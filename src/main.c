@@ -4,12 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/**
- * C99 has no `static_assert`, so a failed condition makes the array size negative, which is a
- * compile-time error. `name` must be unique in the file and should say what is being checked. This
- * is a macro because it needs the condition as an expression, and it evaluates it only once.
- */
-#define STATIC_ASSERT(condition, name) typedef char name[1 - 2 * !(condition)]
+#include <mialu/static_assert.h>
+#include <mialu/str.h>
 
 enum {
     // Larger sources are rejected. The tokenizer works on one buffer that is allocated once at
@@ -23,17 +19,6 @@ enum {
 typedef enum {
     TOKEN_TYPE_IDENTIFIER,
 } Token_Type;
-
-/**
- * A length-based view into text it does not own, so that no terminator is needed.
- */
-typedef struct {
-    char const *bytes;
-    size_t length;
-} Str;
-
-// Both sizes assume 64-bit pointers, which are the only targets this project builds for.
-STATIC_ASSERT(sizeof(Str) == 16, str_size_is_16_bytes);
 
 typedef struct {
     Str text;
