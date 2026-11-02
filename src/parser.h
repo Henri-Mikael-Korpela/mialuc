@@ -42,7 +42,7 @@ typedef struct {
     Array_Slice nodes;
     Str expected;
     size_t error_token_index;
-    uint32_t root;
+    Ast_Node_Index root;
     Parse_Status status;
 } Parse_Result;
 

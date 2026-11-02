@@ -19,10 +19,15 @@ typedef enum {
     AST_NODE_TYPE_TYPE_NAME,
 } Ast_Node_Type;
 
-// Nodes refer to each other by index into the node buffer instead of by pointer, so the buffer
-// can be allocated once and the indexes stay valid. This value means "no node". It is a constant
-// and not zero, because zero is the index of the first node.
-static uint32_t const AST_NODE_INDEX_NONE = UINT32_MAX;
+/**
+ * The position of a node in the node buffer. Nodes refer to each other by index instead of by
+ * pointer, so the buffer can be allocated once and the indexes stay valid. An index is 32 bits,
+ * which is far more nodes than a source file can have.
+ */
+typedef uint32_t Ast_Node_Index;
+
+// Means "no node". It is not zero, because zero is the index of the first node.
+static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
 
 /**
  * One node of the syntax tree. The children of a node form a linked list: `first_child` is the
@@ -41,9 +46,9 @@ static uint32_t const AST_NODE_INDEX_NONE = UINT32_MAX;
  */
 typedef struct {
     Ast_Node_Type node_type;
-    uint32_t first_child;
-    uint32_t last_child;
-    uint32_t next_sibling;
+    Ast_Node_Index first_child;
+    Ast_Node_Index last_child;
+    Ast_Node_Index next_sibling;
     // This union is named, because unnamed unions are C11 and the project uses C99.
     // Only the member that matches `node_type` is meaningful.
     union {
@@ -80,6 +85,6 @@ STATIC_ASSERT(sizeof(Ast_Node) == 32, ast_node_size_is_32_bytes);
  * Prints the tree below `root`, one node per line, indented by depth. `nodes` holds `Ast_Node`
  * elements.
  */
-void ast_print(Array_Slice nodes, uint32_t root);
+void ast_print(Array_Slice nodes, Ast_Node_Index root);
 
 #endif

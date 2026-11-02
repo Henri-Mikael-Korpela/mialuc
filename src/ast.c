@@ -13,7 +13,7 @@ enum {
     AST_PRINT_INDENT_SPACES = 2,
 };
 
-void ast_print(Array_Slice nodes, uint32_t root) {
+void ast_print(Array_Slice nodes, Ast_Node_Index root) {
     assert(nodes.elements != NULL);
     assert(root < nodes.length);
 
@@ -21,10 +21,10 @@ void ast_print(Array_Slice nodes, uint32_t root) {
 
     // The nodes on the path from the root to the current node, excluding the current node. Its
     // size is the depth of the current node.
-    uint32_t path[AST_PRINT_DEPTH_MAX] = {0};
+    Ast_Node_Index path[AST_PRINT_DEPTH_MAX] = {0};
     size_t path_count = 0;
 
-    uint32_t current = root;
+    Ast_Node_Index current = root;
     // Every node is visited once, so `nodes.length` steps are enough.
     for (size_t step = 0; step < nodes.length; step += 1) {
         assert(current < nodes.length);

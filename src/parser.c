@@ -25,23 +25,25 @@ typedef struct {
     Parse_Status status;
 } Parser;
 
-static uint32_t      parse_constant_definition (Parser *parser);
-static uint32_t      parse_expression          (Parser *parser);
-static uint32_t      parse_fail                (Parser *parser, Str expected);
-static uint32_t      parse_identifier          (Parser *parser);
-static uint32_t      parse_integer_literal     (Parser *parser);
-static uint32_t      parse_module              (Parser *parser);
-static void          parse_node_append_child   (Parser *parser, uint32_t parent, uint32_t child);
-static uint32_t      parse_node_make           (Parser *parser, Ast_Node_Type node_type);
-static uint32_t      parse_parameter           (Parser *parser);
-static uint32_t      parse_procedure           (Parser *parser, uint32_t indentation_level);
-static bool          parse_procedure_body      (Parser *parser, uint32_t procedure,
-                                                uint32_t indentation_level);
-static bool          parse_procedure_parameters(Parser *parser, uint32_t procedure);
-static uint32_t      parse_return_statement    (Parser *parser);
-static void          parse_token_advance       (Parser *parser);
-static Token const * parse_token_current       (Parser const *parser);
-static bool          parse_token_expect        (Parser *parser, Token_Type token_type, Str expected);
+static Ast_Node_Index parse_constant_definition (Parser *parser);
+static Ast_Node_Index parse_expression          (Parser *parser);
+static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
+static Ast_Node_Index parse_identifier          (Parser *parser);
+static Ast_Node_Index parse_integer_literal     (Parser *parser);
+static Ast_Node_Index parse_module              (Parser *parser);
+static void           parse_node_append_child   (Parser *parser, Ast_Node_Index parent,
+                                                 Ast_Node_Index child);
+static Ast_Node_Index parse_node_make           (Parser *parser, Ast_Node_Type node_type);
+static Ast_Node_Index parse_parameter           (Parser *parser);
+static Ast_Node_Index parse_procedure           (Parser *parser, uint32_t indentation_level);
+static bool           parse_procedure_body      (Parser *parser, Ast_Node_Index procedure,
+                                                 uint32_t indentation_level);
+static bool           parse_procedure_parameters(Parser *parser, Ast_Node_Index procedure);
+static Ast_Node_Index parse_return_statement    (Parser *parser);
+static void           parse_token_advance       (Parser *parser);
+static Token const *  parse_token_current       (Parser const *parser);
+static bool           parse_token_expect        (Parser *parser, Token_Type token_type,
+                                                 Str expected);
 
 Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
     assert(tokens.elements != NULL);
@@ -63,7 +65,7 @@ Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
         .status = PARSE_STATUS_OK,
     };
 
-    uint32_t root = parse_module(&parser);
+    Ast_Node_Index root = parse_module(&parser);
 
     // The root exists exactly when parsing succeeded.
     assert((root == AST_NODE_INDEX_NONE) == (parser.status != PARSE_STATUS_OK));
@@ -77,11 +79,11 @@ Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
     };
 }
 
-static uint32_t parse_module(Parser *parser) {
+static Ast_Node_Index parse_module(Parser *parser) {
     assert(parser->token_index == 0);
     assert(parser->status == PARSE_STATUS_OK);
 
-    uint32_t module = parse_node_make(parser, AST_NODE_TYPE_MODULE);
+    Ast_Node_Index module = parse_node_make(parser, AST_NODE_TYPE_MODULE);
     if (module == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -93,7 +95,7 @@ static uint32_t parse_module(Parser *parser) {
             break;
         }
 
-        uint32_t definition = parse_constant_definition(parser);
+        Ast_Node_Index definition = parse_constant_definition(parser);
         if (definition == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
@@ -104,10 +106,11 @@ static uint32_t parse_module(Parser *parser) {
     return module;
 }
 
-static uint32_t parse_constant_definition(Parser *parser) {
+static Ast_Node_Index parse_constant_definition(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->node_count <= parser->node_count_max);
 
+    // Expect constant definitions to be at the top level.
     Token const *indentation = parse_token_current(parser);
     if (indentation->token_type != TOKEN_TYPE_INDENTATION) {
         return parse_fail(parser, STR("the start of a line"));
@@ -117,12 +120,13 @@ static uint32_t parse_constant_definition(Parser *parser) {
     }
     parse_token_advance(parser);
 
+    // Expect constant definition to start with an identifier.
     Token const *name = parse_token_current(parser);
     if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
         return parse_fail(parser, STR("a name"));
     }
 
-    uint32_t definition = parse_node_make(parser, AST_NODE_TYPE_CONSTANT_DEFINITION);
+    Ast_Node_Index definition = parse_node_make(parser, AST_NODE_TYPE_CONSTANT_DEFINITION);
     if (definition == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -137,7 +141,8 @@ static uint32_t parse_constant_definition(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
-    uint32_t procedure = parse_procedure(parser, INDENTATION_LEVEL_TOP);
+    // Expect to parse a procedure as the constant variable.
+    Ast_Node_Index procedure = parse_procedure(parser, INDENTATION_LEVEL_TOP);
     if (procedure == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -147,7 +152,7 @@ static uint32_t parse_constant_definition(Parser *parser) {
     return definition;
 }
 
-static uint32_t parse_procedure(Parser *parser, uint32_t indentation_level) {
+static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level) {
     assert(indentation_level < UINT32_MAX);
     assert(parser->status == PARSE_STATUS_OK);
 
@@ -161,7 +166,7 @@ static uint32_t parse_procedure(Parser *parser, uint32_t indentation_level) {
     }
     parse_token_advance(parser);
 
-    uint32_t procedure = parse_node_make(parser, AST_NODE_TYPE_PROCEDURE);
+    Ast_Node_Index procedure = parse_node_make(parser, AST_NODE_TYPE_PROCEDURE);
     if (procedure == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -197,7 +202,7 @@ static uint32_t parse_procedure(Parser *parser, uint32_t indentation_level) {
  * Parses the parameters between the parentheses, which can be none, and appends them to
  * `procedure`. Returns false after it recorded an error.
  */
-static bool parse_procedure_parameters(Parser *parser, uint32_t procedure) {
+static bool parse_procedure_parameters(Parser *parser, Ast_Node_Index procedure) {
     assert(procedure < parser->node_count);
     assert(parser->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
 
@@ -208,7 +213,7 @@ static bool parse_procedure_parameters(Parser *parser, uint32_t procedure) {
     // Every parameter consumes at least its name, so there are fewer parameters than tokens,
     // which bounds the loop. A comma means that another parameter has to follow.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        uint32_t parameter = parse_parameter(parser);
+        Ast_Node_Index parameter = parse_parameter(parser);
         if (parameter == AST_NODE_INDEX_NONE) {
             return false;
         }
@@ -228,7 +233,8 @@ static bool parse_procedure_parameters(Parser *parser, uint32_t procedure) {
  * the line of the definition, and appends them to `procedure`. Returns false after it recorded an
  * error.
  */
-static bool parse_procedure_body(Parser *parser, uint32_t procedure, uint32_t indentation_level) {
+static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
+                                 uint32_t indentation_level) {
     assert(procedure < parser->node_count);
     assert(indentation_level < UINT32_MAX);
 
@@ -253,7 +259,7 @@ static bool parse_procedure_body(Parser *parser, uint32_t procedure, uint32_t in
         }
         parse_token_advance(parser);
 
-        uint32_t statement = parse_return_statement(parser);
+        Ast_Node_Index statement = parse_return_statement(parser);
         if (statement == AST_NODE_INDEX_NONE) {
             return false;
         }
@@ -274,7 +280,7 @@ static bool parse_procedure_body(Parser *parser, uint32_t procedure, uint32_t in
  * Parses `name: Type`. The node for the parameter has the name in its payload and one child, the
  * type.
  */
-static uint32_t parse_parameter(Parser *parser) {
+static Ast_Node_Index parse_parameter(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
@@ -283,7 +289,7 @@ static uint32_t parse_parameter(Parser *parser) {
         return parse_fail(parser, STR("a parameter name"));
     }
 
-    uint32_t parameter = parse_node_make(parser, AST_NODE_TYPE_PARAMETER);
+    Ast_Node_Index parameter = parse_node_make(parser, AST_NODE_TYPE_PARAMETER);
     if (parameter == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -299,7 +305,7 @@ static uint32_t parse_parameter(Parser *parser) {
         return parse_fail(parser, STR("a type name"));
     }
 
-    uint32_t type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
+    Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
     if (type_name == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -311,7 +317,7 @@ static uint32_t parse_parameter(Parser *parser) {
     return parameter;
 }
 
-static uint32_t parse_return_statement(Parser *parser) {
+static Ast_Node_Index parse_return_statement(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
@@ -319,12 +325,12 @@ static uint32_t parse_return_statement(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
-    uint32_t statement = parse_node_make(parser, AST_NODE_TYPE_RETURN_STATEMENT);
+    Ast_Node_Index statement = parse_node_make(parser, AST_NODE_TYPE_RETURN_STATEMENT);
     if (statement == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
 
-    uint32_t value = parse_expression(parser);
+    Ast_Node_Index value = parse_expression(parser);
     if (value == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -345,7 +351,7 @@ static uint32_t parse_return_statement(Parser *parser) {
  * Parses a value: an integer literal, or the name of something, such as a parameter. There are no
  * operators yet, so an expression is a single token and the parser does not need to call itself.
  */
-static uint32_t parse_expression(Parser *parser) {
+static Ast_Node_Index parse_expression(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
@@ -360,7 +366,7 @@ static uint32_t parse_expression(Parser *parser) {
     return parse_fail(parser, STR("an integer literal or a name"));
 }
 
-static uint32_t parse_integer_literal(Parser *parser) {
+static Ast_Node_Index parse_integer_literal(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
@@ -369,7 +375,7 @@ static uint32_t parse_integer_literal(Parser *parser) {
         return parse_fail(parser, STR("an integer literal"));
     }
 
-    uint32_t node = parse_node_make(parser, AST_NODE_TYPE_INTEGER_LITERAL);
+    Ast_Node_Index node = parse_node_make(parser, AST_NODE_TYPE_INTEGER_LITERAL);
     if (node == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -380,7 +386,7 @@ static uint32_t parse_integer_literal(Parser *parser) {
     return node;
 }
 
-static uint32_t parse_identifier(Parser *parser) {
+static Ast_Node_Index parse_identifier(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
@@ -389,7 +395,7 @@ static uint32_t parse_identifier(Parser *parser) {
         return parse_fail(parser, STR("a name"));
     }
 
-    uint32_t node = parse_node_make(parser, AST_NODE_TYPE_IDENTIFIER);
+    Ast_Node_Index node = parse_node_make(parser, AST_NODE_TYPE_IDENTIFIER);
     if (node == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -435,7 +441,7 @@ static bool parse_token_expect(Parser *parser, Token_Type token_type, Str expect
     return false;
 }
 
-static uint32_t parse_node_make(Parser *parser, Ast_Node_Type node_type) {
+static Ast_Node_Index parse_node_make(Parser *parser, Ast_Node_Type node_type) {
     assert(parser->node_count <= parser->node_count_max);
     assert(parser->status == PARSE_STATUS_OK);
 
@@ -447,7 +453,7 @@ static uint32_t parse_node_make(Parser *parser, Ast_Node_Type node_type) {
 
     // Node indexes are 32 bits, and a node needs a token, which is bounded by the same limit.
     assert(parser->node_count < AST_NODE_INDEX_NONE);
-    uint32_t index = (uint32_t)parser->node_count;
+    Ast_Node_Index index = (Ast_Node_Index)parser->node_count;
     parser->nodes[index] = (Ast_Node){
         .node_type = node_type,
         .first_child = AST_NODE_INDEX_NONE,
@@ -459,7 +465,8 @@ static uint32_t parse_node_make(Parser *parser, Ast_Node_Type node_type) {
     return index;
 }
 
-static void parse_node_append_child(Parser *parser, uint32_t parent, uint32_t child) {
+static void parse_node_append_child(Parser *parser, Ast_Node_Index parent,
+                                    Ast_Node_Index child) {
     assert(parent < parser->node_count);
     assert(child < parser->node_count);
     assert(parent != child);
@@ -476,7 +483,7 @@ static void parse_node_append_child(Parser *parser, uint32_t parent, uint32_t ch
     assert(parser->nodes[child].next_sibling == AST_NODE_INDEX_NONE);
 }
 
-static uint32_t parse_fail(Parser *parser, Str expected) {
+static Ast_Node_Index parse_fail(Parser *parser, Str expected) {
     // Only the first error is kept, and callers return right after it.
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
