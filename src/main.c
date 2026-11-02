@@ -87,6 +87,12 @@ int main(int argc, char *argv[]) {
                         (int)token.identifier.text.length,
                         token.identifier.text.bytes);
                     break;
+                case TOKEN_TYPE_PARENTHESIS_LEFT:
+                    printf("PARENTHESIS_LEFT\n");
+                    break;
+                case TOKEN_TYPE_PARENTHESIS_RIGHT:
+                    printf("PARENTHESIS_RIGHT\n");
+                    break;
                 case TOKEN_TYPE_TYPE_SEPARATOR:
                     printf("TYPE_SEPARATOR\n");
                     break;

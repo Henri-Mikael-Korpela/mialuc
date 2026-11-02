@@ -102,6 +102,20 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset = end;
         }
+        else if (character == (char)TOKEN_TYPE_PARENTHESIS_LEFT) {
+            token_elements[result.tokens.length] = (Token){
+                .token_type = TOKEN_TYPE_PARENTHESIS_LEFT,
+            };
+            result.tokens.length += 1;
+            offset += 1;
+        }
+        else if (character == (char)TOKEN_TYPE_PARENTHESIS_RIGHT) {
+            token_elements[result.tokens.length] = (Token){
+                .token_type = TOKEN_TYPE_PARENTHESIS_RIGHT,
+            };
+            result.tokens.length += 1;
+            offset += 1;
+        }
         else if (character == (char)TOKEN_TYPE_TYPE_SEPARATOR) {
             token_elements[result.tokens.length] = (Token){
                 .token_type = TOKEN_TYPE_TYPE_SEPARATOR,

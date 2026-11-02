@@ -6,6 +6,8 @@
 #include <mialu/str.h>
 
 typedef enum {
+    TOKEN_TYPE_PARENTHESIS_LEFT = '(',
+    TOKEN_TYPE_PARENTHESIS_RIGHT = ')',
     TOKEN_TYPE_TYPE_SEPARATOR = ':',
     TOKEN_TYPE_IDENTIFIER,
 } Token_Type;
