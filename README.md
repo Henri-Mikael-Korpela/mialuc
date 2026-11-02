@@ -25,3 +25,7 @@ The script uses only the Python standard library, so there is nothing to install
 [editors/vscode](editors/vscode) is a VS Code extension that highlights the reserved words in `.mu` files. See its [README](editors/vscode/README.md) for how to install it.
 
 See the [C programming style guide](docs/c-programming-style-guide.md) for coding conventions.
+
+## License
+
+See [LICENSE](LICENSE). The software is provided as is, without warranty or liability, and may be redistributed unmodified with attribution. Derivative works are not permitted.
