@@ -1,10 +1,12 @@
 #include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <mialu/static_assert.h>
+#include <mialu/common-types.h>
+#include <mialu/array_slice.h>
 #include <mialu/str.h>
 
 enum {
@@ -35,24 +37,25 @@ typedef enum {
 } Tokenize_Status;
 
 /**
- * On `TOKENIZE_STATUS_OK` only `token_count` is meaningful. Otherwise `error_offset` is the byte
- * offset in the source where tokenizing stopped.
+ * On `TOKENIZE_STATUS_OK` only `tokens` is meaningful: it is the filled start of the token buffer,
+ * as `Token` elements. Otherwise `error_offset` is the byte offset in the source where tokenizing
+ * stopped.
  */
 typedef struct {
-    size_t token_count;
+    Array_Slice tokens;
     size_t error_offset;
     Tokenize_Status status;
 } Tokenize_Result;
 
-static int32_t main_run(char const *path, char *source_buffer, Token *tokens);
-static Str main_read_file(char const *path, char *buffer, size_t size_bytes_max);
-static void main_print_tokens(Token const *tokens, size_t token_count);
-static void main_print_error(char const *path, Str source, Tokenize_Result result);
-static Tokenize_Result tokenize(Str source, Token *tokens, size_t token_count_max);
-static size_t tokenize_scan_identifier(Str source, size_t offset);
-static bool tokenize_is_whitespace(char character);
-static bool tokenize_is_identifier_start(char character);
-static bool tokenize_is_identifier_part(char character);
+static int32_t         main_run                    (char const *path, Array_Slice source_buffer, Array_Slice token_buffer);
+static Str             main_read_file              (char const *path, Array_Slice buffer);
+static void            main_print_tokens           (Array_Slice tokens);
+static void            main_print_error            (char const *path, Str source, Tokenize_Result result);
+static Tokenize_Result tokenize                    (Str source, Array_Slice token_buffer);
+static size_t          tokenize_scan_identifier    (Str source, size_t offset);
+static bool            tokenize_is_whitespace      (char character);
+static bool            tokenize_is_identifier_start(char character);
+static bool            tokenize_is_identifier_part (char character);
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
@@ -61,19 +64,25 @@ int main(int argc, char *argv[]) {
     }
 
     // Allocated once, here, because the buffers are too large for the default Windows stack.
-    char *source_buffer = malloc(SOURCE_SIZE_BYTES_MAX);
-    Token *tokens = malloc(TOKEN_COUNT_MAX * sizeof(Token));
-    if (source_buffer == NULL || tokens == NULL) {
+    Array_Slice source_buffer = {
+        .elements = malloc(SOURCE_SIZE_BYTES_MAX * sizeof(byte)),
+        .length = SOURCE_SIZE_BYTES_MAX,
+    };
+    Array_Slice token_buffer = {
+        .elements = malloc(TOKEN_COUNT_MAX * sizeof(Token)),
+        .length = TOKEN_COUNT_MAX,
+    };
+    if (source_buffer.elements == NULL || token_buffer.elements == NULL) {
         fprintf(stderr, "Out of memory.\n");
-        free(tokens);
-        free(source_buffer);
+        free(token_buffer.elements);
+        free(source_buffer.elements);
         return 1;
     }
 
-    int32_t exit_code = main_run(argv[1], source_buffer, tokens);
+    int32_t exit_code = main_run(argv[1], source_buffer, token_buffer);
 
-    free(tokens);
-    free(source_buffer);
+    free(token_buffer.elements);
+    free(source_buffer.elements);
     return exit_code;
 }
 
@@ -81,21 +90,21 @@ int main(int argc, char *argv[]) {
  * Tokenizes the file at `path` and prints the tokens. Returns the process exit code. It is split
  * from `main` so that `main` can free the buffers on every path.
  */
-static int32_t main_run(char const *path, char *source_buffer, Token *tokens) {
+static int32_t main_run(char const *path, Array_Slice source_buffer, Array_Slice token_buffer) {
     assert(path != NULL);
-    assert(source_buffer != NULL);
-    assert(tokens != NULL);
+    assert(source_buffer.elements != NULL);
+    assert(token_buffer.elements != NULL);
 
-    Str source = main_read_file(path, source_buffer, SOURCE_SIZE_BYTES_MAX);
+    Str source = main_read_file(path, source_buffer);
     if (source.bytes == NULL) {
         fprintf(stderr, "%s: cannot read file, or file is larger than %d bytes.\n", path,
                 SOURCE_SIZE_BYTES_MAX);
         return 1;
     }
 
-    Tokenize_Result result = tokenize(source, tokens, TOKEN_COUNT_MAX);
+    Tokenize_Result result = tokenize(source, token_buffer);
     if (result.status == TOKENIZE_STATUS_OK) {
-        main_print_tokens(tokens, result.token_count);
+        main_print_tokens(result.tokens);
         return 0;
     }
 
@@ -105,40 +114,41 @@ static int32_t main_run(char const *path, char *source_buffer, Token *tokens) {
 
 /**
  * Reads the whole file into `buffer`. The returned `Str` has `bytes == NULL` when the file cannot
- * be opened or read, or does not fit in `size_bytes_max`. An empty file gives a non-NULL `Str` of
- * length zero.
+ * be opened or read, or does not fit in `buffer`, which holds `byte` elements. An empty file gives
+ * a non-NULL `Str` of length zero.
  */
-static Str main_read_file(char const *path, char *buffer, size_t size_bytes_max) {
+static Str main_read_file(char const *path, Array_Slice buffer) {
     assert(path != NULL);
-    assert(buffer != NULL);
-    assert(size_bytes_max > 0);
+    assert(buffer.elements != NULL);
+    assert(buffer.length > 0);
 
     // Binary mode so that Windows does not translate line endings and shift offsets.
     FILE *file = fopen(path, "rb");
     if (file == NULL) {
-        return (Str){.bytes = NULL, .length = 0};
+        return STR_EMPTY;
     }
 
-    size_t size_bytes = fread(buffer, 1, size_bytes_max, file);
+    size_t size_bytes = fread(buffer.elements, sizeof(byte), buffer.length, file);
     bool is_read_error = ferror(file) != 0;
     // Reading one more byte after a full buffer tells "exactly full" apart from "too large".
     bool is_at_end = fgetc(file) == EOF;
     fclose(file);
 
     if (is_read_error || is_at_end == false) {
-        return (Str){.bytes = NULL, .length = 0};
+        return STR_EMPTY;
     }
 
-    assert(size_bytes <= size_bytes_max);
-    return (Str){.bytes = buffer, .length = size_bytes};
+    assert(size_bytes <= buffer.length);
+    return str_make(buffer.elements, size_bytes);
 }
 
-static void main_print_tokens(Token const *tokens, size_t token_count) {
-    assert(tokens != NULL);
-    assert(token_count <= TOKEN_COUNT_MAX);
+static void main_print_tokens(Array_Slice tokens) {
+    assert(tokens.elements != NULL);
+    assert(tokens.length <= TOKEN_COUNT_MAX);
 
-    for (size_t i = 0; i < token_count; i += 1) {
-        Token token = tokens[i];
+    Token const *token_elements = tokens.elements;
+    for (size_t i = 0; i < tokens.length; i += 1) {
+        Token token = token_elements[i];
 
         switch (token.token_type) {
         case TOKEN_TYPE_IDENTIFIER:
@@ -187,12 +197,16 @@ static void main_print_error(char const *path, Str source, Tokenize_Result resul
  * Splits `source` into tokens, skipping whitespace. Stops at the first character that cannot start
  * a token, since the language has no error recovery yet.
  */
-static Tokenize_Result tokenize(Str source, Token *tokens, size_t token_count_max) {
-    assert(tokens != NULL);
+static Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
+    assert(token_buffer.elements != NULL);
     assert(source.bytes != NULL || source.length == 0);
 
+    Token *token_elements = token_buffer.elements;
     Tokenize_Result result = {
-        .token_count = 0,
+        .tokens = {
+            .elements = token_buffer.elements,
+            .length = 0
+        },
         .error_offset = 0,
         .status = TOKENIZE_STATUS_OK,
     };
@@ -205,18 +219,18 @@ static Tokenize_Result tokenize(Str source, Token *tokens, size_t token_count_ma
         if (tokenize_is_whitespace(character)) {
             offset += 1;
         } else if (tokenize_is_identifier_start(character)) {
-            if (result.token_count == token_count_max) {
+            if (result.tokens.length == token_buffer.length) {
                 result.status = TOKENIZE_STATUS_TOKEN_LIMIT;
                 result.error_offset = offset;
                 return result;
             }
 
             size_t end = tokenize_scan_identifier(source, offset);
-            tokens[result.token_count] = (Token){
+            token_elements[result.tokens.length] = (Token){
                 .text = {.bytes = source.bytes + offset, .length = end - offset},
                 .token_type = TOKEN_TYPE_IDENTIFIER,
             };
-            result.token_count += 1;
+            result.tokens.length += 1;
             offset = end;
         } else {
             result.status = TOKENIZE_STATUS_UNEXPECTED_CHARACTER;
@@ -225,7 +239,7 @@ static Tokenize_Result tokenize(Str source, Token *tokens, size_t token_count_ma
         }
     }
 
-    assert(result.token_count <= token_count_max);
+    assert(result.tokens.length <= token_buffer.length);
     assert(result.status == TOKENIZE_STATUS_OK);
     return result;
 }

@@ -11,6 +11,8 @@ Do not run any formatter that works against these rules.
 - Use 4 spaces for indentation, never tabs.
 - Keep lines to at most 100 columns, with no exceptions for long strings other than URLs.
 - Always put a space after keywords (`if (`, `for (`, `while (`), but not after function names (`assert(x)`).
+- Add spaces to separate parts of function forward declarations when there is more than one signature declared in a row. Ensure function names and parameter lists (beginning with an opening parenthesis) are aligned in their own columns.
+    - This way forward declarations read like a table, which is better for readability.
 
 ## File layout
 
@@ -87,8 +89,9 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 ## Data types
 
 - Use explicitly sized types (`int32_t`, `uint32_t`, `uint64_t`, `size_t` only for sizes and indexes of memory). Avoid `int`, `long` and `unsigned` where the range matters.
-  - Where an API (raylib, raygui, libc) forces `int` or `float`, convert at the boundary.
+  - Where an external API forces `int` or `float`, convert at the boundary.
 - Use `bool` for booleans, never `int`.
+- Use custom type `byte` to represent bytes instead of `char`, `unsigned char` or `uint8_t`.
 
 ## Conditional statements
 

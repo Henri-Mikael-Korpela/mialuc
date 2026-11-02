@@ -6,13 +6,15 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-add_executable(mialuc src/main.c)
+add_executable(mialuc src/main.c src/str.c)
 
 # Headers live directly in src/ but are included as <mialu/...>, so they are copied into a
 # generated include directory under that name. configure_file reruns CMake when a header changes.
 set(MIALU_INCLUDE_DIRECTORY ${CMAKE_BINARY_DIR}/include)
-foreach(header static_assert.h str.h)
-    configure_file(src/${header} ${MIALU_INCLUDE_DIRECTORY}/mialu/${header} COPYONLY)
+file(GLOB MIALU_HEADERS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/*.h)
+foreach(header_path ${MIALU_HEADERS})
+    get_filename_component(header_name ${header_path} NAME)
+    configure_file(${header_path} ${MIALU_INCLUDE_DIRECTORY}/mialu/${header_name} COPYONLY)
 endforeach()
 target_include_directories(mialuc PRIVATE ${MIALU_INCLUDE_DIRECTORY})
 
