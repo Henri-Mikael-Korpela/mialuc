@@ -6,6 +6,10 @@ This document describes how to use the C programming language and associated too
 
 Do not run any formatter that works against these rules.
 
+## C Standard
+
+The project is written in **C99** (ISO/IEC 9899:1999). CMake builds it with `-std=c99`, GNU extensions off, and `-Wpedantic -Werror`, so any use of a newer or non-standard feature fails the build.
+
 ## Indentation, lines and spacing
 
 - Use 4 spaces for indentation, never tabs.
