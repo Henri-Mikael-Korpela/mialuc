@@ -14,4 +14,14 @@ cmake --build build
 build/mialuc.exe <source file>
 ```
 
+## Grammar
+
+[grammar.ebnf](grammar.ebnf) describes what the compiler accepts, in EBNF that works on characters. To check that a source file matches it:
+
+```
+python scripts/verify_grammar.py test-code/main-function.mu
+```
+
+The script uses only the Python standard library, so there is nothing to install. It prints `OK`, or the line and column where the file stops matching and what the grammar expected there. It exits with 0 when every file matches, 1 when a file does not, and 2 when the grammar or the arguments are wrong.
+
 See the [C programming style guide](docs/c-programming-style-guide.md) for coding conventions.

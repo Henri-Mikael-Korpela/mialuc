@@ -1,0 +1,89 @@
+(*
+   Grammar of the Mialu programming language, in EBNF.
+
+   The grammar works directly on the characters of a source file, without a separate tokenizer
+   step. So it spells out where spaces may appear, and indentation is part of it. It describes
+   what the compiler in src/ accepts today, which is only a part of the language; the language
+   itself is described in docs/mialu-programming-language.md. Check a source file against it with
+   scripts/verify_grammar.py.
+
+   Notation, which is ISO 14977 EBNF with three small extensions:
+
+     name = ... ;     defines a rule
+     a , b            a followed by b
+     a | b            a or b
+     [ a ]            a, or nothing
+     { a }            a repeated zero or more times
+     ( a )            grouping
+     a - b            a, except where b matches exactly the same text
+     "text" 'text'    the characters in between
+     ? ... ?          a special sequence, here only "end of input"
+     comment          text between an opening parenthesis with an asterisk and an asterisk with a
+                      closing parenthesis, like this one; comments do not nest
+
+   Extensions to ISO 14977:
+     - Terminals understand the escapes \n, \r, \t, \\, \" and \'.
+     - "a" .. "z"     any one character from "a" to "z", both included.
+     - Rule names are written in snake_case, without spaces.
+
+   What a grammar cannot say, and the compiler checks in addition:
+     - An integer literal must fit in a signed 64-bit integer.
+     - A line may be indented by any number of spaces that is a multiple of 4. The grammar only
+       has procedure bodies, which are indented by exactly one level, 4 spaces. Rules for deeper
+       nesting have to be added together with the syntax that needs them.
+*)
+
+module = { blank_line | definition } , end_of_input ;
+
+(* A constant definition. It starts in the first column, so a line that starts with a space or a
+   tab does not match here. `::` is two separate ':' characters for the compiler, so spaces may
+   be between them. *)
+definition = name , ws , ":" , ws , ":" , ws , procedure ;
+
+(* A procedure and its body. The optional name before the arrow is the return type. *)
+procedure =
+    "proc" , ws , "(" , ws , ")" , ws , [ return_type , ws ] , "->" , ws , line_end ,
+    procedure_body ;
+
+return_type = name ;
+
+(* At least one statement. Blank lines are allowed before, between and after statements, and are
+   not statements. *)
+procedure_body = { blank_line } , statement_line , { blank_line | statement_line } ;
+
+(* The body of a procedure is indented exactly one level. A tab, or any other number of spaces,
+   does not match. *)
+statement_line = indentation , return_statement , ws , line_end ;
+
+indentation = "    " ;
+
+(* `return` and the number must be separated, or `return0` would be one identifier. *)
+return_statement = "return" , required_space , integer_literal ;
+
+(* Names. An identifier that is a reserved word is not a name. *)
+name = identifier - reserved_word ;
+
+reserved_word = "return" ;
+
+identifier = ( letter | "_" ) , { letter | digit | "_" } ;
+
+(* A number is written in decimal, and a letter or underscore may not follow it directly. Both
+   are guaranteed because only a space, a line end or the end of input is allowed after it. *)
+integer_literal = digit , { digit } ;
+
+letter = "a" .. "z" | "A" .. "Z" ;
+
+digit = "0" .. "9" ;
+
+(* Spaces inside a line. A carriage return counts as one, so lines may end with \r\n. *)
+ws = { " " | "\t" | "\r" } ;
+
+required_space = ( " " | "\t" | "\r" ) , ws ;
+
+(* A line with nothing on it but spaces. It carries no indentation, so its width does not matter. *)
+blank_line = ws , line_end ;
+
+(* The last line of a file does not need a line feed. *)
+line_end = "\n" | end_of_input ;
+
+end_of_input = ? end of input ? ;
