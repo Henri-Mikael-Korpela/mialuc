@@ -5,9 +5,16 @@
     "patterns": [
         {
             "include": "#reserved-words"
+        },
+        {
+            "include": "#operators"
         }
     ],
     "repository": {
+        "operators": {
+            "name": "keyword.operator.arithmetic.mialu",
+            "match": "\\+"
+        },
         "reserved-words": {
             "patterns": [
                 {

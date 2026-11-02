@@ -26,6 +26,7 @@ typedef struct {
 } Parser;
 
 static Ast_Node_Index parse_constant_definition (Parser *parser);
+static Ast_Node_Index parse_operand             (Parser *parser);
 static Ast_Node_Index parse_expression          (Parser *parser);
 static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
 static Ast_Node_Index parse_identifier          (Parser *parser);
@@ -342,10 +343,48 @@ static Ast_Node_Index parse_return_statement(Parser *parser) {
 }
 
 /**
- * Parses a value: an integer literal, or the name of something, such as a parameter. There are no
- * operators yet, so an expression is a single token and the parser does not need to call itself.
+ * Parses operands separated by `+`. Addition is left associative, so `a + b + c` is `(a + b) + c`:
+ * each `+` makes a node that takes the expression so far as its left operand. The parser does not
+ * call itself, because there are no parentheses yet.
  */
 static Ast_Node_Index parse_expression(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Ast_Node_Index left = parse_operand(parser);
+    if (left == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    // Every operator consumes a token, so there are fewer operators than tokens, which bounds
+    // the loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_PLUS) {
+            break;
+        }
+        parse_token_advance(parser);
+
+        Ast_Node_Index right = parse_operand(parser);
+        if (right == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+
+        Ast_Node_Index addition = parse_node_make(parser, AST_NODE_TYPE_ADDITION);
+        if (addition == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, addition, left);
+        parse_node_append_child(parser, addition, right);
+        left = addition;
+    }
+
+    return left;
+}
+
+/**
+ * Parses a value: an integer literal, or the name of something, such as a parameter.
+ */
+static Ast_Node_Index parse_operand(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 

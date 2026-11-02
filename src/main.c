@@ -124,6 +124,9 @@ int main(int argc, char *argv[]) {
                 case TOKEN_TYPE_PARENTHESIS_RIGHT:
                     printf("PARENTHESIS_RIGHT\n");
                     break;
+                case TOKEN_TYPE_PLUS:
+                    printf("PLUS\n");
+                    break;
                 case TOKEN_TYPE_TYPE_SEPARATOR:
                     printf("TYPE_SEPARATOR\n");
                     break;

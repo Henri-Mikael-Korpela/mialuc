@@ -23,6 +23,18 @@ sum :: proc(a: Int, b: Int) Int ->
     return a + b
 ```
 
+## Operators
+
+Mialu supports the following operators:
+
+| Operator | Description |Precedence|
+|----------|-------------|----------|
+| `+`      | Addition    |1         |
+
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals or names.
+
+Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`.
+
 ## Procedures
 
 Procedures are blocks of code that perform a specific task. They can be defined by placing the keyword `proc` after an identifier, followed by a list of parameters and an optional return type:

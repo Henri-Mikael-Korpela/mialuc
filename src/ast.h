@@ -9,6 +9,7 @@
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
+    AST_NODE_TYPE_ADDITION,
     AST_NODE_TYPE_CONSTANT_DEFINITION,
     AST_NODE_TYPE_IDENTIFIER,
     AST_NODE_TYPE_INTEGER_LITERAL,
@@ -34,6 +35,7 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * head, `next_sibling` of each child points at the following one, and `last_child` makes appending
  * a child a constant-time operation. Which children a node has depends on `node_type`:
  *
+ * - `AST_NODE_TYPE_ADDITION`: two children, the left and the right operand, in that order.
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: one child, the value that is bound to the name.
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.

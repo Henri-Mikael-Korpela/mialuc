@@ -33,6 +33,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         // The casts are needed because `%*s` and `%.*s` take an `int` width.
         printf("%*s", (int)(path_count * AST_PRINT_INDENT_SPACES), "");
         switch (node.node_type) {
+        case AST_NODE_TYPE_ADDITION:
+            printf("ADDITION\n");
+            break;
         case AST_NODE_TYPE_CONSTANT_DEFINITION:
             printf("CONSTANT_DEFINITION %.*s\n", (int)node.payload.constant_definition.name.length,
                    node.payload.constant_definition.name.bytes);

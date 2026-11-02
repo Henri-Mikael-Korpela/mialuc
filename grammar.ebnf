@@ -68,8 +68,12 @@ indentation = "    " ;
 (* `return` and its value must be separated, or `return0` would be one identifier. *)
 return_statement = "return" , required_space , expression ;
 
-(* The use of a name, such as a parameter. *)
-expression = integer_literal | name ;
+(* Operands joined by `+`. The compiler reads `a + b + c` as `(a + b) + c`, which a grammar that
+   only accepts or rejects text does not show. Spaces around the `+` are optional. *)
+expression = operand , { ws , "+" , ws , operand } ;
+
+(* An integer literal, or the use of a name, such as a parameter. *)
+operand = integer_literal | name ;
 
 (* Names. An identifier that is a reserved word is not a name. *)
 name = identifier - reserved_word ;
@@ -79,7 +83,8 @@ reserved_word = "proc" | "return" ;
 identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 
 (* A number is written in decimal, and a letter or underscore may not follow it directly. Both
-   are guaranteed because only a space, a line end or the end of input is allowed after it. *)
+   are guaranteed because only a space, a plus, a line end or the end of input is allowed after
+   it. *)
 integer_literal = digit , { digit } ;
 
 letter = "a" .. "z" | "A" .. "Z" ;
