@@ -10,9 +10,11 @@
 
 #include <mialu/tokenizer.h>
 
-static bool char_is_lower(char character) {
-    return character >= 'a' && character <= 'z';
-}
+static bool char_is_digit     (char character);
+static bool char_is_letter    (char character);
+static bool char_is_lower     (char character);
+static bool char_is_upper     (char character);
+static bool char_is_whitespace(char character);
 
 static bool char_is_digit(char character) {
     return character >= '0' && character <= '9';
@@ -20,6 +22,10 @@ static bool char_is_digit(char character) {
 
 static bool char_is_letter(char character) {
     return char_is_lower(character) || char_is_upper(character);
+}
+
+static bool char_is_lower(char character) {
+    return character >= 'a' && character <= 'z';
 }
 
 static bool char_is_upper(char character) {
@@ -65,9 +71,8 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.error_offset = offset;
             return result;
         }
-
         // If the character is a letter or underscore, it starts an identifier:
-        if (char_is_letter(character) || character == '_') {
+        else if (char_is_letter(character) || character == '_') {
             // The start character is already known to be valid, so scanning continues after it.
             // An identifier part is a start character or a digit, which is how identifiers cannot
             // begin with a digit but may contain one.
@@ -87,14 +92,25 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             token_elements[result.tokens.length] = (Token){
                 .token_type = TOKEN_TYPE_IDENTIFIER,
-                .text = {
-                    .bytes = source.bytes + offset,
-                    .length = end - offset
-                },
+                .identifier = {
+                    .text = {
+                        .bytes = source.bytes + offset,
+                        .length = end - offset
+                    },
+                }
             };
             result.tokens.length += 1;
             offset = end;
-        } else {
+        }
+        else if (character == (char)TOKEN_TYPE_TYPE_SEPARATOR) {
+            token_elements[result.tokens.length] = (Token){
+                .token_type = TOKEN_TYPE_TYPE_SEPARATOR,
+            };
+            result.tokens.length += 1;
+            offset += 1;
+        }
+        // Unrecognized characters are an error, since the language has no error recovery yet.
+        else {
             result.status = TOKENIZE_STATUS_UNEXPECTED_CHARACTER;
             result.error_offset = offset;
             return result;

@@ -83,7 +83,12 @@ int main(int argc, char *argv[]) {
                 switch (token.token_type) {
                 case TOKEN_TYPE_IDENTIFIER:
                     // The cast is needed because `%.*s` takes an `int` precision.
-                    printf("IDENTIFIER %.*s\n", (int)token.text.length, token.text.bytes);
+                    printf("IDENTIFIER %.*s\n",
+                        (int)token.identifier.text.length,
+                        token.identifier.text.bytes);
+                    break;
+                case TOKEN_TYPE_TYPE_SEPARATOR:
+                    printf("TYPE_SEPARATOR\n");
                     break;
                 }
             }

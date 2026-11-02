@@ -6,12 +6,15 @@
 #include <mialu/str.h>
 
 typedef enum {
+    TOKEN_TYPE_TYPE_SEPARATOR = ':',
     TOKEN_TYPE_IDENTIFIER,
 } Token_Type;
 
 typedef struct {
     Token_Type token_type;
-    Str text;
+    struct {
+        Str text;
+    } identifier;
 } Token;
 
 // The enum is 4 bytes in GCC, so 4 bytes of padding follow it.
