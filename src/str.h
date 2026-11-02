@@ -42,4 +42,18 @@ Str str_make(char const *bytes, size_t length);
  */
 bool str_equals(Str left, Str right);
 
+/**
+ * A place in a text, counted from 1 like editors and compilers show it.
+ */
+typedef struct {
+    size_t line;
+    size_t column;
+} Str_Position;
+
+/**
+ * Returns the line and column of the byte at `offset` in `source`. `offset` may be the length of
+ * `source`, which is the position just after the last byte. Columns count bytes, not characters.
+ */
+Str_Position str_position_at(Str source, size_t offset);
+
 #endif

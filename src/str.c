@@ -25,3 +25,20 @@ bool str_equals(Str left, Str right) {
     }
     return false;
 }
+
+Str_Position str_position_at(Str source, size_t offset) {
+    assert(source.bytes != NULL || source.length == 0);
+    assert(offset <= source.length);
+
+    Str_Position position = {.line = 1, .column = 1};
+    for (size_t i = 0; i < offset; i += 1) {
+        if (source.bytes[i] == '\n') {
+            position.line += 1;
+            position.column = 1;
+        } else {
+            position.column += 1;
+        }
+    }
+
+    return position;
+}

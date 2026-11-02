@@ -25,6 +25,9 @@ typedef enum {
 
 typedef struct {
     Token_Type token_type;
+    // The byte offset of the token in the source, so that later stages can say where an error
+    // is. It fits in the 4 bytes of padding after the enum, and sources are far below 4 GiB.
+    uint32_t source_offset;
     // This union is named, because unnamed unions are C11 and the project uses C99.
     // Only the member that matches `token_type` is meaningful.
     union {
@@ -44,7 +47,8 @@ typedef struct {
     } payload;
 } Token;
 
-// The enum is 4 bytes in GCC, so 4 bytes of padding follow it, and the largest payload is 16 bytes.
+// The enum is 4 bytes in GCC and `source_offset` fills the 4 bytes after it. The largest payload
+// is 16 bytes.
 STATIC_ASSERT(sizeof(Token) == 24, token_size_is_24_bytes);
 
 typedef enum {

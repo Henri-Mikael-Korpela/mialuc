@@ -51,6 +51,9 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
     assert(token_buffer.elements != NULL);
     assert(source.bytes != NULL || source.length == 0);
 
+    // Offsets are stored in 32 bits, see `Token`.
+    assert(source.length <= UINT32_MAX);
+
     Token *token_elements = token_buffer.elements;
     Tokenize_Result result = {
         .tokens = {
@@ -112,6 +115,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                 // there is no separate end-of-line token to tell where a line starts.
                 token_elements[result.tokens.length] = (Token){
                     .token_type = TOKEN_TYPE_INDENTATION,
+                    .source_offset = (uint32_t)offset,
                     .payload.indentation.level =
                         (uint32_t)(space_count / INDENTATION_SPACES_PER_LEVEL),
                 };
@@ -171,6 +175,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             token_elements[result.tokens.length] = (Token){
                 .token_type = TOKEN_TYPE_INTEGER_LITERAL,
+                .source_offset = (uint32_t)offset,
                 .payload.integer_literal.value = value,
             };
             result.tokens.length += 1;
@@ -206,6 +211,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             token_elements[result.tokens.length] = (Token){
                 .token_type = token_type,
+                .source_offset = (uint32_t)offset,
                 .payload.identifier.text = text,
             };
             result.tokens.length += 1;
@@ -214,6 +220,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         else if (character == (char)TOKEN_TYPE_PARENTHESIS_LEFT) {
             token_elements[result.tokens.length] = (Token){
                 .token_type = TOKEN_TYPE_PARENTHESIS_LEFT,
+                .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
             offset += 1;
@@ -221,6 +228,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         else if (character == (char)TOKEN_TYPE_PARENTHESIS_RIGHT) {
             token_elements[result.tokens.length] = (Token){
                 .token_type = TOKEN_TYPE_PARENTHESIS_RIGHT,
+                .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
             offset += 1;
@@ -228,6 +236,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         else if (character == (char)TOKEN_TYPE_TYPE_SEPARATOR) {
             token_elements[result.tokens.length] = (Token){
                 .token_type = TOKEN_TYPE_TYPE_SEPARATOR,
+                .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
             offset += 1;
@@ -240,6 +249,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         ) {
             token_elements[result.tokens.length] = (Token){
                 .token_type = TOKEN_TYPE_ARROW,
+                .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
             offset += 2;
@@ -258,6 +268,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
     assert(result.tokens.length <= token_count_max);
     token_elements[result.tokens.length] = (Token){
         .token_type = TOKEN_TYPE_END,
+        .source_offset = (uint32_t)source.length,
     };
     result.tokens.length += 1;
 

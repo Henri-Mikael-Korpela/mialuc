@@ -7,7 +7,9 @@
 #include <stdlib.h>
 
 #include <mialu/array_slice.h>
+#include <mialu/ast.h>
 #include <mialu/common_types.h>
+#include <mialu/parser.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
 
@@ -34,15 +36,22 @@ int main(int argc, char *argv[]) {
 
     // Allocated once, here, because the buffers are too large for the default Windows stack.
     Array_Slice source_buffer = {
-        .elements = malloc(SOURCE_SIZE_BYTES_MAX * sizeof(Byte)),
+        .elements = malloc(SOURCE_SIZE_BYTES_MAX * sizeof(byte)),
         .length = SOURCE_SIZE_BYTES_MAX,
     };
     Array_Slice token_buffer = {
         .elements = malloc(TOKEN_COUNT_MAX * sizeof(Token)),
         .length = TOKEN_COUNT_MAX,
     };
-    if (source_buffer.elements == NULL || token_buffer.elements == NULL) {
+    // A node needs at least one token, so as many nodes as tokens always suffice.
+    Array_Slice node_buffer = {
+        .elements = malloc(TOKEN_COUNT_MAX * sizeof(Ast_Node)),
+        .length = TOKEN_COUNT_MAX,
+    };
+    if (source_buffer.elements == NULL || token_buffer.elements == NULL ||
+        node_buffer.elements == NULL) {
         fprintf(stderr, "Out of memory.\n");
+        free(node_buffer.elements);
         free(token_buffer.elements);
         free(source_buffer.elements);
         return 1;
@@ -55,7 +64,7 @@ int main(int argc, char *argv[]) {
     // buffer. An empty file gives a non-NULL `Str` of length zero.
     Str source = STR_EMPTY;
     if (file != NULL) {
-        size_t size_bytes = fread(source_buffer.elements, sizeof(Byte), source_buffer.length, file);
+        size_t size_bytes = fread(source_buffer.elements, sizeof(byte), source_buffer.length, file);
         bool is_read_error = ferror(file) != 0;
         // Reading one more byte after a full buffer tells "exactly full" apart from "too large".
         bool is_at_end = fgetc(file) == EOF;
@@ -114,22 +123,41 @@ int main(int argc, char *argv[]) {
                     break;
                 }
             }
-            exit_code = 0;
+
+            Parse_Result parse_result = parse(result.tokens, node_buffer);
+            if (parse_result.status == PARSE_STATUS_OK) {
+                printf("\n");
+                ast_print(parse_result.nodes, parse_result.root);
+                exit_code = 0;
+            } else {
+                assert(parse_result.error_token_index < result.tokens.length);
+
+                size_t error_offset = token_elements[parse_result.error_token_index].source_offset;
+                Str_Position position = str_position_at(source, error_offset);
+
+                switch (parse_result.status) {
+                case PARSE_STATUS_OK:
+                    assert(false);
+                    break;
+                case PARSE_STATUS_NODE_LIMIT:
+                    fprintf(stderr, "%s:%zu:%zu: more than %d syntax tree nodes.\n", path,
+                            position.line, position.column, TOKEN_COUNT_MAX);
+                    break;
+                case PARSE_STATUS_UNEXPECTED_TOKEN:
+                    fprintf(stderr, "%s:%zu:%zu: expected %.*s.\n", path, position.line,
+                            position.column, (int)parse_result.expected.length,
+                            parse_result.expected.bytes);
+                    break;
+                }
+            }
         } else {
             assert(result.error_offset < source.length);
 
             // Line and column are only needed for the message, so they are computed here rather
             // than tracked for every byte while tokenizing.
-            size_t line = 1;
-            size_t column = 1;
-            for (size_t i = 0; i < result.error_offset; i += 1) {
-                if (source.bytes[i] == '\n') {
-                    line += 1;
-                    column = 1;
-                } else {
-                    column += 1;
-                }
-            }
+            Str_Position position = str_position_at(source, result.error_offset);
+            size_t line = position.line;
+            size_t column = position.column;
 
             switch (result.status) {
             case TOKENIZE_STATUS_OK:
@@ -163,6 +191,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    free(node_buffer.elements);
     free(token_buffer.elements);
     free(source_buffer.elements);
     return exit_code;
