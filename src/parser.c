@@ -27,7 +27,7 @@ typedef struct {
 
 static uint32_t      parse_module             (Parser *parser);
 static uint32_t      parse_constant_definition(Parser *parser);
-static uint32_t      parse_function           (Parser *parser, uint32_t indentation_level);
+static uint32_t      parse_procedure          (Parser *parser, uint32_t indentation_level);
 static uint32_t      parse_return_statement   (Parser *parser);
 static uint32_t      parse_integer_literal    (Parser *parser);
 static Token const * parse_token_current      (Parser const *parser);
@@ -131,17 +131,17 @@ static uint32_t parse_constant_definition(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
-    uint32_t function = parse_function(parser, INDENTATION_LEVEL_TOP);
-    if (function == AST_NODE_INDEX_NONE) {
+    uint32_t procedure = parse_procedure(parser, INDENTATION_LEVEL_TOP);
+    if (procedure == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    parse_node_append_child(parser, definition, function);
+    parse_node_append_child(parser, definition, procedure);
 
-    assert(parser->nodes[definition].first_child == function);
+    assert(parser->nodes[definition].first_child == procedure);
     return definition;
 }
 
-static uint32_t parse_function(Parser *parser, uint32_t indentation_level) {
+static uint32_t parse_procedure(Parser *parser, uint32_t indentation_level) {
     assert(indentation_level < UINT32_MAX);
     assert(parser->status == PARSE_STATUS_OK);
 
@@ -174,11 +174,11 @@ static uint32_t parse_function(Parser *parser, uint32_t indentation_level) {
         return AST_NODE_INDEX_NONE;
     }
 
-    uint32_t function = parse_node_make(parser, AST_NODE_TYPE_FUNCTION);
-    if (function == AST_NODE_INDEX_NONE) {
+    uint32_t procedure = parse_node_make(parser, AST_NODE_TYPE_PROCEDURE);
+    if (procedure == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    parser->nodes[function].payload.function.return_type = return_type;
+    parser->nodes[procedure].payload.procedure.return_type = return_type;
 
     // The body is the lines that are indented one level deeper than the line of the definition.
     // Each statement consumes at least its indentation token, so there are fewer statements than
@@ -204,15 +204,15 @@ static uint32_t parse_function(Parser *parser, uint32_t indentation_level) {
         if (statement == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
-        parse_node_append_child(parser, function, statement);
+        parse_node_append_child(parser, procedure, statement);
         statement_count += 1;
     }
 
     if (statement_count == 0) {
-        return parse_fail(parser, STR("an indented function body"));
+        return parse_fail(parser, STR("an indented procedure body"));
     }
 
-    return function;
+    return procedure;
 }
 
 static uint32_t parse_return_statement(Parser *parser) {

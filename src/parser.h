@@ -2,13 +2,13 @@
  * The grammar that `parse` accepts, where each line starts with an indentation token:
  *
  *     module              = { constant_definition } END
- *     constant_definition = INDENTATION(0) IDENTIFIER ":" ":" function
- *     function            = "proc" "(" ")" [ IDENTIFIER ] "->" { INDENTATION(1) return_statement }
+ *     constant_definition = INDENTATION(0) IDENTIFIER ":" ":" procedure
+ *     procedure           = "proc" "(" ")" [ IDENTIFIER ] "->" { INDENTATION(1) return_statement }
  *     return_statement    = "return" INTEGER_LITERAL
  *
- * The optional identifier before the arrow is the return type. A function has at least one
- * statement. The parser does not call itself, so the grammar has no
- * nesting yet; nested blocks will need an explicit stack of the open blocks.
+ * The optional identifier before the arrow is the return type. A procedure has at least one
+ * statement. The parser does not call itself, so the grammar has no nesting yet; nested blocks
+ * will need an explicit stack of the open blocks.
  */
 
 #ifndef MIALU_PARSER_H
