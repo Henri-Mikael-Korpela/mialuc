@@ -1,5 +1,5 @@
-io :: import "mu/io"
+import "mu/libc"
 
 main :: proc() Int ->
-    io.println("Hello, world!")
+    libc.printf("Hello, world!\n")
     return 0
