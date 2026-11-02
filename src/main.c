@@ -81,6 +81,9 @@ int main(int argc, char *argv[]) {
                 Token token = token_elements[i];
 
                 switch (token.token_type) {
+                case TOKEN_TYPE_ARROW:
+                    printf("ARROW\n");
+                    break;
                 case TOKEN_TYPE_IDENTIFIER:
                     // The cast is needed because `%.*s` takes an `int` precision.
                     printf("IDENTIFIER %.*s\n",

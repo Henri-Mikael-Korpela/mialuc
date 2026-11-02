@@ -123,6 +123,18 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset += 1;
         }
+        // If the two subsequent characters form a `->` token, it is recognized as a single token.
+        else if (
+            character == '-' &&
+            offset + 1 < source.length &&
+            source.bytes[offset + 1] == '>'
+        ) {
+            token_elements[result.tokens.length] = (Token){
+                .token_type = TOKEN_TYPE_ARROW,
+            };
+            result.tokens.length += 1;
+            offset += 2;
+        }
         // Unrecognized characters are an error, since the language has no error recovery yet.
         else {
             result.status = TOKENIZE_STATUS_UNEXPECTED_CHARACTER;
