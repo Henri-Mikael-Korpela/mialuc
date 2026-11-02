@@ -26,6 +26,11 @@ STATIC_ASSERT(sizeof(Str) == 16, str_size_is_16_bytes);
 #define STR_EMPTY ((Str){.bytes = NULL, .length = 0})
 
 /**
+ * Returns whether `left` and `right` have the same length and the same bytes.
+ */
+bool str_equals(Str left, Str right);
+
+/**
  * Makes a `Str` over `length` bytes at `bytes`. `bytes` may be NULL only when `length` is zero.
  */
 Str str_make(char const *bytes, size_t length);
@@ -36,11 +41,6 @@ Str str_make(char const *bytes, size_t length);
  * evaluate its operand, so the literal is only read once.
  */
 #define STR(literal) str_make((literal), sizeof(literal) - 1)
-
-/**
- * Returns whether `left` and `right` have the same length and the same bytes.
- */
-bool str_equals(Str left, Str right);
 
 /**
  * A place in a text, counted from 1 like editors and compilers show it.

@@ -9,6 +9,7 @@
 
 typedef enum {
     // Tokens consisting of a single character are represented by their ASCII value:
+    TOKEN_TYPE_COMMA = ',',
     TOKEN_TYPE_PARENTHESIS_LEFT = '(',
     TOKEN_TYPE_PARENTHESIS_RIGHT = ')',
     TOKEN_TYPE_TYPE_SEPARATOR = ':',

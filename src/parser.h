@@ -3,12 +3,16 @@
  *
  *     module              = { constant_definition } END
  *     constant_definition = INDENTATION(0) IDENTIFIER ":" ":" procedure
- *     procedure           = "proc" "(" ")" [ IDENTIFIER ] "->" { INDENTATION(1) return_statement }
- *     return_statement    = "return" INTEGER_LITERAL
+ *     procedure           = "proc" "(" [ parameter { "," parameter } ] ")" [ IDENTIFIER ] "->"
+ *                           { INDENTATION(1) return_statement }
+ *     parameter           = IDENTIFIER ":" IDENTIFIER
+ *     return_statement    = "return" expression
+ *     expression          = INTEGER_LITERAL | IDENTIFIER
  *
- * The optional identifier before the arrow is the return type. A procedure has at least one
- * statement. The parser does not call itself, so the grammar has no nesting yet; nested blocks
- * will need an explicit stack of the open blocks.
+ * The identifier after the colon of a parameter is its type, and the optional identifier before
+ * the arrow is the return type. A procedure has at least one statement. The parser does not
+ * call itself, so the grammar has no nesting yet; nested blocks will need an explicit stack of
+ * the open blocks.
  */
 
 #ifndef MIALU_PARSER_H

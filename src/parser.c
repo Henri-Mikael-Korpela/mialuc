@@ -25,17 +25,23 @@ typedef struct {
     Parse_Status status;
 } Parser;
 
-static uint32_t      parse_module             (Parser *parser);
-static uint32_t      parse_constant_definition(Parser *parser);
-static uint32_t      parse_procedure          (Parser *parser, uint32_t indentation_level);
-static uint32_t      parse_return_statement   (Parser *parser);
-static uint32_t      parse_integer_literal    (Parser *parser);
-static Token const * parse_token_current      (Parser const *parser);
-static void          parse_token_advance      (Parser *parser);
-static bool          parse_token_expect       (Parser *parser, Token_Type token_type, Str expected);
-static uint32_t      parse_node_make          (Parser *parser, Ast_Node_Type node_type);
-static void          parse_node_append_child  (Parser *parser, uint32_t parent, uint32_t child);
-static uint32_t      parse_fail               (Parser *parser, Str expected);
+static uint32_t      parse_constant_definition (Parser *parser);
+static uint32_t      parse_expression          (Parser *parser);
+static uint32_t      parse_fail                (Parser *parser, Str expected);
+static uint32_t      parse_identifier          (Parser *parser);
+static uint32_t      parse_integer_literal     (Parser *parser);
+static uint32_t      parse_module              (Parser *parser);
+static void          parse_node_append_child   (Parser *parser, uint32_t parent, uint32_t child);
+static uint32_t      parse_node_make           (Parser *parser, Ast_Node_Type node_type);
+static uint32_t      parse_parameter           (Parser *parser);
+static uint32_t      parse_procedure           (Parser *parser, uint32_t indentation_level);
+static bool          parse_procedure_body      (Parser *parser, uint32_t procedure,
+                                                uint32_t indentation_level);
+static bool          parse_procedure_parameters(Parser *parser, uint32_t procedure);
+static uint32_t      parse_return_statement    (Parser *parser);
+static void          parse_token_advance       (Parser *parser);
+static Token const * parse_token_current       (Parser const *parser);
+static bool          parse_token_expect        (Parser *parser, Token_Type token_type, Str expected);
 
 Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
     assert(tokens.elements != NULL);
@@ -155,7 +161,15 @@ static uint32_t parse_procedure(Parser *parser, uint32_t indentation_level) {
     }
     parse_token_advance(parser);
 
+    uint32_t procedure = parse_node_make(parser, AST_NODE_TYPE_PROCEDURE);
+    if (procedure == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
     if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_LEFT, STR("'('")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_procedure_parameters(parser, procedure) == false) {
         return AST_NODE_INDEX_NONE;
     }
     if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_RIGHT, STR("')'")) == false) {
@@ -163,24 +177,61 @@ static uint32_t parse_procedure(Parser *parser, uint32_t indentation_level) {
     }
 
     // The return type is optional. It is only a name for now, so an identifier here is it.
-    Str return_type = STR_EMPTY;
     Token const *type = parse_token_current(parser);
     if (type->token_type == TOKEN_TYPE_IDENTIFIER) {
-        return_type = type->payload.identifier.text;
+        parser->nodes[procedure].payload.procedure.return_type = type->payload.identifier.text;
         parse_token_advance(parser);
     }
 
     if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
-
-    uint32_t procedure = parse_node_make(parser, AST_NODE_TYPE_PROCEDURE);
-    if (procedure == AST_NODE_INDEX_NONE) {
+    if (parse_procedure_body(parser, procedure, indentation_level) == false) {
         return AST_NODE_INDEX_NONE;
     }
-    parser->nodes[procedure].payload.procedure.return_type = return_type;
 
-    // The body is the lines that are indented one level deeper than the line of the definition.
+    return procedure;
+}
+
+/**
+ * Parses the parameters between the parentheses, which can be none, and appends them to
+ * `procedure`. Returns false after it recorded an error.
+ */
+static bool parse_procedure_parameters(Parser *parser, uint32_t procedure) {
+    assert(procedure < parser->node_count);
+    assert(parser->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+
+    if (parse_token_current(parser)->token_type == TOKEN_TYPE_PARENTHESIS_RIGHT) {
+        return true;
+    }
+
+    // Every parameter consumes at least its name, so there are fewer parameters than tokens,
+    // which bounds the loop. A comma means that another parameter has to follow.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        uint32_t parameter = parse_parameter(parser);
+        if (parameter == AST_NODE_INDEX_NONE) {
+            return false;
+        }
+        parse_node_append_child(parser, procedure, parameter);
+
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
+            break;
+        }
+        parse_token_advance(parser);
+    }
+
+    return true;
+}
+
+/**
+ * Parses the statements of the body, which are the lines that are indented one level deeper than
+ * the line of the definition, and appends them to `procedure`. Returns false after it recorded an
+ * error.
+ */
+static bool parse_procedure_body(Parser *parser, uint32_t procedure, uint32_t indentation_level) {
+    assert(procedure < parser->node_count);
+    assert(indentation_level < UINT32_MAX);
+
     // Each statement consumes at least its indentation token, so there are fewer statements than
     // tokens, which bounds the loop. It stops at the first line that is not part of the body.
     uint32_t const body_level = indentation_level + 1;
@@ -196,23 +247,68 @@ static uint32_t parse_procedure(Parser *parser, uint32_t indentation_level) {
             break;
         }
         if (level > body_level) {
-            return parse_fail(parser, STR("a line that is not indented deeper"));
+            // The false return value reports the failure, so the node index is not needed.
+            (void)parse_fail(parser, STR("a line that is not indented deeper"));
+            return false;
         }
         parse_token_advance(parser);
 
         uint32_t statement = parse_return_statement(parser);
         if (statement == AST_NODE_INDEX_NONE) {
-            return AST_NODE_INDEX_NONE;
+            return false;
         }
         parse_node_append_child(parser, procedure, statement);
         statement_count += 1;
     }
 
     if (statement_count == 0) {
-        return parse_fail(parser, STR("an indented procedure body"));
+        // The false return value reports the failure, so the node index is not needed.
+        (void)parse_fail(parser, STR("an indented procedure body"));
+        return false;
     }
 
-    return procedure;
+    return true;
+}
+
+/**
+ * Parses `name: Type`. The node for the parameter has the name in its payload and one child, the
+ * type.
+ */
+static uint32_t parse_parameter(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Token const *name = parse_token_current(parser);
+    if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        return parse_fail(parser, STR("a parameter name"));
+    }
+
+    uint32_t parameter = parse_node_make(parser, AST_NODE_TYPE_PARAMETER);
+    if (parameter == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[parameter].payload.parameter.name = name->payload.identifier.text;
+    parse_token_advance(parser);
+
+    if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("':'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Token const *type = parse_token_current(parser);
+    if (type->token_type != TOKEN_TYPE_IDENTIFIER) {
+        return parse_fail(parser, STR("a type name"));
+    }
+
+    uint32_t type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
+    if (type_name == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[type_name].payload.type_name.name = type->payload.identifier.text;
+    parse_token_advance(parser);
+    parse_node_append_child(parser, parameter, type_name);
+
+    assert(parser->nodes[parameter].first_child == type_name);
+    return parameter;
 }
 
 static uint32_t parse_return_statement(Parser *parser) {
@@ -228,7 +324,7 @@ static uint32_t parse_return_statement(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
-    uint32_t value = parse_integer_literal(parser);
+    uint32_t value = parse_expression(parser);
     if (value == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -245,6 +341,25 @@ static uint32_t parse_return_statement(Parser *parser) {
     return statement;
 }
 
+/**
+ * Parses a value: an integer literal, or the name of something, such as a parameter. There are no
+ * operators yet, so an expression is a single token and the parser does not need to call itself.
+ */
+static uint32_t parse_expression(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Token_Type next = parse_token_current(parser)->token_type;
+    if (next == TOKEN_TYPE_INTEGER_LITERAL) {
+        return parse_integer_literal(parser);
+    }
+    if (next == TOKEN_TYPE_IDENTIFIER) {
+        return parse_identifier(parser);
+    }
+
+    return parse_fail(parser, STR("an integer literal or a name"));
+}
+
 static uint32_t parse_integer_literal(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
@@ -259,6 +374,26 @@ static uint32_t parse_integer_literal(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
     parser->nodes[node].payload.integer_literal.value = literal->payload.integer_literal.value;
+    parse_token_advance(parser);
+
+    assert(parser->nodes[node].first_child == AST_NODE_INDEX_NONE);
+    return node;
+}
+
+static uint32_t parse_identifier(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Token const *identifier = parse_token_current(parser);
+    if (identifier->token_type != TOKEN_TYPE_IDENTIFIER) {
+        return parse_fail(parser, STR("a name"));
+    }
+
+    uint32_t node = parse_node_make(parser, AST_NODE_TYPE_IDENTIFIER);
+    if (node == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[node].payload.identifier.name = identifier->payload.identifier.text;
     parse_token_advance(parser);
 
     assert(parser->nodes[node].first_child == AST_NODE_INDEX_NONE);

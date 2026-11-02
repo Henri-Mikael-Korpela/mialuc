@@ -37,11 +37,19 @@ void ast_print(Array_Slice nodes, uint32_t root) {
             printf("CONSTANT_DEFINITION %.*s\n", (int)node.payload.constant_definition.name.length,
                    node.payload.constant_definition.name.bytes);
             break;
+        case AST_NODE_TYPE_IDENTIFIER:
+            printf("IDENTIFIER %.*s\n", (int)node.payload.identifier.name.length,
+                   node.payload.identifier.name.bytes);
+            break;
         case AST_NODE_TYPE_INTEGER_LITERAL:
             printf("INTEGER_LITERAL %" PRId64 "\n", node.payload.integer_literal.value);
             break;
         case AST_NODE_TYPE_MODULE:
             printf("MODULE\n");
+            break;
+        case AST_NODE_TYPE_PARAMETER:
+            printf("PARAMETER %.*s\n", (int)node.payload.parameter.name.length,
+                   node.payload.parameter.name.bytes);
             break;
         case AST_NODE_TYPE_PROCEDURE:
             if (node.payload.procedure.return_type.bytes == NULL) {
@@ -53,6 +61,10 @@ void ast_print(Array_Slice nodes, uint32_t root) {
             break;
         case AST_NODE_TYPE_RETURN_STATEMENT:
             printf("RETURN_STATEMENT\n");
+            break;
+        case AST_NODE_TYPE_TYPE_NAME:
+            printf("TYPE_NAME %.*s\n", (int)node.payload.type_name.name.length,
+                   node.payload.type_name.name.bytes);
             break;
         }
 

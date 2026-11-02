@@ -42,8 +42,16 @@ definition = name , ws , ":" , ws , ":" , ws , procedure ;
 
 (* A procedure and its body. The optional name before the arrow is the return type. *)
 procedure =
-    "proc" , ws , "(" , ws , ")" , ws , [ return_type , ws ] , "->" , ws , line_end ,
-    procedure_body ;
+    "proc" , ws , "(" , ws , [ parameters , ws ] , ")" , ws , [ return_type , ws ] , "->" , ws ,
+    line_end , procedure_body ;
+
+(* One or more parameters, separated by commas. There is no comma after the last one. *)
+parameters = parameter , { ws , "," , ws , parameter } ;
+
+(* The name of the parameter, and its type. *)
+parameter = name , ws , ":" , ws , type_name ;
+
+type_name = name ;
 
 return_type = name ;
 
@@ -57,8 +65,11 @@ statement_line = indentation , return_statement , ws , line_end ;
 
 indentation = "    " ;
 
-(* `return` and the number must be separated, or `return0` would be one identifier. *)
-return_statement = "return" , required_space , integer_literal ;
+(* `return` and its value must be separated, or `return0` would be one identifier. *)
+return_statement = "return" , required_space , expression ;
+
+(* The use of a name, such as a parameter. *)
+expression = integer_literal | name ;
 
 (* Names. An identifier that is a reserved word is not a name. *)
 name = identifier - reserved_word ;

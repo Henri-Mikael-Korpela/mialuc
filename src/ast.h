@@ -10,10 +10,13 @@
 // Alphabetical, because nothing depends on the order.
 typedef enum {
     AST_NODE_TYPE_CONSTANT_DEFINITION,
+    AST_NODE_TYPE_IDENTIFIER,
     AST_NODE_TYPE_INTEGER_LITERAL,
     AST_NODE_TYPE_MODULE,
+    AST_NODE_TYPE_PARAMETER,
     AST_NODE_TYPE_PROCEDURE,
     AST_NODE_TYPE_RETURN_STATEMENT,
+    AST_NODE_TYPE_TYPE_NAME,
 } Ast_Node_Type;
 
 // Nodes refer to each other by index into the node buffer instead of by pointer, so the buffer
@@ -27,11 +30,14 @@ static uint32_t const AST_NODE_INDEX_NONE = UINT32_MAX;
  * a child a constant-time operation. Which children a node has depends on `node_type`:
  *
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: one child, the value that is bound to the name.
+ * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition. It is the root of the tree.
- * - `AST_NODE_TYPE_PROCEDURE`: one child per statement of the body. The return type is in the
- *   payload.
+ * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`.
+ * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
+ *   body. The return type is in the payload.
  * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child, the returned value.
+ * - `AST_NODE_TYPE_TYPE_NAME`: no children.
  */
 typedef struct {
     Ast_Node_Type node_type;
@@ -52,8 +58,18 @@ typedef struct {
             Str return_type;
         } procedure;
         struct {
+            // Views the source text, like the other names.
+            Str name;
+        } identifier;
+        struct {
             int64_t value;
         } integer_literal;
+        struct {
+            Str name;
+        } parameter;
+        struct {
+            Str name;
+        } type_name;
     } payload;
 } Ast_Node;
 

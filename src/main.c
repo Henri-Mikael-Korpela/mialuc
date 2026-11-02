@@ -94,6 +94,9 @@ int main(int argc, char *argv[]) {
                 case TOKEN_TYPE_ARROW:
                     printf("ARROW\n");
                     break;
+                case TOKEN_TYPE_COMMA:
+                    printf("COMMA\n");
+                    break;
                 case TOKEN_TYPE_END:
                     printf("END\n");
                     break;
