@@ -1,0 +1,35 @@
+{
+    "name": "mialu",
+    "displayName": "Mialu",
+    "description": "Language support for the Mialu programming language.",
+    "version": "0.0.1",
+    "publisher": "mialu",
+    "engines": {
+        "vscode": "^1.60.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "contributes": {
+        "languages": [
+            {
+                "id": "mialu",
+                "aliases": [
+                    "Mialu",
+                    "mialu"
+                ],
+                "extensions": [
+                    ".mu"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "mialu",
+                "scopeName": "source.mialu",
+                "path": "./syntaxes/mialu.tmLanguage.json"
+            }
+        ]
+    }
+}

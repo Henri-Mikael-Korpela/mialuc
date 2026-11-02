@@ -1,0 +1,24 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Mialu",
+    "scopeName": "source.mialu",
+    "patterns": [
+        {
+            "include": "#reserved-words"
+        }
+    ],
+    "repository": {
+        "reserved-words": {
+            "patterns": [
+                {
+                    "name": "storage.type.function.mialu",
+                    "match": "\\bproc\\b"
+                },
+                {
+                    "name": "keyword.control.return.mialu",
+                    "match": "\\breturn\\b"
+                }
+            ]
+        }
+    }
+}
