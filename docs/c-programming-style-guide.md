@@ -30,7 +30,7 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 
 ## Comments and documentation
 
-- Use `/**` to start a documentation comment. Example:
+- Do not use single line comments above function definitions. Instead, use `/**` to start a documentation comment. Example:
 
 ```c
 /**
@@ -106,10 +106,10 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 
 - Use only simple, explicit control flow. Do not use `goto` (other than a single cleanup label where unavoidable), `setjmp`/`longjmp`, or recursion. All executions that should be bounded must be bounded.
 - Put a fixed upper bound on every loop and every queue or buffer, so that a runaway loop cannot occur. A loop that must run forever, such as the main loop, should be the only exception and should say so.
+- Use `while (true)` for infinite loops, not `for (;;)` or `while (1)`.
 
 ## Functions
 
-- Keep functions to at most 70 lines. If a function grows longer, split it; centralize control flow in the parent function and move pure logic into helpers.
 - Good function shape is a few parameters and a simple return type. Prefer passing structs by `const` pointer when large, and by value when small.
 - Mark everything that can be `static` as `static`. Mark pointer parameters `const` when the function does not modify the data.
 - Keep control flow (`if`, `switch`, loops) in the parent function and pure computation (no I/O, no side effects) in helpers. Keep leaf functions pure.
