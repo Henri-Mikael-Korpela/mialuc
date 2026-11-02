@@ -25,8 +25,8 @@ typedef enum {
 
 typedef struct {
     Token_Type token_type;
-    // Named, because unnamed unions are C11 and the project is C99. Only the member that matches
-    // `token_type` is meaningful.
+    // This union is named, because unnamed unions are C11 and the project uses C99.
+    // Only the member that matches `token_type` is meaningful.
     union {
         struct {
             // The number of indentation levels, where one level is four spaces. Zero for a line
