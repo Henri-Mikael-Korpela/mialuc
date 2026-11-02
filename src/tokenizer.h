@@ -14,6 +14,7 @@ typedef enum {
     // Tokens consisting of multiple characters are represented by a unique value:
     TOKEN_TYPE_ARROW,
     TOKEN_TYPE_IDENTIFIER,
+    TOKEN_TYPE_KEYWORD_RETURN,
 } Token_Type;
 
 typedef struct {

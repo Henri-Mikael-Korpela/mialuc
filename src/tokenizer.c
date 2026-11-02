@@ -90,13 +90,19 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             assert(end > offset);
             assert(end <= source.length);
 
+            Str text = str_make(source.bytes + offset, end - offset);
+
+            // Keywords are scanned like identifiers and told apart afterwards, so that a longer
+            // identifier such as `returned` is not split into a keyword and a remainder.
+            Token_Type token_type = TOKEN_TYPE_IDENTIFIER;
+            if (str_equals(text, STR("return"))) {
+                token_type = TOKEN_TYPE_KEYWORD_RETURN;
+            }
+
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_IDENTIFIER,
+                .token_type = token_type,
                 .identifier = {
-                    .text = {
-                        .bytes = source.bytes + offset,
-                        .length = end - offset
-                    },
+                    .text = text,
                 }
             };
             result.tokens.length += 1;

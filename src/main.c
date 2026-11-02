@@ -90,6 +90,9 @@ int main(int argc, char *argv[]) {
                         (int)token.identifier.text.length,
                         token.identifier.text.bytes);
                     break;
+                case TOKEN_TYPE_KEYWORD_RETURN:
+                    printf("KEYWORD_RETURN\n");
+                    break;
                 case TOKEN_TYPE_PARENTHESIS_LEFT:
                     printf("PARENTHESIS_LEFT\n");
                     break;
