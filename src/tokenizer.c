@@ -11,6 +11,11 @@
 
 #include <mialu/tokenizer.h>
 
+enum {
+    // Indentation must be a whole number of levels, and one level is always this many spaces.
+    INDENTATION_SPACES_PER_LEVEL = 4,
+};
+
 static bool char_is_digit     (char character);
 static bool char_is_letter    (char character);
 static bool char_is_lower     (char character);
@@ -56,13 +61,67 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         .status = TOKENIZE_STATUS_OK,
     };
 
-    // Each iteration consumes at least one byte, so the loop ends after `source.length` steps.
+    // An iteration consumes at least one byte, except the one that handles the start of a line,
+    // which happens once per line. So the loop ends after at most twice `source.length` steps.
     size_t offset = 0;
+    bool is_line_start = true;
     while (offset < source.length) {
         char character = source.bytes[offset];
 
+        if (is_line_start) {
+            // The run of spaces and tabs before the first other character on the line.
+            size_t end = offset;
+            size_t space_count = 0;
+            size_t tab_offset = 0;
+            bool has_tab = false;
+            while (end < source.length && (source.bytes[end] == ' ' || source.bytes[end] == '\t')) {
+                if (source.bytes[end] == ' ') {
+                    space_count += 1;
+                } else if (has_tab == false) {
+                    has_tab = true;
+                    tab_offset = end;
+                }
+                end += 1;
+            }
+
+            bool is_blank = end == source.length || source.bytes[end] == '\n' ||
+                            source.bytes[end] == '\r';
+            is_line_start = false;
+
+            if (is_blank) {
+                // Blank lines carry no indentation, so trailing spaces on them are harmless.
+                offset = end;
+            } else if (has_tab) {
+                result.status = TOKENIZE_STATUS_INDENTATION_TAB;
+                result.error_offset = tab_offset;
+                return result;
+            } else if (space_count % INDENTATION_SPACES_PER_LEVEL != 0) {
+                result.status = TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID;
+                result.error_offset = end;
+                return result;
+            } else if (result.tokens.length == token_buffer.length) {
+                result.status = TOKENIZE_STATUS_TOKEN_LIMIT;
+                result.error_offset = offset;
+                return result;
+            } else {
+                // Every non-blank line gets an indentation token, even at level zero, because
+                // there is no separate end-of-line token to tell where a line starts.
+                token_elements[result.tokens.length] = (Token){
+                    .token_type = TOKEN_TYPE_INDENTATION,
+                    .payload.indentation.level =
+                        (uint32_t)(space_count / INDENTATION_SPACES_PER_LEVEL),
+                };
+                result.tokens.length += 1;
+                offset = end;
+            }
+            continue;
+        }
+
         if (char_is_whitespace(character)) {
-            // Ignore whitespace.
+            // Ignore whitespace, but remember that a new line begins after a line feed.
+            if (character == '\n') {
+                is_line_start = true;
+            }
             offset += 1;
             continue;
         }
@@ -108,9 +167,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             token_elements[result.tokens.length] = (Token){
                 .token_type = TOKEN_TYPE_INTEGER_LITERAL,
-                .integer_literal = {
-                    .value = value,
-                }
+                .payload.integer_literal.value = value,
             };
             result.tokens.length += 1;
             offset = end;
@@ -145,9 +202,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             token_elements[result.tokens.length] = (Token){
                 .token_type = token_type,
-                .identifier = {
-                    .text = text,
-                }
+                .payload.identifier.text = text,
             };
             result.tokens.length += 1;
             offset = end;

@@ -88,11 +88,14 @@ int main(int argc, char *argv[]) {
                 case TOKEN_TYPE_IDENTIFIER:
                     // The cast is needed because `%.*s` takes an `int` precision.
                     printf("IDENTIFIER %.*s\n",
-                        (int)token.identifier.text.length,
-                        token.identifier.text.bytes);
+                        (int)token.payload.identifier.text.length,
+                        token.payload.identifier.text.bytes);
+                    break;
+                case TOKEN_TYPE_INDENTATION:
+                    printf("INDENTATION %" PRIu32 "\n", token.payload.indentation.level);
                     break;
                 case TOKEN_TYPE_INTEGER_LITERAL:
-                    printf("INTEGER_LITERAL %" PRId64 "\n", token.integer_literal.value);
+                    printf("INTEGER_LITERAL %" PRId64 "\n", token.payload.integer_literal.value);
                     break;
                 case TOKEN_TYPE_KEYWORD_RETURN:
                     printf("KEYWORD_RETURN\n");
@@ -128,6 +131,14 @@ int main(int argc, char *argv[]) {
             switch (result.status) {
             case TOKENIZE_STATUS_OK:
                 assert(false);
+                break;
+            case TOKENIZE_STATUS_INDENTATION_TAB:
+                fprintf(stderr, "%s:%zu:%zu: indentation must use spaces, not tabs.\n", path, line,
+                        column);
+                break;
+            case TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID:
+                fprintf(stderr, "%s:%zu:%zu: indentation must be a multiple of 4 spaces.\n", path,
+                        line, column);
                 break;
             case TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE:
                 fprintf(stderr, "%s:%zu:%zu: integer literal does not fit in 64 bits.\n", path,

@@ -16,13 +16,21 @@ typedef enum {
     // Tokens consisting of multiple characters are represented by a unique value:
     TOKEN_TYPE_ARROW,
     TOKEN_TYPE_IDENTIFIER,
+    TOKEN_TYPE_INDENTATION,
     TOKEN_TYPE_INTEGER_LITERAL,
     TOKEN_TYPE_KEYWORD_RETURN,
 } Token_Type;
 
 typedef struct {
     Token_Type token_type;
+    // Named, because unnamed unions are C11 and the project is C99. Only the member that matches
+    // `token_type` is meaningful.
     union {
+        struct {
+            // The number of indentation levels, where one level is four spaces. Zero for a line
+            // that is not indented.
+            uint32_t level;
+        } indentation;
         struct {
             Str text;
         } identifier;
@@ -31,15 +39,16 @@ typedef struct {
             // Literals that do not fit are rejected by the tokenizer.
             int64_t value;
         } integer_literal;
-    };
+    } payload;
 } Token;
 
-// The enum is 4 bytes in GCC, so 4 bytes of padding follow it. A union of the payloads would save
-// 8 bytes, but unnamed unions are not C99.
-STATIC_ASSERT(sizeof(Token) == 32, token_size_is_32_bytes);
+// The enum is 4 bytes in GCC, so 4 bytes of padding follow it, and the largest payload is 16 bytes.
+STATIC_ASSERT(sizeof(Token) == 24, token_size_is_24_bytes);
 
 typedef enum {
     TOKENIZE_STATUS_OK,
+    TOKENIZE_STATUS_INDENTATION_TAB,
+    TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID,
     TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE,
     TOKENIZE_STATUS_TOKEN_LIMIT,
     TOKENIZE_STATUS_UNEXPECTED_CHARACTER,
