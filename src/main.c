@@ -112,6 +112,9 @@ int main(int argc, char *argv[]) {
                 case TOKEN_TYPE_INTEGER_LITERAL:
                     printf("INTEGER_LITERAL %" PRId64 "\n", token.payload.integer_literal.value);
                     break;
+                case TOKEN_TYPE_KEYWORD_PROC:
+                    printf("KEYWORD_PROC\n");
+                    break;
                 case TOKEN_TYPE_KEYWORD_RETURN:
                     printf("KEYWORD_RETURN\n");
                     break;

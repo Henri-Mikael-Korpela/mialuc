@@ -205,7 +205,9 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             // Keywords are scanned like identifiers and told apart afterwards, so that a longer
             // identifier such as `returned` is not split into a keyword and a remainder.
             Token_Type token_type = TOKEN_TYPE_IDENTIFIER;
-            if (str_equals(text, STR("return"))) {
+            if (str_equals(text, STR("proc"))) {
+                token_type = TOKEN_TYPE_KEYWORD_PROC;
+            } else if (str_equals(text, STR("return"))) {
                 token_type = TOKEN_TYPE_KEYWORD_RETURN;
             }
 

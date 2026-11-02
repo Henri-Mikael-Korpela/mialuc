@@ -156,15 +156,9 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
     assert(indentation_level < UINT32_MAX);
     assert(parser->status == PARSE_STATUS_OK);
 
-    // `proc` is not a keyword token yet, so it is recognized by its text.
-    Token const *keyword = parse_token_current(parser);
-    if (keyword->token_type != TOKEN_TYPE_IDENTIFIER) {
-        return parse_fail(parser, STR("'proc'"));
+    if (parse_token_expect(parser, TOKEN_TYPE_KEYWORD_PROC, STR("'proc'")) == false) {
+        return AST_NODE_INDEX_NONE;
     }
-    if (str_equals(keyword->payload.identifier.text, STR("proc")) == false) {
-        return parse_fail(parser, STR("'proc'"));
-    }
-    parse_token_advance(parser);
 
     Ast_Node_Index procedure = parse_node_make(parser, AST_NODE_TYPE_PROCEDURE);
     if (procedure == AST_NODE_INDEX_NONE) {
