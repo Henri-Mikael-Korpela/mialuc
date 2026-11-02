@@ -19,6 +19,8 @@ typedef enum {
     TOKEN_TYPE_INDENTATION,
     TOKEN_TYPE_INTEGER_LITERAL,
     TOKEN_TYPE_KEYWORD_RETURN,
+
+    TOKEN_TYPE_END,
 } Token_Type;
 
 typedef struct {
@@ -56,8 +58,9 @@ typedef enum {
 
 /**
  * On `TOKENIZE_STATUS_OK` only `tokens` is meaningful: it is the filled start of the token buffer,
- * as `Token` elements. Otherwise `error_offset` is the byte offset in the source where tokenizing
- * stopped.
+ * as `Token` elements. The last token is always `TOKEN_TYPE_END`, and it appears only there, so
+ * `tokens` is never empty. Otherwise `error_offset` is the byte offset in the source where
+ * tokenizing stopped.
  */
 typedef struct {
     Array_Slice tokens;
@@ -68,7 +71,10 @@ typedef struct {
 /**
  * Splits `source` into tokens written to `token_buffer`, which holds `Token` elements. Skips
  * whitespace. Stops at the first character that cannot start a token, since the language has no
- * error recovery yet.
+ * error recovery yet. One element of `token_buffer` is reserved for the `TOKEN_TYPE_END` token,
+ * so
+ * at most `token_buffer.length - 1` other tokens fit, and the buffer must hold at least one
+ * element.
  */
 Tokenize_Result tokenize(Str source, Array_Slice token_buffer);
 

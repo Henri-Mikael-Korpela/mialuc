@@ -61,6 +61,10 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         .status = TOKENIZE_STATUS_OK,
     };
 
+    // One slot is kept free for the `END` token, so that it can always be added at the end.
+    assert(token_buffer.length >= 1);
+    size_t const token_count_max = token_buffer.length - 1;
+
     // An iteration consumes at least one byte, except the one that handles the start of a line,
     // which happens once per line. So the loop ends after at most twice `source.length` steps.
     size_t offset = 0;
@@ -99,7 +103,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                 result.status = TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID;
                 result.error_offset = end;
                 return result;
-            } else if (result.tokens.length == token_buffer.length) {
+            } else if (result.tokens.length == token_count_max) {
                 result.status = TOKENIZE_STATUS_TOKEN_LIMIT;
                 result.error_offset = offset;
                 return result;
@@ -126,7 +130,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             continue;
         }
         // If the token buffer is full, the tokenizer cannot continue, so it returns an error.
-        else if (result.tokens.length == token_buffer.length) {
+        else if (result.tokens.length == token_count_max) {
             result.status = TOKENIZE_STATUS_TOKEN_LIMIT;
             result.error_offset = offset;
             return result;
@@ -247,6 +251,15 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             return result;
         }
     }
+
+    // Always exactly one `END` token, and always last.
+    // This helps parsing because it never need a bounds check
+    // to look at the token that follows the last real one.
+    assert(result.tokens.length <= token_count_max);
+    token_elements[result.tokens.length] = (Token){
+        .token_type = TOKEN_TYPE_END,
+    };
+    result.tokens.length += 1;
 
     assert(result.tokens.length <= token_buffer.length);
     assert(result.status == TOKENIZE_STATUS_OK);
