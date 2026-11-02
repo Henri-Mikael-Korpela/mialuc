@@ -115,6 +115,7 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 - Keep control flow (`if`, `switch`, loops) in the parent function and pure computation (no I/O, no side effects) in helpers. Keep leaf functions pure.
 - Do not duplicate or alias variables or state, since duplication creates opportunities for them to drift out of sync.
 - Avoid out parameters where a return value will do; if you must use them, assert on them.
+- Sort function forward declarations alphabetically.
 
 ## Structs
 
