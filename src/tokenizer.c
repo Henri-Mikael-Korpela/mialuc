@@ -6,6 +6,7 @@
 // using `<ctype.h>`, whose results // depend on the locale, so that behavior does not change
 // between machines.
 #include <assert.h>
+#include <stdint.h>
 #include <stdbool.h>
 
 #include <mialu/tokenizer.h>
@@ -70,6 +71,49 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.status = TOKENIZE_STATUS_TOKEN_LIMIT;
             result.error_offset = offset;
             return result;
+        }
+        // Only decimal format is supported for integer literals.
+        else if (char_is_digit(character)) {
+            int64_t value = 0;
+            bool is_too_large = false;
+
+            // Bounded by `source.length`, since each iteration consumes one digit.
+            size_t end = offset;
+            while (end < source.length && char_is_digit(source.bytes[end])) {
+                int64_t digit = source.bytes[end] - '0';
+
+                // Checked before multiplying, because signed overflow is undefined behavior.
+                if (value > (INT64_MAX - digit) / 10) {
+                    is_too_large = true;
+                    break;
+                }
+                value = value * 10 + digit;
+                end += 1;
+            }
+
+            if (is_too_large) {
+                result.status = TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE;
+                result.error_offset = offset;
+                return result;
+            }
+
+            // A letter or underscore right after the digits would otherwise be silently split into
+            // a separate identifier, but identifiers cannot begin with a digit.
+            if (end < source.length && (char_is_letter(source.bytes[end]) ||
+                                        source.bytes[end] == '_')) {
+                result.status = TOKENIZE_STATUS_UNEXPECTED_CHARACTER;
+                result.error_offset = end;
+                return result;
+            }
+
+            token_elements[result.tokens.length] = (Token){
+                .token_type = TOKEN_TYPE_INTEGER_LITERAL,
+                .integer_literal = {
+                    .value = value,
+                }
+            };
+            result.tokens.length += 1;
+            offset = end;
         }
         // If the character is a letter or underscore, it starts an identifier:
         else if (char_is_letter(character) || character == '_') {

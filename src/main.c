@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -90,6 +91,9 @@ int main(int argc, char *argv[]) {
                         (int)token.identifier.text.length,
                         token.identifier.text.bytes);
                     break;
+                case TOKEN_TYPE_INTEGER_LITERAL:
+                    printf("INTEGER_LITERAL %" PRId64 "\n", token.integer_literal.value);
+                    break;
                 case TOKEN_TYPE_KEYWORD_RETURN:
                     printf("KEYWORD_RETURN\n");
                     break;
@@ -124,6 +128,10 @@ int main(int argc, char *argv[]) {
             switch (result.status) {
             case TOKENIZE_STATUS_OK:
                 assert(false);
+                break;
+            case TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE:
+                fprintf(stderr, "%s:%zu:%zu: integer literal does not fit in 64 bits.\n", path,
+                        line, column);
                 break;
             case TOKENIZE_STATUS_TOKEN_LIMIT:
                 fprintf(stderr, "%s:%zu:%zu: more than %d tokens.\n", path, line, column,
