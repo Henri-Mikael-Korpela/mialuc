@@ -38,7 +38,12 @@ void ast_print(Array_Slice nodes, uint32_t root) {
                    node.payload.constant_definition.name.bytes);
             break;
         case AST_NODE_TYPE_FUNCTION:
-            printf("FUNCTION\n");
+            if (node.payload.function.return_type.bytes == NULL) {
+                printf("FUNCTION\n");
+            } else {
+                printf("FUNCTION returns %.*s\n", (int)node.payload.function.return_type.length,
+                       node.payload.function.return_type.bytes);
+            }
             break;
         case AST_NODE_TYPE_INTEGER_LITERAL:
             printf("INTEGER_LITERAL %" PRId64 "\n", node.payload.integer_literal.value);

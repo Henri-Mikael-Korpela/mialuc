@@ -27,7 +27,8 @@ static uint32_t const AST_NODE_INDEX_NONE = UINT32_MAX;
  * a child a constant-time operation. Which children a node has depends on `node_type`:
  *
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: one child, the value that is bound to the name.
- * - `AST_NODE_TYPE_FUNCTION`: one child per statement of the body.
+ * - `AST_NODE_TYPE_FUNCTION`: one child per statement of the body. The return type is in the
+ *   payload.
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition. It is the root of the tree.
  * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child, the returned value.
@@ -44,6 +45,12 @@ typedef struct {
             // Views the source text, so it is valid only as long as the source is.
             Str name;
         } constant_definition;
+        struct {
+            // The name of the return type, as a view of the source text. Empty, with `bytes` NULL,
+            // when the function does not declare one. Types are only names for now, so a name is
+            // enough; when types get more structure, this should become a child node.
+            Str return_type;
+        } function;
         struct {
             int64_t value;
         } integer_literal;

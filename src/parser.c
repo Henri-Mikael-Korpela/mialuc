@@ -161,6 +161,15 @@ static uint32_t parse_function(Parser *parser, uint32_t indentation_level) {
     if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_RIGHT, STR("')'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
+
+    // The return type is optional. It is only a name for now, so an identifier here is it.
+    Str return_type = STR_EMPTY;
+    Token const *type = parse_token_current(parser);
+    if (type->token_type == TOKEN_TYPE_IDENTIFIER) {
+        return_type = type->payload.identifier.text;
+        parse_token_advance(parser);
+    }
+
     if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
@@ -169,6 +178,7 @@ static uint32_t parse_function(Parser *parser, uint32_t indentation_level) {
     if (function == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
+    parser->nodes[function].payload.function.return_type = return_type;
 
     // The body is the lines that are indented one level deeper than the line of the definition.
     // Each statement consumes at least its indentation token, so there are fewer statements than

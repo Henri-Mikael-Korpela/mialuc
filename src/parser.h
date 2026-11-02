@@ -3,10 +3,11 @@
  *
  *     module              = { constant_definition } END
  *     constant_definition = INDENTATION(0) IDENTIFIER ":" ":" function
- *     function            = "proc" "(" ")" "->" { INDENTATION(1) return_statement }
+ *     function            = "proc" "(" ")" [ IDENTIFIER ] "->" { INDENTATION(1) return_statement }
  *     return_statement    = "return" INTEGER_LITERAL
  *
- * A function has at least one statement. The parser does not call itself, so the grammar has no
+ * The optional identifier before the arrow is the return type. A function has at least one
+ * statement. The parser does not call itself, so the grammar has no
  * nesting yet; nested blocks will need an explicit stack of the open blocks.
  */
 
