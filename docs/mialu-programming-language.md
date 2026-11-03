@@ -178,4 +178,4 @@ The target is built from the result of scope resolution, so it also rejects ever
 
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 
-There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the module as text, and runs JavaScript against it. See the README.
+There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree and the module as text, and runs JavaScript against it. See the README.

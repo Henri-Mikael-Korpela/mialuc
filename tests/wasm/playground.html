@@ -160,6 +160,43 @@
         .token-string { color: #ce9178; }
         .token-type { color: #4ec9b0; }
 
+        .tabs { display: flex; background: var(--background-panel); }
+
+        .tab {
+            padding: 6px 12px;
+            border: 0;
+            border-bottom: 2px solid transparent;
+            border-radius: 0;
+            background: none;
+            color: var(--text-muted);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .tab:hover { background: none; color: var(--text); }
+        .tab[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--text); }
+
+        .tab-pane { flex: 1; display: flex; min-height: 0; }
+        .tab-pane[hidden] { display: none; }
+
+        /* The parsed code is a tree of nodes, each of which can be folded. */
+        #tree {
+            flex: 1;
+            margin: 0;
+            padding: 8px 12px;
+            overflow: auto;
+            font: 14px/1.5 var(--font-code);
+        }
+
+        #tree.is-stale { opacity: 0.4; }
+        #tree ul { margin: 0; padding-left: 20px; list-style: none; }
+        #tree > ul { padding-left: 0; }
+        #tree summary { cursor: pointer; }
+        #tree li:not(:has(details)) { padding-left: 14px; }
+        .tree-kind { color: #569cd6; }
+        .tree-detail { color: #ce9178; }
+
         .compile-error {
             margin: 0;
             padding: 8px 12px;
@@ -217,9 +254,20 @@
                 <div id="console"></div>
             </section>
             <section class="panel" id="panel-wat">
-                <div class="panel-title">WebAssembly text</div>
+                <div class="tabs" role="tablist">
+                    <button class="tab" type="button" role="tab" id="tab-tree"
+                        aria-controls="pane-tree" aria-selected="true">Parsed code</button>
+                    <button class="tab" type="button" role="tab" id="tab-wat"
+                        aria-controls="pane-wat" aria-selected="false">WebAssembly text</button>
+                </div>
                 <pre class="compile-error" id="compile-error"></pre>
-                <div class="editor" id="editor-wat"></div>
+                <div class="tab-pane" id="pane-tree" role="tabpanel" aria-labelledby="tab-tree">
+                    <div id="tree"></div>
+                </div>
+                <div class="tab-pane" id="pane-wat" role="tabpanel" aria-labelledby="tab-wat"
+                    hidden>
+                    <div class="editor" id="editor-wat" data-label="WebAssembly text"></div>
+                </div>
             </section>
         </div>
     </main>
@@ -318,8 +366,8 @@
             const textarea = document.createElement("textarea");
             textarea.spellcheck = false;
             textarea.readOnly = isReadOnly;
-            textarea.setAttribute("aria-label", container.closest(".panel")
-                .querySelector(".panel-title").textContent);
+            textarea.setAttribute("aria-label", container.dataset.label
+                ?? container.closest(".panel").querySelector(".panel-title").textContent);
             code.append(pre, textarea);
             container.append(gutter, code);
 
@@ -379,6 +427,7 @@
         const consoleOutput = document.getElementById("console");
         const compileError = document.getElementById("compile-error");
         const watContainer = document.getElementById("editor-wat");
+        const treeContainer = document.getElementById("tree");
 
         // Empty until the example has been loaded, see `loadExample`.
         const mialuEditor = createEditor(document.getElementById("editor-mialu"), "mialu", "",
@@ -413,25 +462,76 @@
             try {
                 const response = await fetch("/compile", { method: "POST", body: source });
                 if (response.ok === false) {
-                    return { bytes: null, wat: null, error: `The server answered ${response.status}.` };
+                    return {
+                        bytes: null, wat: null, ast: null,
+                        error: `The server answered ${response.status}.`,
+                    };
                 }
                 const answer = await response.json();
                 if (answer.error !== null) {
-                    return { bytes: null, wat: null, error: answer.error };
+                    return { bytes: null, wat: null, ast: answer.ast, error: answer.error };
                 }
                 const bytes = Uint8Array.from(atob(answer.wasm), (character) => character.charCodeAt(0));
-                return { bytes, wat: answer.wat, error: null };
+                return { bytes, wat: answer.wat, ast: answer.ast, error: null };
             } catch (error) {
                 return {
                     bytes: null,
                     wat: null,
+                    ast: null,
                     error: `Cannot reach the compiler. Start it with: python tests/wasm/serve.py\n${error}`,
                 };
             }
         }
 
+        /*
+         * Builds the folding tree from the lines of the syntax tree, which the compiler indents
+         * by 2 spaces per level. A node is "KIND detail", such as "PARAMETER a".
+         */
+        function renderTree(text) {
+            const root = document.createElement("ul");
+            // The list that holds the children of the node at each depth so far.
+            const lists = [root];
+            let previousItem = null;
+            let previousDepth = -1;
+            for (const line of text.split("\n")) {
+                const depth = (line.length - line.trimStart().length) / 2;
+                const [kind, ...rest] = line.trim().split(" ");
+                if (depth > previousDepth && previousItem !== null) {
+                    // The previous node has children, so it becomes a foldable node.
+                    const details = document.createElement("details");
+                    details.open = true;
+                    const summary = document.createElement("summary");
+                    summary.append(...previousItem.childNodes);
+                    const list = document.createElement("ul");
+                    details.append(summary, list);
+                    previousItem.replaceChildren(details);
+                    lists[depth] = list;
+                }
+                const item = document.createElement("li");
+                const kindLabel = document.createElement("span");
+                kindLabel.className = "tree-kind";
+                kindLabel.textContent = kind;
+                item.append(kindLabel);
+                if (rest.length > 0) {
+                    const detail = document.createElement("span");
+                    detail.className = "tree-detail";
+                    detail.textContent = ` ${rest.join(" ")}`;
+                    item.append(detail);
+                }
+                lists[depth].append(item);
+                previousItem = item;
+                previousDepth = depth;
+            }
+            treeContainer.replaceChildren(root);
+        }
+
         function showCompilation(answer) {
             compileError.textContent = answer.error ?? "";
+            // The tree of the last source that parsed stays, dimmed, like the text below.
+            if (answer.ast !== null) {
+                renderTree(answer.ast);
+            }
+            treeContainer.classList.toggle("is-stale", answer.ast === null);
             if (answer.error === null) {
                 watEditor.value = answer.wat;
                 watEditor.render();
@@ -443,6 +543,19 @@
             // The text of the last good module stays, dimmed, so that the view does not jump
             // while a line is half typed.
             watContainer.classList.toggle("is-stale", answer.error !== null);
+        }
+
+        const tabs = [
+            { button: document.getElementById("tab-tree"), pane: document.getElementById("pane-tree") },
+            { button: document.getElementById("tab-wat"), pane: document.getElementById("pane-wat") },
+        ];
+        for (const selected of tabs) {
+            selected.button.addEventListener("click", () => {
+                for (const { button, pane } of tabs) {
+                    button.setAttribute("aria-selected", String(button === selected.button));
+                    pane.hidden = button !== selected.button;
+                }
+            });
         }
 
         mialuEditor.addEventListener("input", () => {

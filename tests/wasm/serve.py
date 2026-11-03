@@ -10,8 +10,11 @@ localhost only. The script has no dependencies besides the Python standard libra
 The playground, playground.html, compiles Mialu by posting the source to /compile. The server runs
 the compiler, build/mialuc.exe, which must be built first, and answers with JSON:
 
-    {"error": null, "wasm": "<module in base64>", "wat": "<module in the text format>"}
-    {"error": "<what the compiler printed>", "wasm": null, "wat": null}
+    {"error": null, "ast": "<syntax tree>", "wasm": "<module in base64>", "wat": "<module text>"}
+    {"error": "<what the compiler printed>", "ast": "<syntax tree or null>", "wasm": null, "wat": null}
+
+The syntax tree is the one that `mialuc run` prints, one node per line, indented by depth. It is
+there even when the analysis rejects the program, and null when the source does not parse.
 
 A program that does not compile is a normal answer, so it comes with status 200 too.
 
@@ -100,6 +103,8 @@ def compile_source(source):
     with tempfile.TemporaryDirectory() as directory:
         Path(directory, SOURCE_NAME).write_bytes(source)
 
+        ast = parse_tree(compiler_path, directory)
+
         outputs = {}
         for target in ["wasm", "wat"]:
             output_name = f"playground.{target}"
@@ -108,22 +113,38 @@ def compile_source(source):
                 completed = subprocess.run(command, cwd=directory, capture_output=True,
                                            timeout=COMPILE_TIMEOUT_SECONDS)
             except subprocess.TimeoutExpired:
-                return failure(f"The compiler did not finish in {COMPILE_TIMEOUT_SECONDS} s.")
+                return failure(f"The compiler did not finish in {COMPILE_TIMEOUT_SECONDS} s.", ast)
 
             if completed.returncode != 0:
                 message = (completed.stderr or completed.stdout).decode("utf-8", "replace")
-                return failure(message.strip() or f"The compiler exited with {completed.returncode}.")
+                return failure(message.strip() or f"The compiler exited with {completed.returncode}.", ast)
             outputs[target] = Path(directory, output_name).read_bytes()
 
     return {
         "error": None,
+        "ast": ast,
         "wasm": base64.b64encode(outputs["wasm"]).decode("ascii"),
         "wat": outputs["wat"].decode("utf-8"),
     }
 
 
-def failure(message):
-    return {"error": message, "wasm": None, "wat": None}
+def parse_tree(compiler_path, directory):
+    """Returns the syntax tree that `mialuc run` prints for the source, or None without one."""
+    try:
+        completed = subprocess.run([str(compiler_path), "run", SOURCE_NAME], cwd=directory,
+                                   capture_output=True, timeout=COMPILE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return None
+
+    # The tokens come first, then an empty line, then the tree, which starts with its root.
+    # Windows writes the lines of text output with "\r\n".
+    output = completed.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    start = output.find("\n\nMODULE")
+    return None if start < 0 else output[start + 2:].rstrip("\n")
+
+
+def failure(message, ast=None):
+    return {"error": message, "ast": ast, "wasm": None, "wat": None}
 
 
 def main():
