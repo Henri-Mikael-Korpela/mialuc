@@ -312,6 +312,19 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             Str text = str_make(source.bytes + offset, end - offset);
 
+            // `not` directly followed by `=`, with nothing in between, is the single token `not=`.
+            // It is told apart here because it starts like an identifier. A longer identifier
+            // such as `cannot` is not affected, and `not =` with a space is a name and an `=`.
+            if (str_equals(text, STR("not")) && end < source.length && source.bytes[end] == '=') {
+                token_elements[result.tokens.length] = (Token){
+                    .token_type = TOKEN_TYPE_NOT_EQUALS,
+                    .source_offset = (uint32_t)offset,
+                };
+                result.tokens.length += 1;
+                offset = end + 1;
+                continue;
+            }
+
             // Keywords are scanned like identifiers and told apart afterwards, so that a longer
             // identifier such as `returned` is not split into a keyword and a remainder.
             Token_Type token_type = TOKEN_TYPE_IDENTIFIER;
@@ -395,15 +408,6 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             };
             result.tokens.length += 1;
             offset += size_bytes;
-        }
-        // A `!` is only the start of the single token `!=`.
-        else if (character == '!' && offset + 1 < source.length && source.bytes[offset + 1] == '=') {
-            token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_NOT_EQUALS,
-                .source_offset = (uint32_t)offset,
-            };
-            result.tokens.length += 1;
-            offset += 2;
         }
         // A `*` is the asterisk operator, unless an `=` follows it directly, which makes the single
         // token `*=`.

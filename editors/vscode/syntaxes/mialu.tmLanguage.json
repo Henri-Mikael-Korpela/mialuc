@@ -40,7 +40,7 @@
                 },
                 {
                     "name": "keyword.operator.comparison.mialu",
-                    "match": "==|!=|<=|>=|<|>"
+                    "match": "==|not=|<=|>=|<|>"
                 },
                 {
                     "name": "keyword.operator.assignment.compound.mialu",

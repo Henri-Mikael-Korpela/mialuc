@@ -39,7 +39,7 @@
        has blocks nested up to the fourth level, see `block_1`. Deeper nesting is accepted by the
        compiler, up to 32 blocks inside each other, and the grammar needs more rules for it.
      - The condition of an if statement must be a `Bool`, so a number or a string is not one, and
-       the operands of a comparison must both be `Int`, or both `Bool` for `==` and `!=`. A
+       the operands of a comparison must both be `Int`, or both `Bool` for `==` and `not=`. A
        variable defined in a block can only be used in that block. All are checked after parsing.
 *)
 
@@ -121,7 +121,7 @@ branch_end = ws , "->" , ws , line_end ;
    grammar cannot tell, because a name or a comparison can be one. *)
 condition = expression ;
 
-comparison_operator = "==" | "!=" | "<=" | ">=" | "<" | ">" ;
+comparison_operator = "==" | "not=" | "<=" | ">=" | "<" | ">" ;
 
 indentation_1 = "    " ;
 indentation_2 = "        " ;

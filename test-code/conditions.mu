@@ -41,7 +41,7 @@ sign :: proc(n: Int) Int ->
 compare_foo :: proc(a: Int, b: Int) Int ->
     if a == b ->
         return 0
-    else if a != b ->
+    else if a not= b ->
         if a >= b + 10 ->
             return 2
         else if a <= b - 10 ->

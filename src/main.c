@@ -584,7 +584,7 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         break;
     case WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "
-                "must be Int, or both must be Bool for == and !=.\n", path, position.line,
+                "must be Int, or both must be Bool for == and not=.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_CONDITION_TYPE_INVALID:

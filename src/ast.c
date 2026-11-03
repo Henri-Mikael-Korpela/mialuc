@@ -79,7 +79,7 @@ static char const *ast_comparison_operator_name(Ast_Comparison_Operator operator
     case AST_COMPARISON_OPERATOR_LESS_EQUAL:
         return "<=";
     case AST_COMPARISON_OPERATOR_NOT_EQUAL:
-        return "!=";
+        return "not=";
     }
 
     // Unreachable: every operator is handled above.

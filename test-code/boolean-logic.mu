@@ -31,7 +31,7 @@ either :: proc(a: Bool, b: Bool) Bool ->
     return b
 
 exclusive_or :: proc(a: Bool, b: Bool) Bool ->
-    return a != b
+    return a not= b
 
 describe :: proc(flag: Bool) Int ->
     if flag ->

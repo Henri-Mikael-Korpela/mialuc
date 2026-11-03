@@ -1,6 +1,6 @@
 # Mialu for VS Code
 
-Language support for Mialu, for now only syntax highlighting of the reserved words (`proc`, `return`, `if`, `else`, `true` and `false`), the operators (`+`, `-`, `*`, `/`, `+=`, `-=`, `*=`, `/=`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `->`, `:` and `=`) and strings. The
+Language support for Mialu, for now only syntax highlighting of the reserved words (`proc`, `return`, `if`, `else`, `true` and `false`), the operators (`+`, `-`, `*`, `/`, `+=`, `-=`, `*=`, `/=`, `==`, `not=`, `<`, `<=`, `>`, `>=`, `->`, `:` and `=`) and strings. The
 extension is enabled for files that end in `.mu`.
 
 The extension is declarative: it is a language definition and a TextMate grammar, so there is

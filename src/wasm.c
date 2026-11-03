@@ -1098,7 +1098,7 @@ static Str wasm_expression_subject(Wasm_Builder const *builder, Ast_Node_Index d
 /**
  * Checks the operands of the arithmetic operation or comparison `operation`, which were written
  * already. Arithmetic is defined for `Int` only. A comparison takes two `Int` values with any
- * operator, or two `Bool` values with `==` and `!=`, because a `Bool` has no order. Returns false
+ * operator, or two `Bool` values with `==` and `not=`, because a `Bool` has no order. Returns false
  * after it recorded an error.
  */
 static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Node_Index definition,

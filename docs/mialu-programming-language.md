@@ -75,9 +75,9 @@ is_even :: proc(n: Int) Bool ->
     return n / 2 * 2 == n
 ```
 
-Unlike C, integer types are not implicitly converted into boolean values. A `Bool` is never converted to or from another type. An `Int` is not a condition, so `if n ->` is an error and has to be written `if n != 0 ->`, and `true` is not `1`: `x : Int = true` and `b : Bool = 1` are errors.
+Unlike C, integer types are not implicitly converted into boolean values. A `Bool` is never converted to or from another type. An `Int` is not a condition, so `if n ->` is an error and has to be written `if n not= 0 ->`, and `true` is not `1`: `x : Int = true` and `b : Bool = 1` are errors.
 
-A `Bool` has no arithmetic. Two `Bool` values can be compared with `==` and `!=`, so `a != b` holds when exactly one of them is `true`, but they have no order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Both operands of a comparison must have the same type. There are no operators for logical and, or and not yet: they are written with if statements, and `value == false` is the negation of `value`.
+A `Bool` has no arithmetic. Two `Bool` values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`, but they have no order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Both operands of a comparison must have the same type. There are no operators for logical and, or and not yet: they are written with if statements, and `value == false` is the negation of `value`.
 
 ## Operators
 
@@ -86,7 +86,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | Operator | Description | Precedence | Example |
 |----------|-------------|------------|---------|
 | `==`     | Equal to. A comparison, see [Booleans](#booleans). | 1 | `x == 3` |
-| `!=`     | Not equal to. A comparison. | 1 | `x != 3` |
+| `not=`   | Not equal to. A comparison. `not` and `=` are written together, without a space. | 1 | `x not= 3` |
 | `<`      | Less than. A comparison. | 1 | `x < 3` |
 | `<=`     | Less than or equal to. A comparison. | 1 | `x <= 3` |
 | `>`      | Greater than. A comparison. | 1 | `x > 3` |
@@ -104,7 +104,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
 | `=`      | Sets the initial value of a variable whose type is written. | 0 | `x : Int = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false` or names. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values for `==` and `!=`, and its result is a `Bool`.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false` or names. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values for `==` and `not=`, and its result is a `Bool`.
 
 Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2, and so do `*` and `/`, so `8 / 2 * 3` is 12 and not 1. A comparison has the lowest precedence of them, so `a + 1 > b * 2` means `(a + 1) > (b * 2)`. A comparison is an expression of type `Bool`, but its operands are not comparisons, so it cannot be an operand of another operator, and `a < b < c` and `a == b == c` are errors. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2.
 
@@ -283,7 +283,7 @@ The `wasm` target writes a WebAssembly binary module. Every constant definition 
 
 `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition, subtraction and multiplication wrap around on overflow. Division truncates toward zero, so `(0 - 7) / 2` is -3. It traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
 
-`Bool` is a 32-bit integer (`i32`), which is 0 for `false` and 1 for `true`, as a comparison in WebAssembly leaves it. So JavaScript passes a `Bool` as `true`, `false`, 0 or 1, and receives it as the number 0 or 1, which `Boolean(...)` turns into a boolean. Comparisons of `Int` values are signed `i64` instructions, and comparisons of `Bool` values with `==` and `!=` are `i32.eq` and `i32.ne`.
+`Bool` is a 32-bit integer (`i32`), which is 0 for `false` and 1 for `true`, as a comparison in WebAssembly leaves it. So JavaScript passes a `Bool` as `true`, `false`, 0 or 1, and receives it as the number 0 or 1, which `Boolean(...)` turns into a boolean. Comparisons of `Int` values are signed `i64` instructions, and comparisons of `Bool` values with `==` and `not=` are `i32.eq` and `i32.ne`.
 
 `Str` is two 32-bit integers (`i32`): the address of its first byte in memory, and its length in bytes. The bytes are UTF-8, so a caller decodes them as that, as `TextDecoder` does by default. So a parameter of type `Str` is two WebAssembly parameters, one after the other, and a result of type `Str` is two WebAssembly results, which JavaScript receives as an array `[address, length]`. The bytes of all the string literals of the program are copied to the start of the memory of the module when it is instantiated, and the module exports the memory as `memory`, so that a caller can read a string:
 
@@ -305,7 +305,7 @@ The target rejects a program that the parser accepts when:
 - the value that a procedure returns is not of its return type,
 - the initial value of a variable is not of the type that is written for the variable,
 - an operand of an arithmetic operator is not an `Int`,
-- the operands of a comparison are not both `Int`, or not both `Bool` for `==` and `!=`,
+- the operands of a comparison are not both `Int`, or not both `Bool` for `==` and `not=`,
 - the condition of an if statement is not a `Bool`,
 - the variable or the value of an assignment such as `x += 2`, `x -= 2`, `x *= 2` or `x /= 2` is not an `Int`.
 

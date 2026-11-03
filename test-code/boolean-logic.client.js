@@ -8,7 +8,7 @@ console.log("Is even, for 4, 7 and -6:", Boolean(is_even(4n)), Boolean(is_even(7
     Boolean(is_even(-6n)));
 console.log("In range 1 to 10, for 5, 0 and 11:", Boolean(in_range(5n, 1n, 10n)),
     Boolean(in_range(0n, 1n, 10n)), Boolean(in_range(11n, 1n, 10n)));
-// Bool values are compared with == and !=, and combined with if statements.
+// Bool values are compared with == and not=, and combined with if statements.
 console.log("Negate true and false:", Boolean(negate(true)), Boolean(negate(false)));
 console.log("Both, for the four combinations:", Boolean(both(false, false)),
     Boolean(both(false, true)), Boolean(both(true, false)), Boolean(both(true, true)));
