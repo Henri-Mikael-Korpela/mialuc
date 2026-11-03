@@ -10,6 +10,7 @@
 // Alphabetical, because nothing depends on the order.
 typedef enum {
     AST_NODE_TYPE_ADDITION,
+    AST_NODE_TYPE_ADDITION_ASSIGNMENT,
     AST_NODE_TYPE_CONSTANT_DEFINITION,
     AST_NODE_TYPE_DIVISION,
     AST_NODE_TYPE_IDENTIFIER,
@@ -41,6 +42,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * a child a constant-time operation. Which children a node has depends on `node_type`:
  *
  * - `AST_NODE_TYPE_ADDITION`: two children, the left and the right operand, in that order.
+ * - `AST_NODE_TYPE_ADDITION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
+ *   variable that gets the sum, and the value that is added to it, in that order. It is a
+ *   statement of a procedure body.
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: one child, the value that is bound to the name. It is
  *   an `AST_NODE_TYPE_PROCEDURE` or an `AST_NODE_TYPE_STRING_LITERAL`.
  * - `AST_NODE_TYPE_DIVISION`: two children, the dividend and the divisor, in that order.
@@ -50,7 +54,7 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_MULTIPLICATION`: two children, the left and the right operand, in that order.
  * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`.
  * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
- *   body, which are variable definitions and return statements. The return type is in the
+ *   body, which are variable definitions, assignments and return statements. The return type is in the
  *   payload.
  * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child, the returned value.
  * - `AST_NODE_TYPE_STRING_LITERAL`: no children.

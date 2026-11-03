@@ -36,6 +36,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_ADDITION:
             printf("ADDITION\n");
             break;
+        case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+            printf("ADDITION_ASSIGNMENT\n");
+            break;
         case AST_NODE_TYPE_CONSTANT_DEFINITION:
             printf("CONSTANT_DEFINITION %.*s\n", (int)node.payload.constant_definition.name.length,
                    node.payload.constant_definition.name.bytes);

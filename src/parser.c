@@ -25,6 +25,7 @@ typedef struct {
     Parse_Status status;
 } Parser;
 
+static Ast_Node_Index parse_assignment          (Parser *parser);
 static Ast_Node_Index parse_constant_definition (Parser *parser);
 static Ast_Node_Index parse_operand             (Parser *parser);
 static Ast_Node_Index parse_expression          (Parser *parser);
@@ -327,7 +328,8 @@ static Ast_Node_Index parse_parameter(Parser *parser) {
 }
 
 /**
- * Parses one statement of a body: a `return`, or a variable definition, which starts with a name.
+ * Parses one statement of a body: a `return`, or a statement that starts with a name, which is a
+ * variable definition when a `:` follows the name and an assignment otherwise.
  */
 static Ast_Node_Index parse_statement(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -338,10 +340,56 @@ static Ast_Node_Index parse_statement(Parser *parser) {
         return parse_return_statement(parser);
     }
     if (next == TOKEN_TYPE_IDENTIFIER) {
-        return parse_variable_definition(parser);
+        // The name is not the last token, because the last one is `END`.
+        assert(parser->token_index + 1 < parser->token_count);
+        if (parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_TYPE_SEPARATOR) {
+            return parse_variable_definition(parser);
+        }
+        return parse_assignment(parser);
     }
 
     return parse_fail(parser, STR("a statement"));
+}
+
+/**
+ * Parses `name += value`. The node for the assignment has two children: the name, as an
+ * identifier, and the value. A name that is followed by anything else than `:` or an assignment
+ * operator is the error here.
+ */
+static Ast_Node_Index parse_assignment(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index + 1 < parser->token_count);
+
+    Ast_Node_Index target = parse_identifier(parser);
+    if (target == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Token_Type operator = parse_token_current(parser)->token_type;
+    if (operator != TOKEN_TYPE_PLUS_EQUALS) {
+        return parse_fail(parser, STR("':' or '+='"));
+    }
+    parse_token_advance(parser);
+
+    Ast_Node_Index assignment = parse_node_make(parser, AST_NODE_TYPE_ADDITION_ASSIGNMENT);
+    if (assignment == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, assignment, target);
+
+    Ast_Node_Index value = parse_expression(parser);
+    if (value == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, assignment, value);
+
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    assert(parser->nodes[assignment].first_child == target);
+    assert(parser->nodes[assignment].last_child == value);
+    return assignment;
 }
 
 /**

@@ -369,13 +369,22 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset += 1;
         }
+        // A `+` is the plus operator, unless an `=` follows it directly, which makes the single
+        // token `+=`.
         else if (character == (char)TOKEN_TYPE_PLUS) {
+            Token_Type token_type = TOKEN_TYPE_PLUS;
+            size_t size_bytes = 1;
+            if (offset + 1 < source.length && source.bytes[offset + 1] == '=') {
+                token_type = TOKEN_TYPE_PLUS_EQUALS;
+                size_bytes = 2;
+            }
+
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_PLUS,
+                .token_type = token_type,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
-            offset += 1;
+            offset += size_bytes;
         }
         else if (character == (char)TOKEN_TYPE_SLASH) {
             token_elements[result.tokens.length] = (Token){

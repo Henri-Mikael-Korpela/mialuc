@@ -62,6 +62,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `-`      | Subtraction. | 1 | `x := 5 - 1` makes `x` 4 |
 | `*`      | Multiplication. | 2 | `x := 2 + 3 * 4` makes `x` 14 |
 | `/`      | Division. The result is truncated toward zero. | 2 | `x := 20 - 12 / 4` makes `x` 17 |
+| `+=`     | Addition assignment. It adds the value to a variable that is defined already. | 0 | `x += 2` adds 2 to `x` |
 | `:`      | Type separator. It separates a name from its type. | 0 | `x : Int = 5` |
 | `::`     | Defines a constant. It is two subsequent `:`. | 0 | `NAME :: "Bob"` |
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
@@ -71,7 +72,7 @@ A binary operator is written between its two operands, such as `a + b`. The oper
 
 Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2, and so do `*` and `/`, so `8 / 2 * 3` is 12 and not 1. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2.
 
-The operators of precedence 0 define names and are not part of an expression. Each one is written after the name that it defines, and takes everything up to the end of the line as its right-hand side, so `x := a + b` means `x := (a + b)`. Spaces may be written between the characters of `::` and `:=`, because they are separate tokens.
+The operators of precedence 0 define names or assign to them, and are not part of an expression. Each one is written after the name that it defines or assigns to, and takes everything up to the end of the line as its right-hand side, so `x := a + b` means `x := (a + b)`, and `x += a * b` means `x += (a * b)`. Spaces may be written between the characters of `::` and `:=`, because they are separate tokens. An assignment operator such as `+=` is one token, so no space may be written between its characters.
 
 See [Variables](#variables) for variable definitions and [Constants](#constants) for constants.
 
@@ -91,7 +92,7 @@ procedure_name :: proc() ->
     // procedure body
 ```
 
-A procedure body consists of a series of statements, which are variable definitions and `return` statements for now. The procedure body is indented to indicate its scope.
+A procedure body consists of a series of statements, which are variable definitions, assignments and `return` statements for now. The procedure body is indented to indicate its scope.
 
 ## Variables
 
@@ -114,6 +115,19 @@ foo :: proc() Int ->
 `:=` is the type separator `:` followed by `=`, with the type left out. The type that is written must be the type of the initial value.
 
 A variable is defined once, with its initial value, and every variable has one. It can be used in the statements below its definition, but not above it and not in its own initial value. The variables of a procedure are not visible outside of it, so two procedures can have a variable of the same name.
+
+## Assignment
+
+An assignment changes the value of a variable that is defined already. It is a statement that has the name of the variable, an assignment operator and a value, which is an expression. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was:
+
+```
+foo :: proc() Int ->
+    x := 4
+    x += 5
+    return x
+```
+
+`foo` returns 9. The value is evaluated first, with the value that the variable has before the assignment, so `x += x` doubles `x`, and `x += 2 * 3` adds 6. The name must be a variable of the procedure, defined above the assignment: a parameter or a constant cannot be assigned to. The variable and the value must be an `Int`, because addition is defined for `Int` only.
 
 ## Scope resolution
 
@@ -139,7 +153,8 @@ There is no shadowing of names so a name cannot be declared twice in the same sc
 - two parameters of a procedure have the same name,
 - a parameter has the name of a constant, including the constant that is the procedure itself,
 - a variable has the name of a constant, of a parameter, or of an earlier variable of the procedure,
-- a name in an expression is neither a variable defined above it, nor a parameter of the procedure, nor a constant.
+- a name in an expression is neither a variable defined above it, nor a parameter of the procedure, nor a constant,
+- the name that an assignment assigns to is not a variable, but a parameter or a constant.
 
 Scope resolution is about names only. Whether the value of a name has the right type is checked separately for the target, see below.
 
@@ -160,7 +175,7 @@ const [address, length] = instance.exports.get_name();
 new TextDecoder().decode(new Uint8Array(instance.exports.memory.buffer, address, length));
 ```
 
-The variables of a procedure are locals of its function, after the parameters, and a `Str` variable is two locals, like a `Str` parameter. The definition of a variable stores the initial value in them.
+The variables of a procedure are locals of its function, after the parameters, and a `Str` variable is two locals, like a `Str` parameter. The definition of a variable stores the initial value in them, and an assignment such as `x += 2` pushes the value of the variable, then the value, adds them and stores the sum in the local of the variable.
 
 A module has a memory only when the program has a string literal. A procedure cannot be called `memory`, whether the program has a string literal or not, because that is the name of the export.
 
@@ -172,7 +187,8 @@ The target rejects a program that the parser accepts when:
 - a procedure with no return type has a `return` statement,
 - the value that a procedure returns is not of its return type,
 - the initial value of a variable is not of the type that is written for the variable,
-- an operand of an arithmetic operator is not an `Int`.
+- an operand of an arithmetic operator is not an `Int`,
+- the variable or the value of an assignment such as `x += 2` is not an `Int`.
 
 The target is built from the result of scope resolution, so it also rejects every program that scope resolution rejects.
 

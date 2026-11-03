@@ -69,7 +69,8 @@ procedure_body = { blank_line } , statement_line , { blank_line | statement_line
 
 (* The body of a procedure is indented exactly one level. A tab, or any other number of spaces,
    does not match. *)
-statement_line = indentation , ( return_statement | variable_definition ) , ws , line_end ;
+statement_line =
+    indentation , ( return_statement | variable_definition | assignment ) , ws , line_end ;
 
 indentation = "    " ;
 
@@ -77,6 +78,11 @@ indentation = "    " ;
    between them, as for `::`. Without a type the type of the variable is the type of the value.
    `x : Int = 5` gives the type. *)
 variable_definition = name , ws , ":" , ws , [ type_name , ws ] , "=" , ws , expression ;
+
+(* An assignment to a variable that is already defined: `x += 2` adds 2 to `x`. The operator is a
+   single token, so no space may be written inside it. The name must be a variable, not a
+   parameter or a constant, which the grammar cannot tell. *)
+assignment = name , ws , "+=" , ws , expression ;
 
 (* `return` and its value must be separated, or `return0` would be one identifier. *)
 return_statement = "return" , required_space , expression ;

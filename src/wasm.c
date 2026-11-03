@@ -74,6 +74,9 @@ static bool            wasm_build_code_section                (Wasm_Builder *bui
                                                                size_t definition_count);
 static bool            wasm_build_code_section_body           (Wasm_Builder *builder,
                                                                Ast_Node_Index definition);
+static bool            wasm_build_code_section_body_assignment(Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index assignment);
 static bool            wasm_build_code_section_body_expression(Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index expression);
@@ -614,7 +617,8 @@ static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_
 
 /**
  * Writes the statements of a procedure. A variable definition becomes its value stored in the
- * locals of the variable, and a `return` becomes the value followed by the `return` instruction.
+ * locals of the variable, an assignment becomes the new value of the variable stored in the same
+ * way, and a `return` becomes the value followed by the `return` instruction.
  */
 static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                                                    Ast_Node_Index definition) {
@@ -650,6 +654,10 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             if (wasm_build_code_section_body_variable(builder, definition, child) == false) {
                 return false;
             }
+        } else if (child_node->node_type == AST_NODE_TYPE_ADDITION_ASSIGNMENT) {
+            if (wasm_build_code_section_body_assignment(builder, definition, child) == false) {
+                return false;
+            }
         } else {
             // Parameters come first and are not code.
             assert(child_node->node_type == AST_NODE_TYPE_PARAMETER);
@@ -657,6 +665,56 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
 
         child = child_node->next_sibling;
     }
+
+    return true;
+}
+
+/**
+ * Writes the instructions of `assignment`, such as `x += 2`: the value of the variable is pushed,
+ * then the value of the assignment, then the operator is applied to them, and the result is stored
+ * in the local of the variable. Only an `Int` can be assigned this way, so a variable of any other
+ * type, or a value of any other type, is rejected. Returns false after it recorded an error.
+ */
+static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
+                                                    Ast_Node_Index definition,
+                                                    Ast_Node_Index assignment) {
+    assert(assignment < builder->node_count);
+    assert(builder->nodes[assignment].node_type == AST_NODE_TYPE_ADDITION_ASSIGNMENT);
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index target = builder->nodes[assignment].first_child;
+    Ast_Node_Index value = builder->nodes[assignment].last_child;
+
+    // The analysis checked that the name stands for a variable.
+    Semantic_Binding binding = builder->bindings[target];
+    assert(binding.kind == SEMANTIC_BINDING_KIND_VARIABLE);
+    Str target_name = builder->nodes[target].payload.identifier.name;
+    if (wasm_variable_type(builder, binding.target) != WASM_VALUE_TYPE_INT) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, target_name);
+    }
+
+    size_t local_index = wasm_variable_local_index(builder, procedure, binding.target);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
+    wasm_write_unsigned(&builder->writer, local_index);
+
+    if (wasm_build_code_section_body_expression(builder, definition, value) == false) {
+        return false;
+    }
+
+    // An arithmetic operation, or an integer literal, is an `Int`, so only a name or a string
+    // can be of another type, and it is the subject of the error.
+    if (wasm_expression_type(builder, value) != WASM_VALUE_TYPE_INT) {
+        Ast_Node const *value_node = &builder->nodes[value];
+        Str subject = value_node->payload.string_literal.text;
+        if (value_node->node_type == AST_NODE_TYPE_IDENTIFIER) {
+            subject = value_node->payload.identifier.name;
+        }
+        return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, subject);
+    }
+
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I64_ADD);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_SET);
+    wasm_write_unsigned(&builder->writer, local_index);
 
     return true;
 }
@@ -852,6 +910,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     }
     case AST_NODE_TYPE_STRING_LITERAL:
         return WASM_VALUE_TYPE_STR;
+    case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_PARAMETER:
@@ -949,6 +1008,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             }
             wasm_build_code_section_body_string(builder, current);
             break;
+        case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
         case AST_NODE_TYPE_MODULE:
         case AST_NODE_TYPE_PARAMETER:
         case AST_NODE_TYPE_PROCEDURE:

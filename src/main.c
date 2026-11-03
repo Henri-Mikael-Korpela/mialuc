@@ -431,6 +431,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_PLUS:
             printf("PLUS\n");
             break;
+        case TOKEN_TYPE_PLUS_EQUALS:
+            printf("PLUS_EQUALS\n");
+            break;
         case TOKEN_TYPE_SLASH:
             printf("SLASH\n");
             break;
@@ -585,6 +588,10 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     // The cast is needed because `%.*s` takes an `int` precision.
     int subject_length = (int)result.subject.length;
     switch (result.status) {
+    case SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a variable, so it cannot be assigned to.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
     case SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is already defined.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);

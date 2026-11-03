@@ -21,3 +21,8 @@ precedence_foo :: proc() Int ->
 precedence_division_foo :: proc() Int ->
     x := 20 - 12 / 4
     return x
+
+add_assign_foo :: proc() Int ->
+    x := 4
+    x += 5
+    return x

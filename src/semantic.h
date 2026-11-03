@@ -35,6 +35,8 @@ typedef struct {
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
+    // The name that an assignment assigns to is not a variable, but a parameter or a constant.
+    SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE,
     SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE,
     SEMANTIC_STATUS_EXPRESSION_TOO_DEEP,
     SEMANTIC_STATUS_IDENTIFIER_UNKNOWN,
@@ -69,6 +71,9 @@ typedef struct {
  * procedure is inside the module scope and has the names of its parameters and of its variables. A
  * variable can be used only below its definition, and not in its own initial value. A name is
  * looked up in the scope of the procedure that uses it first, and then in the module scope.
+ *
+ * An assignment, such as `x += 1`, uses the name that it assigns to like any other use of a name,
+ * and the name must stand for a variable: a parameter or a constant cannot be assigned to.
  *
  * A name cannot be declared again where it is already visible, so a name has one meaning
  * everywhere it can be used, and there is no shadowing. Two definitions cannot have one name, two

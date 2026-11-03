@@ -26,6 +26,9 @@ typedef struct {
 } Semantic_Analyzer;
 
 static Semantic_Binding semantic_definition_find    (Semantic_Analyzer const *analyzer, Str name);
+static bool             semantic_assignment_resolve (Semantic_Analyzer *analyzer,
+                                                     Ast_Node_Index definition,
+                                                     Ast_Node_Index assignment);
 static bool             semantic_definitions_check  (Semantic_Analyzer *analyzer);
 static bool             semantic_expression_resolve (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index definition,
@@ -163,6 +166,10 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
             if (semantic_variable_check(analyzer, procedure, child) == false) {
                 return false;
             }
+        } else if (child_node->node_type == AST_NODE_TYPE_ADDITION_ASSIGNMENT) {
+            if (semantic_assignment_resolve(analyzer, definition, child) == false) {
+                return false;
+            }
         } else {
             assert(child_node->node_type == AST_NODE_TYPE_RETURN_STATEMENT);
             if (semantic_expression_resolve(analyzer, definition, child,
@@ -172,6 +179,32 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
         }
 
         child = child_node->next_sibling;
+    }
+
+    return true;
+}
+
+/**
+ * Resolves the names of `assignment`, a statement of the procedure that `definition` binds to its
+ * name. Its first child is the name that is assigned to and the second is the value, which are
+ * both resolved like any other use of a name: a variable that is assigned to must be defined above
+ * the assignment, and the value may use it. The name must stand for a variable. Returns false after
+ * it recorded an error.
+ */
+static bool semantic_assignment_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index definition,
+                                        Ast_Node_Index assignment) {
+    assert(assignment < analyzer->node_count);
+    assert(analyzer->nodes[assignment].node_type == AST_NODE_TYPE_ADDITION_ASSIGNMENT);
+
+    if (semantic_expression_resolve(analyzer, definition, assignment, assignment) == false) {
+        return false;
+    }
+
+    Ast_Node_Index target = analyzer->nodes[assignment].first_child;
+    assert(analyzer->nodes[target].node_type == AST_NODE_TYPE_IDENTIFIER);
+    if (analyzer->bindings[target].kind != SEMANTIC_BINDING_KIND_VARIABLE) {
+        Str name = analyzer->nodes[target].payload.identifier.name;
+        return semantic_fail(analyzer, SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE, name);
     }
 
     return true;
