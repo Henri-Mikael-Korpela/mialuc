@@ -75,7 +75,9 @@ is_even :: proc(n: Int) Bool ->
     return n / 2 * 2 == n
 ```
 
-A `Bool` is never converted to or from another type. An `Int` is not a condition, so `if n ->` is an error and has to be written `if n != 0 ->`, and `true` is not `1`: `x : Int = true` and `b : Bool = 1` are errors. A `Bool` has no arithmetic. Two `Bool` values can be compared with `==` and `!=`, so `a != b` holds when exactly one of them is `true`, but they have no order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Both operands of a comparison must have the same type. There are no operators for logical and, or and not yet: they are written with if statements, and `value == false` is the negation of `value`.
+Unlike C, integer types are not implicitly converted into boolean values. A `Bool` is never converted to or from another type. An `Int` is not a condition, so `if n ->` is an error and has to be written `if n != 0 ->`, and `true` is not `1`: `x : Int = true` and `b : Bool = 1` are errors.
+
+A `Bool` has no arithmetic. Two `Bool` values can be compared with `==` and `!=`, so `a != b` holds when exactly one of them is `true`, but they have no order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Both operands of a comparison must have the same type. There are no operators for logical and, or and not yet: they are written with if statements, and `value == false` is the negation of `value`.
 
 ## Operators
 
