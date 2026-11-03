@@ -42,11 +42,13 @@ static bool           parse_procedure_body      (Parser *parser, Ast_Node_Index 
                                                  uint32_t indentation_level);
 static bool           parse_procedure_parameters(Parser *parser, Ast_Node_Index procedure);
 static Ast_Node_Index parse_return_statement    (Parser *parser);
+static Ast_Node_Index parse_statement           (Parser *parser);
 static Ast_Node_Index parse_string_literal      (Parser *parser);
 static void           parse_token_advance       (Parser *parser);
 static Token const *  parse_token_current       (Parser const *parser);
 static bool           parse_token_expect        (Parser *parser, Token_Type token_type,
                                                  Str expected);
+static Ast_Node_Index parse_variable_definition (Parser *parser);
 
 Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
     assert(tokens.elements != NULL);
@@ -265,7 +267,7 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
         }
         parse_token_advance(parser);
 
-        Ast_Node_Index statement = parse_return_statement(parser);
+        Ast_Node_Index statement = parse_statement(parser);
         if (statement == AST_NODE_INDEX_NONE) {
             return false;
         }
@@ -321,6 +323,81 @@ static Ast_Node_Index parse_parameter(Parser *parser) {
 
     assert(parser->nodes[parameter].first_child == type_name);
     return parameter;
+}
+
+/**
+ * Parses one statement of a body: a `return`, or a variable definition, which starts with a name.
+ */
+static Ast_Node_Index parse_statement(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Token_Type next = parse_token_current(parser)->token_type;
+    if (next == TOKEN_TYPE_KEYWORD_RETURN) {
+        return parse_return_statement(parser);
+    }
+    if (next == TOKEN_TYPE_IDENTIFIER) {
+        return parse_variable_definition(parser);
+    }
+
+    return parse_fail(parser, STR("a statement"));
+}
+
+/**
+ * Parses `name := value` or `name : Type = value`. The node for the variable has the name in its
+ * payload. Its children are the type, when the definition has one, and then the value.
+ */
+static Ast_Node_Index parse_variable_definition(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Token const *name = parse_token_current(parser);
+    if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        return parse_fail(parser, STR("a variable name"));
+    }
+
+    Ast_Node_Index definition = parse_node_make(parser, AST_NODE_TYPE_VARIABLE_DEFINITION);
+    if (definition == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[definition].payload.variable_definition.name = name->payload.identifier.text;
+    parse_token_advance(parser);
+
+    if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("':'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    // `:=` has no type, which is then deduced from the value. Otherwise the type comes before `=`.
+    if (parse_token_current(parser)->token_type != TOKEN_TYPE_EQUALS) {
+        Token const *type = parse_token_current(parser);
+        if (type->token_type != TOKEN_TYPE_IDENTIFIER) {
+            return parse_fail(parser, STR("a type name or '='"));
+        }
+
+        Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
+        if (type_name == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[type_name].payload.type_name.name = type->payload.identifier.text;
+        parse_token_advance(parser);
+        parse_node_append_child(parser, definition, type_name);
+    }
+    if (parse_token_expect(parser, TOKEN_TYPE_EQUALS, STR("'='")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index value = parse_expression(parser);
+    if (value == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, definition, value);
+
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    assert(parser->nodes[definition].last_child == value);
+    return definition;
 }
 
 static Ast_Node_Index parse_return_statement(Parser *parser) {

@@ -579,6 +579,12 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             wasm_text_write_unsigned(&formatter->writer, local_index);
             break;
         }
+        case WASM_OPCODE_LOCAL_SET: {
+            uint32_t local_index = wasm_text_read_unsigned_32(formatter);
+            wasm_text_write_instruction(&formatter->writer, STR("local.set "));
+            wasm_text_write_unsigned(&formatter->writer, local_index);
+            break;
+        }
         case WASM_OPCODE_RETURN:
             wasm_text_write_instruction(&formatter->writer, STR("return"));
             break;

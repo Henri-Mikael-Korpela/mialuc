@@ -19,6 +19,7 @@ typedef enum {
     AST_NODE_TYPE_RETURN_STATEMENT,
     AST_NODE_TYPE_STRING_LITERAL,
     AST_NODE_TYPE_TYPE_NAME,
+    AST_NODE_TYPE_VARIABLE_DEFINITION,
 } Ast_Node_Type;
 
 /**
@@ -44,10 +45,14 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition. It is the root of the tree.
  * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`.
  * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
- *   body. The return type is in the payload.
+ *   body, which are variable definitions and return statements. The return type is in the
+ *   payload.
  * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child, the returned value.
  * - `AST_NODE_TYPE_STRING_LITERAL`: no children.
  * - `AST_NODE_TYPE_TYPE_NAME`: no children.
+ * - `AST_NODE_TYPE_VARIABLE_DEFINITION`: the initial value, preceded by the type, an
+ *   `AST_NODE_TYPE_TYPE_NAME`, when the definition gives one. Without it the type is deduced from
+ *   the value, so the value is the only child. The name is in the payload.
  */
 typedef struct {
     Ast_Node_Type node_type;
@@ -61,6 +66,10 @@ typedef struct {
             // Views the source text, so it is valid only as long as the source is.
             Str name;
         } constant_definition;
+        struct {
+            // Views the source text, like the other names.
+            Str name;
+        } variable_definition;
         struct {
             // The name of the return type, as a view of the source text. Empty, with `bytes` NULL,
             // when the procedure does not declare one. Types are only names for now, so a name is

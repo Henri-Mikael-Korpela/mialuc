@@ -29,11 +29,13 @@ static Semantic_Binding semantic_definition_find    (Semantic_Analyzer const *an
 static bool             semantic_definitions_check  (Semantic_Analyzer *analyzer);
 static bool             semantic_expression_resolve (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index definition,
+                                                     Ast_Node_Index statement,
                                                      Ast_Node_Index expression);
 static bool             semantic_fail               (Semantic_Analyzer *analyzer,
                                                      Semantic_Status status, Str subject);
 static bool             semantic_identifier_resolve (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index procedure,
+                                                     Ast_Node_Index statement,
                                                      Ast_Node_Index identifier);
 static bool             semantic_parameter_check    (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index procedure,
@@ -42,6 +44,12 @@ static Semantic_Binding semantic_parameter_find     (Semantic_Analyzer const *an
                                                      Ast_Node_Index procedure, Str name);
 static bool             semantic_procedure_resolve  (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index definition);
+static bool             semantic_variable_check     (Semantic_Analyzer *analyzer,
+                                                     Ast_Node_Index procedure,
+                                                     Ast_Node_Index variable);
+static Semantic_Binding semantic_variable_find      (Semantic_Analyzer const *analyzer,
+                                                     Ast_Node_Index procedure,
+                                                     Ast_Node_Index before, Str name);
 
 Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
                                  Array_Slice binding_buffer) {
@@ -145,11 +153,20 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
             if (semantic_parameter_check(analyzer, procedure, child) == false) {
                 return false;
             }
+        } else if (child_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            // The value is the last child, after the type if there is one. It is resolved before
+            // the variable is declared, so that the variable is not visible in its own value.
+            Ast_Node_Index value = child_node->last_child;
+            if (semantic_expression_resolve(analyzer, definition, child, value) == false) {
+                return false;
+            }
+            if (semantic_variable_check(analyzer, procedure, child) == false) {
+                return false;
+            }
         } else {
-            // The parser makes nothing but returns in a body yet.
             assert(child_node->node_type == AST_NODE_TYPE_RETURN_STATEMENT);
-            if (semantic_expression_resolve(analyzer, definition, child_node->first_child) ==
-                false) {
+            if (semantic_expression_resolve(analyzer, definition, child,
+                                            child_node->first_child) == false) {
                 return false;
             }
         }
@@ -189,14 +206,43 @@ static bool semantic_parameter_check(Semantic_Analyzer *analyzer, Ast_Node_Index
 }
 
 /**
- * Resolves every name in the expression below `expression`, which is in the procedure that
- * `definition` binds to its name. The walk keeps the path from the root of the expression in an
+ * Checks that the name of `variable` is new: no constant, parameter or earlier variable of the
+ * procedure has it. Like a parameter, a variable with such a name would hide it. Returns false
+ * after it recorded an error.
+ */
+static bool semantic_variable_check(Semantic_Analyzer *analyzer, Ast_Node_Index procedure,
+                                    Ast_Node_Index variable) {
+    assert(variable < analyzer->node_count);
+    assert(analyzer->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
+
+    Str name = analyzer->nodes[variable].payload.variable_definition.name;
+
+    Semantic_Binding earlier = semantic_variable_find(analyzer, procedure, variable, name);
+    if (earlier.kind != SEMANTIC_BINDING_KIND_NONE) {
+        return semantic_fail(analyzer, SEMANTIC_STATUS_VARIABLE_NAME_DUPLICATE, name);
+    }
+
+    Semantic_Binding parameter = semantic_parameter_find(analyzer, procedure, name);
+    Semantic_Binding constant = semantic_definition_find(analyzer, name);
+    if (parameter.kind != SEMANTIC_BINDING_KIND_NONE ||
+        constant.kind != SEMANTIC_BINDING_KIND_NONE) {
+        return semantic_fail(analyzer, SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS, name);
+    }
+
+    return true;
+}
+
+/**
+ * Resolves every name in the expression below `expression`, which is in `statement` of the
+ * procedure that `definition` binds to its name. The variables that `statement` can use are the
+ * ones defined above it. The walk keeps the path from the root of the expression in an
  * array instead of calling itself. Returns false after it recorded an error.
  */
 static bool semantic_expression_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index definition,
-                                        Ast_Node_Index expression) {
+                                        Ast_Node_Index statement, Ast_Node_Index expression) {
     assert(expression < analyzer->node_count);
     assert(definition < analyzer->node_count);
+    assert(statement < analyzer->node_count);
 
     Ast_Node_Index procedure = analyzer->nodes[definition].first_child;
 
@@ -226,7 +272,7 @@ static bool semantic_expression_resolve(Semantic_Analyzer *analyzer, Ast_Node_In
         }
 
         if (node->node_type == AST_NODE_TYPE_IDENTIFIER) {
-            if (semantic_identifier_resolve(analyzer, procedure, current) == false) {
+            if (semantic_identifier_resolve(analyzer, procedure, statement, current) == false) {
                 return false;
             }
         }
@@ -253,19 +299,22 @@ static bool semantic_expression_resolve(Semantic_Analyzer *analyzer, Ast_Node_In
 }
 
 /**
- * Looks up the name of `identifier`, used in `procedure`, and records what it stands for. The
- * parameters are searched before the constants, as the scope of the procedure is the inner one.
- * Because a name cannot be declared twice, the order does not change the result. Returns false
- * after it recorded an error.
+ * Looks up the name of `identifier`, used in `statement` of `procedure`, and records what it
+ * stands for. The variables defined above the statement and the parameters are searched before the
+ * constants, as the scope of the procedure is the inner one. Because a name cannot be declared
+ * twice, the order does not change the result. Returns false after it recorded an error.
  */
 static bool semantic_identifier_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index procedure,
-                                        Ast_Node_Index identifier) {
+                                        Ast_Node_Index statement, Ast_Node_Index identifier) {
     assert(identifier < analyzer->node_count);
     assert(analyzer->nodes[identifier].node_type == AST_NODE_TYPE_IDENTIFIER);
 
     Str name = analyzer->nodes[identifier].payload.identifier.name;
 
-    Semantic_Binding binding = semantic_parameter_find(analyzer, procedure, name);
+    Semantic_Binding binding = semantic_variable_find(analyzer, procedure, statement, name);
+    if (binding.kind == SEMANTIC_BINDING_KIND_NONE) {
+        binding = semantic_parameter_find(analyzer, procedure, name);
+    }
     if (binding.kind == SEMANTIC_BINDING_KIND_NONE) {
         binding = semantic_definition_find(analyzer, name);
     }
@@ -333,6 +382,49 @@ static Semantic_Binding semantic_parameter_find(Semantic_Analyzer const *analyze
             };
         }
         parameter = parameter_node->next_sibling;
+    }
+
+    return (Semantic_Binding){
+        .target = AST_NODE_INDEX_NONE,
+        .position = 0,
+        .kind = SEMANTIC_BINDING_KIND_NONE,
+    };
+}
+
+/**
+ * Returns the first variable of `procedure` that is called `name` and is defined above the
+ * statement `before`, or a binding of the kind `SEMANTIC_BINDING_KIND_NONE` when there is none.
+ * The statements are the children of the procedure after its parameters, and the parser makes the
+ * nodes in the order of the source, so a statement is above `before` when its index is lower.
+ */
+static Semantic_Binding semantic_variable_find(Semantic_Analyzer const *analyzer,
+                                               Ast_Node_Index procedure, Ast_Node_Index before,
+                                               Str name) {
+    assert(procedure < analyzer->node_count);
+    assert(analyzer->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+    assert(before < analyzer->node_count);
+    assert(name.bytes != NULL);
+
+    uint32_t position = 0;
+    Ast_Node_Index statement = analyzer->nodes[procedure].first_child;
+    // Every statement is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < analyzer->node_count && statement != AST_NODE_INDEX_NONE; i += 1) {
+        if (statement >= before) {
+            break;
+        }
+
+        Ast_Node const *statement_node = &analyzer->nodes[statement];
+        if (statement_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            if (str_equals(statement_node->payload.variable_definition.name, name)) {
+                return (Semantic_Binding){
+                    .target = statement,
+                    .position = position,
+                    .kind = SEMANTIC_BINDING_KIND_VARIABLE,
+                };
+            }
+            position += 1;
+        }
+        statement = statement_node->next_sibling;
     }
 
     return (Semantic_Binding){

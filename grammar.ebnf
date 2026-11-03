@@ -28,11 +28,13 @@
 
    What a grammar cannot say, and the compiler checks in addition:
      - An integer literal must fit in a signed 64-bit integer.
-     - A name that is used must be a parameter of its procedure or a constant of the module, and
-       no name may be declared twice, for example a parameter may not have the name of a constant.
-       This is scope resolution, which the compiler does after parsing.
+     - A name that is used must be a variable or a parameter of its procedure or a constant of the
+       module, a variable can only be used below its definition, and no name may be declared twice,
+       for example a variable may not have the name of a parameter. This is scope resolution, which
+       the compiler does after parsing.
      - The types in a program must make sense for the target, for example `Str` has no addition,
-       which the grammar cannot tell from `Int`.
+       which the grammar cannot tell from `Int`, and the value of a variable must be of the type
+       that the variable is given.
      - A line may be indented by any number of spaces that is a multiple of 4. The grammar only
        has procedure bodies, which are indented by exactly one level, 4 spaces. Rules for deeper
        nesting have to be added together with the syntax that needs them.
@@ -67,9 +69,14 @@ procedure_body = { blank_line } , statement_line , { blank_line | statement_line
 
 (* The body of a procedure is indented exactly one level. A tab, or any other number of spaces,
    does not match. *)
-statement_line = indentation , return_statement , ws , line_end ;
+statement_line = indentation , ( return_statement | variable_definition ) , ws , line_end ;
 
 indentation = "    " ;
+
+(* A variable and its initial value. `:=` is a ':' and a '=' for the compiler, so spaces may be
+   between them, as for `::`. Without a type the type of the variable is the type of the value.
+   `x : Int = 5` gives the type. *)
+variable_definition = name , ws , ":" , ws , [ type_name , ws ] , "=" , ws , expression ;
 
 (* `return` and its value must be separated, or `return0` would be one identifier. *)
 return_statement = "return" , required_space , expression ;

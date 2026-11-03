@@ -39,6 +39,7 @@ enum {
     WASM_OPCODE_I64_ADD = 0x7C,
     WASM_OPCODE_I64_CONST = 0x42,
     WASM_OPCODE_LOCAL_GET = 0x20,
+    WASM_OPCODE_LOCAL_SET = 0x21,
     WASM_OPCODE_RETURN = 0x0F,
 
     // The ids of the kinds of section. Custom sections are never written, but may be read.
@@ -72,6 +73,7 @@ typedef enum {
     WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH,
     WASM_BUILD_STATUS_RETURN_TYPE_MISSING,
     WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
+    WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
 } Wasm_Build_Status;
 
 /**
@@ -95,8 +97,9 @@ typedef struct {
  * to `output_buffer`, which holds `byte` elements.
  *
  * Every definition becomes a function that the module exports under the name of the definition.
- * A definition whose value is a string literal becomes a function without parameters that returns
- * the string. A use of such a constant in a procedure is a call of that function, so the constant
+ * A variable of a procedure is a local of its function, or two locals when it is a `Str`, after the
+ * parameters. A definition whose value is a string literal becomes a function without parameters
+ * that returns the string. A use of such a constant in a procedure is a call of that function, so the constant
  * can be used above its definition as well.
  *
  * `Int` is a 64-bit integer (`i64`), so callers from JavaScript pass and receive `BigInt`.

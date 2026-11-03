@@ -265,6 +265,14 @@
                     "",
                 ].join("\n"),
             },
+            variables: {
+                file: "variables.mu",
+                javascript: [
+                    "// `x := 4` deduces the type of x, and `x : Int = 5` gives it.",
+                    "[foo(), foo2()]",
+                    "",
+                ].join("\n"),
+            },
             "scope resolution": {
                 file: "scope-resolution.mu",
                 javascript: [

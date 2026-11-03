@@ -14,14 +14,16 @@ typedef enum {
     SEMANTIC_BINDING_KIND_CONSTANT,
     SEMANTIC_BINDING_KIND_NONE,
     SEMANTIC_BINDING_KIND_PARAMETER,
+    SEMANTIC_BINDING_KIND_VARIABLE,
 } Semantic_Binding_Kind;
 
 /**
  * What a use of a name stands for. `target` is the node that declares the name: an
- * `AST_NODE_TYPE_CONSTANT_DEFINITION` for a constant, or an `AST_NODE_TYPE_PARAMETER` for a
- * parameter. `position` is the place of the target among its siblings, counted from zero: the
- * index of the definition among the definitions of the module, or of the parameter among the
- * parameters of its procedure. A target and its position are both kept, because a target alone
+ * `AST_NODE_TYPE_CONSTANT_DEFINITION` for a constant, an `AST_NODE_TYPE_PARAMETER` for a
+ * parameter, or an `AST_NODE_TYPE_VARIABLE_DEFINITION` for a variable. `position` is the place of
+ * the target among its kind of siblings, counted from zero: the index of the definition among the
+ * definitions of the module, of the parameter among the parameters of its procedure, or of the
+ * variable among the variables of its procedure. A target and its position are both kept, because a target alone
  * would have to be searched for again by whoever needs the position. For `kind`
  * `SEMANTIC_BINDING_KIND_NONE` the `target` is `AST_NODE_INDEX_NONE` and the `position` is zero.
  */
@@ -39,6 +41,8 @@ typedef enum {
     SEMANTIC_STATUS_OK,
     SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE,
     SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS,
+    SEMANTIC_STATUS_VARIABLE_NAME_DUPLICATE,
+    SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS,
 } Semantic_Status;
 
 /**
@@ -62,12 +66,14 @@ typedef struct {
  *
  * There are two scopes. The module scope has the name of every constant definition, and a
  * definition can be used anywhere in the module, also above where it is defined. The scope of a
- * procedure is inside the module scope and has the names of its parameters. A name is looked up in
- * the scope of the procedure that uses it first, and then in the module scope.
+ * procedure is inside the module scope and has the names of its parameters and of its variables. A
+ * variable can be used only below its definition, and not in its own initial value. A name is
+ * looked up in the scope of the procedure that uses it first, and then in the module scope.
  *
  * A name cannot be declared again where it is already visible, so a name has one meaning
  * everywhere it can be used, and there is no shadowing. Two definitions cannot have one name, two
- * parameters of a procedure cannot, and a parameter cannot have the name of a constant. A name that
+ * parameters of a procedure cannot, and a parameter cannot have the name of a constant. A variable
+ * cannot have the name of a constant, of a parameter or of an earlier variable of its procedure. A name that
  * no scope has is an error as well.
  *
  * The analysis is about names only. It does not know what a type is, so whether the value that a

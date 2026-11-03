@@ -396,6 +396,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_END:
             printf("END\n");
             break;
+        case TOKEN_TYPE_EQUALS:
+            printf("EQUALS\n");
+            break;
         case TOKEN_TYPE_IDENTIFIER:
             // The cast is needed because `%.*s` takes an `int` precision.
             printf("IDENTIFIER %.*s\n", (int)token.payload.identifier.text.length,
@@ -553,6 +556,10 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' returns a value but has no return type.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: variable '%.*s' is given a value that is not of its type.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_TYPE_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: type '%.*s' is not supported by the wasm target.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
@@ -578,8 +585,9 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
                 path, position.line, position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_IDENTIFIER_UNKNOWN:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a parameter of the procedure or a constant.\n",
-                path, position.line, position.column, subject_length, result.subject.bytes);
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a variable or parameter of the procedure or a "
+                "constant.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case SEMANTIC_STATUS_OK:
         assert(false);
@@ -591,6 +599,15 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     case SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS:
         fprintf(stderr, "%s:%zu:%zu: parameter '%.*s' has the name of a constant, which it would "
                 "hide.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_VARIABLE_NAME_DUPLICATE:
+        fprintf(stderr, "%s:%zu:%zu: variable '%.*s' is defined twice.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS:
+        fprintf(stderr, "%s:%zu:%zu: variable '%.*s' has the name of a constant or a parameter, "
+                "which it would hide.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     }

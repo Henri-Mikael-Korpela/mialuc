@@ -54,15 +54,23 @@ The compiler rejects a string literal that is not valid UTF-8. A string cannot c
 
 ## Operators
 
-Mialu supports the following operators:
+Mialu supports the following operators. A higher precedence binds tighter:
 
-| Operator | Description |Precedence|
-|----------|-------------|----------|
-| `+`      | Addition    |1         |
+| Operator | Description | Precedence | Example |
+|----------|-------------|------------|---------|
+| `+`      | Addition. | 1 | `x := 1 + 2` makes `x` 3 |
+| `:`      | Type separator. It separates a name from its type. | 0 | `x : Int = 5` |
+| `::`     | Defines a constant. It is two subsequent `:`. | 0 | `NAME :: "Bob"` |
+| `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
+| `=`      | Sets the initial value of a variable whose type is written. | 0 | `x : Int = 5` |
 
 A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals or names. Addition is defined for `Int` only.
 
 Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`.
+
+The operators of precedence 0 define names and are not part of an expression. Each one is written after the name that it defines, and takes everything up to the end of the line as its right-hand side, so `x := a + b` means `x := (a + b)`. Spaces may be written between the characters of `::` and `:=`, because they are separate tokens.
+
+See [Variables](#variables) for variable definitions and [Constants](#constants) for constants.
 
 ## Procedures
 
@@ -80,14 +88,36 @@ procedure_name :: proc() ->
     // procedure body
 ```
 
-A procedure body consists of a series of statements, which can include variable declarations, expressions, and control flow statements. The procedure body is indented to indicate its scope.
+A procedure body consists of a series of statements, which are variable definitions and `return` statements for now. The procedure body is indented to indicate its scope.
+
+## Variables
+
+A variable is a name for a value that is local to a procedure. It is defined by a name followed by `:=` and its initial value, which is an expression:
+
+```
+foo :: proc() Int ->
+    x := 4
+    return x
+```
+
+The type of the variable is deduced from the initial value: `x` above is an `Int` because `4` is. A name as the value has the type of what it stands for, so `y := x` is an `Int` too. The type can also be written, between the `:` and the `=`:
+
+```
+foo :: proc() Int ->
+    x : Int = 5
+    return x
+```
+
+`:=` is the type separator `:` followed by `=`, with the type left out. The type that is written must be the type of the initial value.
+
+A variable is defined once, with its initial value, and every variable has one. It can be used in the statements below its definition, but not above it and not in its own initial value. The variables of a procedure are not visible outside of it, so two procedures can have a variable of the same name.
 
 ## Scope resolution
 
 Every name that is used refers to something that is declared, and the compiler finds out what before the program is built for a target. This is called scope resolution. There are two scopes:
 
 - The module scope has the name of every constant that is defined in the file, such as the procedures and the strings.
-- Procedure's parameters live in a local scope nested inside it.
+- The parameters and the variables of a procedure live in a local scope nested inside it. A variable is in scope below its definition only.
 
 A name is looked up in the local scope of the procedure that uses it first, and then in the module scope. So a procedure can use a constant that is defined outside of it:
 
@@ -105,7 +135,8 @@ There is no shadowing of names so a name cannot be declared twice in the same sc
 - two constants have the same name,
 - two parameters of a procedure have the same name,
 - a parameter has the name of a constant, including the constant that is the procedure itself,
-- a name in an expression is neither a parameter of the procedure nor a constant.
+- a variable has the name of a constant, of a parameter, or of an earlier variable of the procedure,
+- a name in an expression is neither a variable defined above it, nor a parameter of the procedure, nor a constant.
 
 Scope resolution is about names only. Whether the value of a name has the right type is checked separately for the target, see below.
 
@@ -126,15 +157,18 @@ const [address, length] = instance.exports.get_name();
 new TextDecoder().decode(new Uint8Array(instance.exports.memory.buffer, address, length));
 ```
 
+The variables of a procedure are locals of its function, after the parameters, and a `Str` variable is two locals, like a `Str` parameter. The definition of a variable stores the initial value in them.
+
 A module has a memory only when the program has a string literal. A procedure cannot be called `memory`, whether the program has a string literal or not, because that is the name of the export.
 
 The target rejects a program that the parser accepts when:
 
 - a type is not `Int` or `Str`,
-- a name in an expression is a procedure, which is not a value that the target can use yet,
+- a name in an expression, or the initial value of a variable, is a procedure, which is not a value that the target can use yet,
 - a definition is called `memory`,
 - a procedure with no return type has a `return` statement,
 - the value that a procedure returns is not of its return type,
+- the initial value of a variable is not of the type that is written for the variable,
 - an operand of an addition is not an `Int`.
 
 The target is built from the result of scope resolution, so it also rejects every program that scope resolution rejects.

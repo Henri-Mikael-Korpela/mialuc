@@ -10,13 +10,15 @@
 typedef enum {
     // Tokens consisting of a single character are represented by their ASCII value:
     TOKEN_TYPE_COMMA = ',',
+    TOKEN_TYPE_EQUALS = '=',
     TOKEN_TYPE_PARENTHESIS_LEFT = '(',
     TOKEN_TYPE_PARENTHESIS_RIGHT = ')',
     TOKEN_TYPE_PLUS = '+',
     TOKEN_TYPE_TYPE_SEPARATOR = ':',
 
-    // Tokens consisting of multiple characters are represented by a unique value:
-    TOKEN_TYPE_ARROW,
+    // Tokens consisting of multiple characters are represented by a unique value, which starts
+    // above the ASCII range so that it cannot be the value of a single-character token:
+    TOKEN_TYPE_ARROW = 256,
     TOKEN_TYPE_IDENTIFIER,
     TOKEN_TYPE_INDENTATION,
     TOKEN_TYPE_INTEGER_LITERAL,

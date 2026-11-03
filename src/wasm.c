@@ -82,6 +82,9 @@ static void            wasm_build_code_section_body_identifier(Wasm_Builder *bui
                                                                Semantic_Binding binding);
 static bool            wasm_build_code_section_body_procedure (Wasm_Builder *builder,
                                                                Ast_Node_Index definition);
+static bool            wasm_build_code_section_body_variable  (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index variable);
 static void            wasm_build_code_section_body_string    (Wasm_Builder *builder,
                                                                Ast_Node_Index literal);
 static void            wasm_build_data_section                (Wasm_Builder *builder);
@@ -120,6 +123,15 @@ static size_t          wasm_section_begin                     (Wasm_Writer *writ
                                                                byte section_id);
 static Wasm_Value_Type wasm_value_type_of_name                (Str type_name);
 static size_t          wasm_value_type_slot_count             (Wasm_Value_Type value_type);
+static size_t          wasm_variable_local_index              (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Ast_Node_Index variable);
+static Wasm_Value_Type wasm_variable_type                     (Wasm_Builder const *builder,
+                                                               Ast_Node_Index variable);
+static bool            wasm_variables_check                   (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
+static void            wasm_variables_write_locals            (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
 static void            wasm_write_byte                        (Wasm_Writer *writer, byte content);
 static void            wasm_write_bytes                       (Wasm_Writer *writer,
                                                                byte const *bytes, size_t count);
@@ -547,14 +559,19 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
 
     size_t body = wasm_block_begin(&builder->writer);
 
-    // The parameters are the locals of the function already, so there are no other locals.
-    wasm_write_unsigned(&builder->writer, 0);
-
     Ast_Node_Index value = builder->nodes[definition].first_child;
     if (builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL) {
-        // The string is the result, and is left on the stack for the `end` to return.
+        // A constant string has no locals. The string is the result, and is left on the stack for
+        // the `end` to return.
+        wasm_write_unsigned(&builder->writer, 0);
         wasm_build_code_section_body_string(builder, value);
     } else {
+        // The parameters are the first locals of the function already, and the variables come
+        // after them.
+        if (wasm_variables_check(builder, value) == false) {
+            return false;
+        }
+        wasm_variables_write_locals(builder, value);
         if (wasm_build_code_section_body_procedure(builder, definition) == false) {
             return false;
         }
@@ -596,8 +613,8 @@ static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_
 }
 
 /**
- * Writes the statements of a procedure. Each statement is a `return`, which becomes the value
- * followed by the `return` instruction.
+ * Writes the statements of a procedure. A variable definition becomes its value stored in the
+ * locals of the variable, and a `return` becomes the value followed by the `return` instruction.
  */
 static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                                                    Ast_Node_Index definition) {
@@ -629,8 +646,12 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             }
 
             wasm_write_byte(&builder->writer, WASM_OPCODE_RETURN);
+        } else if (child_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            if (wasm_build_code_section_body_variable(builder, definition, child) == false) {
+                return false;
+            }
         } else {
-            // Parameters come first and are not code. The parser makes nothing else yet.
+            // Parameters come first and are not code.
             assert(child_node->node_type == AST_NODE_TYPE_PARAMETER);
         }
 
@@ -638,6 +659,172 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
     }
 
     return true;
+}
+
+/**
+ * Writes the instructions of the definition of `variable`: the initial value is left on the stack
+ * and then stored in the locals of the variable. The last local is stored first, because the
+ * value of a `Str` has its length on top of the stack.
+ */
+static bool wasm_build_code_section_body_variable(Wasm_Builder *builder,
+                                                  Ast_Node_Index definition,
+                                                  Ast_Node_Index variable) {
+    assert(variable < builder->node_count);
+    assert(builder->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index value = builder->nodes[variable].last_child;
+    if (wasm_build_code_section_body_expression(builder, definition, value) == false) {
+        return false;
+    }
+
+    // The value was written, so every name in it is known. It must be of the type of the variable,
+    // which is the type that was written when the definition has one, and deduced otherwise.
+    Wasm_Value_Type variable_type = wasm_variable_type(builder, variable);
+    if (wasm_expression_type(builder, value) != variable_type) {
+        Str name = builder->nodes[variable].payload.variable_definition.name;
+        return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, name);
+    }
+
+    size_t local_index = wasm_variable_local_index(builder, procedure, variable);
+    size_t slot_count = wasm_value_type_slot_count(variable_type);
+    for (size_t slot = slot_count; slot > 0; slot -= 1) {
+        wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_SET);
+        wasm_write_unsigned(&builder->writer, local_index + slot - 1);
+    }
+
+    return true;
+}
+
+/**
+ * Checks the type of every variable of `procedure`, so that what comes after can ask for the type
+ * of a variable and assume that it is known. A variable has the type that its definition gives, or
+ * else the type of its value. Returns false after it recorded an error.
+ */
+static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index procedure) {
+    assert(procedure < builder->node_count);
+    assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+
+    Ast_Node_Index statement = builder->nodes[procedure].first_child;
+    for (size_t i = 0; i < builder->node_count && statement != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node const *statement_node = &builder->nodes[statement];
+
+        if (statement_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            Ast_Node const *first = &builder->nodes[statement_node->first_child];
+            if (first->node_type == AST_NODE_TYPE_TYPE_NAME) {
+                if (wasm_value_type_of_name(first->payload.type_name.name) ==
+                    WASM_VALUE_TYPE_NONE) {
+                    return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
+                                     first->payload.type_name.name);
+                }
+            } else if (wasm_variable_type(builder, statement) == WASM_VALUE_TYPE_NONE) {
+                // The only value without a type is a name that is a procedure.
+                assert(first->node_type == AST_NODE_TYPE_IDENTIFIER);
+                return wasm_fail(builder, WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE,
+                                 first->payload.identifier.name);
+            }
+        }
+
+        statement = statement_node->next_sibling;
+    }
+
+    return true;
+}
+
+/**
+ * Writes the locals of the variables of `procedure`, which come after the parameters: a count of
+ * groups, and for each variable the number of locals it takes and their type. The types must have
+ * been checked by `wasm_variables_check`.
+ */
+static void wasm_variables_write_locals(Wasm_Builder *builder, Ast_Node_Index procedure) {
+    assert(procedure < builder->node_count);
+
+    size_t variable_count = 0;
+    Ast_Node_Index statement = builder->nodes[procedure].first_child;
+    for (size_t i = 0; i < builder->node_count && statement != AST_NODE_INDEX_NONE; i += 1) {
+        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            variable_count += 1;
+        }
+        statement = builder->nodes[statement].next_sibling;
+    }
+    wasm_write_unsigned(&builder->writer, variable_count);
+
+    statement = builder->nodes[procedure].first_child;
+    for (size_t i = 0; i < builder->node_count && statement != AST_NODE_INDEX_NONE; i += 1) {
+        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            Wasm_Value_Type value_type = wasm_variable_type(builder, statement);
+            wasm_write_unsigned(&builder->writer, wasm_value_type_slot_count(value_type));
+            // A `Str` is two locals of one type, so one group holds all the locals of a variable.
+            if (value_type == WASM_VALUE_TYPE_STR) {
+                wasm_write_byte(&builder->writer, WASM_TYPE_I32);
+            } else {
+                wasm_write_byte(&builder->writer, WASM_TYPE_I64);
+            }
+        }
+        statement = builder->nodes[statement].next_sibling;
+    }
+}
+
+/**
+ * Returns the type of `variable`: the one its definition gives, or else the type of its value. A
+ * name as the value has the type of what it stands for, so the search follows a chain of variables
+ * that were defined from each other, which ends because a variable can only use the ones above
+ * it. Returns `WASM_VALUE_TYPE_NONE` when the type is not one that the target has, or the value
+ * is a procedure.
+ */
+static Wasm_Value_Type wasm_variable_type(Wasm_Builder const *builder, Ast_Node_Index variable) {
+    assert(variable < builder->node_count);
+    assert(builder->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
+
+    Ast_Node_Index current = variable;
+    // Each step goes to a variable above, so there are fewer steps than nodes.
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        Ast_Node const *current_node = &builder->nodes[current];
+        Ast_Node const *first = &builder->nodes[current_node->first_child];
+        if (first->node_type == AST_NODE_TYPE_TYPE_NAME) {
+            return wasm_value_type_of_name(first->payload.type_name.name);
+        }
+
+        Ast_Node_Index value = current_node->last_child;
+        Ast_Node const *value_node = &builder->nodes[value];
+        if (value_node->node_type != AST_NODE_TYPE_IDENTIFIER) {
+            return wasm_expression_type(builder, value);
+        }
+
+        Semantic_Binding binding = builder->bindings[value];
+        if (binding.kind != SEMANTIC_BINDING_KIND_VARIABLE) {
+            return wasm_binding_value_type(builder, binding);
+        }
+        current = binding.target;
+    }
+
+    // Unreachable: a chain of variables is shorter than the number of nodes.
+    assert(false);
+    return WASM_VALUE_TYPE_NONE;
+}
+
+/**
+ * Returns the index of the first local that holds `variable`. The locals of a function are its
+ * parameters, then its variables, in order, so that is the number of locals of the parameters and
+ * of the variables above it. The types of the parameters and variables must be known.
+ */
+static size_t wasm_variable_local_index(Wasm_Builder const *builder, Ast_Node_Index procedure,
+                                        Ast_Node_Index variable) {
+    assert(procedure < builder->node_count);
+    assert(variable < builder->node_count);
+
+    size_t local_index = wasm_parameter_slot_count(builder, procedure);
+    Ast_Node_Index statement = builder->nodes[procedure].first_child;
+    for (size_t i = 0; i < builder->node_count && statement != variable; i += 1) {
+        assert(statement != AST_NODE_INDEX_NONE);
+        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            local_index += wasm_value_type_slot_count(wasm_variable_type(builder, statement));
+        }
+        statement = builder->nodes[statement].next_sibling;
+    }
+
+    assert(statement == variable);
+    return local_index;
 }
 
 /**
@@ -668,6 +855,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_PROCEDURE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
     case AST_NODE_TYPE_TYPE_NAME:
+    case AST_NODE_TYPE_VARIABLE_DEFINITION:
         // None of these is part of an expression.
         assert(false);
         break;
@@ -754,6 +942,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_PROCEDURE:
         case AST_NODE_TYPE_RETURN_STATEMENT:
         case AST_NODE_TYPE_TYPE_NAME:
+        case AST_NODE_TYPE_VARIABLE_DEFINITION:
             // Same as above: none of these is part of an expression.
             assert(false);
             break;
@@ -813,6 +1002,15 @@ static void wasm_build_code_section_body_identifier(Wasm_Builder *builder,
         }
         break;
     }
+    case SEMANTIC_BINDING_KIND_VARIABLE: {
+        size_t local_index = wasm_variable_local_index(builder, procedure, binding.target);
+        size_t slot_count = wasm_value_type_slot_count(value_type);
+        for (size_t slot = 0; slot < slot_count; slot += 1) {
+            wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
+            wasm_write_unsigned(&builder->writer, local_index + slot);
+        }
+        break;
+    }
     }
 }
 
@@ -841,6 +1039,8 @@ static Wasm_Value_Type wasm_binding_value_type(Wasm_Builder const *builder,
         Ast_Node_Index type = builder->nodes[binding.target].first_child;
         return wasm_value_type_of_name(builder->nodes[type].payload.type_name.name);
     }
+    case SEMANTIC_BINDING_KIND_VARIABLE:
+        return wasm_variable_type(builder, binding.target);
     }
 
     return WASM_VALUE_TYPE_NONE;

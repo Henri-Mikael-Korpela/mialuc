@@ -73,6 +73,10 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             printf("TYPE_NAME %.*s\n", (int)node.payload.type_name.name.length,
                    node.payload.type_name.name.bytes);
             break;
+        case AST_NODE_TYPE_VARIABLE_DEFINITION:
+            printf("VARIABLE_DEFINITION %.*s\n", (int)node.payload.variable_definition.name.length,
+                   node.payload.variable_definition.name.bytes);
+            break;
         }
 
         // Depth first: go down to the first child if there is one.

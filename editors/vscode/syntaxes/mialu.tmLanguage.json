@@ -33,8 +33,20 @@
             ]
         },
         "operators": {
-            "name": "keyword.operator.arithmetic.mialu",
-            "match": "\\+"
+            "patterns": [
+                {
+                    "name": "keyword.operator.assignment.mialu",
+                    "match": "="
+                },
+                {
+                    "name": "keyword.operator.arithmetic.mialu",
+                    "match": "\\+"
+                },
+                {
+                    "name": "keyword.operator.type.mialu",
+                    "match": ":"
+                }
+            ]
         },
         "reserved-words": {
             "patterns": [
