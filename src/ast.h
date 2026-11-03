@@ -13,6 +13,7 @@ typedef enum {
     AST_NODE_TYPE_ADDITION,
     AST_NODE_TYPE_ADDITION_ASSIGNMENT,
     AST_NODE_TYPE_BLOCK,
+    AST_NODE_TYPE_BOOL_LITERAL,
     AST_NODE_TYPE_COMPARISON,
     AST_NODE_TYPE_CONSTANT_DEFINITION,
     AST_NODE_TYPE_DIVISION,
@@ -72,9 +73,10 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_BLOCK`: one child per statement. It is the body of a branch of an
  *   `AST_NODE_TYPE_IF_STATEMENT`, and it has its own scope: a variable defined in it cannot be
  *   used below it. Its payload has the end of the block, see below.
+ * - `AST_NODE_TYPE_BOOL_LITERAL`: no children. It is `true` or `false`, which is in the payload.
  * - `AST_NODE_TYPE_COMPARISON`: two children, the left and the right operand, in that order. It is
- *   the condition of a branch, and not part of any other expression. The operator is in the
- *   payload.
+ *   an expression of type `Bool` with the lowest precedence of the operators, so its operands are
+ *   not comparisons. The operator is in the payload.
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: one child, the value that is bound to the name. It is
  *   an `AST_NODE_TYPE_PROCEDURE` or an `AST_NODE_TYPE_STRING_LITERAL`.
  * - `AST_NODE_TYPE_DIVISION`: two children, the dividend and the divisor, in that order.
@@ -83,8 +85,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   statement of a procedure body.
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_IF_STATEMENT`: a chain of `if`, any number of `else if` and an optional
- *   `else`, as the children in the order of the source: a condition, which is an
- *   `AST_NODE_TYPE_COMPARISON`, and the `AST_NODE_TYPE_BLOCK` that runs when it holds, for the `if`
+ *   `else`, as the children in the order of the source: a condition, which is any expression
+ *   (the target requires it to be a `Bool`), and the `AST_NODE_TYPE_BLOCK` that runs when it holds, for the `if`
  *   and for every `else if`, and then, when `has_else` is set in the payload, the last child is the
  *   `AST_NODE_TYPE_BLOCK` of the `else`.
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.
@@ -130,6 +132,9 @@ typedef struct {
             // of the source.
             Ast_Node_Index end;
         } block;
+        struct {
+            bool value;
+        } bool_literal;
         struct {
             Ast_Comparison_Operator operator;
         } comparison;

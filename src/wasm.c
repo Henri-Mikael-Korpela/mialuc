@@ -37,6 +37,7 @@ typedef struct {
 // Alphabetical, because nothing depends on the order. `WASM_VALUE_TYPE_NONE` is the result of a
 // name that is not a type that the target has.
 typedef enum {
+    WASM_VALUE_TYPE_BOOL,
     WASM_VALUE_TYPE_INT,
     WASM_VALUE_TYPE_NONE,
     WASM_VALUE_TYPE_STR,
@@ -93,6 +94,9 @@ static bool            wasm_build_code_section_body           (Wasm_Builder *bui
 static bool            wasm_build_code_section_body_assignment(Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index assignment);
+static bool            wasm_build_code_section_body_operands  (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index operation);
 static bool            wasm_build_code_section_body_expression(Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index expression);
@@ -127,6 +131,9 @@ static size_t          wasm_children_count                    (Wasm_Builder cons
                                                                Ast_Node_Index parent);
 static bool            wasm_data_measure                      (Wasm_Builder *builder);
 static Wasm_Value_Type wasm_expression_type                   (Wasm_Builder const *builder,
+                                                               Ast_Node_Index expression);
+static Str             wasm_expression_subject                (Wasm_Builder const *builder,
+                                                               Ast_Node_Index definition,
                                                                Ast_Node_Index expression);
 static bool            wasm_fail                              (Wasm_Builder *builder,
                                                                Wasm_Build_Status status,
@@ -393,6 +400,9 @@ static Wasm_Value_Type wasm_value_type_of_name(Str type_name) {
     assert(type_name.bytes != NULL);
     assert(type_name.length > 0);
 
+    if (str_equals(type_name, STR("Bool"))) {
+        return WASM_VALUE_TYPE_BOOL;
+    }
     if (str_equals(type_name, STR("Int"))) {
         return WASM_VALUE_TYPE_INT;
     }
@@ -405,8 +415,9 @@ static Wasm_Value_Type wasm_value_type_of_name(Str type_name) {
 /**
  * Returns the number of WebAssembly values that a value of `value_type` takes. `Int` is a 64-bit
  * integer, so that every integer literal, which the tokenizer accepts up to the largest signed
- * 64-bit value, fits. `Str` is the address and the length of its bytes, both 32-bit, because
- * addresses are.
+ * 64-bit value, fits. `Bool` is one 32-bit integer, which is 0 for `false` and 1 for `true`, like
+ * the result of a WebAssembly comparison. `Str` is the address and the length of its bytes, both
+ * 32-bit, because addresses are.
  */
 static size_t wasm_value_type_slot_count(Wasm_Value_Type value_type) {
     assert(value_type != WASM_VALUE_TYPE_NONE);
@@ -426,6 +437,8 @@ static void wasm_write_value_type(Wasm_Writer *writer, Wasm_Value_Type value_typ
 
     if (value_type == WASM_VALUE_TYPE_STR) {
         wasm_write_byte(writer, WASM_TYPE_I32);
+        wasm_write_byte(writer, WASM_TYPE_I32);
+    } else if (value_type == WASM_VALUE_TYPE_BOOL) {
         wasm_write_byte(writer, WASM_TYPE_I32);
     } else {
         wasm_write_byte(writer, WASM_TYPE_I64);
@@ -690,7 +703,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
 
         if (frame_node->node_type == AST_NODE_TYPE_IF_STATEMENT) {
             bool is_first = child == frame_node->first_child;
-            if (child_node->node_type == AST_NODE_TYPE_COMPARISON) {
+            if (child_node->node_type != AST_NODE_TYPE_BLOCK) {
                 // A condition after the first is an `else if`, which is inside the `else` of the
                 // branch before it.
                 if (is_first == false) {
@@ -698,6 +711,11 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 }
                 if (wasm_build_code_section_body_expression(builder, definition, child) == false) {
                     return false;
+                }
+                // There is no conversion to a `Bool`, so an `Int` or a `Str` is not a condition.
+                if (wasm_expression_type(builder, child) != WASM_VALUE_TYPE_BOOL) {
+                    Str subject = wasm_expression_subject(builder, definition, child);
+                    return wasm_fail(builder, WASM_BUILD_STATUS_CONDITION_TYPE_INVALID, subject);
                 }
                 wasm_write_byte(&builder->writer, WASM_OPCODE_IF);
                 wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
@@ -812,14 +830,8 @@ static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
         return false;
     }
 
-    // An arithmetic operation, or an integer literal, is an `Int`, so only a name or a string
-    // can be of another type, and it is the subject of the error.
     if (wasm_expression_type(builder, value) != WASM_VALUE_TYPE_INT) {
-        Ast_Node const *value_node = &builder->nodes[value];
-        Str subject = value_node->payload.string_literal.text;
-        if (value_node->node_type == AST_NODE_TYPE_IDENTIFIER) {
-            subject = value_node->payload.identifier.name;
-        }
+        Str subject = wasm_expression_subject(builder, definition, value);
         return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, subject);
     }
 
@@ -933,7 +945,7 @@ static void wasm_variables_write_locals(Wasm_Builder *builder, Ast_Node_Index pr
             Wasm_Value_Type value_type = wasm_variable_type(builder, statement);
             wasm_write_unsigned(&builder->writer, wasm_value_type_slot_count(value_type));
             // A `Str` is two locals of one type, so one group holds all the locals of a variable.
-            if (value_type == WASM_VALUE_TYPE_STR) {
+            if (value_type == WASM_VALUE_TYPE_STR || value_type == WASM_VALUE_TYPE_BOOL) {
                 wasm_write_byte(&builder->writer, WASM_TYPE_I32);
             } else {
                 wasm_write_byte(&builder->writer, WASM_TYPE_I64);
@@ -1006,7 +1018,8 @@ static size_t wasm_variable_local_index(Wasm_Builder const *builder, Ast_Node_In
 /**
  * Returns the type of the value of `expression`. The expression must have been written already,
  * so that every name in it is known to have a value. Only the root matters: an arithmetic
- * operation is an `Int` because its operands were checked to be, as they were written.
+ * operation is an `Int` and a comparison is a `Bool`, because their operands were checked, as they
+ * were written.
  */
 static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
                                             Ast_Node_Index expression) {
@@ -1026,11 +1039,13 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
         assert(value_type != WASM_VALUE_TYPE_NONE);
         return value_type;
     }
+    case AST_NODE_TYPE_BOOL_LITERAL:
+    case AST_NODE_TYPE_COMPARISON:
+        return WASM_VALUE_TYPE_BOOL;
     case AST_NODE_TYPE_STRING_LITERAL:
         return WASM_VALUE_TYPE_STR;
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
     case AST_NODE_TYPE_BLOCK:
-    case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
     case AST_NODE_TYPE_IF_STATEMENT:
@@ -1048,6 +1063,82 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     }
 
     return WASM_VALUE_TYPE_NONE;
+}
+
+/**
+ * Returns the text in the source that an error about `expression` points at: the first name or
+ * string in it, which is the leftmost leaf of its tree. An expression that starts with a number or
+ * with `true` or `false` has no such text, so the name of the definition is the closest place that
+ * the tree knows.
+ */
+static Str wasm_expression_subject(Wasm_Builder const *builder, Ast_Node_Index definition,
+                                   Ast_Node_Index expression) {
+    assert(expression < builder->node_count);
+    assert(definition < builder->node_count);
+
+    Ast_Node_Index current = expression;
+    // Each step goes down one level, so there are fewer steps than nodes.
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        if (builder->nodes[current].first_child == AST_NODE_INDEX_NONE) {
+            break;
+        }
+        current = builder->nodes[current].first_child;
+    }
+
+    Ast_Node const *leaf = &builder->nodes[current];
+    if (leaf->node_type == AST_NODE_TYPE_IDENTIFIER) {
+        return leaf->payload.identifier.name;
+    }
+    if (leaf->node_type == AST_NODE_TYPE_STRING_LITERAL) {
+        return leaf->payload.string_literal.text;
+    }
+    return builder->nodes[definition].payload.constant_definition.name;
+}
+
+/**
+ * Checks the operands of the arithmetic operation or comparison `operation`, which were written
+ * already. Arithmetic is defined for `Int` only. A comparison takes two `Int` values with any
+ * operator, or two `Bool` values with `==` and `!=`, because a `Bool` has no order. Returns false
+ * after it recorded an error.
+ */
+static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Node_Index definition,
+                                                  Ast_Node_Index operation) {
+    assert(operation < builder->node_count);
+
+    Ast_Node const *node = &builder->nodes[operation];
+    Ast_Node_Index left = node->first_child;
+    Ast_Node_Index right = node->last_child;
+    assert(left != AST_NODE_INDEX_NONE && right != left);
+
+    Wasm_Value_Type left_type = wasm_expression_type(builder, left);
+    Wasm_Value_Type right_type = wasm_expression_type(builder, right);
+
+    if (node->node_type != AST_NODE_TYPE_COMPARISON) {
+        if (left_type != WASM_VALUE_TYPE_INT) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, left));
+        }
+        if (right_type != WASM_VALUE_TYPE_INT) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, right));
+        }
+        return true;
+    }
+
+    Ast_Comparison_Operator operator = node->payload.comparison.operator;
+    bool is_equality = operator == AST_COMPARISON_OPERATOR_EQUAL ||
+                       operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
+    bool is_left_comparable = left_type == WASM_VALUE_TYPE_INT ||
+                              (left_type == WASM_VALUE_TYPE_BOOL && is_equality);
+    if (is_left_comparable == false) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                         wasm_expression_subject(builder, definition, left));
+    }
+    if (right_type != left_type) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                         wasm_expression_subject(builder, definition, right));
+    }
+    return true;
 }
 
 /**
@@ -1115,14 +1206,42 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             }
         }
 
+        // The operands of an operator have been written when the operator is reached, so their types
+        // are known and are checked here.
+        switch (node->node_type) {
+        case AST_NODE_TYPE_ADDITION:
+        case AST_NODE_TYPE_DIVISION:
+        case AST_NODE_TYPE_MULTIPLICATION:
+        case AST_NODE_TYPE_SUBTRACTION:
+        case AST_NODE_TYPE_COMPARISON:
+            if (wasm_build_code_section_body_operands(builder, definition, current) == false) {
+                return false;
+            }
+            break;
+        default:
+            break;
+        }
+
         switch (node->node_type) {
         case AST_NODE_TYPE_ADDITION:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_ADD);
             break;
+        case AST_NODE_TYPE_BOOL_LITERAL:
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
+            wasm_write_signed(&builder->writer, node->payload.bool_literal.value ? 1 : 0);
+            break;
         case AST_NODE_TYPE_COMPARISON:
-            // The operands were written, and an operand that is not an `Int` was rejected.
-            wasm_write_byte(&builder->writer,
-                            wasm_comparison_opcode(node->payload.comparison.operator));
+            // `Bool` values are compared as the 32-bit integers that they are.
+            if (wasm_expression_type(builder, node->first_child) == WASM_VALUE_TYPE_BOOL) {
+                if (node->payload.comparison.operator == AST_COMPARISON_OPERATOR_EQUAL) {
+                    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_EQ);
+                } else {
+                    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_NE);
+                }
+            } else {
+                wasm_write_byte(&builder->writer,
+                                wasm_comparison_opcode(node->payload.comparison.operator));
+            }
             break;
         case AST_NODE_TYPE_DIVISION:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_DIV_S);
@@ -1134,7 +1253,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_SUB);
             break;
         case AST_NODE_TYPE_CONSTANT_DEFINITION:
-            // The parser only makes arithmetic, integer literals and names in an expression.
+            // The parser only makes operators, literals and names in an expression.
             assert(false);
             break;
         case AST_NODE_TYPE_IDENTIFIER: {
@@ -1143,10 +1262,6 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             Wasm_Value_Type value_type = wasm_binding_value_type(builder, binding);
             if (value_type == WASM_VALUE_TYPE_NONE) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE, name);
-            }
-            // The only operators are the arithmetic of integers, and an operand has a parent.
-            if (path_count > 0 && value_type != WASM_VALUE_TYPE_INT) {
-                return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, name);
             }
 
             wasm_build_code_section_body_identifier(builder, procedure, binding);
@@ -1157,10 +1272,6 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             wasm_write_signed(&builder->writer, node->payload.integer_literal.value);
             break;
         case AST_NODE_TYPE_STRING_LITERAL:
-            if (path_count > 0) {
-                return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
-                                 node->payload.string_literal.text);
-            }
             wasm_build_code_section_body_string(builder, current);
             break;
         case AST_NODE_TYPE_ADDITION_ASSIGNMENT:

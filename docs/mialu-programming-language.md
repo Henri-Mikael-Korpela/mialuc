@@ -10,7 +10,7 @@ Indentation is made of spaces only. Tabs are not allowed in indentation. Each le
 
 ## Identifiers
 
-Identifiers can contain alphanumeric characters and underscores. Case matters for identifiers in Mialu are case-sensitive. An identifier cannot begin with a digit.
+Identifiers can contain alphanumeric characters and underscores. Case matters for identifiers in Mialu are case-sensitive. An identifier cannot begin with a digit. The reserved words `proc`, `return`, `if`, `else`, `true` and `false` are keywords and cannot be used as names.
 
 ## Constants
 
@@ -39,6 +39,7 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 
 | Type  | Description                                                  |
 |-------|--------------------------------------------------------------|
+| `Bool` | A boolean value, which is `true` or `false`. See [Booleans](#booleans). |
 | `Int` | A signed 64-bit integer. Written as a decimal number, such as `42`. |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
 
@@ -56,13 +57,33 @@ A string is length-based, not null-terminated. It is its bytes together with the
 
 The compiler rejects a string literal that is not valid UTF-8. A string cannot contain a double quote or a line break, because they would end it, and cannot contain a backslash. There are no escape sequences.
 
+### Booleans
+
+A `Bool` is either `true` or `false`, which are keywords:
+
+```
+ready : Bool = true
+```
+
+A comparison such as `x > 5` is an expression of type `Bool`, so it can be the value of a variable, a returned value or the condition of an if statement:
+
+```
+is_positive :: proc(n: Int) Bool ->
+    return n > 0
+
+is_even :: proc(n: Int) Bool ->
+    return n / 2 * 2 == n
+```
+
+A `Bool` is never converted to or from another type. An `Int` is not a condition, so `if n ->` is an error and has to be written `if n != 0 ->`, and `true` is not `1`: `x : Int = true` and `b : Bool = 1` are errors. A `Bool` has no arithmetic. Two `Bool` values can be compared with `==` and `!=`, so `a != b` holds when exactly one of them is `true`, but they have no order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Both operands of a comparison must have the same type. There are no operators for logical and, or and not yet: they are written with if statements, and `value == false` is the negation of `value`.
+
 ## Operators
 
 Mialu supports the following operators. A higher precedence binds tighter:
 
 | Operator | Description | Precedence | Example |
 |----------|-------------|------------|---------|
-| `==`     | Equal to. A comparison, see [If statements](#if-statements). | 1 | `x == 3` |
+| `==`     | Equal to. A comparison, see [Booleans](#booleans). | 1 | `x == 3` |
 | `!=`     | Not equal to. A comparison. | 1 | `x != 3` |
 | `<`      | Less than. A comparison. | 1 | `x < 3` |
 | `<=`     | Less than or equal to. A comparison. | 1 | `x <= 3` |
@@ -81,9 +102,9 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
 | `=`      | Sets the initial value of a variable whose type is written. | 0 | `x : Int = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals or names. Addition, subtraction, multiplication and division are defined for `Int` only, and so are the comparisons.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false` or names. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values for `==` and `!=`, and its result is a `Bool`.
 
-Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2, and so do `*` and `/`, so `8 / 2 * 3` is 12 and not 1. A comparison has the lowest precedence of them, so `a + 1 > b * 2` means `(a + 1) > (b * 2)`. A comparison is not an expression that has a value, it is only the condition of an if statement, so it cannot be an operand, a returned value or the value of a variable, and `a < b < c` is not a comparison. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2.
+Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2, and so do `*` and `/`, so `8 / 2 * 3` is 12 and not 1. A comparison has the lowest precedence of them, so `a + 1 > b * 2` means `(a + 1) > (b * 2)`. A comparison is an expression of type `Bool`, but its operands are not comparisons, so it cannot be an operand of another operator, and `a < b < c` and `a == b == c` are errors. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2.
 
 The operators of precedence 0 define names or assign to them, and are not part of an expression. Each one is written after the name that it defines or assigns to, and takes everything up to the end of the line as its right-hand side, so `x := a + b` means `x := (a + b)`, and `x += a * b` means `x += (a * b)`. Spaces may be written between the characters of `::` and `:=`, because they are separate tokens. An assignment operator such as `+=`, `-=`, `*=` or `/=` is one token, so no space may be written between its characters.
 
@@ -179,7 +200,15 @@ foo :: proc() Int ->
 
 Here `foo` returns 2, because `x > 5` does not hold, so the block of the `if` is skipped and the statements after it run.
 
-A condition is a comparison: two expressions, which are `Int` values, with one of the comparison operators `==`, `!=`, `<`, `<=`, `>` and `>=` between them. The expressions can use everything that an expression can, so `if x + 1 > y * 2 ->` is a condition. There are no values for true and false yet, so a condition cannot be a name or a number on its own, as in C, and the comparison cannot be stored in a variable.
+A condition is an expression of type `Bool`: a comparison such as `x + 1 > y * 2`, which can use everything that an expression can, or a `Bool` that is stored in a variable or a parameter, or `true` and `false`. There is no implicit conversion to `Bool`, as in C: a condition that is an `Int`, such as `if x ->` or `if 1 ->`, is an error, and so is a string.
+
+```
+foo :: proc(n: Int) Int ->
+    big := n > 100
+    if big ->
+        return 2
+    return 1
+```
 
 An `else` branch runs when the condition does not hold. An `else if` is an `else` that has an `if` in it, so there can be any number of them, and the first condition that holds picks the block. The branches are tried in the order that they are written, and at most one of them runs. An `else` that comes last takes the case that none of the conditions holds:
 
@@ -248,9 +277,11 @@ The compiler has two modes: `run` prints the tokens and the syntax tree of a pro
 
 ### WebAssembly
 
-The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. `Int` and `Str` are the only types that the target supports.
+The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. `Int`, `Bool` and `Str` are the only types that the target supports.
 
 `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition, subtraction and multiplication wrap around on overflow. Division truncates toward zero, so `(0 - 7) / 2` is -3. It traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
+
+`Bool` is a 32-bit integer (`i32`), which is 0 for `false` and 1 for `true`, as a comparison in WebAssembly leaves it. So JavaScript passes a `Bool` as `true`, `false`, 0 or 1, and receives it as the number 0 or 1, which `Boolean(...)` turns into a boolean. Comparisons of `Int` values are signed `i64` instructions, and comparisons of `Bool` values with `==` and `!=` are `i32.eq` and `i32.ne`.
 
 `Str` is two 32-bit integers (`i32`): the address of its first byte in memory, and its length in bytes. The bytes are UTF-8, so a caller decodes them as that, as `TextDecoder` does by default. So a parameter of type `Str` is two WebAssembly parameters, one after the other, and a result of type `Str` is two WebAssembly results, which JavaScript receives as an array `[address, length]`. The bytes of all the string literals of the program are copied to the start of the memory of the module when it is instantiated, and the module exports the memory as `memory`, so that a caller can read a string:
 
@@ -265,18 +296,20 @@ A module has a memory only when the program has a string literal. A procedure ca
 
 The target rejects a program that the parser accepts when:
 
-- a type is not `Int` or `Str`,
+- a type is not `Int`, `Bool` or `Str`,
 - a name in an expression, or the initial value of a variable, is a procedure, which is not a value that the target can use yet,
 - a definition is called `memory`,
 - a procedure with no return type has a `return` statement,
 - the value that a procedure returns is not of its return type,
 - the initial value of a variable is not of the type that is written for the variable,
-- an operand of an arithmetic operator or of a comparison is not an `Int`,
+- an operand of an arithmetic operator is not an `Int`,
+- the operands of a comparison are not both `Int`, or not both `Bool` for `==` and `!=`,
+- the condition of an if statement is not a `Bool`,
 - the variable or the value of an assignment such as `x += 2`, `x -= 2`, `x *= 2` or `x /= 2` is not an `Int`.
 
 The target is built from the result of scope resolution, so it also rejects every program that scope resolution rejects.
 
-An if statement becomes the structured instructions of WebAssembly: the two operands of the condition, the signed comparison of `i64` values, which leaves 1 or 0, then `if`, the block, `else` and the next branch, up to `end`. An `else if` is written as an `else` with another `if` in it, so the statement ends with an `end` for each of its conditions. When the last statement of a procedure that returns a value is not a `return`, for example an if statement that returns in all of its branches, the body ends with the `unreachable` instruction, because WebAssembly cannot tell that the end of it cannot be reached. A body that gets there anyway traps.
+An if statement becomes the structured instructions of WebAssembly: the condition, which leaves 1 or 0 (for a comparison, its two operands and the signed comparison of them), then `if`, the block, `else` and the next branch, up to `end`. An `else if` is written as an `else` with another `if` in it, so the statement ends with an `end` for each of its conditions. When the last statement of a procedure that returns a value is not a `return`, for example an if statement that returns in all of its branches, the body ends with the `unreachable` instruction, because WebAssembly cannot tell that the end of it cannot be reached. A body that gets there anyway traps.
 
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 

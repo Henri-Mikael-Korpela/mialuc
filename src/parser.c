@@ -38,12 +38,13 @@ typedef struct {
 static Ast_Node_Index parse_assignment          (Parser *parser);
 static void           parse_block_close         (Parser *parser, Ast_Node_Index block);
 static Ast_Node_Index parse_branch              (Parser *parser, Ast_Node_Index statement);
-static Ast_Node_Index parse_condition           (Parser *parser);
 static Ast_Node_Index parse_constant_definition (Parser *parser);
 static Ast_Node_Index parse_else_branch         (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_if_statement        (Parser *parser, Ast_Node_Index parent);
+static Ast_Node_Index parse_bool_literal        (Parser *parser);
 static Ast_Node_Index parse_operand             (Parser *parser);
 static Ast_Node_Index parse_expression          (Parser *parser);
+static Ast_Node_Index parse_sum                 (Parser *parser);
 static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
 static Ast_Node_Index parse_identifier          (Parser *parser);
 static Ast_Node_Index parse_integer_literal     (Parser *parser);
@@ -437,7 +438,7 @@ static Ast_Node_Index parse_branch(Parser *parser, Ast_Node_Index statement) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->nodes[statement].node_type == AST_NODE_TYPE_IF_STATEMENT);
 
-    Ast_Node_Index condition = parse_condition(parser);
+    Ast_Node_Index condition = parse_expression(parser);
     if (condition == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -459,14 +460,17 @@ static Ast_Node_Index parse_branch(Parser *parser, Ast_Node_Index statement) {
 }
 
 /**
- * Parses a condition: two expressions with a comparison operator between them, such as `x > 5`.
- * There is no type for the result of a comparison, so a comparison is only a condition.
+ * Parses an expression: a sum, optionally followed by a comparison operator and another sum, such
+ * as `x + 1 > y`. A comparison has the lowest precedence and does not chain, so in `a < b < c` the
+ * second operator is left for the caller, which expects the end of the line or `->` there. The
+ * result of a comparison is a `Bool`, so it is an expression like the others: the value of a
+ * variable or of a `return`, as well as the condition of an `if`.
  */
-static Ast_Node_Index parse_condition(Parser *parser) {
+static Ast_Node_Index parse_expression(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
-    Ast_Node_Index left = parse_expression(parser);
+    Ast_Node_Index left = parse_sum(parser);
     if (left == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -484,11 +488,12 @@ static Ast_Node_Index parse_condition(Parser *parser) {
     } else if (operator_token == TOKEN_TYPE_NOT_EQUALS) {
         operator = AST_COMPARISON_OPERATOR_NOT_EQUAL;
     } else if (operator_token != TOKEN_TYPE_EQUALS_EQUALS) {
-        return parse_fail(parser, STR("a comparison operator"));
+        // Not a comparison, so the expression is the sum alone.
+        return left;
     }
     parse_token_advance(parser);
 
-    Ast_Node_Index right = parse_expression(parser);
+    Ast_Node_Index right = parse_sum(parser);
     if (right == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -733,7 +738,7 @@ static bool parse_line_end_expect(Parser *parser) {
  * of a term bind tighter: `a + b * c` is `a + (b * c)`. The parser does not call itself, because
  * there are no parentheses yet.
  */
-static Ast_Node_Index parse_expression(Parser *parser) {
+static Ast_Node_Index parse_sum(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
@@ -816,8 +821,8 @@ static Ast_Node_Index parse_term(Parser *parser) {
 }
 
 /**
- * Parses a value: an integer literal, a string literal, or the name of something, such as a
- * parameter.
+ * Parses a value: an integer literal, a string literal, `true` or `false`, or the name of
+ * something, such as a parameter.
  */
 static Ast_Node_Index parse_operand(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -833,8 +838,32 @@ static Ast_Node_Index parse_operand(Parser *parser) {
     if (next == TOKEN_TYPE_STRING_LITERAL) {
         return parse_string_literal(parser);
     }
+    if (next == TOKEN_TYPE_KEYWORD_TRUE || next == TOKEN_TYPE_KEYWORD_FALSE) {
+        return parse_bool_literal(parser);
+    }
 
-    return parse_fail(parser, STR("an integer literal, a string literal or a name"));
+    return parse_fail(parser,
+                      STR("an integer literal, a string literal, 'true', 'false' or a name"));
+}
+
+static Ast_Node_Index parse_bool_literal(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Token_Type keyword = parse_token_current(parser)->token_type;
+    if (keyword != TOKEN_TYPE_KEYWORD_TRUE && keyword != TOKEN_TYPE_KEYWORD_FALSE) {
+        return parse_fail(parser, STR("'true' or 'false'"));
+    }
+
+    Ast_Node_Index node = parse_node_make(parser, AST_NODE_TYPE_BOOL_LITERAL);
+    if (node == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[node].payload.bool_literal.value = keyword == TOKEN_TYPE_KEYWORD_TRUE;
+    parse_token_advance(parser);
+
+    assert(parser->nodes[node].first_child == AST_NODE_INDEX_NONE);
+    return node;
 }
 
 static Ast_Node_Index parse_string_literal(Parser *parser) {

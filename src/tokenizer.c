@@ -323,6 +323,10 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                 token_type = TOKEN_TYPE_KEYWORD_ELSE;
             } else if (str_equals(text, STR("return"))) {
                 token_type = TOKEN_TYPE_KEYWORD_RETURN;
+            } else if (str_equals(text, STR("true"))) {
+                token_type = TOKEN_TYPE_KEYWORD_TRUE;
+            } else if (str_equals(text, STR("false"))) {
+                token_type = TOKEN_TYPE_KEYWORD_FALSE;
             }
 
             token_elements[result.tokens.length] = (Token){

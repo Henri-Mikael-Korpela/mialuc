@@ -73,6 +73,10 @@
                 {
                     "name": "keyword.control.conditional.mialu",
                     "match": "\\b(if|else)\\b"
+                },
+                {
+                    "name": "constant.language.boolean.mialu",
+                    "match": "\\b(true|false)\\b"
                 }
             ]
         }

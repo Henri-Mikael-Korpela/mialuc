@@ -428,6 +428,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_KEYWORD_ELSE:
             printf("KEYWORD_ELSE\n");
             break;
+        case TOKEN_TYPE_KEYWORD_FALSE:
+            printf("KEYWORD_FALSE\n");
+            break;
         case TOKEN_TYPE_KEYWORD_IF:
             printf("KEYWORD_IF\n");
             break;
@@ -436,6 +439,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
             break;
         case TOKEN_TYPE_KEYWORD_RETURN:
             printf("KEYWORD_RETURN\n");
+            break;
+        case TOKEN_TYPE_KEYWORD_TRUE:
+            printf("KEYWORD_TRUE\n");
             break;
         case TOKEN_TYPE_LESS:
             printf("LESS\n");
@@ -575,6 +581,16 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     case WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be used in arithmetic.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "
+                "must be Int, or both must be Bool for == and !=.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_CONDITION_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the condition at '%.*s' is not a Bool, and an Int is not "
+                "converted to one.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is reserved for the memory of the wasm module.\n",

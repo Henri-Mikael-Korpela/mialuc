@@ -38,8 +38,9 @@
      - A line may be indented by any number of spaces that is a multiple of 4. The grammar only
        has blocks nested up to the fourth level, see `block_1`. Deeper nesting is accepted by the
        compiler, up to 32 blocks inside each other, and the grammar needs more rules for it.
-     - The condition of an if statement must compare `Int` values, and a variable defined in a
-       block can only be used in that block. Both are checked after parsing.
+     - The condition of an if statement must be a `Bool`, so a number or a string is not one, and
+       the operands of a comparison must both be `Int`, or both `Bool` for `==` and `!=`. A
+       variable defined in a block can only be used in that block. All are checked after parsing.
 *)
 
 module = { blank_line | definition } , end_of_input ;
@@ -116,9 +117,9 @@ simple_statement_4 =
    last. The `->` ends the line, and what is indented below it is the block of the branch. *)
 branch_end = ws , "->" , ws , line_end ;
 
-(* A comparison of two expressions. It is not an expression itself: there is no value for true
-   and false yet, so a comparison is only the condition of a branch. *)
-condition = expression , ws , comparison_operator , ws , expression ;
+(* The condition of a branch is an expression. The compiler requires it to be a `Bool`, which the
+   grammar cannot tell, because a name or a comparison can be one. *)
+condition = expression ;
 
 comparison_operator = "==" | "!=" | "<=" | ">=" | "<" | ">" ;
 
@@ -141,17 +142,24 @@ assignment = name , ws , ( "+=" | "-=" | "*=" | "/=" ) , ws , expression ;
 (* `return` and its value must be separated, or `return0` would be one identifier. *)
 return_statement = "return" , required_space , expression ;
 
+(* A sum, or a comparison of two sums, which has the lowest precedence and does not chain: `a < b`
+   is an expression, `a < b < c` is not. A comparison has the type `Bool`. *)
+expression = sum , [ ws , comparison_operator , ws , sum ] ;
+
 (* Terms joined by `+` or `-`, which have the same precedence. The compiler reads `a - b + c` as
    `(a - b) + c`, which a grammar that only accepts or rejects text does not show. Spaces around
    the operator are optional. *)
-expression = term , { ws , ( "+" | "-" ) , ws , term } ;
+sum = term , { ws , ( "+" | "-" ) , ws , term } ;
 
 (* Operands joined by `*` or `/`, which have the same precedence and bind tighter than `+` and `-`:
    the compiler reads `a + b * c` as `a + (b * c)`, which the grammar does not show either. *)
 term = operand , { ws , ( "*" | "/" ) , ws , operand } ;
 
-(* An integer literal, a string literal, or the use of a name, such as a parameter or a constant. *)
-operand = integer_literal | string_literal | name ;
+(* An integer literal, a string literal, `true` or `false`, or the use of a name, such as a
+   parameter or a constant. *)
+operand = integer_literal | string_literal | bool_literal | name ;
+
+bool_literal = "true" | "false" ;
 
 (* Text between quotes, on one line. It is taken as it is: there are no escape sequences yet, so a
    backslash is not allowed, to keep it free for them. Any other character is, including a tab
@@ -166,7 +174,7 @@ any_character = ? any character ? ;
 (* Names. An identifier that is a reserved word is not a name. *)
 name = identifier - reserved_word ;
 
-reserved_word = "proc" | "return" | "if" | "else" ;
+reserved_word = "proc" | "return" | "if" | "else" | "true" | "false" ;
 
 identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 
