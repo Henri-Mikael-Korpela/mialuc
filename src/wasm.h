@@ -5,7 +5,45 @@
 
 #include <mialu/array_slice.h>
 #include <mialu/ast.h>
+#include <mialu/common_types.h>
 #include <mialu/str.h>
+
+// Constants of the WebAssembly binary format, see https://webassembly.github.io/spec/core/binary/.
+// They are shared by the writer in wasm.c and the reader in wasm-text.c, so that the two cannot
+// disagree. They are an `enum` rather than `static const`, because a file that uses only some of
+// them would get warnings about the rest.
+enum {
+    // The kind of thing that an export makes visible.
+    WASM_EXPORT_KIND_FUNCTION = 0x00,
+
+    // A 32-bit value takes 7 bits per byte, so at most 5 bytes in LEB128.
+    WASM_LEB128_32_BYTES_MAX = 5,
+    // A 64-bit value takes at most 10 bytes in LEB128.
+    WASM_LEB128_64_BYTES_MAX = 10,
+
+    // Instructions.
+    WASM_OPCODE_END = 0x0B,
+    WASM_OPCODE_I64_ADD = 0x7C,
+    WASM_OPCODE_I64_CONST = 0x42,
+    WASM_OPCODE_LOCAL_GET = 0x20,
+    WASM_OPCODE_RETURN = 0x0F,
+
+    // The ids of the kinds of section. Custom sections are never written, but may be read.
+    WASM_SECTION_ID_CODE = 10,
+    WASM_SECTION_ID_CUSTOM = 0,
+    WASM_SECTION_ID_EXPORT = 7,
+    WASM_SECTION_ID_FUNCTION = 3,
+    WASM_SECTION_ID_TYPE = 1,
+
+    // The marker of a function type, and the type of a 64-bit integer.
+    WASM_TYPE_FUNCTION = 0x60,
+    WASM_TYPE_I64 = 0x7E,
+};
+
+/**
+ * The first eight bytes of every module: "\0asm", and version 1 as a 32-bit little-endian number.
+ */
+extern byte const WASM_MODULE_HEADER[8];
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {

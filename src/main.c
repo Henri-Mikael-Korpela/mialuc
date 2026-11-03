@@ -13,6 +13,7 @@
 #include <mialu/parser.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
+#include <mialu/wasm-text.h>
 #include <mialu/wasm.h>
 
 enum {
@@ -26,6 +27,10 @@ enum {
     // is mostly a few bytes per token, so this is far more than a source of the maximum size is
     // likely to need.
     OUTPUT_SIZE_BYTES_MAX = 1024 * 1024,
+    // Bounds the text that the `wat` target writes. The text is allocated once at startup. The
+    // largest growth is `i64.add`, one byte of the module that becomes 12 bytes of text, so 16
+    // bytes of text per byte of the module is enough.
+    OUTPUT_TEXT_SIZE_BYTES_MAX = 16 * OUTPUT_SIZE_BYTES_MAX,
 };
 
 // Alphabetical, because nothing depends on the order. `COMMAND_MODE_INVALID` is the result of a
@@ -36,14 +41,24 @@ typedef enum {
     COMMAND_MODE_RUN,
 } Command_Mode;
 
+// Alphabetical, because nothing depends on the order. `COMMAND_TARGET_NONE` is for the modes
+// that do not write a program.
+typedef enum {
+    COMMAND_TARGET_NONE,
+    COMMAND_TARGET_WASM,
+    COMMAND_TARGET_WAT,
+} Command_Target;
+
 /**
- * What the command line asks for. `output_path` is NULL unless the mode is build. The paths are
- * the C strings of `argv`, because they are only handed to `fopen`.
+ * What the command line asks for. `output_path` is NULL, and `target` is `COMMAND_TARGET_NONE`,
+ * unless the mode is build. The paths are the C strings of `argv`, because they are only handed
+ * to `fopen`.
  */
 typedef struct {
     char const *source_path;
     char const *output_path;
     Command_Mode mode;
+    Command_Target target;
 } Command;
 
 /**
@@ -55,20 +70,24 @@ typedef struct {
     Array_Slice tokens;
     Array_Slice nodes;
     Array_Slice output;
+    Array_Slice output_text;
 } Buffers;
 
-static Command main_command_parse                    (Array_Slice args);
-static int32_t main_run_command                      (Command command, Buffers const *buffers);
-static void    main_run_command_print_tokens         (Array_Slice tokens);
-static Str     main_run_command_read_file            (char const *path, Array_Slice buffer);
-static void    main_run_command_report_parse_error   (char const *path, Str source,
-                                                      Array_Slice tokens,
-                                                      Parse_Result parse_result);
-static void    main_run_command_report_tokenize_error(char const *path, Str source,
-                                                      Tokenize_Result result);
-static void    main_run_command_report_wasm_error    (char const *path, Str source,
-                                                      Wasm_Build_Result result);
-static bool    main_run_command_write_file           (char const *path, Array_Slice bytes);
+static Command main_command_parse                     (Array_Slice args);
+static int32_t main_run_command                       (Command command, Buffers const *buffers);
+static int32_t main_run_command_build                 (Command command, Buffers const *buffers,
+                                                       Str source, Parse_Result parse_result);
+static void    main_run_command_print_tokens          (Array_Slice tokens);
+static Str     main_run_command_read_file             (char const *path, Array_Slice buffer);
+static void    main_run_command_report_parse_error    (char const *path, Str source,
+                                                       Array_Slice tokens,
+                                                       Parse_Result parse_result);
+static void    main_run_command_report_tokenize_error (char const *path, Str source,
+                                                       Tokenize_Result result);
+static void    main_run_command_report_wasm_error     (char const *path, Str source,
+                                                       Wasm_Build_Result result);
+static void    main_run_command_report_wasm_text_error(char const *path, Wasm_Text_Result result);
+static bool    main_run_command_write_file            (char const *path, Array_Slice bytes);
 
 /**
  * Has two modes. `run` reads a source file, tokenizes and parses it, and prints the tokens and
@@ -84,8 +103,9 @@ int main(int argc, char *argv[]) {
     if (command.mode == COMMAND_MODE_INVALID) {
         fprintf(stderr,
                 "Usage: %s run <source file>\n"
-                "       %s build --target wasm <output file> <source file>\n",
-                argv[0], argv[0]);
+                "       %s build --target wasm <output file> <source file>\n"
+                "       %s build --target wat <output file> <source file>\n",
+                argv[0], argv[0], argv[0]);
         return 2;
     }
 
@@ -98,16 +118,20 @@ int main(int argc, char *argv[]) {
         .nodes = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Ast_Node)), TOKEN_COUNT_MAX),
         .output = array_slice_make(malloc(OUTPUT_SIZE_BYTES_MAX * sizeof(byte)),
                                    OUTPUT_SIZE_BYTES_MAX),
+        .output_text = array_slice_make(malloc(OUTPUT_TEXT_SIZE_BYTES_MAX * sizeof(byte)),
+                                        OUTPUT_TEXT_SIZE_BYTES_MAX),
     };
 
     int32_t exit_code = 1;
     if (buffers.source.elements == NULL || buffers.tokens.elements == NULL ||
-        buffers.nodes.elements == NULL || buffers.output.elements == NULL) {
+        buffers.nodes.elements == NULL || buffers.output.elements == NULL ||
+        buffers.output_text.elements == NULL) {
         fprintf(stderr, "Out of memory.\n");
     } else {
         exit_code = main_run_command(command, &buffers);
     }
 
+    free(buffers.output_text.elements);
     free(buffers.output.elements);
     free(buffers.nodes.elements);
     free(buffers.tokens.elements);
@@ -120,6 +144,7 @@ int main(int argc, char *argv[]) {
  *
  *     mialuc run <source file>
  *     mialuc build --target wasm <output file> <source file>
+ *     mialuc build --target wat <output file> <source file>
  *
  * Returns a command with mode `COMMAND_MODE_INVALID` when it is anything else.
  */
@@ -133,6 +158,7 @@ static Command main_command_parse(Array_Slice args) {
         .source_path = NULL,
         .output_path = NULL,
         .mode = COMMAND_MODE_INVALID,
+        .target = COMMAND_TARGET_NONE,
     };
     if (args.length < 2) {
         return invalid;
@@ -146,25 +172,34 @@ static Command main_command_parse(Array_Slice args) {
             .source_path = argv[2],
             .output_path = NULL,
             .mode = COMMAND_MODE_RUN,
+            .target = COMMAND_TARGET_NONE,
         };
     }
 
     if (strcmp(argv[1], "build") == 0) {
-        // WebAssembly is the only target, but naming it keeps the command line the same when
-        // another one is added.
         if (args.length != 6) {
             return invalid;
         }
         if (strcmp(argv[2], "--target") != 0) {
             return invalid;
         }
-        if (strcmp(argv[3], "wasm") != 0) {
+
+        // `wat` is the WebAssembly text format, which is the same module as `wasm` in a form
+        // that a person can read.
+        Command_Target target = COMMAND_TARGET_NONE;
+        if (strcmp(argv[3], "wasm") == 0) {
+            target = COMMAND_TARGET_WASM;
+        } else if (strcmp(argv[3], "wat") == 0) {
+            target = COMMAND_TARGET_WAT;
+        } else {
             return invalid;
         }
+
         return (Command){
             .source_path = argv[5],
             .output_path = argv[4],
             .mode = COMMAND_MODE_BUILD,
+            .target = target,
         };
     }
 
@@ -208,22 +243,8 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     }
 
     switch (command.mode) {
-    case COMMAND_MODE_BUILD: {
-        assert(command.output_path != NULL);
-
-        Wasm_Build_Result build_result = wasm_build(parse_result.nodes, parse_result.root,
-                                                    buffers->output);
-        if (build_result.status != WASM_BUILD_STATUS_OK) {
-            main_run_command_report_wasm_error(path, source, build_result);
-            return 1;
-        }
-
-        if (main_run_command_write_file(command.output_path, build_result.bytes) == false) {
-            fprintf(stderr, "%s: cannot write file.\n", command.output_path);
-            return 1;
-        }
-        return 0;
-    }
+    case COMMAND_MODE_BUILD:
+        return main_run_command_build(command, buffers, source, parse_result);
     case COMMAND_MODE_INVALID:
         assert(false);
         return 1;
@@ -235,6 +256,51 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
 
     assert(false);
     return 1;
+}
+
+/**
+ * Builds the parsed program for the target of `command`, and writes it to the output file.
+ * Returns the exit code, which is 0 on success. The text is formatted from the binary module
+ * rather than written from the syntax tree, so that it always shows exactly what `wasm` writes.
+ */
+static int32_t main_run_command_build(Command command, Buffers const *buffers, Str source,
+                                      Parse_Result parse_result) {
+    assert(command.mode == COMMAND_MODE_BUILD);
+    assert(command.output_path != NULL);
+    assert(parse_result.status == PARSE_STATUS_OK);
+
+    char const *path = command.source_path;
+    Wasm_Build_Result build_result = wasm_build(parse_result.nodes, parse_result.root,
+                                                buffers->output);
+    if (build_result.status != WASM_BUILD_STATUS_OK) {
+        main_run_command_report_wasm_error(path, source, build_result);
+        return 1;
+    }
+
+    Array_Slice output = build_result.bytes;
+    switch (command.target) {
+    case COMMAND_TARGET_NONE:
+        assert(false);
+        return 1;
+    case COMMAND_TARGET_WASM:
+        break;
+    case COMMAND_TARGET_WAT: {
+        Wasm_Text_Result text_result = wasm_text_format(build_result.bytes, buffers->output_text);
+        if (text_result.status != WASM_TEXT_STATUS_OK) {
+            main_run_command_report_wasm_text_error(path, text_result);
+            return 1;
+        }
+        // The text is the filled start of the text buffer, which is writable, unlike the `Str`.
+        output = array_slice_make(buffers->output_text.elements, text_result.text.length);
+        break;
+    }
+    }
+
+    if (main_run_command_write_file(command.output_path, output) == false) {
+        fprintf(stderr, "%s: cannot write file.\n", command.output_path);
+        return 1;
+    }
+    return 0;
 }
 
 /**
@@ -450,6 +516,33 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     case WASM_BUILD_STATUS_TYPE_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: type '%.*s' is not supported by the wasm target.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    }
+}
+
+static void main_run_command_report_wasm_text_error(char const *path, Wasm_Text_Result result) {
+    assert(path != NULL);
+    assert(result.status != WASM_TEXT_STATUS_OK);
+
+    // The formatter reads what `wasm_build` wrote, so a module that it cannot format is a bug in
+    // the compiler rather than in the program, and the message says so.
+    switch (result.status) {
+    case WASM_TEXT_STATUS_MODULE_MALFORMED:
+        fprintf(stderr, "%s: internal error: the WebAssembly module is malformed at byte %zu.\n",
+                path, result.error_offset);
+        break;
+    case WASM_TEXT_STATUS_MODULE_UNSUPPORTED:
+        fprintf(stderr,
+                "%s: internal error: the WebAssembly module cannot be formatted as text at byte "
+                "%zu.\n",
+                path, result.error_offset);
+        break;
+    case WASM_TEXT_STATUS_OK:
+        assert(false);
+        break;
+    case WASM_TEXT_STATUS_OUTPUT_TOO_LARGE:
+        fprintf(stderr, "%s: the WebAssembly text is larger than %d bytes.\n", path,
+                OUTPUT_TEXT_SIZE_BYTES_MAX);
         break;
     }
 }

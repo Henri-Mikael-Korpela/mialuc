@@ -9,19 +9,22 @@ cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_C_COMPILER=gcc
 cmake --build build
 build/mialuc.exe run <source file>
 build/mialuc.exe build --target wasm <output file> <source file>
+build/mialuc.exe build --target wat <output file> <source file>
 ```
 
-`run` prints the tokens and the syntax tree of a source file. `build` writes a program for a target; `wasm` is the only target for now. See [build-wasm.ps1](build-wasm.ps1) and [run.ps1](run.ps1).
+`run` prints the tokens and the syntax tree of a source file. `build` writes a program for a target: `wasm` is a WebAssembly binary module, and `wat` is the same module in the WebAssembly text format. See [build-wasm.ps1](build-wasm.ps1) and [run.ps1](run.ps1).
 
-## WebAssembly test site
+## Playground and WebAssembly test site
 
-`build-wasm.ps1` writes `tests/wasm/sum.wasm`. To call it from a browser:
+Build the compiler first, for example with `build-wasm.ps1`, which also writes `tests/wasm/sum.wasm`. Then start the server:
 
 ```
 python tests/wasm/serve.py
 ```
 
-Then open http://localhost:8008/. See [tests/wasm](tests/wasm).
+Open http://localhost:8008/playground.html for the playground: Mialu on the left, compiled as you type, and JavaScript below it that calls the procedures, such as `sum(10, 15)`. Run it with Ctrl+Enter; the console output and the WebAssembly text are on the right. The server compiles with `build/mialuc.exe`.
+
+http://localhost:8008/ calls `sum.wasm` directly. See [tests/wasm](tests/wasm).
 
 ## Grammar
 

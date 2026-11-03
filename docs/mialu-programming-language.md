@@ -67,3 +67,5 @@ The target rejects a program that the parser accepts when:
 - a name in an expression is not a parameter of the procedure,
 - two parameters, or two definitions, have the same name,
 - a procedure with no return type has a `return` statement.
+
+The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.

@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Mialu Playground</title>
+    <style>
+        :root {
+            --background: #1e1e1e;
+            --background-panel: #252526;
+            --border: #3c3c3c;
+            --text: #d4d4d4;
+            --text-muted: #858585;
+            --accent: #0e639c;
+            --accent-hover: #1177bb;
+            --error: #f48771;
+            --warning: #cca700;
+            --font-code: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+        }
+
+        * { box-sizing: border-box; }
+
+        html, body { height: 100%; margin: 0; }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            background: var(--background);
+            color: var(--text);
+            font: 14px system-ui, sans-serif;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 8px 16px;
+            background: var(--background-panel);
+            border-bottom: 1px solid var(--border);
+        }
+
+        header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+
+        button {
+            padding: 4px 16px;
+            border: 0;
+            border-radius: 2px;
+            background: var(--accent);
+            color: white;
+            font: inherit;
+            cursor: pointer;
+        }
+
+        button:hover { background: var(--accent-hover); }
+
+        .hint, #status { color: var(--text-muted); font-size: 12px; }
+        #status.is-error { color: var(--error); }
+
+        main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            min-height: 0;
+        }
+
+        .column {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            min-height: 0;
+        }
+
+        .column + .column { border-left: 1px solid var(--border); }
+
+        .panel {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .panel + .panel { border-top: 1px solid var(--border); }
+
+        /* The program is what one works on most, so it gets the most room. */
+        #panel-mialu { flex: 3; }
+        #panel-javascript { flex: 2; }
+        #panel-console { flex: 2; }
+        #panel-wat { flex: 3; }
+
+        .panel-title {
+            padding: 6px 12px;
+            background: var(--background-panel);
+            color: var(--text-muted);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        /*
+         * An editor is a transparent text area over a highlighted copy of its text. The two must
+         * lay out the text identically, so they share every property that affects it.
+         */
+        .editor {
+            flex: 1;
+            display: flex;
+            min-height: 0;
+            font: 14px/1.5 var(--font-code);
+        }
+
+        .gutter {
+            min-width: 4ch;
+            padding: 8px 8px 8px 0;
+            overflow: hidden;
+            color: var(--text-muted);
+            text-align: right;
+            white-space: pre;
+            user-select: none;
+        }
+
+        .code { position: relative; flex: 1; min-width: 0; }
+
+        .code pre, .code textarea {
+            position: absolute;
+            inset: 0;
+            margin: 0;
+            padding: 8px 12px;
+            border: 0;
+            font: inherit;
+            white-space: pre;
+            tab-size: 4;
+            overflow: auto;
+        }
+
+        .code pre { overflow: hidden; pointer-events: none; color: var(--text); }
+
+        .code textarea {
+            background: transparent;
+            color: transparent;
+            caret-color: white;
+            outline: none;
+            resize: none;
+        }
+
+        .code textarea::selection { background: rgba(38, 79, 120, 0.9); }
+
+        .editor.is-stale pre { opacity: 0.4; }
+
+        .token-comment { color: #6a9955; }
+        .token-definition { color: #dcdcaa; }
+        .token-instruction { color: #9cdcfe; }
+        .token-keyword { color: #569cd6; }
+        .token-number { color: #b5cea8; }
+        .token-string { color: #ce9178; }
+        .token-type { color: #4ec9b0; }
+
+        .compile-error {
+            margin: 0;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+            color: var(--error);
+            font: 13px/1.5 var(--font-code);
+            white-space: pre-wrap;
+        }
+
+        .compile-error:empty { display: none; }
+
+        #console {
+            flex: 1;
+            margin: 0;
+            padding: 4px 0;
+            overflow: auto;
+            font: 13px/1.5 var(--font-code);
+        }
+
+        .console-line {
+            padding: 1px 12px;
+            border-bottom: 1px solid #2a2a2a;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .console-line.is-error { color: var(--error); }
+        .console-line.is-warn { color: var(--warning); }
+        .console-line.is-result { color: var(--text-muted); }
+        .console-line.is-result::before { content: "\2190  "; }
+        .console-line.is-info { color: #75beff; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Mialu Playground</h1>
+        <button id="run" type="button">Run</button>
+        <span class="hint">Ctrl+Enter</span>
+        <span id="status"></span>
+    </header>
+
+    <main>
+        <div class="column">
+            <section class="panel" id="panel-mialu">
+                <div class="panel-title">Mialu</div>
+                <div class="editor" id="editor-mialu"></div>
+            </section>
+            <section class="panel" id="panel-javascript">
+                <div class="panel-title">JavaScript</div>
+                <div class="editor" id="editor-javascript"></div>
+            </section>
+        </div>
+        <div class="column">
+            <section class="panel" id="panel-console">
+                <div class="panel-title">Console</div>
+                <div id="console"></div>
+            </section>
+            <section class="panel" id="panel-wat">
+                <div class="panel-title">WebAssembly text</div>
+                <pre class="compile-error" id="compile-error"></pre>
+                <div class="editor" id="editor-wat"></div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+        "use strict";
+
+        const MIALU_EXAMPLE = [
+            "sum :: proc(a: Int, b: Int) Int ->",
+            "    return a + b",
+            "",
+        ].join("\n");
+
+        const JAVASCRIPT_EXAMPLE = [
+            "// The procedures of the Mialu program are in scope, and in `exports`.",
+            "// Int is a 64-bit integer, so it comes back as a BigInt.",
+            "sum(10, 15)",
+            "",
+        ].join("\n");
+
+        // Waits this long after the last key press before compiling, so that typing does not send
+        // a request per key.
+        const COMPILE_DELAY_MS = 250;
+
+        // Mialu indents with exactly 4 spaces, so the editors do the same.
+        const INDENTATION = "    ";
+
+        /*
+         * Each highlighter is a list of rules, tried in order at every position, so that for
+         * example a comment wins over the words inside it. No rule may match the empty string.
+         */
+        const HIGHLIGHT_RULES = {
+            mialu: [
+                ["keyword", /\b(?:proc|return)\b/],
+                ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
+                ["type", /\b[A-Z]\w*\b/],
+                ["number", /\b\d+\b/],
+            ],
+            javascript: [
+                ["comment", /\/\/.*|\/\*[\s\S]*?\*\//],
+                ["string", /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\[\s\S])*`/],
+                ["keyword", new RegExp("\\b(?:async|await|break|case|catch|class|const|"
+                    + "continue|default|do|else|false|finally|for|function|if|in|instanceof|let|"
+                    + "new|null|of|return|switch|this|throw|true|try|typeof|undefined|var|"
+                    + "while)\\b")],
+                ["number", /\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?n?\b/],
+                ["definition", /\b[A-Za-z_$][\w$]*(?=\s*\()/],
+            ],
+            wat: [
+                ["comment", /\(;[\s\S]*?;\)|;;.*/],
+                ["string", /"(?:[^"\\\n]|\\.)*"/],
+                ["keyword", /(?<=\()(?:module|type|func|param|result|local|export|import)\b/],
+                ["instruction", /\b[a-z][a-z0-9]*\.[a-z0-9_]+\b|\b(?:return|end|call|drop)\b/],
+                ["type", /\b(?:i32|i64|f32|f64)\b/],
+                ["number", /-?\b\d+\b/],
+            ],
+        };
+
+        // The rules of a language joined into one expression, with one capture group per rule.
+        const HIGHLIGHT_EXPRESSIONS = Object.fromEntries(Object.entries(HIGHLIGHT_RULES).map(
+            ([language, rules]) => [language, new RegExp(
+                rules.map(([, expression]) => `(${expression.source})`).join("|"), "g")]));
+
+        function escapeHtml(text) {
+            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        function highlight(text, language) {
+            const rules = HIGHLIGHT_RULES[language];
+            const expression = HIGHLIGHT_EXPRESSIONS[language];
+            let html = "";
+            let end = 0;
+            for (const match of text.matchAll(expression)) {
+                const ruleIndex = match.slice(1).findIndex((group) => group !== undefined);
+                html += escapeHtml(text.slice(end, match.index));
+                html += `<span class="token-${rules[ruleIndex][0]}">${escapeHtml(match[0])}</span>`;
+                end = match.index + match[0].length;
+            }
+            return html + escapeHtml(text.slice(end));
+        }
+
+        /**
+         * Turns `container` into an editor with line numbers and highlighting. Returns the text
+         * area, whose `value` is the text. A read-only editor can still be selected and copied.
+         */
+        function createEditor(container, language, text, isReadOnly) {
+            const gutter = document.createElement("div");
+            gutter.className = "gutter";
+            const code = document.createElement("div");
+            code.className = "code";
+            const pre = document.createElement("pre");
+            pre.setAttribute("aria-hidden", "true");
+            const textarea = document.createElement("textarea");
+            textarea.spellcheck = false;
+            textarea.readOnly = isReadOnly;
+            textarea.setAttribute("aria-label", container.closest(".panel")
+                .querySelector(".panel-title").textContent);
+            code.append(pre, textarea);
+            container.append(gutter, code);
+
+            function render() {
+                // The last line of a text area can be empty and still take room, which the copy
+                // only does with something after it.
+                pre.innerHTML = highlight(textarea.value, language) + "\n";
+                const lineCount = textarea.value.split("\n").length;
+                gutter.textContent = Array.from({ length: lineCount }, (_, i) => i + 1).join("\n");
+                syncScroll();
+            }
+
+            function syncScroll() {
+                pre.scrollTop = textarea.scrollTop;
+                pre.scrollLeft = textarea.scrollLeft;
+                gutter.scrollTop = textarea.scrollTop;
+            }
+
+            textarea.addEventListener("input", render);
+            textarea.addEventListener("scroll", syncScroll);
+            if (isReadOnly === false) {
+                textarea.addEventListener("keydown", (event) => handleEditorKey(event, textarea));
+            }
+
+            textarea.value = text;
+            // Assigning `value` does not fire `input`, so code that sets the text calls this.
+            textarea.render = render;
+            render();
+            return textarea;
+        }
+
+        /**
+         * Makes Tab indent and Enter keep the indentation, as code editors do. Inserts with
+         * `execCommand`, because it is the only way that keeps the browser's undo history.
+         */
+        function handleEditorKey(event, textarea) {
+            if (event.key === "Tab" && event.shiftKey === false) {
+                event.preventDefault();
+                document.execCommand("insertText", false, INDENTATION);
+                return;
+            }
+            if (event.key === "Enter" && event.ctrlKey === false && event.metaKey === false) {
+                event.preventDefault();
+                const lineStart = textarea.value.lastIndexOf("\n", textarea.selectionStart - 1) + 1;
+                const line = textarea.value.slice(lineStart, textarea.selectionStart);
+                let indentation = line.match(/^ */)[0];
+                // A Mialu procedure body, or a JavaScript block, starts on the next line.
+                if (/(->|\{)\s*$/.test(line)) {
+                    indentation += INDENTATION;
+                }
+                document.execCommand("insertText", false, "\n" + indentation);
+            }
+        }
+
+        const runButton = document.getElementById("run");
+        const statusLabel = document.getElementById("status");
+        const consoleOutput = document.getElementById("console");
+        const compileError = document.getElementById("compile-error");
+        const watContainer = document.getElementById("editor-wat");
+
+        const mialuEditor = createEditor(document.getElementById("editor-mialu"), "mialu",
+            MIALU_EXAMPLE, false);
+        const javascriptEditor = createEditor(document.getElementById("editor-javascript"),
+            "javascript", JAVASCRIPT_EXAMPLE, false);
+        const watEditor = createEditor(watContainer, "wat", "", true);
+
+        // The result of the newest compile, a promise of `{ bytes, error }`. Running waits for it,
+        // so that it always runs the program that is in the editor.
+        let compilation = null;
+        // Counts compiles, so that an answer that arrives after a newer request is ignored.
+        let compileCount = 0;
+        let compileTimer = 0;
+
+        function compile() {
+            compileCount += 1;
+            const compileIndex = compileCount;
+            statusLabel.textContent = "Compiling…";
+            statusLabel.classList.remove("is-error");
+
+            compilation = requestCompile(mialuEditor.value).then((answer) => {
+                if (compileIndex === compileCount) {
+                    showCompilation(answer);
+                }
+                return answer;
+            });
+            return compilation;
+        }
+
+        async function requestCompile(source) {
+            try {
+                const response = await fetch("/compile", { method: "POST", body: source });
+                if (response.ok === false) {
+                    return { bytes: null, wat: null, error: `The server answered ${response.status}.` };
+                }
+                const answer = await response.json();
+                if (answer.error !== null) {
+                    return { bytes: null, wat: null, error: answer.error };
+                }
+                const bytes = Uint8Array.from(atob(answer.wasm), (character) => character.charCodeAt(0));
+                return { bytes, wat: answer.wat, error: null };
+            } catch (error) {
+                return {
+                    bytes: null,
+                    wat: null,
+                    error: `Cannot reach the compiler. Start it with: python tests/wasm/serve.py\n${error}`,
+                };
+            }
+        }
+
+        function showCompilation(answer) {
+            compileError.textContent = answer.error ?? "";
+            if (answer.error === null) {
+                watEditor.value = answer.wat;
+                watEditor.render();
+                statusLabel.textContent = `${answer.bytes.length} bytes of WebAssembly`;
+            } else {
+                statusLabel.textContent = "Compile error";
+                statusLabel.classList.add("is-error");
+            }
+            // The text of the last good module stays, dimmed, so that the view does not jump
+            // while a line is half typed.
+            watContainer.classList.toggle("is-stale", answer.error !== null);
+        }
+
+        mialuEditor.addEventListener("input", () => {
+            clearTimeout(compileTimer);
+            compileTimer = setTimeout(() => {
+                compileTimer = 0;
+                compile();
+            }, COMPILE_DELAY_MS);
+        });
+
+        /*
+         * The JavaScript runs in a worker, so that an endless loop can be stopped without
+         * freezing the page. The worker is made from this function, so that it is checked and
+         * highlighted as code like the rest of the page. It never runs on the page itself.
+         */
+        function workerMain() {
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+
+            // Mialu's `Int` is a 64-bit integer, which WebAssembly takes from JavaScript only as
+            // a BigInt. Whole numbers are converted, so that `sum(10, 15)` works as written.
+            function toWasmArgument(argument) {
+                if (typeof argument === "number" && Number.isInteger(argument)) {
+                    return BigInt(argument);
+                }
+                return argument;
+            }
+
+            function wrapExport(name, exported) {
+                const wrapped = (...args) => exported(...args.map(toWasmArgument));
+                Object.defineProperty(wrapped, "name", { value: name });
+                return wrapped;
+            }
+
+            // A name can be a parameter if it is an identifier and not a reserved word, which the
+            // engine knows best.
+            function isParameterName(name) {
+                try {
+                    new Function(name, "");
+                    return true;
+                } catch {
+                    return false;
+                }
+            }
+
+            /*
+             * Shows the value of the code like a console does when it is an expression, or ends
+             * in one. Tries the code as one expression, then with its last line as the value,
+             * then as plain statements, and takes the first that is valid JavaScript.
+             */
+            function compileCode(parameterNames, code) {
+                const lines = code.replace(/\s+$/, "").split("\n");
+                const lastLine = lines.pop().replace(/;\s*$/, "");
+                const candidates = [
+                    `return (\n${code}\n);`,
+                    `${lines.join("\n")}\nreturn (\n${lastLine}\n);`,
+                    code,
+                ];
+                for (const candidate of candidates.slice(0, -1)) {
+                    try {
+                        return new AsyncFunction(...parameterNames, candidate);
+                    } catch {
+                        // Not an expression, so the next form is tried.
+                    }
+                }
+                return new AsyncFunction(...parameterNames, candidates[candidates.length - 1]);
+            }
+
+            function format(value, depth, seen) {
+                switch (typeof value) {
+                case "bigint":
+                    return `${value}n`;
+                case "function":
+                    return `[Function: ${value.name || "(anonymous)"}]`;
+                case "string":
+                    return depth === 0 ? value : JSON.stringify(value);
+                case "object":
+                    break;
+                default:
+                    return String(value);
+                }
+                if (value === null) {
+                    return "null";
+                }
+                if (value instanceof Error) {
+                    return `${value.name}: ${value.message}`;
+                }
+                // Objects can refer to themselves, and can be deep, so both are bounded.
+                if (seen.has(value)) {
+                    return "[Circular]";
+                }
+                if (depth > 3) {
+                    return Array.isArray(value) ? "[Array]" : "[Object]";
+                }
+                seen.add(value);
+                let text = "";
+                if (Array.isArray(value)) {
+                    text = `[${value.map((item) => format(item, depth + 1, seen)).join(", ")}]`;
+                } else {
+                    const entries = Object.entries(value)
+                        .map(([key, item]) => `${key}: ${format(item, depth + 1, seen)}`);
+                    text = entries.length === 0 ? "{}" : `{ ${entries.join(", ")} }`;
+                }
+                seen.delete(value);
+                return text;
+            }
+
+            function send(kind, values) {
+                const text = values.map((value) => format(value, 0, new Set())).join(" ");
+                self.postMessage({ kind, text });
+            }
+
+            const playgroundConsole = {
+                debug: (...values) => send("log", values),
+                error: (...values) => send("error", values),
+                info: (...values) => send("info", values),
+                log: (...values) => send("log", values),
+                warn: (...values) => send("warn", values),
+            };
+
+            self.onmessage = async (event) => {
+                const { bytes, code } = event.data;
+                try {
+                    const { instance } = await WebAssembly.instantiate(bytes);
+                    const exports = {};
+                    for (const [name, exported] of Object.entries(instance.exports)) {
+                        if (typeof exported === "function") {
+                            exports[name] = wrapExport(name, exported);
+                        }
+                    }
+
+                    const names = Object.keys(exports).filter(isParameterName);
+                    const run = compileCode([...names, "console", "exports"], code);
+                    const result = await run(...names.map((name) => exports[name]),
+                        playgroundConsole, exports);
+                    if (result !== undefined) {
+                        send("result", [result]);
+                    }
+                } catch (error) {
+                    send("error", [error]);
+                }
+                self.postMessage({ kind: "done" });
+            };
+        }
+
+        const workerUrl = URL.createObjectURL(new Blob([`(${workerMain})();`],
+            { type: "text/javascript" }));
+        let worker = null;
+
+        function print(kind, text) {
+            const line = document.createElement("div");
+            line.className = `console-line is-${kind}`;
+            line.textContent = text;
+            consoleOutput.append(line);
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        }
+
+        function stop() {
+            if (worker !== null) {
+                worker.terminate();
+                worker = null;
+            }
+            runButton.textContent = "Run";
+        }
+
+        async function run() {
+            stop();
+            // A change that is still waiting for its compile is compiled now instead.
+            if (compileTimer !== 0) {
+                clearTimeout(compileTimer);
+                compileTimer = 0;
+                compile();
+            }
+            const answer = await compilation;
+            // Another run may have started while this one waited, and only the last one counts.
+            stop();
+            consoleOutput.replaceChildren();
+            if (answer.error !== null) {
+                print("error", answer.error);
+                return;
+            }
+
+            const runningWorker = new Worker(workerUrl);
+            worker = runningWorker;
+            runButton.textContent = "Stop";
+            runningWorker.onmessage = (event) => {
+                if (event.data.kind === "done") {
+                    if (worker === runningWorker) {
+                        stop();
+                    }
+                    return;
+                }
+                print(event.data.kind, event.data.text);
+            };
+            runningWorker.onerror = (event) => {
+                print("error", event.message);
+                if (worker === runningWorker) {
+                    stop();
+                }
+            };
+            runningWorker.postMessage({ bytes: answer.bytes, code: javascriptEditor.value });
+        }
+
+        runButton.addEventListener("click", () => {
+            if (worker !== null) {
+                print("warn", "Stopped.");
+                stop();
+            } else {
+                run();
+            }
+        });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                run();
+            }
+        });
+
+        compile();
+        run();
+    </script>
+</body>
+</html>

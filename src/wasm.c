@@ -6,34 +6,9 @@
 #include <mialu/common_types.h>
 #include <mialu/wasm.h>
 
-// Constants of the WebAssembly binary format, see https://webassembly.github.io/spec/core/binary/.
-// They are typed `byte`, because that is what is written, so no conversion is needed.
-
-// The kind of thing that an export makes visible.
-static byte const WASM_EXPORT_KIND_FUNCTION = 0x00;
-
-// Instructions.
-static byte const WASM_OPCODE_END = 0x0B;
-static byte const WASM_OPCODE_I64_ADD = 0x7C;
-static byte const WASM_OPCODE_I64_CONST = 0x42;
-static byte const WASM_OPCODE_LOCAL_GET = 0x20;
-static byte const WASM_OPCODE_RETURN = 0x0F;
-
-// The ids of the kinds of section that are written.
-static byte const WASM_SECTION_ID_CODE = 10;
-static byte const WASM_SECTION_ID_EXPORT = 7;
-static byte const WASM_SECTION_ID_FUNCTION = 3;
-static byte const WASM_SECTION_ID_TYPE = 1;
-
-// The marker of a function type, and the type of a 64-bit integer.
-static byte const WASM_TYPE_FUNCTION = 0x60;
-static byte const WASM_TYPE_I64 = 0x7E;
+// The constants of the binary format are in wasm.h, because wasm-text.c reads what this writes.
 
 enum {
-    // A 32-bit value takes 7 bits per byte, so at most 5 bytes in LEB128.
-    WASM_LEB128_32_BYTES_MAX = 5,
-    // A 64-bit value takes at most 10 bytes in LEB128.
-    WASM_LEB128_64_BYTES_MAX = 10,
     // The deepest expression that can be written. The writer keeps the path from the root of the
     // expression in a fixed array instead of recursing. Left associative operators nest to the
     // left, so `a + b + c + ...` is as deep as it has operators. A longer chain is rejected.
@@ -43,8 +18,7 @@ enum {
 // Means "no such parameter". It is not zero, because zero is the index of the first parameter.
 static uint32_t const WASM_PARAMETER_INDEX_NONE = UINT32_MAX;
 
-// The first eight bytes of every module: "\0asm", and version 1 as a 32-bit little-endian number.
-static byte const WASM_MODULE_HEADER[8] = {0x00, 'a', 's', 'm', 0x01, 0x00, 0x00, 0x00};
+byte const WASM_MODULE_HEADER[8] = {0x00, 'a', 's', 'm', 0x01, 0x00, 0x00, 0x00};
 
 /**
  * Where the module is written. A write that does not fit sets `is_overflowed` and the rest of the
