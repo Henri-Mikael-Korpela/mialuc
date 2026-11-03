@@ -542,6 +542,12 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
         // The opcode is a byte of the module rather than an enumeration, so any value can come,
         // and the default case is the ones that the formatter does not know.
         switch (opcode) {
+        case WASM_OPCODE_CALL: {
+            uint32_t function_index = wasm_text_read_unsigned_32(formatter);
+            wasm_text_write_instruction(&formatter->writer, STR("call "));
+            wasm_text_write_unsigned(&formatter->writer, function_index);
+            break;
+        }
         case WASM_OPCODE_END:
             // No instruction that opens a block is supported, so an `end` must close the body.
             if (formatter->offset != formatter->limit) {

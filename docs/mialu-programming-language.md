@@ -82,13 +82,40 @@ procedure_name :: proc() ->
 
 A procedure body consists of a series of statements, which can include variable declarations, expressions, and control flow statements. The procedure body is indented to indicate its scope.
 
+## Scope resolution
+
+Every name that is used refers to something that is declared, and the compiler finds out what before the program is built for a target. This is called scope resolution. There are two scopes:
+
+- The module scope has the name of every constant that is defined in the file, such as the procedures and the strings.
+- Procedure's parameters live in a local scope nested inside it.
+
+A name is looked up in the local scope of the procedure that uses it first, and then in the module scope. So a procedure can use a constant that is defined outside of it:
+
+```
+NAME :: "Bob"
+
+get_name :: proc() Str ->
+    return NAME
+```
+
+The order of the definitions does not matter, so a procedure can use a constant that is defined below it.
+
+There is no shadowing of names so a name cannot be declared twice in the same scope. A name cannot be declared again in a nested scope either, where the first declaration is visible. A name has one meaning wherever it can be used. The compiler rejects a program when:
+
+- two constants have the same name,
+- two parameters of a procedure have the same name,
+- a parameter has the name of a constant, including the constant that is the procedure itself,
+- a name in an expression is neither a parameter of the procedure nor a constant.
+
+Scope resolution is about names only. Whether the value of a name has the right type is checked separately for the target, see below.
+
 ## Compilation targets
 
-The compiler has two modes: `run` prints the tokens and the syntax tree of a program, and `build --target <target> <output file> <source file>` writes a program for a target.
+The compiler has two modes: `run` prints the tokens and the syntax tree of a program, after which it resolves the names, and `build --target <target> <output file> <source file>` writes a program for a target.
 
 ### WebAssembly
 
-The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string. `Int` and `Str` are the only types that the target supports.
+The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. `Int` and `Str` are the only types that the target supports.
 
 `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition wraps around on overflow.
 
@@ -104,12 +131,13 @@ A module has a memory only when the program has a string literal. A procedure ca
 The target rejects a program that the parser accepts when:
 
 - a type is not `Int` or `Str`,
-- a name in an expression is not a parameter of the procedure,
-- two parameters, or two definitions, have the same name,
+- a name in an expression is a procedure, which is not a value that the target can use yet,
 - a definition is called `memory`,
 - a procedure with no return type has a `return` statement,
 - the value that a procedure returns is not of its return type,
 - an operand of an addition is not an `Int`.
+
+The target is built from the result of scope resolution, so it also rejects every program that scope resolution rejects.
 
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 

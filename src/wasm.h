@@ -6,6 +6,7 @@
 #include <mialu/array_slice.h>
 #include <mialu/ast.h>
 #include <mialu/common_types.h>
+#include <mialu/semantic.h>
 #include <mialu/str.h>
 
 // Constants of the WebAssembly binary format, see https://webassembly.github.io/spec/core/binary/.
@@ -32,6 +33,7 @@ enum {
     WASM_MEMORY_PAGE_SIZE_BYTES = 65536,
 
     // Instructions.
+    WASM_OPCODE_CALL = 0x10,
     WASM_OPCODE_END = 0x0B,
     WASM_OPCODE_I32_CONST = 0x41,
     WASM_OPCODE_I64_ADD = 0x7C,
@@ -62,13 +64,11 @@ extern byte const WASM_MODULE_HEADER[8];
 // Alphabetical, because nothing depends on the order.
 typedef enum {
     WASM_BUILD_STATUS_ADDITION_OPERAND_TYPE_INVALID,
-    WASM_BUILD_STATUS_DEFINITION_NAME_DUPLICATE,
     WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED,
     WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP,
-    WASM_BUILD_STATUS_IDENTIFIER_UNKNOWN,
+    WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE,
     WASM_BUILD_STATUS_OK,
     WASM_BUILD_STATUS_OUTPUT_TOO_LARGE,
-    WASM_BUILD_STATUS_PARAMETER_NAME_DUPLICATE,
     WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH,
     WASM_BUILD_STATUS_RETURN_TYPE_MISSING,
     WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
@@ -89,25 +89,29 @@ typedef struct {
 
 /**
  * Builds a WebAssembly binary module from the syntax tree below `root`, which must be the
- * `AST_NODE_TYPE_MODULE` node of a successful `parse`. `nodes` holds `Ast_Node` elements. The
- * module is written to `output_buffer`, which holds `byte` elements.
+ * `AST_NODE_TYPE_MODULE` node of a successful `parse`. `nodes` holds `Ast_Node` elements, and
+ * `bindings` holds the `Semantic_Binding` elements that `semantic_analyze` made for the same tree,
+ * so every name in the tree is known to stand for a parameter or a constant. The module is written
+ * to `output_buffer`, which holds `byte` elements.
  *
  * Every definition becomes a function that the module exports under the name of the definition.
  * A definition whose value is a string literal becomes a function without parameters that returns
- * the string.
+ * the string. A use of such a constant in a procedure is a call of that function, so the constant
+ * can be used above its definition as well.
  *
  * `Int` is a 64-bit integer (`i64`), so callers from JavaScript pass and receive `BigInt`.
  * `Str` is two 32-bit integers (`i32`), the address of its first byte in memory and its length
- * in bytes, which are UTF-8, so a parameter of that type is two WebAssembly parameters, and a result of that type
- * is two WebAssembly results, which JavaScript receives as an array. The bytes of the string
- * literals are in the first bytes of the memory, which the module exports as `memory`. The module
- * has no memory, and so no export of that name, when the program has no string literal. A
- * definition cannot be called `memory`, because the name is taken.
+ * in bytes, which are UTF-8. So a parameter of that type is two WebAssembly parameters, and a
+ * result of that type is two WebAssembly results, which JavaScript receives as an array. The bytes
+ * of the string literals are in the first bytes of the memory, which the module exports as
+ * `memory`. The module has no memory, and so no export of that name, when the program has no
+ * string literal. A definition cannot be called `memory`, because the name is taken.
  *
  * The syntax tree can be valid for the parser but not for the target, for example when it uses a
- * name that no parameter has. Such trees are rejected with a status other than
+ * procedure as a value. Such trees are rejected with a status other than
  * `WASM_BUILD_STATUS_OK`.
  */
-Wasm_Build_Result wasm_build(Array_Slice nodes, Ast_Node_Index root, Array_Slice output_buffer);
+Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,
+                             Array_Slice output_buffer);
 
 #endif

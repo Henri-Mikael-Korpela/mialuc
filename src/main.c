@@ -11,6 +11,7 @@
 #include <mialu/ast.h>
 #include <mialu/common_types.h>
 #include <mialu/parser.h>
+#include <mialu/semantic.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
 #include <mialu/wasm-text.h>
@@ -69,31 +70,38 @@ typedef struct {
     Array_Slice source;
     Array_Slice tokens;
     Array_Slice nodes;
+    Array_Slice bindings;
     Array_Slice output;
     Array_Slice output_text;
 } Buffers;
 
-static Command main_command_parse                     (Array_Slice args);
-static int32_t main_run_command                       (Command command, Buffers const *buffers);
-static int32_t main_run_command_build                 (Command command, Buffers const *buffers,
-                                                       Str source, Parse_Result parse_result);
-static void    main_run_command_print_tokens          (Array_Slice tokens);
-static Str     main_run_command_read_file             (char const *path, Array_Slice buffer);
-static void    main_run_command_report_parse_error    (char const *path, Str source,
-                                                       Array_Slice tokens,
-                                                       Parse_Result parse_result);
-static void    main_run_command_report_tokenize_error (char const *path, Str source,
-                                                       Tokenize_Result result);
-static void    main_run_command_report_wasm_error     (char const *path, Str source,
-                                                       Wasm_Build_Result result);
-static void    main_run_command_report_wasm_text_error(char const *path, Wasm_Text_Result result);
-static bool    main_run_command_write_file            (char const *path, Array_Slice bytes);
+static Command      main_command_parse                     (Array_Slice args);
+static int32_t      main_run_command                       (Command command,
+                                                            Buffers const *buffers);
+static int32_t      main_run_command_build                 (Command command, Buffers const *buffers,
+                                                            Str source, Parse_Result parse_result,
+                                                            Semantic_Result semantic_result);
+static void         main_run_command_print_tokens          (Array_Slice tokens);
+static Str          main_run_command_read_file             (char const *path, Array_Slice buffer);
+static void         main_run_command_report_parse_error    (char const *path, Str source,
+                                                            Array_Slice tokens,
+                                                            Parse_Result parse_result);
+static void         main_run_command_report_semantic_error (char const *path, Str source,
+                                                            Semantic_Result result);
+static void         main_run_command_report_tokenize_error (char const *path, Str source,
+                                                            Tokenize_Result result);
+static void         main_run_command_report_wasm_error     (char const *path, Str source,
+                                                            Wasm_Build_Result result);
+static void         main_run_command_report_wasm_text_error(char const *path,
+                                                            Wasm_Text_Result result);
+static bool         main_run_command_write_file            (char const *path, Array_Slice bytes);
+static Str_Position main_subject_position                  (Str source, Str subject);
 
 /**
- * Has two modes. `run` reads a source file, tokenizes and parses it, and prints the tokens and
- * the syntax tree. `build` does the same silently and writes the program for a target. Everything
- * that allocates is in `main` on purpose, so that the buffers are freed in one place on every
- * path.
+ * Has two modes. `run` reads a source file, tokenizes, parses and analyzes it, and prints the
+ * tokens and the syntax tree. `build` does the same silently and writes the program for a target.
+ * Everything that allocates is in `main` on purpose, so that the buffers are freed in one place on
+ * every path.
  */
 int main(int argc, char *argv[]) {
     // The cast is needed because `argc` is an `int`, which `main` must declare. It is never
@@ -116,6 +124,9 @@ int main(int argc, char *argv[]) {
         .tokens = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Token)), TOKEN_COUNT_MAX),
         // A node needs at least one token, so as many nodes as tokens always suffice.
         .nodes = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Ast_Node)), TOKEN_COUNT_MAX),
+        // The analysis has one binding for each node.
+        .bindings = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Semantic_Binding)),
+                                     TOKEN_COUNT_MAX),
         .output = array_slice_make(malloc(OUTPUT_SIZE_BYTES_MAX * sizeof(byte)),
                                    OUTPUT_SIZE_BYTES_MAX),
         .output_text = array_slice_make(malloc(OUTPUT_TEXT_SIZE_BYTES_MAX * sizeof(byte)),
@@ -124,8 +135,8 @@ int main(int argc, char *argv[]) {
 
     int32_t exit_code = 1;
     if (buffers.source.elements == NULL || buffers.tokens.elements == NULL ||
-        buffers.nodes.elements == NULL || buffers.output.elements == NULL ||
-        buffers.output_text.elements == NULL) {
+        buffers.nodes.elements == NULL || buffers.bindings.elements == NULL ||
+        buffers.output.elements == NULL || buffers.output_text.elements == NULL) {
         fprintf(stderr, "Out of memory.\n");
     } else {
         exit_code = main_run_command(command, &buffers);
@@ -133,6 +144,7 @@ int main(int argc, char *argv[]) {
 
     free(buffers.output_text.elements);
     free(buffers.output.elements);
+    free(buffers.bindings.elements);
     free(buffers.nodes.elements);
     free(buffers.tokens.elements);
     free(buffers.source.elements);
@@ -242,15 +254,26 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
         return 1;
     }
 
+    // The tree is printed before it is analyzed, so that a program with a bad name can be looked at.
+    if (command.mode == COMMAND_MODE_RUN) {
+        printf("\n");
+        ast_print(parse_result.nodes, parse_result.root);
+    }
+
+    Semantic_Result semantic_result = semantic_analyze(parse_result.nodes, parse_result.root,
+                                                       buffers->bindings);
+    if (semantic_result.status != SEMANTIC_STATUS_OK) {
+        main_run_command_report_semantic_error(path, source, semantic_result);
+        return 1;
+    }
+
     switch (command.mode) {
     case COMMAND_MODE_BUILD:
-        return main_run_command_build(command, buffers, source, parse_result);
+        return main_run_command_build(command, buffers, source, parse_result, semantic_result);
     case COMMAND_MODE_INVALID:
         assert(false);
         return 1;
     case COMMAND_MODE_RUN:
-        printf("\n");
-        ast_print(parse_result.nodes, parse_result.root);
         return 0;
     }
 
@@ -259,19 +282,20 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
 }
 
 /**
- * Builds the parsed program for the target of `command`, and writes it to the output file.
- * Returns the exit code, which is 0 on success. The text is formatted from the binary module
+ * Builds the parsed and analyzed program for the target of `command`, and writes it to the output
+ * file. Returns the exit code, which is 0 on success. The text is formatted from the binary module
  * rather than written from the syntax tree, so that it always shows exactly what `wasm` writes.
  */
 static int32_t main_run_command_build(Command command, Buffers const *buffers, Str source,
-                                      Parse_Result parse_result) {
+                                      Parse_Result parse_result, Semantic_Result semantic_result) {
     assert(command.mode == COMMAND_MODE_BUILD);
     assert(command.output_path != NULL);
     assert(parse_result.status == PARSE_STATUS_OK);
+    assert(semantic_result.status == SEMANTIC_STATUS_OK);
 
     char const *path = command.source_path;
-    Wasm_Build_Result build_result = wasm_build(parse_result.nodes, parse_result.root,
-                                                buffers->output);
+    Wasm_Build_Result build_result = wasm_build(parse_result.nodes, semantic_result.bindings,
+                                                parse_result.root, buffers->output);
     if (build_result.status != WASM_BUILD_STATUS_OK) {
         main_run_command_report_wasm_error(path, source, build_result);
         return 1;
@@ -495,11 +519,7 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         return;
     }
 
-    // The subject views the source, so its distance from the start is its offset.
-    assert(result.subject.bytes >= source.bytes);
-    size_t offset = (size_t)(result.subject.bytes - source.bytes);
-    assert(offset <= source.length);
-    Str_Position position = str_position_at(source, offset);
+    Str_Position position = main_subject_position(source, result.subject);
 
     // The cast is needed because `%.*s` takes an `int` precision.
     int subject_length = (int)result.subject.length;
@@ -507,10 +527,6 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     case WASM_BUILD_STATUS_ADDITION_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be added.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
-        break;
-    case WASM_BUILD_STATUS_DEFINITION_NAME_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is already defined.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is reserved for the memory of the wasm module.\n",
@@ -520,17 +536,14 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: an expression in '%.*s' has too many nested operators.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
         break;
-    case WASM_BUILD_STATUS_IDENTIFIER_UNKNOWN:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a parameter of the procedure.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes);
+    case WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is a procedure, which the wasm target cannot use as a "
+                "value.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_OK:
     case WASM_BUILD_STATUS_OUTPUT_TOO_LARGE:
         assert(false);
-        break;
-    case WASM_BUILD_STATUS_PARAMETER_NAME_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: parameter '%.*s' is declared twice.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' returns a value that is not of its return type.\n",
@@ -545,6 +558,54 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
     }
+}
+
+static void main_run_command_report_semantic_error(char const *path, Str source,
+                                                   Semantic_Result result) {
+    assert(result.status != SEMANTIC_STATUS_OK);
+
+    Str_Position position = main_subject_position(source, result.subject);
+
+    // The cast is needed because `%.*s` takes an `int` precision.
+    int subject_length = (int)result.subject.length;
+    switch (result.status) {
+    case SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is already defined.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_EXPRESSION_TOO_DEEP:
+        fprintf(stderr, "%s:%zu:%zu: an expression in '%.*s' has too many nested operators.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_IDENTIFIER_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a parameter of the procedure or a constant.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_OK:
+        assert(false);
+        break;
+    case SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE:
+        fprintf(stderr, "%s:%zu:%zu: parameter '%.*s' is declared twice.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS:
+        fprintf(stderr, "%s:%zu:%zu: parameter '%.*s' has the name of a constant, which it would "
+                "hide.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    }
+}
+
+/**
+ * Returns the line and column in `source` of `subject`, which must be a view into it. The reports
+ * of the analysis and of the build both point at a name in the source this way.
+ */
+static Str_Position main_subject_position(Str source, Str subject) {
+    // The subject views the source, so its distance from the start is its offset.
+    assert(subject.bytes >= source.bytes);
+    size_t offset = (size_t)(subject.bytes - source.bytes);
+    assert(offset <= source.length);
+    return str_position_at(source, offset);
 }
 
 static void main_run_command_report_wasm_text_error(char const *path, Wasm_Text_Result result) {

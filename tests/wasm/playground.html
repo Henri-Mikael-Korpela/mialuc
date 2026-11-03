@@ -265,6 +265,15 @@
                     "",
                 ].join("\n"),
             },
+            "scope resolution": {
+                file: "scope-resolution.mu",
+                javascript: [
+                    "// get_name uses the constant NAME, which is defined outside the procedure.",
+                    "// NAME is a procedure without parameters too, so it can be called as well.",
+                    "[Str(get_name()), Str(NAME())]",
+                    "",
+                ].join("\n"),
+            },
         };
         const EXAMPLE_DEFAULT = "sum";
 
