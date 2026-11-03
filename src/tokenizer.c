@@ -16,11 +16,77 @@ enum {
     INDENTATION_SPACES_PER_LEVEL = 4,
 };
 
-static bool char_is_digit     (char character);
-static bool char_is_letter    (char character);
-static bool char_is_lower     (char character);
-static bool char_is_upper     (char character);
-static bool char_is_whitespace(char character);
+static bool   char_is_digit     (char character);
+static bool   char_is_letter    (char character);
+static bool   char_is_lower     (char character);
+static bool   char_is_upper     (char character);
+static bool   char_is_whitespace(char character);
+static size_t utf8_sequence_size(Str text, size_t offset);
+
+/**
+ * Returns the number of bytes of the UTF-8 encoded character that starts at `offset` in `text`,
+ * or zero when the bytes there are not a valid encoding. The rules are the strict ones of
+ * RFC 3629: a character is encoded in the fewest bytes that can hold it, the surrogates U+D800 to
+ * U+DFFF have no encoding, and nothing is above U+10FFFF. They are checked so that a `Str`, which
+ * is promised to be UTF-8, never holds bytes that other software would reject or read differently.
+ * Written as the ranges of the second byte, because that is where the rules differ.
+ */
+static size_t utf8_sequence_size(Str text, size_t offset) {
+    assert(offset < text.length);
+
+    // The sequence is a lead byte, and then this many continuation bytes, which are 0x80 to 0xBF.
+    uint8_t lead = (uint8_t)text.bytes[offset];
+    size_t continuation_count = 0;
+    // The range of the byte after the lead, which is narrower than the others for some leads.
+    uint8_t second_low = 0x80;
+    uint8_t second_high = 0xBF;
+
+    if (lead < 0x80) {
+        return 1;
+    } else if (lead >= 0xC2 && lead <= 0xDF) {
+        continuation_count = 1;
+    } else if (lead >= 0xE0 && lead <= 0xEF) {
+        continuation_count = 2;
+        if (lead == 0xE0) {
+            // Anything lower would be an overlong encoding of a character below U+0800.
+            second_low = 0xA0;
+        } else if (lead == 0xED) {
+            // Anything higher would be a surrogate.
+            second_high = 0x9F;
+        }
+    } else if (lead >= 0xF0 && lead <= 0xF4) {
+        continuation_count = 3;
+        if (lead == 0xF0) {
+            // Anything lower would be an overlong encoding of a character below U+10000.
+            second_low = 0x90;
+        } else if (lead == 0xF4) {
+            // Anything higher would be above U+10FFFF.
+            second_high = 0x8F;
+        }
+    } else {
+        // 0x80 to 0xBF is a continuation byte without a lead, 0xC0 and 0xC1 would be overlong
+        // encodings of ASCII, and 0xF5 to 0xFF would be above U+10FFFF.
+        return 0;
+    }
+
+    if (continuation_count > text.length - offset - 1) {
+        return 0;
+    }
+    for (size_t i = 1; i <= continuation_count; i += 1) {
+        uint8_t byte_value = (uint8_t)text.bytes[offset + i];
+        uint8_t low = 0x80;
+        uint8_t high = 0xBF;
+        if (i == 1) {
+            low = second_low;
+            high = second_high;
+        }
+        if (byte_value < low || byte_value > high) {
+            return 0;
+        }
+    }
+
+    return continuation_count + 1;
+}
 
 static bool char_is_digit(char character) {
     return character >= '0' && character <= '9';
@@ -135,6 +201,53 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.status = TOKENIZE_STATUS_TOKEN_LIMIT;
             result.error_offset = offset;
             return result;
+        }
+        // A string is everything up to the next quote on the same line. It is not null-terminated
+        // anywhere, because the token only keeps where its bytes are and how many there are.
+        else if (character == '"') {
+            // Bounded by `source.length`, since each iteration consumes at least one byte. A
+            // character that is not ASCII takes several bytes, which are checked together, so
+            // that the string is valid UTF-8 as a whole.
+            size_t end = offset + 1;
+            while (end < source.length) {
+                char part = source.bytes[end];
+
+                if (part == '"' || part == '\\' || part == '\n' || part == '\r') {
+                    break;
+                }
+
+                size_t sequence_size = utf8_sequence_size(source, end);
+                if (sequence_size == 0) {
+                    result.status = TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID;
+                    result.error_offset = end;
+                    return result;
+                }
+                end += sequence_size;
+            }
+
+            // The end of the source, and the end of the line, both mean that no quote came.
+            bool is_terminated = end < source.length && source.bytes[end] != '\n' &&
+                                 source.bytes[end] != '\r';
+            if (is_terminated == false) {
+                result.status = TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED;
+                result.error_offset = offset;
+                return result;
+            }
+            if (source.bytes[end] == '\\') {
+                result.status = TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH;
+                result.error_offset = end;
+                return result;
+            }
+
+            assert(source.bytes[end] == '"');
+            token_elements[result.tokens.length] = (Token){
+                .token_type = TOKEN_TYPE_STRING_LITERAL,
+                .source_offset = (uint32_t)offset,
+                .payload.string_literal.text = str_make(source.bytes + offset + 1,
+                                                        end - offset - 1),
+            };
+            result.tokens.length += 1;
+            offset = end + 1;
         }
         // Only decimal format is supported for integer literals.
         else if (char_is_digit(character)) {

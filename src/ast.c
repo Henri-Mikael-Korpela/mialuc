@@ -65,6 +65,10 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_RETURN_STATEMENT:
             printf("RETURN_STATEMENT\n");
             break;
+        case AST_NODE_TYPE_STRING_LITERAL:
+            printf("STRING_LITERAL \"%.*s\"\n", (int)node.payload.string_literal.text.length,
+                   node.payload.string_literal.text.bytes);
+            break;
         case AST_NODE_TYPE_TYPE_NAME:
             printf("TYPE_NAME %.*s\n", (int)node.payload.type_name.name.length,
                    node.payload.type_name.name.bytes);

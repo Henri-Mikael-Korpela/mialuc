@@ -52,6 +52,15 @@
 
         button:hover { background: var(--accent-hover); }
 
+        select {
+            padding: 3px 6px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--background);
+            color: var(--text);
+            font: inherit;
+        }
+
         .hint, #status { color: var(--text-muted); font-size: 12px; }
         #status.is-error { color: var(--error); }
 
@@ -187,6 +196,7 @@
 <body>
     <header>
         <h1>Mialu Playground</h1>
+        <select id="example" aria-label="Example"></select>
         <button id="run" type="button">Run</button>
         <span class="hint">Ctrl+Enter</span>
         <span id="status"></span>
@@ -219,18 +229,44 @@
     <script>
         "use strict";
 
-        const MIALU_EXAMPLE = [
-            "sum :: proc(a: Int, b: Int) Int ->",
-            "    return a + b",
-            "",
-        ].join("\n");
-
-        const JAVASCRIPT_EXAMPLE = [
-            "// The procedures of the Mialu program are in scope, and in `exports`.",
-            "// Int is a 64-bit integer, so it comes back as a BigInt.",
-            "sum(10, 15)",
-            "",
-        ].join("\n");
+        /*
+         * The examples. The Mialu program of each is the file in test-code that the server
+         * serves, so that there is one copy of it. The JavaScript is what calls it.
+         */
+        const EXAMPLES = {
+            sum: {
+                file: "sum.mu",
+                javascript: [
+                    "// The procedures of the Mialu program are in scope, and in `exports`.",
+                    "// Int is a 64-bit integer, so it comes back as a BigInt.",
+                    "sum(10, 15)",
+                    "",
+                ].join("\n"),
+            },
+            strings: {
+                file: "strings.mu",
+                javascript: [
+                    "// A Str is two numbers: the address of its bytes in memory, and their count.",
+                    "// A procedure that returns one gives them as an array.",
+                    "const name = get_name();",
+                    "console.log(name);",
+                    "",
+                    "// Str(...) reads the bytes, and makes a JavaScript string of them.",
+                    "Str(name)",
+                    "",
+                ].join("\n"),
+            },
+            "string constant": {
+                file: "string-constant.mu",
+                javascript: [
+                    "// A constant that is a string is a procedure without parameters.",
+                    "// A Str parameter takes the two numbers, so `...` passes a string on.",
+                    "[Str(greeting()), Str(echo(...greeting())), Str(second(1, ...greeting(), ...empty()))]",
+                    "",
+                ].join("\n"),
+            },
+        };
+        const EXAMPLE_DEFAULT = "sum";
 
         // Waits this long after the last key press before compiling, so that typing does not send
         // a request per key.
@@ -245,6 +281,7 @@
          */
         const HIGHLIGHT_RULES = {
             mialu: [
+                ["string", /"[^"\\\n]*"/],
                 ["keyword", /\b(?:proc|return)\b/],
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
                 ["type", /\b[A-Z]\w*\b/],
@@ -263,7 +300,7 @@
             wat: [
                 ["comment", /\(;[\s\S]*?;\)|;;.*/],
                 ["string", /"(?:[^"\\\n]|\\.)*"/],
-                ["keyword", /(?<=\()(?:module|type|func|param|result|local|export|import)\b/],
+                ["keyword", /(?<=\()(?:module|type|func|param|result|local|export|import|memory|data)\b/],
                 ["instruction", /\b[a-z][a-z0-9]*\.[a-z0-9_]+\b|\b(?:return|end|call|drop)\b/],
                 ["type", /\b(?:i32|i64|f32|f64)\b/],
                 ["number", /-?\b\d+\b/],
@@ -369,10 +406,11 @@
         const compileError = document.getElementById("compile-error");
         const watContainer = document.getElementById("editor-wat");
 
-        const mialuEditor = createEditor(document.getElementById("editor-mialu"), "mialu",
-            MIALU_EXAMPLE, false);
+        // Empty until the example has been loaded, see `loadExample`.
+        const mialuEditor = createEditor(document.getElementById("editor-mialu"), "mialu", "",
+            false);
         const javascriptEditor = createEditor(document.getElementById("editor-javascript"),
-            "javascript", JAVASCRIPT_EXAMPLE, false);
+            "javascript", "", false);
         const watEditor = createEditor(watContainer, "wat", "", true);
 
         // The result of the newest compile, a promise of `{ bytes, error }`. Running waits for it,
@@ -449,19 +487,60 @@
         function workerMain() {
             const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
-            // Mialu's `Int` is a 64-bit integer, which WebAssembly takes from JavaScript only as
-            // a BigInt. Whole numbers are converted, so that `sum(10, 15)` works as written.
-            function toWasmArgument(argument) {
-                if (typeof argument === "number" && Number.isInteger(argument)) {
+            /*
+             * Finds the types of the parameters of every exported function, in the text of the
+             * module, which the compiler writes with each function and each export on a line of
+             * its own, so that a string in the data cannot be taken for one. The module itself
+             * does not say it: WebAssembly cannot be asked for the type of a function yet.
+             * Returns a map from the name of the function to the list of its parameter types.
+             */
+            function parseSignatures(wat) {
+                const parameterTypes = new Map();
+                for (const match of wat.matchAll(
+                    /^  \(func \(;(\d+);\) \(type \d+\)(?: \(param ([^)]*)\))?/gm)) {
+                    parameterTypes.set(Number(match[1]),
+                        match[2] === undefined ? [] : match[2].split(" "));
+                }
+
+                const signatures = new Map();
+                for (const match of wat.matchAll(/^  \(export "([^"]*)" \(func (\d+)\)\)/gm)) {
+                    signatures.set(match[1], parameterTypes.get(Number(match[2])) ?? []);
+                }
+                return signatures;
+            }
+
+            // Mialu's `Int` is a 64-bit integer (`i64`), which WebAssembly takes from JavaScript
+            // only as a BigInt. Whole numbers are converted, so that `sum(10, 15)` works as
+            // written. The two numbers of a `Str` are `i32`, which are numbers, so they are not.
+            function toWasmArgument(argument, parameterType) {
+                if (parameterType === "i64" && typeof argument === "number"
+                    && Number.isInteger(argument)) {
                     return BigInt(argument);
                 }
                 return argument;
             }
 
-            function wrapExport(name, exported) {
-                const wrapped = (...args) => exported(...args.map(toWasmArgument));
+            function wrapExport(name, exported, parameterTypes) {
+                const wrapped = (...args) => exported(
+                    ...args.map((argument, i) => toWasmArgument(argument, parameterTypes[i])));
                 Object.defineProperty(wrapped, "name", { value: name });
                 return wrapped;
+            }
+
+            // Makes the function that reads a `Str`, which is the address of its bytes in the
+            // memory, and their count. A program has a memory only when it has a string.
+            function makeStrReader(memory) {
+                return function Str(pair) {
+                    if (memory === undefined) {
+                        throw new Error("The program has no strings, so it has no memory.");
+                    }
+                    if (Array.isArray(pair) === false || pair.length !== 2) {
+                        throw new TypeError("Str takes the [address, length] of a string.");
+                    }
+                    const [address, length] = pair;
+                    return new TextDecoder().decode(
+                        new Uint8Array(memory.buffer, address, length));
+                };
             }
 
             // A name can be a parameter if it is an identifier and not a reserved word, which the
@@ -551,20 +630,22 @@
             };
 
             self.onmessage = async (event) => {
-                const { bytes, code } = event.data;
+                const { bytes, wat, code } = event.data;
                 try {
                     const { instance } = await WebAssembly.instantiate(bytes);
+                    const signatures = parseSignatures(wat);
                     const exports = {};
                     for (const [name, exported] of Object.entries(instance.exports)) {
                         if (typeof exported === "function") {
-                            exports[name] = wrapExport(name, exported);
+                            exports[name] = wrapExport(name, exported, signatures.get(name) ?? []);
                         }
                     }
 
+                    // The names of the program come after `Str`, so that they win if it has one.
                     const names = Object.keys(exports).filter(isParameterName);
-                    const run = compileCode([...names, "console", "exports"], code);
-                    const result = await run(...names.map((name) => exports[name]),
-                        playgroundConsole, exports);
+                    const run = compileCode(["Str", ...names, "console", "exports"], code);
+                    const result = await run(makeStrReader(instance.exports.memory),
+                        ...names.map((name) => exports[name]), playgroundConsole, exports);
                     if (result !== undefined) {
                         send("result", [result]);
                     }
@@ -630,7 +711,11 @@
                     stop();
                 }
             };
-            runningWorker.postMessage({ bytes: answer.bytes, code: javascriptEditor.value });
+            runningWorker.postMessage({
+                bytes: answer.bytes,
+                wat: answer.wat,
+                code: javascriptEditor.value,
+            });
         }
 
         runButton.addEventListener("click", () => {
@@ -649,8 +734,51 @@
             }
         });
 
-        compile();
-        run();
+        const exampleSelect = document.getElementById("example");
+        for (const name of Object.keys(EXAMPLES)) {
+            exampleSelect.append(new Option(name, name));
+        }
+        exampleSelect.value = EXAMPLE_DEFAULT;
+
+        // Counts loads, so that a slow answer for an example that was replaced is ignored.
+        let exampleLoadCount = 0;
+
+        async function loadExample(name) {
+            exampleLoadCount += 1;
+            const loadIndex = exampleLoadCount;
+            const example = EXAMPLES[name];
+
+            let source = "";
+            try {
+                const response = await fetch(`/test-code/${example.file}`);
+                if (response.ok === false) {
+                    throw new Error(`The server answered ${response.status}.`);
+                }
+                source = await response.text();
+            } catch (error) {
+                if (loadIndex === exampleLoadCount) {
+                    consoleOutput.replaceChildren();
+                    print("error", `Cannot load test-code/${example.file}. Start the server with: `
+                        + `python tests/wasm/serve.py\n${error}`);
+                }
+                return;
+            }
+            if (loadIndex !== exampleLoadCount) {
+                return;
+            }
+
+            mialuEditor.value = source;
+            mialuEditor.render();
+            javascriptEditor.value = example.javascript;
+            javascriptEditor.render();
+            clearTimeout(compileTimer);
+            compileTimer = 0;
+            compile();
+            run();
+        }
+
+        exampleSelect.addEventListener("change", () => loadExample(exampleSelect.value));
+        loadExample(EXAMPLE_DEFAULT);
     </script>
 </body>
 </html>

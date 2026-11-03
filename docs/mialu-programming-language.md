@@ -23,6 +23,44 @@ sum :: proc(a: Int, b: Int) Int ->
     return a + b
 ```
 
+A constant can also be a string, which is written on its own line:
+
+```
+greeting :: "Hello, world"
+```
+
+## Data types
+
+Every value has a type, which is written as an identifier. Mialu has the following types:
+
+| Type  | Description                                                  |
+|-------|--------------------------------------------------------------|
+| `Int` | A signed 64-bit integer. Written as a decimal number, such as `42`. |
+| `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
+
+Parameters and return types name their type, as in `proc(name: Str) Str`. A procedure that returns a string has the return type `Str`:
+
+```
+get_name :: proc() Str ->
+    return "Bob"
+```
+
+### Strings
+
+A string literal is the text between a pair of double quotes, on one line:
+
+```
+"Hello, world"
+```
+
+A `Str` is encoded in UTF-8: its bytes are always a valid UTF-8 encoding of text, as defined by [RFC 3629](https://www.rfc-editor.org/rfc/rfc3629). A string can hold any Unicode character, such as `"héllo"` or `"日本語"`, and each character takes one to four bytes. The encoding is strict: an overlong encoding, a surrogate (U+D800 to U+DFFF), a value above U+10FFFF and a stray continuation byte are all invalid. The character U+0000 is valid, and is one byte of zero.
+
+A string is length-based, not null-terminated. It is its bytes together with the number of them, so the length is known without looking for an end, and a string can hold a zero byte. The length counts bytes, not characters: `"héllo"` has a length of 6, because `é` takes two bytes. The empty string `""` has a length of zero. A string is immutable, and does not own its bytes: a string literal is a view of bytes that are part of the program, so returning one from a procedure is safe.
+
+The bytes of a string literal are the bytes of the source file between the quotes, so a source file that has a string must be UTF-8 at that place. The compiler rejects a string literal that is not valid UTF-8. A string cannot contain a double quote or a line break, because they would end it, and cannot contain a backslash. There are no escape sequences yet, and the backslash is kept for them, so a program that is written today does not change its meaning when they are added.
+
+A string has no operators yet. In particular `+` does not join strings.
+
 ## Operators
 
 Mialu supports the following operators:
@@ -31,7 +69,7 @@ Mialu supports the following operators:
 |----------|-------------|----------|
 | `+`      | Addition    |1         |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals or names.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals or names. Addition is defined for `Int` only.
 
 Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`.
 
@@ -59,13 +97,29 @@ The compiler has two modes: `run` prints the tokens and the syntax tree of a pro
 
 ### WebAssembly
 
-The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition wraps around on overflow. `Int` is the only type that the target supports.
+The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string. `Int` and `Str` are the only types that the target supports.
+
+`Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition wraps around on overflow.
+
+`Str` is two 32-bit integers (`i32`): the address of its first byte in memory, and its length in bytes. The bytes are UTF-8, so a caller decodes them as that, as `TextDecoder` does by default. So a parameter of type `Str` is two WebAssembly parameters, one after the other, and a result of type `Str` is two WebAssembly results, which JavaScript receives as an array `[address, length]`. The bytes of all the string literals of the program are copied to the start of the memory of the module when it is instantiated, and the module exports the memory as `memory`, so that a caller can read a string:
+
+```js
+const [address, length] = instance.exports.get_name();
+new TextDecoder().decode(new Uint8Array(instance.exports.memory.buffer, address, length));
+```
+
+A module has a memory only when the program has a string literal. A procedure cannot be called `memory`, whether the program has a string literal or not, because that is the name of the export.
 
 The target rejects a program that the parser accepts when:
 
-- a type is not `Int`,
+- a type is not `Int` or `Str`,
 - a name in an expression is not a parameter of the procedure,
 - two parameters, or two definitions, have the same name,
-- a procedure with no return type has a `return` statement.
+- a definition is called `memory`,
+- a procedure with no return type has a `return` statement,
+- the value that a procedure returns is not of its return type,
+- an operand of an addition is not an `Int`.
 
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
+
+There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the module as text, and runs JavaScript against it. See the README.

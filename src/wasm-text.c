@@ -8,8 +8,8 @@
 #include <mialu/wasm.h>
 
 // The text follows the layout of `wasm2wat` from the WebAssembly Binary Toolkit, which is what
-// people who read WebAssembly text are used to: types first, then functions, then exports, with
-// the index of each in a `(;index;)` comment.
+// people who read WebAssembly text are used to: types first, then functions, memories, exports
+// and data, with the index of each in a `(;index;)` comment.
 
 enum {
     // The longest decimal number that is written: `UINT64_MAX` has 20 digits.
@@ -44,8 +44,10 @@ typedef struct {
  */
 typedef struct {
     Wasm_Text_Section code;
+    Wasm_Text_Section data;
     Wasm_Text_Section export;
     Wasm_Text_Section function;
+    Wasm_Text_Section memory;
     Wasm_Text_Section type;
 } Wasm_Text_Sections;
 
@@ -76,6 +78,8 @@ typedef struct {
 static bool               wasm_text_fail                              (Wasm_Text_Formatter *formatter,
                                                                        Wasm_Text_Status status,
                                                                        size_t error_offset);
+static bool               wasm_text_format_data                       (Wasm_Text_Formatter *formatter,
+                                                                       Wasm_Text_Section section);
 static bool               wasm_text_format_exports                    (Wasm_Text_Formatter *formatter,
                                                                        Wasm_Text_Section section);
 static bool               wasm_text_format_function_type              (Wasm_Text_Formatter *formatter);
@@ -85,6 +89,8 @@ static bool               wasm_text_format_functions                  (Wasm_Text
 static bool               wasm_text_format_functions_body             (Wasm_Text_Formatter *formatter);
 static bool               wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *formatter);
 static bool               wasm_text_format_functions_body_locals      (Wasm_Text_Formatter *formatter);
+static bool               wasm_text_format_memories                   (Wasm_Text_Formatter *formatter,
+                                                                       Wasm_Text_Section section);
 static bool               wasm_text_format_types                      (Wasm_Text_Formatter *formatter,
                                                                        Wasm_Text_Section section);
 static bool               wasm_text_format_value_type                 (Wasm_Text_Formatter *formatter);
@@ -102,11 +108,11 @@ static void               wasm_text_write                             (Wasm_Text
                                                                        Str text);
 static void               wasm_text_write_instruction                 (Wasm_Text_Writer *writer,
                                                                        Str name);
-static void               wasm_text_write_name                        (Wasm_Text_Writer *writer,
-                                                                       byte const *name,
-                                                                       size_t length);
 static void               wasm_text_write_signed                      (Wasm_Text_Writer *writer,
                                                                        int64_t number);
+static void               wasm_text_write_string                      (Wasm_Text_Writer *writer,
+                                                                       byte const *bytes,
+                                                                       size_t length);
 static void               wasm_text_write_unsigned                    (Wasm_Text_Writer *writer,
                                                                        uint64_t number);
 
@@ -147,7 +153,13 @@ Wasm_Text_Result wasm_text_format(Array_Slice module, Array_Slice output_buffer)
         is_ok = wasm_text_format_functions(&formatter, sections.function, sections.code);
     }
     if (is_ok) {
+        is_ok = wasm_text_format_memories(&formatter, sections.memory);
+    }
+    if (is_ok) {
         is_ok = wasm_text_format_exports(&formatter, sections.export);
+    }
+    if (is_ok) {
+        is_ok = wasm_text_format_data(&formatter, sections.data);
     }
     if (is_ok) {
         wasm_text_write(&formatter.writer, STR(")\n"));
@@ -189,8 +201,10 @@ static Wasm_Text_Sections wasm_text_sections_find(Wasm_Text_Formatter *formatter
     };
     Wasm_Text_Sections sections = {
         .code = absent,
+        .data = absent,
         .export = absent,
         .function = absent,
+        .memory = absent,
         .type = absent,
     };
 
@@ -237,11 +251,17 @@ static Wasm_Text_Sections wasm_text_sections_find(Wasm_Text_Formatter *formatter
             // Custom sections hold extra information, such as names for debuggers, which the
             // text does not show.
             break;
+        case WASM_SECTION_ID_DATA:
+            known = &sections.data;
+            break;
         case WASM_SECTION_ID_EXPORT:
             known = &sections.export;
             break;
         case WASM_SECTION_ID_FUNCTION:
             known = &sections.function;
+            break;
+        case WASM_SECTION_ID_MEMORY:
+            known = &sections.memory;
             break;
         case WASM_SECTION_ID_TYPE:
             known = &sections.type;
@@ -531,6 +551,13 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             // The text format closes the body with the parenthesis of the function instead.
             is_ended = true;
             break;
+        case WASM_OPCODE_I32_CONST: {
+            // The immediate is a signed 32-bit number, which the 64-bit reader also reads.
+            int64_t number = wasm_text_read_signed_64(formatter);
+            wasm_text_write_instruction(&formatter->writer, STR("i32.const "));
+            wasm_text_write_signed(&formatter->writer, number);
+            break;
+        }
         case WASM_OPCODE_I64_ADD:
             wasm_text_write_instruction(&formatter->writer, STR("i64.add"));
             break;
@@ -586,20 +613,105 @@ static bool wasm_text_format_exports(Wasm_Text_Formatter *formatter, Wasm_Text_S
 
         size_t kind_offset = formatter->offset;
         byte kind = wasm_text_read_byte(formatter);
-        uint32_t function_index = wasm_text_read_unsigned_32(formatter);
+        uint32_t index = wasm_text_read_unsigned_32(formatter);
         if (formatter->status != WASM_TEXT_STATUS_OK) {
             return false;
         }
-        // Only functions are supported, because the module has no tables, memories or globals.
-        if (kind != WASM_EXPORT_KIND_FUNCTION) {
+
+        // Only functions and memories are supported, because the module has no tables or globals.
+        Str kind_name = STR_EMPTY;
+        if (kind == WASM_EXPORT_KIND_FUNCTION) {
+            kind_name = STR(" (func ");
+        } else if (kind == WASM_EXPORT_KIND_MEMORY) {
+            kind_name = STR(" (memory ");
+        } else {
             return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, kind_offset);
         }
 
         wasm_text_write(&formatter->writer, STR("\n  (export "));
-        wasm_text_write_name(&formatter->writer, name, name_length);
-        wasm_text_write(&formatter->writer, STR(" (func "));
-        wasm_text_write_unsigned(&formatter->writer, function_index);
+        wasm_text_write_string(&formatter->writer, name, name_length);
+        wasm_text_write(&formatter->writer, kind_name);
+        wasm_text_write_unsigned(&formatter->writer, index);
         wasm_text_write(&formatter->writer, STR("))"));
+    }
+
+    return wasm_text_section_end(formatter);
+}
+
+/**
+ * Writes one `(memory ...)` per entry of the memory section, with its size in pages.
+ */
+static bool wasm_text_format_memories(Wasm_Text_Formatter *formatter, Wasm_Text_Section section) {
+    assert(formatter->status == WASM_TEXT_STATUS_OK);
+    assert(section.start <= section.end);
+
+    uint32_t count = wasm_text_section_count_read(formatter, section);
+    // Bounded like the loop over the types: every entry takes at least one byte.
+    for (uint32_t i = 0; i < count && formatter->status == WASM_TEXT_STATUS_OK; i += 1) {
+        size_t flag_offset = formatter->offset;
+        byte flag = wasm_text_read_byte(formatter);
+        uint32_t page_count_min = wasm_text_read_unsigned_32(formatter);
+        if (formatter->status != WASM_TEXT_STATUS_OK) {
+            return false;
+        }
+        // A memory can also have a maximum, which `wasm_build` never writes.
+        if (flag != WASM_MEMORY_LIMITS_MIN_ONLY) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, flag_offset);
+        }
+
+        wasm_text_write(&formatter->writer, STR("\n  (memory (;"));
+        wasm_text_write_unsigned(&formatter->writer, i);
+        wasm_text_write(&formatter->writer, STR(";) "));
+        wasm_text_write_unsigned(&formatter->writer, page_count_min);
+        wasm_text_write(&formatter->writer, STR(")"));
+    }
+
+    return wasm_text_section_end(formatter);
+}
+
+/**
+ * Writes one `(data ...)` per segment of the data section, with the address that it is copied to
+ * and its bytes as a string.
+ */
+static bool wasm_text_format_data(Wasm_Text_Formatter *formatter, Wasm_Text_Section section) {
+    assert(formatter->status == WASM_TEXT_STATUS_OK);
+    assert(section.start <= section.end);
+
+    uint32_t count = wasm_text_section_count_read(formatter, section);
+    // Bounded like the loop over the types: every segment takes at least one byte.
+    for (uint32_t i = 0; i < count && formatter->status == WASM_TEXT_STATUS_OK; i += 1) {
+        size_t flag_offset = formatter->offset;
+        byte flag = wasm_text_read_byte(formatter);
+        size_t address_offset = formatter->offset;
+        byte address_opcode = wasm_text_read_byte(formatter);
+        int64_t address = wasm_text_read_signed_64(formatter);
+        byte end_opcode = wasm_text_read_byte(formatter);
+        size_t size_offset = formatter->offset;
+        uint32_t size_bytes = wasm_text_read_unsigned_32(formatter);
+        if (formatter->status != WASM_TEXT_STATUS_OK) {
+            return false;
+        }
+
+        // Other segments are passive, or for another memory, and other addresses are computed.
+        if (flag != WASM_DATA_SEGMENT_ACTIVE) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, flag_offset);
+        }
+        if (address_opcode != WASM_OPCODE_I32_CONST || end_opcode != WASM_OPCODE_END) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, address_offset);
+        }
+        if (size_bytes > formatter->limit - formatter->offset) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_MALFORMED, size_offset);
+        }
+
+        wasm_text_write(&formatter->writer, STR("\n  (data (;"));
+        wasm_text_write_unsigned(&formatter->writer, i);
+        wasm_text_write(&formatter->writer, STR(";) (i32.const "));
+        wasm_text_write_signed(&formatter->writer, address);
+        wasm_text_write(&formatter->writer, STR(") "));
+        wasm_text_write_string(&formatter->writer, formatter->module + formatter->offset,
+                               size_bytes);
+        wasm_text_write(&formatter->writer, STR(")"));
+        formatter->offset += size_bytes;
     }
 
     return wasm_text_section_end(formatter);
@@ -786,6 +898,9 @@ static int64_t wasm_text_read_signed_64(Wasm_Text_Formatter *formatter) {
  * it is a type that the formatter does not know.
  */
 static Str wasm_text_value_type_name(byte value_type) {
+    if (value_type == WASM_TYPE_I32) {
+        return STR("i32");
+    }
     if (value_type == WASM_TYPE_I64) {
         return STR("i64");
     }
@@ -823,19 +938,20 @@ static void wasm_text_write_instruction(Wasm_Text_Writer *writer, Str name) {
 }
 
 /**
- * Writes a name as a string of the text format. Printable ASCII is written as it is, except for
- * the quote and the backslash, which end or escape the string. Every other byte is written as a
- * backslash and two hexadecimal digits, so that the name can hold any bytes.
+ * Writes bytes, such as a name or the content of a data segment, as a string of the text format.
+ * Printable ASCII is written as it is, except for the quote and the backslash, which end or
+ * escape the string. Every other byte is written as a backslash and two hexadecimal digits, so
+ * that the string can hold any bytes, and the text stays on one line.
  */
-static void wasm_text_write_name(Wasm_Text_Writer *writer, byte const *name, size_t length) {
-    assert(name != NULL);
+static void wasm_text_write_string(Wasm_Text_Writer *writer, byte const *bytes, size_t length) {
+    assert(bytes != NULL);
     assert(writer->length <= writer->capacity);
 
     static char const hexadecimal_digits[] = "0123456789abcdef";
 
     wasm_text_write(writer, STR("\""));
     for (size_t i = 0; i < length; i += 1) {
-        byte character = name[i];
+        byte character = bytes[i];
         bool is_printable = character >= 0x20 && character < 0x7F;
         if (is_printable && character != '"' && character != '\\') {
             char plain[1] = {(char)character};

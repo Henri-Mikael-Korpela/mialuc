@@ -17,7 +17,7 @@
      ( a )            grouping
      a - b            a, except where b matches exactly the same text
      "text" 'text'    the characters in between
-     ? ... ?          a special sequence, here only "end of input"
+     ? ... ?          a special sequence, here "end of input" and "any character"
      comment          text between an opening parenthesis with an asterisk and an asterisk with a
                       closing parenthesis, like this one; comments do not nest
 
@@ -28,6 +28,8 @@
 
    What a grammar cannot say, and the compiler checks in addition:
      - An integer literal must fit in a signed 64-bit integer.
+     - The types and the names in a program must make sense for the target, for example `Str` has
+       no addition, which the grammar cannot tell from `Int`.
      - A line may be indented by any number of spaces that is a multiple of 4. The grammar only
        has procedure bodies, which are indented by exactly one level, 4 spaces. Rules for deeper
        nesting have to be added together with the syntax that needs them.
@@ -37,8 +39,9 @@ module = { blank_line | definition } , end_of_input ;
 
 (* A constant definition. It starts in the first column, so a line that starts with a space or a
    tab does not match here. `::` is two separate ':' characters for the compiler, so spaces may
-   be between them. *)
-definition = name , ws , ":" , ws , ":" , ws , procedure ;
+   be between them. The value is a procedure, or a string on one line. *)
+definition =
+    name , ws , ":" , ws , ":" , ws , ( procedure | string_literal , ws , line_end ) ;
 
 (* A procedure and its body. The optional name before the arrow is the return type. *)
 procedure =
@@ -72,8 +75,18 @@ return_statement = "return" , required_space , expression ;
    only accepts or rejects text does not show. Spaces around the `+` are optional. *)
 expression = operand , { ws , "+" , ws , operand } ;
 
-(* An integer literal, or the use of a name, such as a parameter. *)
-operand = integer_literal | name ;
+(* An integer literal, a string literal, or the use of a name, such as a parameter. *)
+operand = integer_literal | string_literal | name ;
+
+(* Text between quotes, on one line. It is taken as it is: there are no escape sequences yet, so a
+   backslash is not allowed, to keep it free for them. Any other character is, including a tab
+   and characters that are not ASCII. The grammar works on characters, so it only sees text that
+   is valid UTF-8; the compiler works on bytes and rejects a string that is not. *)
+string_literal = '"' , { string_character } , '"' ;
+
+string_character = any_character - ( '"' | "\\" | "\n" | "\r" ) ;
+
+any_character = ? any character ? ;
 
 (* Names. An identifier that is a reserved word is not a name. *)
 name = identifier - reserved_word ;

@@ -4,6 +4,9 @@
     "scopeName": "source.mialu",
     "patterns": [
         {
+            "include": "#strings"
+        },
+        {
             "include": "#reserved-words"
         },
         {
@@ -11,6 +14,11 @@
         }
     ],
     "repository": {
+        "strings": {
+            "name": "string.quoted.double.mialu",
+            "comment": "A string has no escape sequences yet, and ends with its line.",
+            "match": "\"[^\"\\\\\\n]*\""
+        },
         "operators": {
             "name": "keyword.operator.arithmetic.mialu",
             "match": "\\+"

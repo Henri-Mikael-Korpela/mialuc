@@ -14,6 +14,9 @@ the compiler, build/mialuc.exe, which must be built first, and answers with JSON
     {"error": "<what the compiler printed>", "wasm": null, "wat": null}
 
 A program that does not compile is a normal answer, so it comes with status 200 too.
+
+The directory test-code of the project is served under /test-code/, so that the playground can
+offer the example programs that are kept there.
 """
 
 import base64
@@ -28,6 +31,8 @@ from pathlib import Path
 PORT_DEFAULT = 8008
 
 ROOT_DIRECTORY = Path(__file__).resolve().parents[2]
+EXAMPLES_DIRECTORY = ROOT_DIRECTORY / "test-code"
+EXAMPLES_ROUTE = "/test-code/"
 # The name of the executable depends on the platform that CMake built it for.
 COMPILER_PATHS = [ROOT_DIRECTORY / "build" / "mialuc.exe", ROOT_DIRECTORY / "build" / "mialuc"]
 
@@ -45,12 +50,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     extensions_map = {
         **http.server.SimpleHTTPRequestHandler.extensions_map,
         ".wasm": "application/wasm",
+        ".mu": "text/plain; charset=utf-8",
     }
 
     def end_headers(self):
         # The module is rebuilt often, and a stale one in the cache would be confusing.
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    def translate_path(self, path):
+        # The base class resolves a path against `self.directory`, and refuses to leave it, so
+        # the examples are served by pointing it at their directory for this request. A handler
+        # lives for one request, so the change does not reach any other.
+        if path.startswith(EXAMPLES_ROUTE):
+            self.directory = str(EXAMPLES_DIRECTORY)
+            path = path[len(EXAMPLES_ROUTE) - 1:]
+        return super().translate_path(path)
 
     def do_POST(self):
         if self.path != "/compile":

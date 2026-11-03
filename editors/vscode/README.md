@@ -1,7 +1,7 @@
 # Mialu for VS Code
 
-Language support for Mialu, for now only syntax highlighting of the reserved words and the `+` operator. The extension is
-enabled for files that end in `.mu`.
+Language support for Mialu, for now only syntax highlighting of the reserved words, the `+` operator and strings. The
+extension is enabled for files that end in `.mu`.
 
 The extension is declarative: it is a language definition and a TextMate grammar, so there is
 nothing to build and nothing to install with a package manager.

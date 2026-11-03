@@ -22,6 +22,7 @@ typedef enum {
     TOKEN_TYPE_INTEGER_LITERAL,
     TOKEN_TYPE_KEYWORD_PROC,
     TOKEN_TYPE_KEYWORD_RETURN,
+    TOKEN_TYPE_STRING_LITERAL,
 
     TOKEN_TYPE_END,
 } Token_Type;
@@ -47,6 +48,12 @@ typedef struct {
             // Literals that do not fit are rejected by the tokenizer.
             int64_t value;
         } integer_literal;
+        struct {
+            // The bytes between the quotes, as a view of the source text. They are valid UTF-8,
+            // which the tokenizer checks. It is never NULL, also for the empty string, so that
+            // its position in the source can be worked out.
+            Str text;
+        } string_literal;
     } payload;
 } Token;
 
@@ -59,6 +66,14 @@ typedef enum {
     TOKENIZE_STATUS_INDENTATION_TAB,
     TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID,
     TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE,
+    // A backslash in a string. It is kept for escape sequences, which the language does not have
+    // yet, so that strings written today keep their meaning when it gets them.
+    TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH,
+    // The string has bytes that are not valid UTF-8. `error_offset` is where the first bad
+    // character starts.
+    TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID,
+    // The string has no closing quote before the end of its line.
+    TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED,
     TOKENIZE_STATUS_TOKEN_LIMIT,
     TOKENIZE_STATUS_UNEXPECTED_CHARACTER,
 } Tokenize_Status;

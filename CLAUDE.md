@@ -14,3 +14,5 @@ Whenever Mialu programming language implementation is changed, the following cha
 - Mialu programming language specification should be updated.
 - Mialu programming language test cases should be updated.
 - Mialu programming language editor support should be updated.
+- Wasm building should work with the change: whatever the language gets, the `wasm` target should compile it, and the `wat` target and the formatter in `src/wasm-text.c` should show it. A change that the front end accepts but that Wasm building cannot handle is not finished.
+- The playground with Wasm should work with the change: `tests/wasm/playground.html` and `tests/wasm/serve.py` should compile, show and run it, and the examples in `test-code` should work in it.

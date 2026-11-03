@@ -398,6 +398,10 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_PLUS:
             printf("PLUS\n");
             break;
+        case TOKEN_TYPE_STRING_LITERAL:
+            printf("STRING_LITERAL \"%.*s\"\n", (int)token.payload.string_literal.text.length,
+                   token.payload.string_literal.text.bytes);
+            break;
         case TOKEN_TYPE_TYPE_SEPARATOR:
             printf("TYPE_SEPARATOR\n");
             break;
@@ -430,6 +434,17 @@ static void main_run_command_report_tokenize_error(char const *path, Str source,
         break;
     case TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE:
         fprintf(stderr, "%s:%zu:%zu: integer literal does not fit in 64 bits.\n", path, line,
+                column);
+        break;
+    case TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH:
+        fprintf(stderr, "%s:%zu:%zu: a string cannot contain a backslash, because escape "
+                "sequences are not supported.\n", path, line, column);
+        break;
+    case TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: a string must be valid UTF-8.\n", path, line, column);
+        break;
+    case TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED:
+        fprintf(stderr, "%s:%zu:%zu: string has no closing quote on its line.\n", path, line,
                 column);
         break;
     case TOKENIZE_STATUS_TOKEN_LIMIT:
@@ -489,9 +504,17 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     // The cast is needed because `%.*s` takes an `int` precision.
     int subject_length = (int)result.subject.length;
     switch (result.status) {
+    case WASM_BUILD_STATUS_ADDITION_OPERAND_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be added.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_DEFINITION_NAME_DUPLICATE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is already defined.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is reserved for the memory of the wasm module.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP:
         fprintf(stderr, "%s:%zu:%zu: an expression in '%.*s' has too many nested operators.\n",
@@ -508,6 +531,10 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     case WASM_BUILD_STATUS_PARAMETER_NAME_DUPLICATE:
         fprintf(stderr, "%s:%zu:%zu: parameter '%.*s' is declared twice.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' returns a value that is not of its return type.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_RETURN_TYPE_MISSING:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' returns a value but has no return type.\n", path,

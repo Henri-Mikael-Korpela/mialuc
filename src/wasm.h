@@ -13,16 +13,27 @@
 // disagree. They are an `enum` rather than `static const`, because a file that uses only some of
 // them would get warnings about the rest.
 enum {
-    // The kind of thing that an export makes visible.
+    // The flag of a data segment that is copied into memory 0 when the module is instantiated, at
+    // the address that a constant expression gives.
+    WASM_DATA_SEGMENT_ACTIVE = 0x00,
+
+    // The kinds of thing that an export makes visible.
     WASM_EXPORT_KIND_FUNCTION = 0x00,
+    WASM_EXPORT_KIND_MEMORY = 0x02,
 
     // A 32-bit value takes 7 bits per byte, so at most 5 bytes in LEB128.
     WASM_LEB128_32_BYTES_MAX = 5,
     // A 64-bit value takes at most 10 bytes in LEB128.
     WASM_LEB128_64_BYTES_MAX = 10,
 
+    // The flag of a memory that has a minimum size but no maximum.
+    WASM_MEMORY_LIMITS_MIN_ONLY = 0x00,
+    // A page of memory is 64 KiB.
+    WASM_MEMORY_PAGE_SIZE_BYTES = 65536,
+
     // Instructions.
     WASM_OPCODE_END = 0x0B,
+    WASM_OPCODE_I32_CONST = 0x41,
     WASM_OPCODE_I64_ADD = 0x7C,
     WASM_OPCODE_I64_CONST = 0x42,
     WASM_OPCODE_LOCAL_GET = 0x20,
@@ -31,12 +42,15 @@ enum {
     // The ids of the kinds of section. Custom sections are never written, but may be read.
     WASM_SECTION_ID_CODE = 10,
     WASM_SECTION_ID_CUSTOM = 0,
+    WASM_SECTION_ID_DATA = 11,
     WASM_SECTION_ID_EXPORT = 7,
     WASM_SECTION_ID_FUNCTION = 3,
+    WASM_SECTION_ID_MEMORY = 5,
     WASM_SECTION_ID_TYPE = 1,
 
-    // The marker of a function type, and the type of a 64-bit integer.
+    // The marker of a function type, and the types of a 32-bit and a 64-bit integer.
     WASM_TYPE_FUNCTION = 0x60,
+    WASM_TYPE_I32 = 0x7F,
     WASM_TYPE_I64 = 0x7E,
 };
 
@@ -47,12 +61,15 @@ extern byte const WASM_MODULE_HEADER[8];
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
+    WASM_BUILD_STATUS_ADDITION_OPERAND_TYPE_INVALID,
     WASM_BUILD_STATUS_DEFINITION_NAME_DUPLICATE,
+    WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED,
     WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP,
     WASM_BUILD_STATUS_IDENTIFIER_UNKNOWN,
     WASM_BUILD_STATUS_OK,
     WASM_BUILD_STATUS_OUTPUT_TOO_LARGE,
     WASM_BUILD_STATUS_PARAMETER_NAME_DUPLICATE,
+    WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH,
     WASM_BUILD_STATUS_RETURN_TYPE_MISSING,
     WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
 } Wasm_Build_Status;
@@ -76,8 +93,16 @@ typedef struct {
  * module is written to `output_buffer`, which holds `byte` elements.
  *
  * Every definition becomes a function that the module exports under the name of the definition.
- * `Int` is the only type for now, and it is a 64-bit integer (`i64`), so callers from JavaScript
- * pass and receive `BigInt`.
+ * A definition whose value is a string literal becomes a function without parameters that returns
+ * the string.
+ *
+ * `Int` is a 64-bit integer (`i64`), so callers from JavaScript pass and receive `BigInt`.
+ * `Str` is two 32-bit integers (`i32`), the address of its first byte in memory and its length
+ * in bytes, which are UTF-8, so a parameter of that type is two WebAssembly parameters, and a result of that type
+ * is two WebAssembly results, which JavaScript receives as an array. The bytes of the string
+ * literals are in the first bytes of the memory, which the module exports as `memory`. The module
+ * has no memory, and so no export of that name, when the program has no string literal. A
+ * definition cannot be called `memory`, because the name is taken.
  *
  * The syntax tree can be valid for the parser but not for the target, for example when it uses a
  * name that no parameter has. Such trees are rejected with a status other than

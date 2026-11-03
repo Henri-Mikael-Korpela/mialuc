@@ -31,6 +31,7 @@ static Ast_Node_Index parse_expression          (Parser *parser);
 static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
 static Ast_Node_Index parse_identifier          (Parser *parser);
 static Ast_Node_Index parse_integer_literal     (Parser *parser);
+static bool           parse_line_end_expect     (Parser *parser);
 static Ast_Node_Index parse_module              (Parser *parser);
 static void           parse_node_append_child   (Parser *parser, Ast_Node_Index parent,
                                                  Ast_Node_Index child);
@@ -41,6 +42,7 @@ static bool           parse_procedure_body      (Parser *parser, Ast_Node_Index 
                                                  uint32_t indentation_level);
 static bool           parse_procedure_parameters(Parser *parser, Ast_Node_Index procedure);
 static Ast_Node_Index parse_return_statement    (Parser *parser);
+static Ast_Node_Index parse_string_literal      (Parser *parser);
 static void           parse_token_advance       (Parser *parser);
 static Token const *  parse_token_current       (Parser const *parser);
 static bool           parse_token_expect        (Parser *parser, Token_Type token_type,
@@ -142,14 +144,23 @@ static Ast_Node_Index parse_constant_definition(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
-    // Expect to parse a procedure as the constant variable.
-    Ast_Node_Index procedure = parse_procedure(parser, INDENTATION_LEVEL_TOP);
-    if (procedure == AST_NODE_INDEX_NONE) {
+    // The value is a string, or a procedure, which is what any other token here starts.
+    Ast_Node_Index value = AST_NODE_INDEX_NONE;
+    if (parse_token_current(parser)->token_type == TOKEN_TYPE_STRING_LITERAL) {
+        value = parse_string_literal(parser);
+        // A procedure ends with its body, but a string is one line, so its end is checked here.
+        if (value != AST_NODE_INDEX_NONE && parse_line_end_expect(parser) == false) {
+            return AST_NODE_INDEX_NONE;
+        }
+    } else {
+        value = parse_procedure(parser, INDENTATION_LEVEL_TOP);
+    }
+    if (value == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    parse_node_append_child(parser, definition, procedure);
+    parse_node_append_child(parser, definition, value);
 
-    assert(parser->nodes[definition].first_child == procedure);
+    assert(parser->nodes[definition].first_child == value);
     return definition;
 }
 
@@ -331,15 +342,31 @@ static Ast_Node_Index parse_return_statement(Parser *parser) {
     }
     parse_node_append_child(parser, statement, value);
 
-    // There is no end-of-line token, so the next line, or the end, must follow directly.
-    Token_Type next = parse_token_current(parser)->token_type;
-    bool is_line_end = next == TOKEN_TYPE_INDENTATION || next == TOKEN_TYPE_END;
-    if (is_line_end == false) {
-        return parse_fail(parser, STR("the end of the line"));
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
     }
 
     assert(parser->nodes[statement].first_child == value);
     return statement;
+}
+
+/**
+ * Checks that the line ends at the current token. There is no end-of-line token, so the next
+ * line, or the end, must follow directly. Records an error and returns false when it does not.
+ */
+static bool parse_line_end_expect(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Token_Type next = parse_token_current(parser)->token_type;
+    bool is_line_end = next == TOKEN_TYPE_INDENTATION || next == TOKEN_TYPE_END;
+    if (is_line_end == false) {
+        // The false return value reports the failure, so the node index is not needed.
+        (void)parse_fail(parser, STR("the end of the line"));
+        return false;
+    }
+
+    return true;
 }
 
 /**
@@ -382,7 +409,8 @@ static Ast_Node_Index parse_expression(Parser *parser) {
 }
 
 /**
- * Parses a value: an integer literal, or the name of something, such as a parameter.
+ * Parses a value: an integer literal, a string literal, or the name of something, such as a
+ * parameter.
  */
 static Ast_Node_Index parse_operand(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -395,8 +423,31 @@ static Ast_Node_Index parse_operand(Parser *parser) {
     if (next == TOKEN_TYPE_IDENTIFIER) {
         return parse_identifier(parser);
     }
+    if (next == TOKEN_TYPE_STRING_LITERAL) {
+        return parse_string_literal(parser);
+    }
 
-    return parse_fail(parser, STR("an integer literal or a name"));
+    return parse_fail(parser, STR("an integer literal, a string literal or a name"));
+}
+
+static Ast_Node_Index parse_string_literal(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Token const *literal = parse_token_current(parser);
+    if (literal->token_type != TOKEN_TYPE_STRING_LITERAL) {
+        return parse_fail(parser, STR("a string literal"));
+    }
+
+    Ast_Node_Index node = parse_node_make(parser, AST_NODE_TYPE_STRING_LITERAL);
+    if (node == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[node].payload.string_literal.text = literal->payload.string_literal.text;
+    parse_token_advance(parser);
+
+    assert(parser->nodes[node].first_child == AST_NODE_INDEX_NONE);
+    return node;
 }
 
 static Ast_Node_Index parse_integer_literal(Parser *parser) {

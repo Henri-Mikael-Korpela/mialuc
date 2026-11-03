@@ -316,11 +316,15 @@ class Matcher:
         return matches - excluded_matches
 
     def ends_of_special(self, name, offset):
-        if name != "end of input":
-            raise GrammarError(f"unknown special sequence '? {name} ?'")
-        if offset == len(self.text):
-            return frozenset([offset])
-        return self.fail(offset, "the end of the file")
+        if name == "end of input":
+            if offset == len(self.text):
+                return frozenset([offset])
+            return self.fail(offset, "the end of the file")
+        if name == "any character":
+            if offset < len(self.text):
+                return frozenset([offset + 1])
+            return self.fail(offset, "a character")
+        raise GrammarError(f"unknown special sequence '? {name} ?'")
 
 
 def verify(rules, start, text, path):

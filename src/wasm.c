@@ -15,9 +15,6 @@ enum {
     WASM_EXPRESSION_DEPTH_MAX = 1024,
 };
 
-// Means "no such parameter". It is not zero, because zero is the index of the first parameter.
-static uint32_t const WASM_PARAMETER_INDEX_NONE = UINT32_MAX;
-
 byte const WASM_MODULE_HEADER[8] = {0x00, 'a', 's', 'm', 0x01, 0x00, 0x00, 0x00};
 
 /**
@@ -32,59 +29,108 @@ typedef struct {
     bool is_overflowed;
 } Wasm_Writer;
 
+// Alphabetical, because nothing depends on the order. `WASM_VALUE_TYPE_NONE` is the result of a
+// name that is not a type that the target has.
+typedef enum {
+    WASM_VALUE_TYPE_INT,
+    WASM_VALUE_TYPE_NONE,
+    WASM_VALUE_TYPE_STR,
+} Wasm_Value_Type;
+
+/**
+ * A parameter of a procedure, found by its name. `local_index` is the index of the first local
+ * that holds it, which is not its position among the parameters, because a `Str` takes two
+ * locals. `value_type` is `WASM_VALUE_TYPE_NONE` when there is no such parameter.
+ */
+typedef struct {
+    uint32_t local_index;
+    Wasm_Value_Type value_type;
+} Wasm_Parameter;
+
 /**
  * The state shared by the building functions. A building function returns false after it recorded
  * an error here, and its caller then returns false too without recording anything more. So only
  * the first error is kept.
+ *
+ * The bytes of all string literals are written to one data segment at address zero, in the order
+ * of the literal nodes. The parser makes the nodes of an expression from left to right, which is
+ * the order that the code is written in, so the code can tell the address of a literal while
+ * it is written, before the data. `data_cursor_bytes` is that address, and `data_last_literal`
+ * is the last literal that got one, which is checked to keep the two orders the same.
  */
 typedef struct {
     Wasm_Writer writer;
     Ast_Node const *nodes;
     Str subject;
     size_t node_count;
+    size_t data_size_bytes;
+    size_t data_cursor_bytes;
+    Ast_Node_Index data_last_literal;
     Wasm_Build_Status status;
+    // Whether the module has a memory, which it has when there is a string literal to put in it.
+    bool has_memory;
 } Wasm_Builder;
 
-static size_t         wasm_block_begin                       (Wasm_Writer *writer);
-static void           wasm_block_end                         (Wasm_Writer *writer,
-                                                              size_t block_start);
-static bool           wasm_build_code_section                (Wasm_Builder *builder,
-                                                              Ast_Node_Index module,
-                                                              size_t definition_count);
-static bool           wasm_build_code_section_body           (Wasm_Builder *builder,
-                                                              Ast_Node_Index definition);
-static bool           wasm_build_code_section_body_expression(Wasm_Builder *builder,
-                                                              Ast_Node_Index definition,
-                                                              Ast_Node_Index expression);
-static bool           wasm_build_export_section              (Wasm_Builder *builder,
-                                                              Ast_Node_Index module,
-                                                              size_t definition_count);
-static void           wasm_build_function_section            (Wasm_Builder *builder,
-                                                              size_t definition_count);
-static bool           wasm_build_type_section                (Wasm_Builder *builder,
-                                                              Ast_Node_Index module,
-                                                              size_t definition_count);
-static bool           wasm_build_type_section_value_type     (Wasm_Builder *builder, Str type_name);
-static size_t         wasm_children_count                    (Wasm_Builder const *builder,
-                                                              Ast_Node_Index parent);
-static bool           wasm_fail                              (Wasm_Builder *builder,
-                                                              Wasm_Build_Status status,
-                                                              Str subject);
-static size_t         wasm_leb128_signed_encode              (int64_t number, byte *encoded);
-static size_t         wasm_leb128_unsigned_encode            (uint64_t number, byte *encoded);
-static size_t         wasm_parameter_count                   (Wasm_Builder const *builder,
-                                                              Ast_Node_Index procedure);
-static uint32_t       wasm_parameter_find                    (Wasm_Builder const *builder,
-                                                              Ast_Node_Index procedure, Str name);
-static Ast_Node_Index wasm_procedure_of                      (Wasm_Builder const *builder,
-                                                              Ast_Node_Index definition);
-static size_t         wasm_section_begin                     (Wasm_Writer *writer, byte section_id);
-static void           wasm_write_byte                        (Wasm_Writer *writer, byte content);
-static void           wasm_write_bytes                       (Wasm_Writer *writer,
-                                                              byte const *bytes, size_t count);
-static void           wasm_write_signed                      (Wasm_Writer *writer, int64_t number);
-static void           wasm_write_text                        (Wasm_Writer *writer, Str text);
-static void           wasm_write_unsigned                    (Wasm_Writer *writer, uint64_t number);
+static size_t          wasm_block_begin                       (Wasm_Writer *writer);
+static void            wasm_block_end                         (Wasm_Writer *writer,
+                                                               size_t block_start);
+static bool            wasm_build_code_section                (Wasm_Builder *builder,
+                                                               Ast_Node_Index module,
+                                                               size_t definition_count);
+static bool            wasm_build_code_section_body           (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition);
+static bool            wasm_build_code_section_body_expression(Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index expression);
+static bool            wasm_build_code_section_body_procedure (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition);
+static void            wasm_build_code_section_body_string    (Wasm_Builder *builder,
+                                                               Ast_Node_Index literal);
+static void            wasm_build_data_section                (Wasm_Builder *builder);
+static bool            wasm_build_export_section              (Wasm_Builder *builder,
+                                                               Ast_Node_Index module,
+                                                               size_t definition_count);
+static void            wasm_build_function_section            (Wasm_Builder *builder,
+                                                               size_t definition_count);
+static void            wasm_build_memory_section              (Wasm_Builder *builder);
+static void            wasm_build_type_section                (Wasm_Builder *builder,
+                                                               Ast_Node_Index module,
+                                                               size_t definition_count);
+static bool            wasm_check_signatures                  (Wasm_Builder *builder,
+                                                               Ast_Node_Index module,
+                                                               size_t definition_count);
+static size_t          wasm_children_count                    (Wasm_Builder const *builder,
+                                                               Ast_Node_Index parent);
+static bool            wasm_data_measure                      (Wasm_Builder *builder);
+static Wasm_Value_Type wasm_expression_type                   (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Ast_Node_Index expression);
+static bool            wasm_fail                              (Wasm_Builder *builder,
+                                                               Wasm_Build_Status status,
+                                                               Str subject);
+static size_t          wasm_leb128_signed_encode              (int64_t number, byte *encoded);
+static size_t          wasm_leb128_unsigned_encode            (uint64_t number, byte *encoded);
+static size_t          wasm_parameter_count                   (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure);
+static Wasm_Parameter  wasm_parameter_find                    (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure, Str name);
+static size_t          wasm_parameter_slot_count              (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure);
+static Ast_Node_Index  wasm_procedure_of                      (Wasm_Builder const *builder,
+                                                               Ast_Node_Index definition);
+static size_t          wasm_section_begin                     (Wasm_Writer *writer,
+                                                               byte section_id);
+static Wasm_Value_Type wasm_value_type_of_name                (Str type_name);
+static size_t          wasm_value_type_slot_count             (Wasm_Value_Type value_type);
+static void            wasm_write_byte                        (Wasm_Writer *writer, byte content);
+static void            wasm_write_bytes                       (Wasm_Writer *writer,
+                                                               byte const *bytes, size_t count);
+static void            wasm_write_signed                      (Wasm_Writer *writer, int64_t number);
+static void            wasm_write_text                        (Wasm_Writer *writer, Str text);
+static void            wasm_write_unsigned                    (Wasm_Writer *writer,
+                                                               uint64_t number);
+static void            wasm_write_value_type                  (Wasm_Writer *writer,
+                                                               Wasm_Value_Type value_type);
 
 Wasm_Build_Result wasm_build(Array_Slice nodes, Ast_Node_Index root, Array_Slice output_buffer) {
     assert(nodes.elements != NULL);
@@ -105,21 +151,42 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Ast_Node_Index root, Array_Slice
         .nodes = node_elements,
         .subject = STR_EMPTY,
         .node_count = nodes.length,
+        .data_size_bytes = 0,
+        .data_cursor_bytes = 0,
+        .data_last_literal = AST_NODE_INDEX_NONE,
         .status = WASM_BUILD_STATUS_OK,
+        .has_memory = false,
     };
 
     size_t definition_count = wasm_children_count(&builder, root);
     wasm_write_bytes(&builder.writer, WASM_MODULE_HEADER, sizeof(WASM_MODULE_HEADER));
 
-    // The sections must come in this order, and each function refers to its type and to its body
-    // by the index of its definition, so one count describes all four.
-    bool is_ok = wasm_build_type_section(&builder, root, definition_count);
+    // The types are checked first, so that the sections below can rely on every type being known.
+    // The size of the data is needed before the code is written, because the memory has to be
+    // big enough for it and comes before the code.
+    bool is_ok = wasm_data_measure(&builder);
     if (is_ok) {
+        is_ok = wasm_check_signatures(&builder, root, definition_count);
+    }
+
+    // The sections must come in this order, and each function refers to its type and to its body
+    // by the index of its definition, so one count describes the type, function and code sections.
+    if (is_ok) {
+        wasm_build_type_section(&builder, root, definition_count);
         wasm_build_function_section(&builder, definition_count);
+        if (builder.has_memory) {
+            wasm_build_memory_section(&builder);
+        }
         is_ok = wasm_build_export_section(&builder, root, definition_count);
     }
     if (is_ok) {
         is_ok = wasm_build_code_section(&builder, root, definition_count);
+    }
+    if (is_ok && builder.has_memory) {
+        // The code gave every literal its address, and the data must be what those addresses
+        // were counted from.
+        assert(builder.data_cursor_bytes == builder.data_size_bytes);
+        wasm_build_data_section(&builder);
     }
 
     // A real error is more useful than the overflow that may follow from it, so the overflow is
@@ -146,10 +213,98 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Ast_Node_Index root, Array_Slice
 }
 
 /**
- * Writes the type section, which has one function type per definition: the parameters and the
- * result of its procedure. Types are not shared, because that would save only a few bytes.
+ * Measures the bytes of all the string literals, and decides from them whether the module has a
+ * memory. Returns false after it recorded an error when they do not fit in the memory.
  */
-static bool wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module,
+static bool wasm_data_measure(Wasm_Builder *builder) {
+    assert(builder->data_size_bytes == 0);
+    assert(builder->has_memory == false);
+
+    size_t size_bytes = 0;
+    bool has_literal = false;
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        if (builder->nodes[i].node_type == AST_NODE_TYPE_STRING_LITERAL) {
+            has_literal = true;
+            // Each literal is shorter than 4 GiB and there are fewer than 4 Gi of them, so the
+            // sum fits in 64 bits.
+            size_bytes += builder->nodes[i].payload.string_literal.text.length;
+        }
+    }
+
+    // Addresses and lengths are written as `i32.const`, whose immediate is signed, so they stay
+    // below 2 GiB. A module that big would not fit in the output anyway, so the same status says it.
+    if (size_bytes > INT32_MAX) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_OUTPUT_TOO_LARGE, STR_EMPTY);
+    }
+
+    builder->data_size_bytes = size_bytes;
+    builder->has_memory = has_literal;
+    return true;
+}
+
+/**
+ * Checks the types of the signature of every procedure: its parameters, and its return type when
+ * it has one. Returns false after it recorded an error. What comes after can ask for the type of
+ * a parameter or of a result and assume that it is known.
+ */
+static bool wasm_check_signatures(Wasm_Builder *builder, Ast_Node_Index module,
+                                  size_t definition_count) {
+    assert(module < builder->node_count);
+    assert(builder->nodes[module].node_type == AST_NODE_TYPE_MODULE);
+
+    Ast_Node_Index definition = builder->nodes[module].first_child;
+    for (size_t i = 0; i < definition_count; i += 1) {
+        assert(definition != AST_NODE_INDEX_NONE);
+
+        // A string has no signature to check: it has no parameters, and its type is known.
+        Ast_Node_Index value = builder->nodes[definition].first_child;
+        if (builder->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE) {
+            size_t parameter_count = wasm_parameter_count(builder, value);
+            Ast_Node_Index parameter = builder->nodes[value].first_child;
+            for (size_t j = 0; j < parameter_count; j += 1) {
+                assert(parameter != AST_NODE_INDEX_NONE);
+                Ast_Node const *parameter_node = &builder->nodes[parameter];
+                assert(parameter_node->node_type == AST_NODE_TYPE_PARAMETER);
+
+                Str name = parameter_node->payload.parameter.name;
+                Str type_name = builder->nodes[parameter_node->first_child].payload.type_name.name;
+                if (wasm_value_type_of_name(type_name) == WASM_VALUE_TYPE_NONE) {
+                    return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED, type_name);
+                }
+
+                // Two parameters with one name would make the name refer to two values.
+                Ast_Node_Index earlier = builder->nodes[value].first_child;
+                for (size_t k = 0; k < j; k += 1) {
+                    if (str_equals(builder->nodes[earlier].payload.parameter.name, name)) {
+                        return wasm_fail(builder, WASM_BUILD_STATUS_PARAMETER_NAME_DUPLICATE,
+                                         name);
+                    }
+                    earlier = builder->nodes[earlier].next_sibling;
+                }
+
+                parameter = parameter_node->next_sibling;
+            }
+
+            Str return_type = builder->nodes[value].payload.procedure.return_type;
+            if (return_type.bytes != NULL) {
+                if (wasm_value_type_of_name(return_type) == WASM_VALUE_TYPE_NONE) {
+                    return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED, return_type);
+                }
+            }
+        }
+
+        definition = builder->nodes[definition].next_sibling;
+    }
+
+    return true;
+}
+
+/**
+ * Writes the type section, which has one function type per definition: the parameters and the
+ * result of its procedure. Types are not shared, because that would save only a few bytes. The
+ * types in the signatures must have been checked by `wasm_check_signatures`.
+ */
+static void wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module,
                                     size_t definition_count) {
     assert(module < builder->node_count);
     assert(builder->nodes[module].node_type == AST_NODE_TYPE_MODULE);
@@ -161,42 +316,37 @@ static bool wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module
     for (size_t i = 0; i < definition_count; i += 1) {
         assert(definition != AST_NODE_INDEX_NONE);
 
-        Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
-        size_t parameter_count = wasm_parameter_count(builder, procedure);
         wasm_write_byte(&builder->writer, WASM_TYPE_FUNCTION);
-        wasm_write_unsigned(&builder->writer, parameter_count);
 
-        Ast_Node_Index parameter = builder->nodes[procedure].first_child;
-        for (size_t j = 0; j < parameter_count; j += 1) {
-            assert(parameter != AST_NODE_INDEX_NONE);
-            Ast_Node const *parameter_node = &builder->nodes[parameter];
-            assert(parameter_node->node_type == AST_NODE_TYPE_PARAMETER);
-
-            Str name = parameter_node->payload.parameter.name;
-            Str type_name = builder->nodes[parameter_node->first_child].payload.type_name.name;
-            if (wasm_build_type_section_value_type(builder, type_name) == false) {
-                return false;
-            }
-
-            // Two parameters with one name would make the name refer to two values.
-            Ast_Node_Index earlier = builder->nodes[procedure].first_child;
-            for (size_t k = 0; k < j; k += 1) {
-                if (str_equals(builder->nodes[earlier].payload.parameter.name, name)) {
-                    return wasm_fail(builder, WASM_BUILD_STATUS_PARAMETER_NAME_DUPLICATE, name);
-                }
-                earlier = builder->nodes[earlier].next_sibling;
-            }
-
-            parameter = parameter_node->next_sibling;
-        }
-
-        Str return_type = builder->nodes[procedure].payload.procedure.return_type;
-        if (return_type.bytes == NULL) {
+        Ast_Node_Index value = builder->nodes[definition].first_child;
+        if (builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL) {
+            // A constant string is a function without parameters that returns the string.
             wasm_write_unsigned(&builder->writer, 0);
+            wasm_write_unsigned(&builder->writer, wasm_value_type_slot_count(WASM_VALUE_TYPE_STR));
+            wasm_write_value_type(&builder->writer, WASM_VALUE_TYPE_STR);
         } else {
-            wasm_write_unsigned(&builder->writer, 1);
-            if (wasm_build_type_section_value_type(builder, return_type) == false) {
-                return false;
+            Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+
+            // A `Str` is two WebAssembly values, so the count is of values and not of parameters.
+            wasm_write_unsigned(&builder->writer, wasm_parameter_slot_count(builder, procedure));
+            Ast_Node_Index parameter = builder->nodes[procedure].first_child;
+            size_t parameter_count = wasm_parameter_count(builder, procedure);
+            for (size_t j = 0; j < parameter_count; j += 1) {
+                assert(parameter != AST_NODE_INDEX_NONE);
+                Ast_Node const *parameter_node = &builder->nodes[parameter];
+
+                Str type_name = builder->nodes[parameter_node->first_child].payload.type_name.name;
+                wasm_write_value_type(&builder->writer, wasm_value_type_of_name(type_name));
+                parameter = parameter_node->next_sibling;
+            }
+
+            Str return_type_name = builder->nodes[procedure].payload.procedure.return_type;
+            if (return_type_name.bytes == NULL) {
+                wasm_write_unsigned(&builder->writer, 0);
+            } else {
+                Wasm_Value_Type return_type = wasm_value_type_of_name(return_type_name);
+                wasm_write_unsigned(&builder->writer, wasm_value_type_slot_count(return_type));
+                wasm_write_value_type(&builder->writer, return_type);
             }
         }
 
@@ -204,24 +354,104 @@ static bool wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module
     }
 
     wasm_block_end(&builder->writer, section);
-    return true;
 }
 
 /**
- * Writes the WebAssembly type that `type_name` stands for, and returns false after it recorded an
- * error if the name is not a type that the target has. `Int` is a 64-bit integer, so that every
- * integer literal, which the tokenizer accepts up to the largest signed 64-bit value, fits.
+ * Returns the type that `type_name` stands for, or `WASM_VALUE_TYPE_NONE` if the target does not
+ * have a type of that name.
  */
-static bool wasm_build_type_section_value_type(Wasm_Builder *builder, Str type_name) {
+static Wasm_Value_Type wasm_value_type_of_name(Str type_name) {
     assert(type_name.bytes != NULL);
     assert(type_name.length > 0);
 
-    if (str_equals(type_name, STR("Int")) == false) {
-        return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED, type_name);
+    if (str_equals(type_name, STR("Int"))) {
+        return WASM_VALUE_TYPE_INT;
+    }
+    if (str_equals(type_name, STR("Str"))) {
+        return WASM_VALUE_TYPE_STR;
+    }
+    return WASM_VALUE_TYPE_NONE;
+}
+
+/**
+ * Returns the number of WebAssembly values that a value of `value_type` takes. `Int` is a 64-bit
+ * integer, so that every integer literal, which the tokenizer accepts up to the largest signed
+ * 64-bit value, fits. `Str` is the address and the length of its bytes, both 32-bit, because
+ * addresses are.
+ */
+static size_t wasm_value_type_slot_count(Wasm_Value_Type value_type) {
+    assert(value_type != WASM_VALUE_TYPE_NONE);
+
+    if (value_type == WASM_VALUE_TYPE_STR) {
+        return 2;
+    }
+    return 1;
+}
+
+/**
+ * Writes the WebAssembly types that a value of `value_type` is made of, which are as many as
+ * `wasm_value_type_slot_count` says.
+ */
+static void wasm_write_value_type(Wasm_Writer *writer, Wasm_Value_Type value_type) {
+    assert(value_type != WASM_VALUE_TYPE_NONE);
+
+    if (value_type == WASM_VALUE_TYPE_STR) {
+        wasm_write_byte(writer, WASM_TYPE_I32);
+        wasm_write_byte(writer, WASM_TYPE_I32);
+    } else {
+        wasm_write_byte(writer, WASM_TYPE_I64);
+    }
+}
+
+/**
+ * Writes the memory section, which declares the one memory of the module. It is just big enough
+ * for the data, and at least one page, so that the memory exists with nothing in it as well.
+ */
+static void wasm_build_memory_section(Wasm_Builder *builder) {
+    assert(builder->has_memory);
+    assert(builder->data_size_bytes <= INT32_MAX);
+
+    size_t page_count = (builder->data_size_bytes + WASM_MEMORY_PAGE_SIZE_BYTES - 1) /
+                        WASM_MEMORY_PAGE_SIZE_BYTES;
+    if (page_count == 0) {
+        page_count = 1;
     }
 
-    wasm_write_byte(&builder->writer, WASM_TYPE_I64);
-    return true;
+    size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_MEMORY);
+    wasm_write_unsigned(&builder->writer, 1);
+    wasm_write_byte(&builder->writer, WASM_MEMORY_LIMITS_MIN_ONLY);
+    wasm_write_unsigned(&builder->writer, page_count);
+    wasm_block_end(&builder->writer, section);
+}
+
+/**
+ * Writes the data section, which has one segment: the bytes of all string literals, in the order
+ * of their nodes, copied to the start of the memory when the module is instantiated.
+ */
+static void wasm_build_data_section(Wasm_Builder *builder) {
+    assert(builder->has_memory);
+    assert(builder->data_size_bytes <= INT32_MAX);
+
+    size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_DATA);
+    wasm_write_unsigned(&builder->writer, 1);
+    wasm_write_byte(&builder->writer, WASM_DATA_SEGMENT_ACTIVE);
+    // The address of the segment is a constant expression: a constant, and the end of it.
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
+    wasm_write_signed(&builder->writer, 0);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+    wasm_write_unsigned(&builder->writer, builder->data_size_bytes);
+
+    size_t written_bytes = 0;
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        if (builder->nodes[i].node_type == AST_NODE_TYPE_STRING_LITERAL) {
+            Str text = builder->nodes[i].payload.string_literal.text;
+            wasm_write_bytes(&builder->writer, (byte const *)text.bytes, text.length);
+            written_bytes += text.length;
+        }
+    }
+
+    assert(written_bytes == builder->data_size_bytes);
+    wasm_block_end(&builder->writer, section);
 }
 
 /**
@@ -241,20 +471,33 @@ static void wasm_build_function_section(Wasm_Builder *builder, size_t definition
 
 /**
  * Writes the export section, which makes every function callable from outside the module under
- * the name of its definition.
+ * the name of its definition, and the memory, if there is one, readable under the name `memory`.
  */
 static bool wasm_build_export_section(Wasm_Builder *builder, Ast_Node_Index module,
                                       size_t definition_count) {
     assert(module < builder->node_count);
     assert(definition_count <= builder->node_count);
 
+    // Strings are in the memory, and a caller that gets the address of one cannot read it
+    // without it.
+    size_t memory_export_count = 0;
+    if (builder->has_memory) {
+        memory_export_count = 1;
+    }
+
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_EXPORT);
-    wasm_write_unsigned(&builder->writer, definition_count);
+    wasm_write_unsigned(&builder->writer, definition_count + memory_export_count);
 
     Ast_Node_Index definition = builder->nodes[module].first_child;
     for (size_t i = 0; i < definition_count; i += 1) {
         assert(definition != AST_NODE_INDEX_NONE);
         Str name = builder->nodes[definition].payload.constant_definition.name;
+
+        // The name is taken whether the module has a memory or not, so that adding a string to
+        // a program does not make it stop compiling.
+        if (str_equals(name, STR("memory"))) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED, name);
+        }
 
         // Export names must be unique, and so must the names of constants.
         Ast_Node_Index earlier = builder->nodes[module].first_child;
@@ -270,6 +513,12 @@ static bool wasm_build_export_section(Wasm_Builder *builder, Ast_Node_Index modu
         wasm_write_unsigned(&builder->writer, i);
 
         definition = builder->nodes[definition].next_sibling;
+    }
+
+    if (builder->has_memory) {
+        wasm_write_text(&builder->writer, STR("memory"));
+        wasm_write_byte(&builder->writer, WASM_EXPORT_KIND_MEMORY);
+        wasm_write_unsigned(&builder->writer, 0);
     }
 
     wasm_block_end(&builder->writer, section);
@@ -302,19 +551,71 @@ static bool wasm_build_code_section(Wasm_Builder *builder, Ast_Node_Index module
 }
 
 /**
- * Writes one entry of the code section: the size of the body, then the body. Each statement is
- * a `return`, which becomes the value followed by the `return` instruction.
+ * Writes one entry of the code section: the size of the body, then the body.
  */
 static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index definition) {
     assert(definition < builder->node_count);
     assert(builder->nodes[definition].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION);
 
-    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
     size_t body = wasm_block_begin(&builder->writer);
 
     // The parameters are the locals of the function already, so there are no other locals.
     wasm_write_unsigned(&builder->writer, 0);
 
+    Ast_Node_Index value = builder->nodes[definition].first_child;
+    if (builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL) {
+        // The string is the result, and is left on the stack for the `end` to return.
+        wasm_build_code_section_body_string(builder, value);
+    } else {
+        if (wasm_build_code_section_body_procedure(builder, definition) == false) {
+            return false;
+        }
+    }
+
+    // After a `return` the code is unreachable, and WebAssembly accepts anything there, so the
+    // body ends with the `end` instruction even though no value is left on the stack.
+    wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+    wasm_block_end(&builder->writer, body);
+    return true;
+}
+
+/**
+ * Writes the instructions that push the string of `literal`: its address and then its length.
+ * The address is where the string will be in the data section, which is written last, in the
+ * order of the nodes, see `Wasm_Builder`.
+ */
+static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_Index literal) {
+    assert(literal < builder->node_count);
+    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_STRING_LITERAL);
+    assert(builder->has_memory);
+
+    // The data is in the order of the nodes, so a literal written out of order would be given an
+    // address that is somebody else's string.
+    assert(builder->data_last_literal == AST_NODE_INDEX_NONE ||
+           literal > builder->data_last_literal);
+
+    size_t length_bytes = builder->nodes[literal].payload.string_literal.text.length;
+    assert(builder->data_cursor_bytes + length_bytes <= builder->data_size_bytes);
+
+    // Both are below 2 GiB, because `wasm_data_measure` checked the total.
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
+    wasm_write_signed(&builder->writer, (int64_t)builder->data_cursor_bytes);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
+    wasm_write_signed(&builder->writer, (int64_t)length_bytes);
+
+    builder->data_cursor_bytes += length_bytes;
+    builder->data_last_literal = literal;
+}
+
+/**
+ * Writes the statements of a procedure. Each statement is a `return`, which becomes the value
+ * followed by the `return` instruction.
+ */
+static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
+                                                   Ast_Node_Index definition) {
+    assert(definition < builder->node_count);
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
     Ast_Node_Index child = builder->nodes[procedure].first_child;
     for (size_t i = 0; i < builder->node_count && child != AST_NODE_INDEX_NONE; i += 1) {
         Ast_Node const *child_node = &builder->nodes[child];
@@ -329,6 +630,16 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
             if (wasm_build_code_section_body_expression(builder, definition, value) == false) {
                 return false;
             }
+
+            // The value on the stack must be what the procedure says that it returns. The
+            // expression was written already, so every name in it is known.
+            Str return_type_name = builder->nodes[procedure].payload.procedure.return_type;
+            Wasm_Value_Type return_type = wasm_value_type_of_name(return_type_name);
+            if (wasm_expression_type(builder, procedure, value) != return_type) {
+                Str name = builder->nodes[definition].payload.constant_definition.name;
+                return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
+            }
+
             wasm_write_byte(&builder->writer, WASM_OPCODE_RETURN);
         } else {
             // Parameters come first and are not code. The parser makes nothing else yet.
@@ -338,11 +649,45 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
         child = child_node->next_sibling;
     }
 
-    // After a `return` the code is unreachable, and WebAssembly accepts anything there, so the
-    // body ends with the `end` instruction even though no value is left on the stack.
-    wasm_write_byte(&builder->writer, WASM_OPCODE_END);
-    wasm_block_end(&builder->writer, body);
     return true;
+}
+
+/**
+ * Returns the type of the value of `expression`. The expression must have been written already,
+ * so that every name in it is known. Only the root matters: an addition is an `Int` because its
+ * operands were checked to be, as they were written.
+ */
+static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
+                                            Ast_Node_Index procedure,
+                                            Ast_Node_Index expression) {
+    assert(expression < builder->node_count);
+    assert(procedure < builder->node_count);
+
+    Ast_Node const *node = &builder->nodes[expression];
+    switch (node->node_type) {
+    case AST_NODE_TYPE_ADDITION:
+    case AST_NODE_TYPE_INTEGER_LITERAL:
+        return WASM_VALUE_TYPE_INT;
+    case AST_NODE_TYPE_IDENTIFIER: {
+        Wasm_Parameter parameter = wasm_parameter_find(builder, procedure,
+                                                       node->payload.identifier.name);
+        assert(parameter.value_type != WASM_VALUE_TYPE_NONE);
+        return parameter.value_type;
+    }
+    case AST_NODE_TYPE_STRING_LITERAL:
+        return WASM_VALUE_TYPE_STR;
+    case AST_NODE_TYPE_CONSTANT_DEFINITION:
+    case AST_NODE_TYPE_MODULE:
+    case AST_NODE_TYPE_PARAMETER:
+    case AST_NODE_TYPE_PROCEDURE:
+    case AST_NODE_TYPE_RETURN_STATEMENT:
+    case AST_NODE_TYPE_TYPE_NAME:
+        // None of these is part of an expression.
+        assert(false);
+        break;
+    }
+
+    return WASM_VALUE_TYPE_NONE;
 }
 
 /**
@@ -394,17 +739,33 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             break;
         case AST_NODE_TYPE_IDENTIFIER: {
             Str name = node->payload.identifier.name;
-            uint32_t index = wasm_parameter_find(builder, procedure, name);
-            if (index == WASM_PARAMETER_INDEX_NONE) {
+            Wasm_Parameter parameter = wasm_parameter_find(builder, procedure, name);
+            if (parameter.value_type == WASM_VALUE_TYPE_NONE) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_IDENTIFIER_UNKNOWN, name);
             }
-            wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
-            wasm_write_unsigned(&builder->writer, index);
+            // The only operator is the addition of integers, and an operand has a parent.
+            if (path_count > 0 && parameter.value_type != WASM_VALUE_TYPE_INT) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_ADDITION_OPERAND_TYPE_INVALID, name);
+            }
+
+            // Every local of the value is pushed, which is two for a `Str`.
+            size_t slot_count = wasm_value_type_slot_count(parameter.value_type);
+            for (size_t slot = 0; slot < slot_count; slot += 1) {
+                wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
+                wasm_write_unsigned(&builder->writer, parameter.local_index + slot);
+            }
             break;
         }
         case AST_NODE_TYPE_INTEGER_LITERAL:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_CONST);
             wasm_write_signed(&builder->writer, node->payload.integer_literal.value);
+            break;
+        case AST_NODE_TYPE_STRING_LITERAL:
+            if (path_count > 0) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_ADDITION_OPERAND_TYPE_INVALID,
+                                 node->payload.string_literal.text);
+            }
+            wasm_build_code_section_body_string(builder, current);
             break;
         case AST_NODE_TYPE_MODULE:
         case AST_NODE_TYPE_PARAMETER:
@@ -438,8 +799,8 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
 }
 
 /**
- * Returns the procedure that `definition` binds to its name. The parser only allows procedures as
- * the value of a definition for now.
+ * Returns the procedure that `definition` binds to its name. The definition must not be of a
+ * string, which has no procedure.
  */
 static Ast_Node_Index wasm_procedure_of(Wasm_Builder const *builder, Ast_Node_Index definition) {
     assert(definition < builder->node_count);
@@ -491,26 +852,64 @@ static size_t wasm_parameter_count(Wasm_Builder const *builder, Ast_Node_Index p
 }
 
 /**
- * Returns the index of the parameter of `procedure` called `name`, which is also the index of
- * the local that holds it, or `WASM_PARAMETER_INDEX_NONE` when there is no such parameter.
+ * Returns the number of WebAssembly values that the parameters of `procedure` take together,
+ * which is more than the number of parameters when one is a `Str`. The types of the parameters
+ * must be known.
  */
-static uint32_t wasm_parameter_find(Wasm_Builder const *builder, Ast_Node_Index procedure,
-                                    Str name) {
-    assert(name.bytes != NULL);
+static size_t wasm_parameter_slot_count(Wasm_Builder const *builder, Ast_Node_Index procedure) {
+    assert(procedure < builder->node_count);
+    assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
 
     size_t parameter_count = wasm_parameter_count(builder, procedure);
-    assert(parameter_count < WASM_PARAMETER_INDEX_NONE);
-
+    size_t slot_count = 0;
     Ast_Node_Index parameter = builder->nodes[procedure].first_child;
     for (size_t i = 0; i < parameter_count; i += 1) {
         assert(parameter != AST_NODE_INDEX_NONE);
-        if (str_equals(builder->nodes[parameter].payload.parameter.name, name)) {
-            return (uint32_t)i;
-        }
-        parameter = builder->nodes[parameter].next_sibling;
+        Ast_Node const *parameter_node = &builder->nodes[parameter];
+
+        Str type_name = builder->nodes[parameter_node->first_child].payload.type_name.name;
+        slot_count += wasm_value_type_slot_count(wasm_value_type_of_name(type_name));
+        parameter = parameter_node->next_sibling;
     }
 
-    return WASM_PARAMETER_INDEX_NONE;
+    return slot_count;
+}
+
+/**
+ * Returns the parameter of `procedure` called `name`, or one with the type
+ * `WASM_VALUE_TYPE_NONE` when there is no such parameter. The types of the parameters must be
+ * known. The locals of a function are its parameters, in order, so the first local of a parameter
+ * comes after all the locals of the parameters before it.
+ */
+static Wasm_Parameter wasm_parameter_find(Wasm_Builder const *builder, Ast_Node_Index procedure,
+                                          Str name) {
+    assert(name.bytes != NULL);
+
+    size_t parameter_count = wasm_parameter_count(builder, procedure);
+    size_t local_index = 0;
+    Ast_Node_Index parameter = builder->nodes[procedure].first_child;
+    for (size_t i = 0; i < parameter_count; i += 1) {
+        assert(parameter != AST_NODE_INDEX_NONE);
+        Ast_Node const *parameter_node = &builder->nodes[parameter];
+
+        Str type_name = builder->nodes[parameter_node->first_child].payload.type_name.name;
+        Wasm_Value_Type value_type = wasm_value_type_of_name(type_name);
+        if (str_equals(parameter_node->payload.parameter.name, name)) {
+            assert(local_index <= UINT32_MAX);
+            return (Wasm_Parameter){
+                .local_index = (uint32_t)local_index,
+                .value_type = value_type,
+            };
+        }
+
+        local_index += wasm_value_type_slot_count(value_type);
+        parameter = parameter_node->next_sibling;
+    }
+
+    return (Wasm_Parameter){
+        .local_index = 0,
+        .value_type = WASM_VALUE_TYPE_NONE,
+    };
 }
 
 /**
