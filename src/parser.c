@@ -369,6 +369,8 @@ static Ast_Node_Index parse_assignment(Parser *parser) {
     Ast_Node_Type node_type = AST_NODE_TYPE_ADDITION_ASSIGNMENT;
     if (operator == TOKEN_TYPE_SLASH_EQUALS) {
         node_type = AST_NODE_TYPE_DIVISION_ASSIGNMENT;
+    } else if (operator == TOKEN_TYPE_ASTERISK_EQUALS) {
+        node_type = AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT;
     } else if (operator != TOKEN_TYPE_PLUS_EQUALS) {
         return parse_fail(parser, STR("':' or an assignment operator"));
     }

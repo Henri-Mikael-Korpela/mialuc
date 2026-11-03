@@ -19,6 +19,7 @@ typedef enum {
     AST_NODE_TYPE_INTEGER_LITERAL,
     AST_NODE_TYPE_MODULE,
     AST_NODE_TYPE_MULTIPLICATION,
+    AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT,
     AST_NODE_TYPE_PARAMETER,
     AST_NODE_TYPE_PROCEDURE,
     AST_NODE_TYPE_RETURN_STATEMENT,
@@ -57,6 +58,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition. It is the root of the tree.
  * - `AST_NODE_TYPE_MULTIPLICATION`: two children, the left and the right operand, in that order.
+ * - `AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
+ *   variable that gets the product, and the factor that it is multiplied by, in that order. It
+ *   is a statement of a procedure body.
  * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`.
  * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
  *   body, which are variable definitions, assignments and return statements. The return type is in the

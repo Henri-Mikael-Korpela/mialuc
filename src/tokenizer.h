@@ -22,6 +22,7 @@ typedef enum {
     // Tokens consisting of multiple characters are represented by a unique value, which starts
     // above the ASCII range so that it cannot be the value of a single-character token:
     TOKEN_TYPE_ARROW = 256,
+    TOKEN_TYPE_ASTERISK_EQUALS,
     TOKEN_TYPE_IDENTIFIER,
     TOKEN_TYPE_INDENTATION,
     TOKEN_TYPE_INTEGER_LITERAL,

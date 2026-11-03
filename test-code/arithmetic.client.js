@@ -3,6 +3,7 @@ console.log("Addition:", add_foo());
 console.log("Addition assignment:", add_assign_foo());
 console.log("Subtraction:", subtract_foo());
 console.log("Multiplication:", multiply_foo());
+console.log("Multiplication assignment:", multiply_assign_foo());
 console.log("Division:", divide_foo());
 console.log("Division assignment:", divide_assign_foo());
 // Multiplication binds tighter than addition, so this is 2 + (3 * 4).

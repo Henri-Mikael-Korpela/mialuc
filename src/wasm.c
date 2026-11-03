@@ -716,6 +716,8 @@ static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
     byte opcode = WASM_OPCODE_I64_ADD;
     if (builder->nodes[assignment].node_type == AST_NODE_TYPE_DIVISION_ASSIGNMENT) {
         opcode = WASM_OPCODE_I64_DIV_S;
+    } else if (builder->nodes[assignment].node_type == AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT) {
+        opcode = WASM_OPCODE_I64_MUL;
     }
     wasm_write_byte(&builder->writer, opcode);
     wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_SET);
@@ -919,6 +921,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
     case AST_NODE_TYPE_MODULE:
+    case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
     case AST_NODE_TYPE_PARAMETER:
     case AST_NODE_TYPE_PROCEDURE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
@@ -1017,6 +1020,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
         case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
         case AST_NODE_TYPE_MODULE:
+        case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
         case AST_NODE_TYPE_PARAMETER:
         case AST_NODE_TYPE_PROCEDURE:
         case AST_NODE_TYPE_RETURN_STATEMENT:

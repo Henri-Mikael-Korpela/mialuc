@@ -17,6 +17,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     switch (node_type) {
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
     case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+    case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
         return true;
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
@@ -88,6 +89,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_MULTIPLICATION:
             printf("MULTIPLICATION\n");
+            break;
+        case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
+            printf("MULTIPLICATION_ASSIGNMENT\n");
             break;
         case AST_NODE_TYPE_PARAMETER:
             printf("PARAMETER %.*s\n", (int)node.payload.parameter.name.length,

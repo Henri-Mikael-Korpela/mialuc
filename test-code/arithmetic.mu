@@ -31,3 +31,8 @@ divide_assign_foo :: proc() Int ->
     x := 20
     x /= 4
     return x
+
+multiply_assign_foo :: proc() Int ->
+    x := 6
+    x *= 7
+    return x

@@ -393,6 +393,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_ASTERISK:
             printf("ASTERISK\n");
             break;
+        case TOKEN_TYPE_ASTERISK_EQUALS:
+            printf("ASTERISK_EQUALS\n");
+            break;
         case TOKEN_TYPE_COMMA:
             printf("COMMA\n");
             break;
