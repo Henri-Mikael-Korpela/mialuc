@@ -16,6 +16,7 @@ typedef enum {
     TOKEN_TYPE_PARENTHESIS_LEFT = '(',
     TOKEN_TYPE_PARENTHESIS_RIGHT = ')',
     TOKEN_TYPE_PLUS = '+',
+    TOKEN_TYPE_SLASH = '/',
     TOKEN_TYPE_TYPE_SEPARATOR = ':',
 
     // Tokens consisting of multiple characters are represented by a unique value, which starts

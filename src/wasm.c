@@ -839,6 +839,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     Ast_Node const *node = &builder->nodes[expression];
     switch (node->node_type) {
     case AST_NODE_TYPE_ADDITION:
+    case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_INTEGER_LITERAL:
     case AST_NODE_TYPE_MULTIPLICATION:
     case AST_NODE_TYPE_SUBTRACTION:
@@ -908,6 +909,9 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         switch (node->node_type) {
         case AST_NODE_TYPE_ADDITION:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_ADD);
+            break;
+        case AST_NODE_TYPE_DIVISION:
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I64_DIV_S);
             break;
         case AST_NODE_TYPE_MULTIPLICATION:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_MUL);

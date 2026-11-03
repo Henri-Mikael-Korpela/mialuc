@@ -86,9 +86,9 @@ return_statement = "return" , required_space , expression ;
    the operator are optional. *)
 expression = term , { ws , ( "+" | "-" ) , ws , term } ;
 
-(* Operands joined by `*`, which binds tighter than `+` and `-`: the compiler reads `a + b * c` as
-   `a + (b * c)`, which the grammar does not show either. *)
-term = operand , { ws , "*" , ws , operand } ;
+(* Operands joined by `*` or `/`, which have the same precedence and bind tighter than `+` and `-`:
+   the compiler reads `a + b * c` as `a + (b * c)`, which the grammar does not show either. *)
+term = operand , { ws , ( "*" | "/" ) , ws , operand } ;
 
 (* An integer literal, a string literal, or the use of a name, such as a parameter or a constant. *)
 operand = integer_literal | string_literal | name ;

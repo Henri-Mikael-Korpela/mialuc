@@ -11,6 +11,7 @@
 typedef enum {
     AST_NODE_TYPE_ADDITION,
     AST_NODE_TYPE_CONSTANT_DEFINITION,
+    AST_NODE_TYPE_DIVISION,
     AST_NODE_TYPE_IDENTIFIER,
     AST_NODE_TYPE_INTEGER_LITERAL,
     AST_NODE_TYPE_MODULE,
@@ -42,6 +43,7 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_ADDITION`: two children, the left and the right operand, in that order.
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: one child, the value that is bound to the name. It is
  *   an `AST_NODE_TYPE_PROCEDURE` or an `AST_NODE_TYPE_STRING_LITERAL`.
+ * - `AST_NODE_TYPE_DIVISION`: two children, the dividend and the divisor, in that order.
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition. It is the root of the tree.

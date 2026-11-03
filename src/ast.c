@@ -40,6 +40,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             printf("CONSTANT_DEFINITION %.*s\n", (int)node.payload.constant_definition.name.length,
                    node.payload.constant_definition.name.bytes);
             break;
+        case AST_NODE_TYPE_DIVISION:
+            printf("DIVISION\n");
+            break;
         case AST_NODE_TYPE_IDENTIFIER:
             printf("IDENTIFIER %.*s\n", (int)node.payload.identifier.name.length,
                    node.payload.identifier.name.bytes);

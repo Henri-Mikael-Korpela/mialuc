@@ -494,8 +494,8 @@ static Ast_Node_Index parse_expression(Parser *parser) {
 }
 
 /**
- * Parses operands separated by `*`, which have a higher precedence than `+` and `-`. Like them,
- * the operator is left associative, so `a * b * c` is `(a * b) * c`.
+ * Parses operands separated by `*` or `/`, which have the same precedence, a higher one than `+`
+ * and `-`. Like them, they are left associative, so `a / b * c` is `(a / b) * c`.
  */
 static Ast_Node_Index parse_term(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -509,7 +509,8 @@ static Ast_Node_Index parse_term(Parser *parser) {
     // Every operator consumes a token, so there are fewer operators than tokens, which bounds
     // the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_ASTERISK) {
+        Token_Type operator = parse_token_current(parser)->token_type;
+        if (operator != TOKEN_TYPE_ASTERISK && operator != TOKEN_TYPE_SLASH) {
             break;
         }
         parse_token_advance(parser);
@@ -519,13 +520,17 @@ static Ast_Node_Index parse_term(Parser *parser) {
             return AST_NODE_INDEX_NONE;
         }
 
-        Ast_Node_Index multiplication = parse_node_make(parser, AST_NODE_TYPE_MULTIPLICATION);
-        if (multiplication == AST_NODE_INDEX_NONE) {
+        Ast_Node_Type node_type = AST_NODE_TYPE_MULTIPLICATION;
+        if (operator == TOKEN_TYPE_SLASH) {
+            node_type = AST_NODE_TYPE_DIVISION;
+        }
+        Ast_Node_Index arithmetic = parse_node_make(parser, node_type);
+        if (arithmetic == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
-        parse_node_append_child(parser, multiplication, left);
-        parse_node_append_child(parser, multiplication, right);
-        left = multiplication;
+        parse_node_append_child(parser, arithmetic, left);
+        parse_node_append_child(parser, arithmetic, right);
+        left = arithmetic;
     }
 
     return left;

@@ -61,14 +61,15 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `+`      | Addition. | 1 | `x := 1 + 2` makes `x` 3 |
 | `-`      | Subtraction. | 1 | `x := 5 - 1` makes `x` 4 |
 | `*`      | Multiplication. | 2 | `x := 2 + 3 * 4` makes `x` 14 |
+| `/`      | Division. The result is truncated toward zero. | 2 | `x := 20 - 12 / 4` makes `x` 17 |
 | `:`      | Type separator. It separates a name from its type. | 0 | `x : Int = 5` |
 | `::`     | Defines a constant. It is two subsequent `:`. | 0 | `NAME :: "Bob"` |
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
 | `=`      | Sets the initial value of a variable whose type is written. | 0 | `x : Int = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals or names. Addition, subtraction and multiplication are defined for `Int` only.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals or names. Addition, subtraction, multiplication and division are defined for `Int` only.
 
-Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20.
+Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2, and so do `*` and `/`, so `8 / 2 * 3` is 12 and not 1. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2.
 
 The operators of precedence 0 define names and are not part of an expression. Each one is written after the name that it defines, and takes everything up to the end of the line as its right-hand side, so `x := a + b` means `x := (a + b)`. Spaces may be written between the characters of `::` and `:=`, because they are separate tokens.
 
@@ -150,7 +151,7 @@ The compiler has two modes: `run` prints the tokens and the syntax tree of a pro
 
 The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. `Int` and `Str` are the only types that the target supports.
 
-`Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition, subtraction and multiplication wrap around on overflow.
+`Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition, subtraction and multiplication wrap around on overflow. Division truncates toward zero, so `(0 - 7) / 2` is -3. It traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
 
 `Str` is two 32-bit integers (`i32`): the address of its first byte in memory, and its length in bytes. The bytes are UTF-8, so a caller decodes them as that, as `TextDecoder` does by default. So a parameter of type `Str` is two WebAssembly parameters, one after the other, and a result of type `Str` is two WebAssembly results, which JavaScript receives as an array `[address, length]`. The bytes of all the string literals of the program are copied to the start of the memory of the module when it is instantiated, and the module exports the memory as `memory`, so that a caller can read a string:
 

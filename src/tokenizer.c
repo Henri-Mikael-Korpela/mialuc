@@ -377,6 +377,14 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset += 1;
         }
+        else if (character == (char)TOKEN_TYPE_SLASH) {
+            token_elements[result.tokens.length] = (Token){
+                .token_type = TOKEN_TYPE_SLASH,
+                .source_offset = (uint32_t)offset,
+            };
+            result.tokens.length += 1;
+            offset += 1;
+        }
         else if (character == (char)TOKEN_TYPE_TYPE_SEPARATOR) {
             token_elements[result.tokens.length] = (Token){
                 .token_type = TOKEN_TYPE_TYPE_SEPARATOR,

@@ -573,6 +573,9 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             wasm_text_write_signed(&formatter->writer, number);
             break;
         }
+        case WASM_OPCODE_I64_DIV_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.div_s"));
+            break;
         case WASM_OPCODE_I64_MUL:
             wasm_text_write_instruction(&formatter->writer, STR("i64.mul"));
             break;

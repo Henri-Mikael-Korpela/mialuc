@@ -431,6 +431,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_PLUS:
             printf("PLUS\n");
             break;
+        case TOKEN_TYPE_SLASH:
+            printf("SLASH\n");
+            break;
         case TOKEN_TYPE_STRING_LITERAL:
             printf("STRING_LITERAL \"%.*s\"\n", (int)token.payload.string_literal.text.length,
                    token.payload.string_literal.text.bytes);
