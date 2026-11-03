@@ -56,10 +56,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
     Token *token_elements = token_buffer.elements;
     Tokenize_Result result = {
-        .tokens = {
-            .elements = token_buffer.elements,
-            .length = 0
-        },
+        .tokens = array_slice_make(token_buffer.elements, 0),
         .error_offset = 0,
         .status = TOKENIZE_STATUS_OK,
     };

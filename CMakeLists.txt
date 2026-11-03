@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-add_executable(mialuc src/main.c src/ast.c src/parser.c src/str.c src/tokenizer.c src/wasm.c)
+add_executable(mialuc src/main.c src/array_slice.c src/ast.c src/parser.c src/str.c src/tokenizer.c src/wasm.c)
 
 # Headers live directly in src/ but are included as <mialu/...>, so they are copied into a
 # generated include directory under that name. configure_file reruns CMake when a header changes.

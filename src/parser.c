@@ -72,7 +72,7 @@ Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
     assert((root == AST_NODE_INDEX_NONE) == (parser.status != PARSE_STATUS_OK));
     assert(parser.node_count <= node_buffer.length);
     return (Parse_Result){
-        .nodes = {.elements = node_buffer.elements, .length = parser.node_count},
+        .nodes = array_slice_make(node_buffer.elements, parser.node_count),
         .expected = parser.expected,
         .error_token_index = parser.error_token_index,
         .root = root,

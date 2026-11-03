@@ -57,7 +57,7 @@ typedef struct {
     Array_Slice output;
 } Buffers;
 
-static Command main_command_parse                    (int argc, char *argv[]);
+static Command main_command_parse                    (Array_Slice args);
 static int32_t main_run_command                      (Command command, Buffers const *buffers);
 static void    main_run_command_print_tokens         (Array_Slice tokens);
 static Str     main_run_command_read_file            (char const *path, Array_Slice buffer);
@@ -77,7 +77,10 @@ static bool    main_run_command_write_file           (char const *path, Array_Sl
  * path.
  */
 int main(int argc, char *argv[]) {
-    Command command = main_command_parse(argc, argv);
+    // The cast is needed because `argc` is an `int`, which `main` must declare. It is never
+    // negative.
+    Array_Slice args = array_slice_make(argv, (size_t)argc);
+    Command command = main_command_parse(args);
     if (command.mode == COMMAND_KIND_INVALID) {
         fprintf(stderr,
                 "Usage: %s run <source file>\n"
@@ -88,27 +91,13 @@ int main(int argc, char *argv[]) {
 
     // Allocated once, here, because the buffers are too large for the default Windows stack.
     Buffers buffers = {
-        .source =
-            {
-                .elements = malloc(SOURCE_SIZE_BYTES_MAX * sizeof(byte)),
-                .length = SOURCE_SIZE_BYTES_MAX,
-            },
-        .tokens =
-            {
-                .elements = malloc(TOKEN_COUNT_MAX * sizeof(Token)),
-                .length = TOKEN_COUNT_MAX,
-            },
+        .source = array_slice_make(malloc(SOURCE_SIZE_BYTES_MAX * sizeof(byte)),
+                                   SOURCE_SIZE_BYTES_MAX),
+        .tokens = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Token)), TOKEN_COUNT_MAX),
         // A node needs at least one token, so as many nodes as tokens always suffice.
-        .nodes =
-            {
-                .elements = malloc(TOKEN_COUNT_MAX * sizeof(Ast_Node)),
-                .length = TOKEN_COUNT_MAX,
-            },
-        .output =
-            {
-                .elements = malloc(OUTPUT_SIZE_BYTES_MAX * sizeof(byte)),
-                .length = OUTPUT_SIZE_BYTES_MAX,
-            },
+        .nodes = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Ast_Node)), TOKEN_COUNT_MAX),
+        .output = array_slice_make(malloc(OUTPUT_SIZE_BYTES_MAX * sizeof(byte)),
+                                   OUTPUT_SIZE_BYTES_MAX),
     };
 
     int32_t exit_code = 1;
@@ -134,21 +123,23 @@ int main(int argc, char *argv[]) {
  *
  * Returns a command with mode `COMMAND_KIND_INVALID` when it is anything else.
  */
-static Command main_command_parse(int argc, char *argv[]) {
-    assert(argc >= 1);
-    assert(argv != NULL);
+static Command main_command_parse(Array_Slice args) {
+    assert(args.elements != NULL);
+    assert(args.length >= 1);
+
+    char const *const *argv = args.elements;
 
     Command invalid = {
         .source_path = NULL,
         .output_path = NULL,
         .mode = COMMAND_KIND_INVALID,
     };
-    if (argc < 2) {
+    if (args.length < 2) {
         return invalid;
     }
 
     if (strcmp(argv[1], "run") == 0) {
-        if (argc != 3) {
+        if (args.length != 3) {
             return invalid;
         }
         return (Command){
@@ -161,7 +152,7 @@ static Command main_command_parse(int argc, char *argv[]) {
     if (strcmp(argv[1], "build") == 0) {
         // WebAssembly is the only target, but naming it keeps the command line the same when
         // another one is added.
-        if (argc != 6) {
+        if (args.length != 6) {
             return invalid;
         }
         if (strcmp(argv[2], "--target") != 0) {

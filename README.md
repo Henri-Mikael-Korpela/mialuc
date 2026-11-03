@@ -21,7 +21,7 @@ build/mialuc.exe build --target wasm <output file> <source file>
 python tests/wasm/serve.py
 ```
 
-Then open http://localhost:8000/. See [tests/wasm](tests/wasm).
+Then open http://localhost:8008/. See [tests/wasm](tests/wasm).
 
 ## Grammar
 

@@ -165,11 +165,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Ast_Node_Index root, Array_Slice
     assert(is_ok == (builder.status == WASM_BUILD_STATUS_OK));
     assert(builder.writer.length <= output_buffer.length);
     return (Wasm_Build_Result){
-        .bytes =
-            {
-                .elements = output_buffer.elements,
-                .length = length_bytes,
-            },
+        .bytes = array_slice_make(output_buffer.elements, length_bytes),
         .subject = builder.subject,
         .status = builder.status,
     };
