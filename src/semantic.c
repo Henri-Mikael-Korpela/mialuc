@@ -18,6 +18,9 @@ typedef struct {
     Semantic_Status status;
 } Semantic_Analyzer;
 
+static bool             semantic_call_resolve       (Semantic_Analyzer *analyzer,
+                                                     Ast_Node_Index procedure,
+                                                     Ast_Node_Index call);
 static Semantic_Binding semantic_definition_find    (Semantic_Analyzer const *analyzer, Str name);
 static bool             semantic_definitions_check  (Semantic_Analyzer *analyzer);
 static bool             semantic_fail               (Semantic_Analyzer *analyzer,
@@ -160,7 +163,12 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
             if (semantic_identifier_resolve(analyzer, procedure, statement, current) == false) {
                 return false;
             }
+        } else if (node_type == AST_NODE_TYPE_CALL) {
+            if (semantic_call_resolve(analyzer, procedure, current) == false) {
+                return false;
+            }
         } else if (node_type == AST_NODE_TYPE_RETURN_STATEMENT ||
+                   node_type == AST_NODE_TYPE_CALL_STATEMENT ||
                    node_type == AST_NODE_TYPE_IF_STATEMENT ||
                    ast_node_type_is_assignment(node_type)) {
             statement = current;
@@ -275,6 +283,41 @@ static bool semantic_identifier_resolve(Semantic_Analyzer *analyzer, Ast_Node_In
         return semantic_fail(analyzer, SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE, name);
     }
 
+    return true;
+}
+
+/**
+ * Binds the call `call` to the definition of the procedure that it calls. The name must be the
+ * name of a constant whose value is a procedure. When it is the name of a parameter or a variable
+ * or of a constant that is a string, the error says that it cannot be called, and when it is the
+ * name of nothing, that it is unknown. Returns false after it recorded an error.
+ */
+static bool semantic_call_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index procedure,
+                                  Ast_Node_Index call) {
+    assert(call < analyzer->node_count);
+    assert(analyzer->nodes[call].node_type == AST_NODE_TYPE_CALL);
+
+    Str name = analyzer->nodes[call].payload.call.name;
+
+    Semantic_Binding binding = semantic_definition_find(analyzer, name);
+    if (binding.kind == SEMANTIC_BINDING_KIND_NONE) {
+        Semantic_Binding local = semantic_variable_find(analyzer, procedure, call,
+                                                        AST_NODE_INDEX_NONE, name);
+        if (local.kind == SEMANTIC_BINDING_KIND_NONE) {
+            local = semantic_parameter_find(analyzer, procedure, name);
+        }
+        if (local.kind == SEMANTIC_BINDING_KIND_NONE) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_IDENTIFIER_UNKNOWN, name);
+        }
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE, name);
+    }
+
+    Ast_Node_Index value = analyzer->nodes[binding.target].first_child;
+    if (analyzer->nodes[value].node_type != AST_NODE_TYPE_PROCEDURE) {
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE, name);
+    }
+
+    analyzer->bindings[call] = binding;
     return true;
 }
 

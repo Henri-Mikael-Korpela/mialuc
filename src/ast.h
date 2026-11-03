@@ -15,6 +15,8 @@ typedef enum {
     AST_NODE_TYPE_AND,
     AST_NODE_TYPE_BLOCK,
     AST_NODE_TYPE_BOOL_LITERAL,
+    AST_NODE_TYPE_CALL,
+    AST_NODE_TYPE_CALL_STATEMENT,
     AST_NODE_TYPE_COMPARISON,
     AST_NODE_TYPE_CONSTANT_DEFINITION,
     AST_NODE_TYPE_DIVISION,
@@ -80,6 +82,12 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   `AST_NODE_TYPE_IF_STATEMENT`, and it has its own scope: a variable defined in it cannot be
  *   used below it. Its payload has the end of the block, see below.
  * - `AST_NODE_TYPE_BOOL_LITERAL`: no children. It is `true` or `false`, which is in the payload.
+ * - `AST_NODE_TYPE_CALL`: one child per argument, in the order of the source, each one an
+ *   expression. It is a call of the procedure that the name in the payload stands for, and an
+ *   expression like the others. The node is made before its arguments. Whether it has a value
+ *   depends on the procedure, which is for the target to tell.
+ * - `AST_NODE_TYPE_CALL_STATEMENT`: one child, an `AST_NODE_TYPE_CALL` whose value, if it has
+ *   one, is dropped. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_COMPARISON`: two children, the left and the right operand, in that order. It is
  *   an expression of type `Bool` with the lowest precedence of the operators, so its operands are
  *   not comparisons. The operator is in the payload.
@@ -147,6 +155,10 @@ typedef struct {
         struct {
             bool value;
         } bool_literal;
+        struct {
+            // Views the source text, like the other names.
+            Str name;
+        } call;
         struct {
             Ast_Comparison_Operator operator;
         } comparison;

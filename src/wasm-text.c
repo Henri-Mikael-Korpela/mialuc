@@ -552,6 +552,9 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             wasm_text_write_unsigned(&formatter->writer, function_index);
             break;
         }
+        case WASM_OPCODE_DROP:
+            wasm_text_write_instruction(&formatter->writer, STR("drop"));
+            break;
         case WASM_OPCODE_ELSE:
             // An `else` belongs to an `if` that is open, and is written like the `if`.
             if (formatter->writer.block_depth == 0) {

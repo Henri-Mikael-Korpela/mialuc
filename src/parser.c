@@ -43,6 +43,8 @@ static Ast_Node_Index parse_else_branch         (Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_if_statement        (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_bool_literal        (Parser *parser);
 static Ast_Node_Index parse_operand             (Parser *parser);
+static Ast_Node_Index parse_call                (Parser *parser);
+static Ast_Node_Index parse_call_statement      (Parser *parser);
 static Ast_Node_Index parse_comparison          (Parser *parser);
 static Ast_Node_Index parse_conjunction         (Parser *parser);
 static Ast_Node_Index parse_disjunction         (Parser *parser);
@@ -691,8 +693,12 @@ static Ast_Node_Index parse_statement(Parser *parser) {
     if (next == TOKEN_TYPE_IDENTIFIER) {
         // The name is not the last token, because the last one is `END`.
         assert(parser->token_index + 1 < parser->token_count);
-        if (parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_TYPE_SEPARATOR) {
+        Token_Type after_name = parser->tokens[parser->token_index + 1].token_type;
+        if (after_name == TOKEN_TYPE_TYPE_SEPARATOR) {
             return parse_variable_definition(parser);
+        }
+        if (after_name == TOKEN_TYPE_PARENTHESIS_LEFT) {
+            return parse_call_statement(parser);
         }
         return parse_assignment(parser);
     }
@@ -947,8 +953,79 @@ static Ast_Node_Index parse_term(Parser *parser) {
 }
 
 /**
- * Parses a value: an integer literal, a string literal, `true` or `false`, or the name of
- * something, such as a parameter.
+ * Parses a call, `name(argument, argument)`, where the arguments are expressions separated by
+ * commas, and there may be none. The node of the call is made before the nodes of its arguments.
+ * A call is an operand, so it binds tighter than any operator: `f(x) + 1` is `(f(x)) + 1`.
+ */
+static Ast_Node_Index parse_call(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index + 1 < parser->token_count);
+
+    Token const *name = parse_token_current(parser);
+    if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        return parse_fail(parser, STR("a name"));
+    }
+
+    Ast_Node_Index call = parse_node_make(parser, AST_NODE_TYPE_CALL);
+    if (call == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[call].payload.call.name = name->payload.identifier.text;
+    parse_token_advance(parser);
+
+    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_LEFT, STR("'('")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    if (parse_token_current(parser)->token_type != TOKEN_TYPE_PARENTHESIS_RIGHT) {
+        // Every argument consumes a token, so there are fewer arguments than tokens, which bounds
+        // the loop.
+        for (size_t i = 0; i < parser->token_count; i += 1) {
+            Ast_Node_Index argument = parse_expression(parser);
+            if (argument == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            parse_node_append_child(parser, call, argument);
+
+            if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
+                break;
+            }
+            parse_token_advance(parser);
+        }
+    }
+
+    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_RIGHT, STR("',' or ')'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    return call;
+}
+
+/**
+ * Parses a line that is a call, such as `greet(name)`, whose value, if the procedure has one, is
+ * not used. The node of the statement is made before the nodes of the call, like the node of every
+ * statement.
+ */
+static Ast_Node_Index parse_call_statement(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+
+    Ast_Node_Index statement = parse_node_make(parser, AST_NODE_TYPE_CALL_STATEMENT);
+    if (statement == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index call = parse_call(parser);
+    if (call == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, statement, call);
+
+    return statement;
+}
+
+/**
+ * Parses a value: an integer literal, a string literal, `true` or `false`, the name of
+ * something, such as a parameter, or a call of a procedure.
  */
 static Ast_Node_Index parse_operand(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -959,6 +1036,11 @@ static Ast_Node_Index parse_operand(Parser *parser) {
         return parse_integer_literal(parser);
     }
     if (next == TOKEN_TYPE_IDENTIFIER) {
+        // The name is not the last token, because the last one is `END`.
+        assert(parser->token_index + 1 < parser->token_count);
+        if (parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_PARENTHESIS_LEFT) {
+            return parse_call(parser);
+        }
         return parse_identifier(parser);
     }
     if (next == TOKEN_TYPE_STRING_LITERAL) {
@@ -969,7 +1051,7 @@ static Ast_Node_Index parse_operand(Parser *parser) {
     }
 
     return parse_fail(parser,
-                      STR("an integer literal, a string literal, 'true', 'false' or a name"));
+                      STR("an integer literal, a string literal, 'true', 'false', a name or a call"));
 }
 
 static Ast_Node_Index parse_bool_literal(Parser *parser) {

@@ -39,6 +39,8 @@ typedef struct {
 typedef enum {
     // The name that an assignment assigns to is not a variable, but a parameter or a constant.
     SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE,
+    // The name that is called is not a procedure: a variable, a parameter or a constant string.
+    SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE,
     SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE,
     SEMANTIC_STATUS_IDENTIFIER_UNKNOWN,
     SEMANTIC_STATUS_OK,
@@ -51,7 +53,9 @@ typedef enum {
 /**
  * On `SEMANTIC_STATUS_OK`, `bindings` is the filled start of the binding buffer, as
  * `Semantic_Binding` elements, with one element per syntax tree node: the element at the index of
- * a node is what that node stands for, if it is an `AST_NODE_TYPE_IDENTIFIER`, and has the kind
+ * a node is what that node stands for, if it is an `AST_NODE_TYPE_IDENTIFIER`, or the procedure
+ * that it calls, if it is an `AST_NODE_TYPE_CALL`, which is a binding of the kind
+ * `SEMANTIC_BINDING_KIND_CONSTANT` whose target is the definition of the procedure. Any other node has the kind
  * `SEMANTIC_BINDING_KIND_NONE` for any other node. Otherwise `bindings.length` is zero and
  * `subject` is the name that the error is about, as a view into the source that the syntax tree
  * was parsed from, so the caller can work out the position.
@@ -75,6 +79,9 @@ typedef struct {
  * block can be used only in the rest of that block, including the blocks inside it, and not after
  * the block ends. A name is looked up in the innermost scope that uses it first, and then in the
  * scopes around it, up to the module scope.
+ *
+ * The name in a call, such as `f(1)`, must stand for a constant that is a procedure. It is looked
+ * up among the constants only, because no other name can be the same as one of them.
  *
  * An assignment, such as `x += 1`, uses the name that it assigns to like any other use of a name,
  * and the name must stand for a variable: a parameter or a constant cannot be assigned to.

@@ -91,6 +91,12 @@ static bool            wasm_build_code_section                (Wasm_Builder *bui
                                                                size_t definition_count);
 static bool            wasm_build_code_section_body           (Wasm_Builder *builder,
                                                                Ast_Node_Index definition);
+static bool            wasm_build_code_section_body_call      (Wasm_Builder *builder,
+                                                               Ast_Node_Index call,
+                                                               bool is_result_unused);
+static bool            wasm_build_code_section_body_call_statement(Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index statement);
 static bool            wasm_build_code_section_body_assignment(Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index assignment);
@@ -99,7 +105,8 @@ static bool            wasm_build_code_section_body_operands  (Wasm_Builder *bui
                                                                Ast_Node_Index operation);
 static bool            wasm_build_code_section_body_expression(Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
-                                                               Ast_Node_Index expression);
+                                                               Ast_Node_Index expression,
+                                                               bool is_result_unused);
 static void            wasm_build_code_section_body_identifier(Wasm_Builder *builder,
                                                                Ast_Node_Index procedure,
                                                                Semantic_Binding binding);
@@ -709,7 +716,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 if (is_first == false) {
                     wasm_write_byte(&builder->writer, WASM_OPCODE_ELSE);
                 }
-                if (wasm_build_code_section_body_expression(builder, definition, child) == false) {
+                if (wasm_build_code_section_body_expression(builder, definition, child, false) == false) {
                     return false;
                 }
                 // There is no conversion to a `Bool`, so an `Int` or a `Str` is not a condition.
@@ -736,6 +743,10 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             }
         } else if (child_node->node_type == AST_NODE_TYPE_RETURN_STATEMENT) {
             if (wasm_build_code_section_body_return(builder, definition, child) == false) {
+                return false;
+            }
+        } else if (child_node->node_type == AST_NODE_TYPE_CALL_STATEMENT) {
+            if (wasm_build_code_section_body_call_statement(builder, definition, child) == false) {
                 return false;
             }
         } else if (child_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
@@ -765,6 +776,73 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
 }
 
 /**
+ * Writes the instructions of a call that is a statement: the call, and then a drop for each value
+ * that it leaves, because nobody uses it. Returns false after it recorded an error.
+ */
+static bool wasm_build_code_section_body_call_statement(Wasm_Builder *builder,
+                                                        Ast_Node_Index definition,
+                                                        Ast_Node_Index statement) {
+    assert(statement < builder->node_count);
+    assert(builder->nodes[statement].node_type == AST_NODE_TYPE_CALL_STATEMENT);
+
+    Ast_Node_Index call = builder->nodes[statement].first_child;
+    if (wasm_build_code_section_body_expression(builder, definition, call, true) == false) {
+        return false;
+    }
+
+    Wasm_Value_Type value_type = wasm_expression_type(builder, call);
+    if (value_type != WASM_VALUE_TYPE_NONE) {
+        size_t slot_count = wasm_value_type_slot_count(value_type);
+        for (size_t slot = 0; slot < slot_count; slot += 1) {
+            wasm_write_byte(&builder->writer, WASM_OPCODE_DROP);
+        }
+    }
+    return true;
+}
+
+/**
+ * Checks the call `call`, whose arguments were written already: there must be as many arguments as
+ * the procedure has parameters, each of the type of its parameter, and the procedure must return a
+ * value unless `is_result_unused`. Returns false after it recorded an error.
+ */
+static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_Index call,
+                                              bool is_result_unused) {
+    assert(call < builder->node_count);
+    assert(builder->nodes[call].node_type == AST_NODE_TYPE_CALL);
+
+    Semantic_Binding binding = builder->bindings[call];
+    assert(binding.kind == SEMANTIC_BINDING_KIND_CONSTANT);
+    Ast_Node_Index callee = wasm_procedure_of(builder, binding.target);
+    Str name = builder->nodes[call].payload.call.name;
+
+    if (wasm_children_count(builder, call) != wasm_parameter_count(builder, callee)) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
+    }
+
+    Ast_Node_Index argument = builder->nodes[call].first_child;
+    Ast_Node_Index parameter = builder->nodes[callee].first_child;
+    size_t argument_count = wasm_children_count(builder, call);
+    for (size_t i = 0; i < argument_count; i += 1) {
+        assert(argument != AST_NODE_INDEX_NONE && parameter != AST_NODE_INDEX_NONE);
+
+        Ast_Node_Index type = builder->nodes[parameter].first_child;
+        Wasm_Value_Type parameter_type =
+            wasm_value_type_of_name(builder->nodes[type].payload.type_name.name);
+        if (wasm_expression_type(builder, argument) != parameter_type) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        }
+        argument = builder->nodes[argument].next_sibling;
+        parameter = builder->nodes[parameter].next_sibling;
+    }
+
+    bool has_result = builder->nodes[callee].payload.procedure.return_type.bytes != NULL;
+    if (has_result == false && is_result_unused == false) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_CALL_RESULT_MISSING, name);
+    }
+    return true;
+}
+
+/**
  * Writes the instructions of a `return`: the value, and the `return` instruction. The value must
  * be of the return type of the procedure that `definition` is, which must have one. Returns false
  * after it recorded an error.
@@ -781,7 +859,7 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
     }
 
     Ast_Node_Index value = builder->nodes[statement].first_child;
-    if (wasm_build_code_section_body_expression(builder, definition, value) == false) {
+    if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
         return false;
     }
 
@@ -826,7 +904,7 @@ static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
     wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
     wasm_write_unsigned(&builder->writer, local_index);
 
-    if (wasm_build_code_section_body_expression(builder, definition, value) == false) {
+    if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
         return false;
     }
 
@@ -864,7 +942,7 @@ static bool wasm_build_code_section_body_variable(Wasm_Builder *builder,
 
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
     Ast_Node_Index value = builder->nodes[variable].last_child;
-    if (wasm_build_code_section_body_expression(builder, definition, value) == false) {
+    if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
         return false;
     }
 
@@ -909,7 +987,12 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index procedure
                                      first->payload.type_name.name);
                 }
             } else if (wasm_variable_type(builder, statement) == WASM_VALUE_TYPE_NONE) {
-                // The only value without a type is a name that is a procedure.
+                // The only values without a type are a name that is a procedure, and a call of a
+                // procedure that returns nothing.
+                if (first->node_type == AST_NODE_TYPE_CALL) {
+                    return wasm_fail(builder, WASM_BUILD_STATUS_CALL_RESULT_MISSING,
+                                     first->payload.call.name);
+                }
                 assert(first->node_type == AST_NODE_TYPE_IDENTIFIER);
                 return wasm_fail(builder, WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE,
                                  first->payload.identifier.name);
@@ -1045,10 +1128,21 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_NOT:
     case AST_NODE_TYPE_OR:
         return WASM_VALUE_TYPE_BOOL;
+    case AST_NODE_TYPE_CALL: {
+        // The type of what the procedure returns, which is none for a procedure without a result.
+        Semantic_Binding binding = builder->bindings[expression];
+        Ast_Node_Index callee = wasm_procedure_of(builder, binding.target);
+        Str return_type = builder->nodes[callee].payload.procedure.return_type;
+        if (return_type.bytes == NULL) {
+            return WASM_VALUE_TYPE_NONE;
+        }
+        return wasm_value_type_of_name(return_type);
+    }
     case AST_NODE_TYPE_STRING_LITERAL:
         return WASM_VALUE_TYPE_STR;
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
     case AST_NODE_TYPE_BLOCK:
+    case AST_NODE_TYPE_CALL_STATEMENT:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
     case AST_NODE_TYPE_IF_STATEMENT:
@@ -1070,7 +1164,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
 
 /**
  * Returns the text in the source that an error about `expression` points at: the first name or
- * string in it, which is the leftmost leaf of its tree. An expression that starts with a number or
+ * string in it, which is the leftmost leaf of its tree, or the name of a call. An expression that starts with a number or
  * with `true` or `false` has no such text, so the name of the definition is the closest place that
  * the tree knows.
  */
@@ -1082,13 +1176,17 @@ static Str wasm_expression_subject(Wasm_Builder const *builder, Ast_Node_Index d
     Ast_Node_Index current = expression;
     // Each step goes down one level, so there are fewer steps than nodes.
     for (size_t i = 0; i < builder->node_count; i += 1) {
-        if (builder->nodes[current].first_child == AST_NODE_INDEX_NONE) {
+        if (builder->nodes[current].first_child == AST_NODE_INDEX_NONE ||
+            builder->nodes[current].node_type == AST_NODE_TYPE_CALL) {
             break;
         }
         current = builder->nodes[current].first_child;
     }
 
     Ast_Node const *leaf = &builder->nodes[current];
+    if (leaf->node_type == AST_NODE_TYPE_CALL) {
+        return leaf->payload.call.name;
+    }
     if (leaf->node_type == AST_NODE_TYPE_IDENTIFIER) {
         return leaf->payload.identifier.name;
     }
@@ -1195,13 +1293,15 @@ static byte wasm_comparison_opcode(Ast_Comparison_Operator operator) {
 
 /**
  * Writes the instructions of the expression below `expression`, which leave its value on the
- * stack. WebAssembly is a stack machine, so an operator comes after its operands: the nodes are
+ * stack. A call of a procedure that returns nothing leaves no value, so it is accepted only as the
+ * whole expression, and only when `is_result_unused` says that the caller does not need a value. WebAssembly is a stack machine, so an operator comes after its operands: the nodes are
  * written depth first, each node after all of its children. The walk keeps the path from the
  * root of the expression in an array instead of calling itself.
  */
 static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
                                                     Ast_Node_Index definition,
-                                                    Ast_Node_Index expression) {
+                                                    Ast_Node_Index expression,
+                                                    bool is_result_unused) {
     assert(expression < builder->node_count);
     assert(definition < builder->node_count);
 
@@ -1247,6 +1347,14 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
                 return false;
             }
             break;
+        case AST_NODE_TYPE_CALL:
+            // The value of a call that is an operand is always needed. The call that is the whole
+            // expression is the only one that can go without.
+            if (wasm_build_code_section_body_call(
+                    builder, current, is_result_unused && current == expression) == false) {
+                return false;
+            }
+            break;
         default:
             break;
         }
@@ -1266,6 +1374,11 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             break;
         case AST_NODE_TYPE_OR:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I32_OR);
+            break;
+        case AST_NODE_TYPE_CALL:
+            // The function index of a procedure is the position of its definition.
+            wasm_write_byte(&builder->writer, WASM_OPCODE_CALL);
+            wasm_write_unsigned(&builder->writer, builder->bindings[current].position);
             break;
         case AST_NODE_TYPE_BOOL_LITERAL:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
@@ -1317,6 +1430,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             break;
         case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
         case AST_NODE_TYPE_BLOCK:
+        case AST_NODE_TYPE_CALL_STATEMENT:
         case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
         case AST_NODE_TYPE_IF_STATEMENT:
         case AST_NODE_TYPE_MODULE:

@@ -25,6 +25,8 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_BLOCK:
     case AST_NODE_TYPE_BOOL_LITERAL:
+    case AST_NODE_TYPE_CALL:
+    case AST_NODE_TYPE_CALL_STATEMENT:
     case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_DIVISION:
@@ -124,6 +126,12 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_BOOL_LITERAL:
             printf("BOOL_LITERAL %s\n", node.payload.bool_literal.value ? "true" : "false");
+            break;
+        case AST_NODE_TYPE_CALL:
+            printf("CALL %.*s\n", (int)node.payload.call.name.length, node.payload.call.name.bytes);
+            break;
+        case AST_NODE_TYPE_CALL_STATEMENT:
+            printf("CALL_STATEMENT\n");
             break;
         case AST_NODE_TYPE_COMPARISON:
             printf("COMPARISON %s\n",

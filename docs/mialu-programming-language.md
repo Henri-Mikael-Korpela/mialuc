@@ -152,7 +152,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
 | `=`      | Sets the initial value of a variable whose type is written. | 0 | `x : Int = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false` or names, or the results of operators of a higher precedence. `not` is a unary operator, written before its operand. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values for `==` and `not=`, and its result is a `Bool`.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names or [calls](#calling-procedures), or the results of operators of a higher precedence. `not` is a unary operator, written before its operand. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values for `==` and `not=`, and its result is a `Bool`.
 
 Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2, and so do `*` and `/`, so `8 / 2 * 3` is 12 and not 1. A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, so `a + 1 > b * 2` means `(a + 1) > (b * 2)`. A comparison is an expression of type `Bool`, but its operands are not comparisons, so it cannot be an operand of another operator, and `a < b < c` and `a == b == c` are errors. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2.
 
@@ -234,7 +234,53 @@ procedure_name :: proc() ->
     // procedure body
 ```
 
-A procedure body consists of a series of statements, which are variable definitions, assignments, [if statements](#if-statements) and `return` statements for now. The procedure body is indented to indicate its scope.
+A procedure body consists of a series of statements, which are variable definitions, assignments, [if statements](#if-statements), `return` statements and [calls](#calling-procedures) for now. The procedure body is indented to indicate its scope.
+
+### Calling procedures
+
+A procedure is called by writing its name and, between parentheses, a value for each of its parameters, separated by commas. The parentheses are written also when there are no arguments:
+
+```
+forty :: proc() Int ->
+    return 40
+
+add :: proc(a: Int, b: Int) Int ->
+    return a + b
+
+forty_two :: proc() Int ->
+    return add(forty(), 2)
+```
+
+Here `forty_two` returns 42. When a procedure is called, its arguments are evaluated first, from left to right, and the procedure runs with its parameters set to them. The call has the value that the procedure returns.
+
+A call is an expression, so it can be the value of a variable or of a `return`, a condition, an operand of an operator, or an argument of another call. It binds tighter than any operator, so `double(3) + 1` means `(double(3)) + 1`, which is 7, and `not is_even(3)` is `not (is_even(3))`. Arguments are expressions as well, so `add(1 + 2, double(4))` is valid.
+
+The call must match the procedure:
+
+- the name must be that of a constant that is a procedure, so a call of a variable, of a parameter or of a constant string is an error,
+- there must be as many arguments as the procedure has parameters,
+- each argument must have the type of the parameter that it is given to, because nothing is converted: an `Int` is not a `Bool`, and `add(1, true)` is an error.
+
+The procedure is looked up in the module scope, so it can be defined above or below the procedure that calls it, and a procedure can call itself, which makes it recursive:
+
+```
+factorial :: proc(n: Int) Int ->
+    if n <= 1 ->
+        return 1
+    return n * factorial(n - 1)
+```
+
+Mialu does not check that a recursion ends, and every call takes space of the stack of the target, so a recursion that never ends, or that is too deep, makes the program fail at run time. For the WebAssembly target the call from JavaScript throws a `RangeError`.
+
+A procedure that has no return type returns nothing, so its call has no value and cannot be used as one: `x := log(1)` and `return log(1)` are errors when `log` has no return type. A call can also be a statement of its own, on a line by itself, and then the value is thrown away when there is one:
+
+```
+ignores_result :: proc(n: Int) Int ->
+    double(n)
+    return n
+```
+
+A call that is a statement is the way to call a procedure that returns nothing.
 
 ## If statements
 
@@ -317,6 +363,7 @@ There is no shadowing of names so a name cannot be declared twice in the same sc
 - a parameter has the name of a constant, including the constant that is the procedure itself,
 - a variable has the name of a constant, of a parameter, or of a variable that is in scope where it is defined, so a block cannot define a variable that the blocks around it have, but two blocks that are not inside each other can each define a variable of the same name,
 - a name in an expression is neither a variable that is in scope there, nor a parameter of the procedure, nor a constant,
+- the name in a call is not a constant that is a procedure, which is also the case when it is a variable or a parameter,
 - the name that an assignment assigns to is not a variable, but a parameter or a constant.
 
 Scope resolution is about names only. Whether the value of a name has the right type is checked separately for the target, see below.
@@ -327,7 +374,7 @@ The compiler has two modes: `run` prints the tokens and the syntax tree of a pro
 
 ### WebAssembly
 
-The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. `Int`, `Bool` and `Str` are the only types that the target supports.
+The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool` and `Str` are the only types that the target supports.
 
 `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition, subtraction and multiplication wrap around on overflow. Division truncates toward zero, so `(0 - 7) / 2` is -3. It traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
 
@@ -352,6 +399,8 @@ The target rejects a program that the parser accepts when:
 - a procedure with no return type has a `return` statement,
 - the value that a procedure returns is not of its return type,
 - the initial value of a variable is not of the type that is written for the variable,
+- a call has a different number of arguments than the procedure has parameters, or an argument is not of the type of its parameter,
+- the call of a procedure without a return type is used as a value, and not as a statement,
 - an operand of an arithmetic operator is not an `Int`,
 - the operands of a comparison are not both `Int`, or not both `Bool` for `==` and `not=`,
 - an operand of `and`, `or` or `not` is not a `Bool`,

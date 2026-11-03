@@ -591,6 +591,20 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be used in arithmetic.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the call of '%.*s' has a different number of arguments than "
+                "the procedure has parameters.\n", path, position.line, position.column,
+                subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: an argument of the call of '%.*s' is not of the type of its "
+                "parameter.\n", path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_CALL_RESULT_MISSING:
+        fprintf(stderr, "%s:%zu:%zu: the procedure '%.*s' returns no value, so its call cannot be "
+                "used as one.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "
                 "must be Int, or both must be Bool for == and not=.\n", path, position.line,
@@ -654,6 +668,10 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     case SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a variable, so it cannot be assigned to.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a procedure, so it cannot be called.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is already defined.\n", path, position.line,

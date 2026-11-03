@@ -154,6 +154,7 @@
 
         .token-comment { color: #6a9955; }
         .token-definition { color: #dcdcaa; }
+        .token-function { color: #dcdcaa; }
         .token-instruction { color: #9cdcfe; }
         .token-keyword { color: #569cd6; }
         .token-number { color: #b5cea8; }
@@ -288,6 +289,7 @@
             variables: "variables",
             conditions: "conditions",
             "boolean logic": "boolean-logic",
+            procedures: "procedures",
             "scope resolution": "scope-resolution",
         };
         const EXAMPLE_DEFAULT = "sum";
@@ -308,6 +310,7 @@
                 ["string", /"[^"\\\n]*"/],
                 ["keyword", /\b(?:proc|return|if|else|true|false|and|or)\b|\bnot\b(?!=)/],
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
+                ["function", /\b[A-Za-z_]\w*(?=\()/],
                 ["type", /\b[A-Z]\w*\b/],
                 ["number", /\b\d+\b/],
             ],
