@@ -76,8 +76,8 @@
                 },
                 {
                     "name": "keyword.operator.word.mialu",
-                    "comment": "Not when it is the start of the operator not=, which is highlighted as an operator.",
-                    "match": "\\bnot\\b(?!=)"
+                    "comment": "The logical operators and, or and not. Not is skipped when it is the start of the operator not=, which is highlighted as an operator.",
+                    "match": "\\b(?:and|or)\\b|\\bnot\\b(?!=)"
                 },
                 {
                     "name": "constant.language.boolean.mialu",

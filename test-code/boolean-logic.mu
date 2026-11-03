@@ -62,3 +62,46 @@ is_leap_year :: proc(year: Int) Bool ->
     if by_100 ->
         return false
     return by_4
+
+logical_not :: proc(value: Bool) Bool ->
+    return not value
+
+logical_and :: proc(a: Bool, b: Bool) Bool ->
+    return a and b
+
+logical_or :: proc(a: Bool, b: Bool) Bool ->
+    return a or b
+
+not_not :: proc(value: Bool) Bool ->
+    return not not value
+
+exclusive_or_keywords :: proc(a: Bool, b: Bool) Bool ->
+    return a and not b or not a and b
+
+in_range_keywords :: proc(n: Int, low: Int, high: Int) Bool ->
+    return n >= low and n <= high
+
+out_of_range :: proc(n: Int, low: Int, high: Int) Bool ->
+    return n < low or n > high
+
+not_binds_looser_than_comparison :: proc(a: Int, b: Int) Bool ->
+    return not a == b
+
+and_binds_tighter_than_or :: proc(a: Bool, b: Bool, c: Bool) Bool ->
+    return a or b and c
+
+is_leap_year_keywords :: proc(year: Int) Bool ->
+    return year / 4 * 4 == year and not year / 100 * 100 == year or year / 400 * 400 == year
+
+fizz_or_buzz :: proc(n: Int) Bool ->
+    return n / 3 * 3 == n or n / 5 * 5 == n
+
+fizz_buzz_only :: proc(n: Int) Bool ->
+    return n / 3 * 3 == n and not n / 5 * 5 == n
+
+can_enter :: proc(age: Int, has_ticket: Bool, is_banned: Bool) Int ->
+    if age >= 18 and has_ticket and not is_banned ->
+        return 1
+    else if age < 18 and has_ticket and not is_banned ->
+        return 2
+    return 0

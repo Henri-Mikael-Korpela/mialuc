@@ -22,6 +22,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
         return true;
     case AST_NODE_TYPE_ADDITION:
+    case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_BLOCK:
     case AST_NODE_TYPE_BOOL_LITERAL:
     case AST_NODE_TYPE_COMPARISON:
@@ -32,6 +33,8 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_INTEGER_LITERAL:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION:
+    case AST_NODE_TYPE_NOT:
+    case AST_NODE_TYPE_OR:
     case AST_NODE_TYPE_PARAMETER:
     case AST_NODE_TYPE_PROCEDURE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
@@ -113,6 +116,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
             printf("ADDITION_ASSIGNMENT\n");
             break;
+        case AST_NODE_TYPE_AND:
+            printf("AND\n");
+            break;
         case AST_NODE_TYPE_BLOCK:
             printf("BLOCK\n");
             break;
@@ -151,6 +157,12 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
             printf("MULTIPLICATION_ASSIGNMENT\n");
+            break;
+        case AST_NODE_TYPE_NOT:
+            printf("NOT\n");
+            break;
+        case AST_NODE_TYPE_OR:
+            printf("OR\n");
             break;
         case AST_NODE_TYPE_PARAMETER:
             printf("PARAMETER %.*s\n", (int)node.payload.parameter.name.length,

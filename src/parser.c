@@ -43,7 +43,11 @@ static Ast_Node_Index parse_else_branch         (Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_if_statement        (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_bool_literal        (Parser *parser);
 static Ast_Node_Index parse_operand             (Parser *parser);
+static Ast_Node_Index parse_comparison          (Parser *parser);
+static Ast_Node_Index parse_conjunction         (Parser *parser);
+static Ast_Node_Index parse_disjunction         (Parser *parser);
 static Ast_Node_Index parse_expression          (Parser *parser);
+static Ast_Node_Index parse_negation            (Parser *parser);
 static Ast_Node_Index parse_sum                 (Parser *parser);
 static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
 static Ast_Node_Index parse_identifier          (Parser *parser);
@@ -460,13 +464,135 @@ static Ast_Node_Index parse_branch(Parser *parser, Ast_Node_Index statement) {
 }
 
 /**
- * Parses an expression: a sum, optionally followed by a comparison operator and another sum, such
- * as `x + 1 > y`. A comparison has the lowest precedence and does not chain, so in `a < b < c` the
- * second operator is left for the caller, which expects the end of the line or `->` there. The
- * result of a comparison is a `Bool`, so it is an expression like the others: the value of a
- * variable or of a `return`, as well as the condition of an `if`.
+ * Parses an expression, which is the value of a variable or of a `return`, as well as the
+ * condition of an `if`. The operators from the loosest to the tightest are `or`, `and`, `not`,
+ * a comparison, `+` and `-`, and `*` and `/`, and there is a function for each level.
  */
 static Ast_Node_Index parse_expression(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    return parse_disjunction(parser);
+}
+
+/**
+ * Parses conjunctions separated by `or`, the operator with the lowest precedence. It is left
+ * associative, so `a or b or c` is `(a or b) or c`.
+ */
+static Ast_Node_Index parse_disjunction(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Ast_Node_Index left = parse_conjunction(parser);
+    if (left == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    // Every operator consumes a token, so there are fewer operators than tokens, which bounds
+    // the loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_KEYWORD_OR) {
+            break;
+        }
+        parse_token_advance(parser);
+
+        Ast_Node_Index right = parse_conjunction(parser);
+        if (right == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+
+        Ast_Node_Index disjunction = parse_node_make(parser, AST_NODE_TYPE_OR);
+        if (disjunction == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, disjunction, left);
+        parse_node_append_child(parser, disjunction, right);
+        left = disjunction;
+    }
+
+    return left;
+}
+
+/**
+ * Parses negations separated by `and`, which binds tighter than `or`. It is left associative.
+ */
+static Ast_Node_Index parse_conjunction(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Ast_Node_Index left = parse_negation(parser);
+    if (left == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    // Every operator consumes a token, so there are fewer operators than tokens, which bounds
+    // the loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_KEYWORD_AND) {
+            break;
+        }
+        parse_token_advance(parser);
+
+        Ast_Node_Index right = parse_negation(parser);
+        if (right == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+
+        Ast_Node_Index conjunction = parse_node_make(parser, AST_NODE_TYPE_AND);
+        if (conjunction == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, conjunction, left);
+        parse_node_append_child(parser, conjunction, right);
+        left = conjunction;
+    }
+
+    return left;
+}
+
+/**
+ * Parses a comparison with any number of `not` before it. `not` binds looser than a comparison
+ * and tighter than `and`, so `not a == b` is `not (a == b)`. The `not` keywords are counted and
+ * the nodes are made after the operand, so that the parser does not call itself.
+ */
+static Ast_Node_Index parse_negation(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    size_t negation_count = 0;
+    // Every `not` consumes a token, so there are fewer of them than tokens, which bounds the loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_KEYWORD_NOT) {
+            break;
+        }
+        parse_token_advance(parser);
+        negation_count += 1;
+    }
+
+    Ast_Node_Index operand = parse_comparison(parser);
+    if (operand == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    for (size_t i = 0; i < negation_count; i += 1) {
+        Ast_Node_Index negation = parse_node_make(parser, AST_NODE_TYPE_NOT);
+        if (negation == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, negation, operand);
+        operand = negation;
+    }
+
+    return operand;
+}
+
+/**
+ * Parses a sum, optionally followed by a comparison operator and another sum, such as
+ * `x + 1 > y`. A comparison does not chain, so in `a < b < c` the second operator is left for the
+ * caller, which expects the end of the line or `->` there. The result of a comparison is a
+ * `Bool`.
+ */
+static Ast_Node_Index parse_comparison(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 

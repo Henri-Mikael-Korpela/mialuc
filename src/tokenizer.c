@@ -343,6 +343,10 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             } else if (str_equals(text, STR("not"))) {
                 // Reserved. A `not` followed by `=` was taken above as the token `not=`.
                 token_type = TOKEN_TYPE_KEYWORD_NOT;
+            } else if (str_equals(text, STR("and"))) {
+                token_type = TOKEN_TYPE_KEYWORD_AND;
+            } else if (str_equals(text, STR("or"))) {
+                token_type = TOKEN_TYPE_KEYWORD_OR;
             }
 
             token_elements[result.tokens.length] = (Token){

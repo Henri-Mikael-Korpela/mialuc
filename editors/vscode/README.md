@@ -1,6 +1,6 @@
 # Mialu for VS Code
 
-Language support for Mialu, for now only syntax highlighting of the reserved words (`proc`, `return`, `if`, `else`, `true`, `false` and `not`), the operators (`+`, `-`, `*`, `/`, `+=`, `-=`, `*=`, `/=`, `==`, `not=`, `<`, `<=`, `>`, `>=`, `->`, `:` and `=`) and strings. The
+Language support for Mialu, for now only syntax highlighting of the reserved words (`proc`, `return`, `if`, `else`, `true`, `false`, `and`, `or` and `not`), the operators (`+`, `-`, `*`, `/`, `+=`, `-=`, `*=`, `/=`, `==`, `not=`, `<`, `<=`, `>`, `>=`, `->`, `:` and `=`) and strings. The
 extension is enabled for files that end in `.mu`.
 
 The extension is declarative: it is a language definition and a TextMate grammar, so there is
@@ -25,4 +25,4 @@ powershell -File scripts/install_vscode_extension.ps1 -Uninstall
 
 The reserved words are listed in `syntaxes/mialu.tmLanguage.json`. They must be the same as the
 keywords that the tokenizer recognizes (`TOKEN_TYPE_KEYWORD_*` in `src/tokenizer.h`), so update both
-when a keyword is added. Today they are `proc`, `return`, `if`, `else`, `true`, `false` and `not`. The operator `not=` is not the keyword `not`, so the pattern of the keyword must not match the start of it.
+when a keyword is added. Today they are `proc`, `return`, `if`, `else`, `true`, `false`, `and`, `or` and `not`. The operator `not=` is not the keyword `not`, so the pattern of the keyword must not match the start of it.

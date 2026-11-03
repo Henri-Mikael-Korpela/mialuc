@@ -12,6 +12,7 @@
 typedef enum {
     AST_NODE_TYPE_ADDITION,
     AST_NODE_TYPE_ADDITION_ASSIGNMENT,
+    AST_NODE_TYPE_AND,
     AST_NODE_TYPE_BLOCK,
     AST_NODE_TYPE_BOOL_LITERAL,
     AST_NODE_TYPE_COMPARISON,
@@ -24,6 +25,8 @@ typedef enum {
     AST_NODE_TYPE_MODULE,
     AST_NODE_TYPE_MULTIPLICATION,
     AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT,
+    AST_NODE_TYPE_NOT,
+    AST_NODE_TYPE_OR,
     AST_NODE_TYPE_PARAMETER,
     AST_NODE_TYPE_PROCEDURE,
     AST_NODE_TYPE_RETURN_STATEMENT,
@@ -70,6 +73,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_ADDITION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that gets the sum, and the value that is added to it, in that order. It is a
  *   statement of a procedure body.
+ * - `AST_NODE_TYPE_AND`: two children, the left and the right operand, in that order. It is an
+ *   expression of type `Bool` and the target requires both operands to be `Bool`. It binds
+ *   tighter than `AST_NODE_TYPE_OR` and looser than `AST_NODE_TYPE_NOT`.
  * - `AST_NODE_TYPE_BLOCK`: one child per statement. It is the body of a branch of an
  *   `AST_NODE_TYPE_IF_STATEMENT`, and it has its own scope: a variable defined in it cannot be
  *   used below it. Its payload has the end of the block, see below.
@@ -95,6 +101,12 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that gets the product, and the factor that it is multiplied by, in that order. It
  *   is a statement of a procedure body.
+ * - `AST_NODE_TYPE_NOT`: one child, the operand. It is an expression of type `Bool` and the target
+ *   requires the operand to be `Bool`. It binds looser than a comparison, so `not a == b` is
+ *   `not (a == b)`.
+ * - `AST_NODE_TYPE_OR`: two children, the left and the right operand, in that order. It is an
+ *   expression of type `Bool` with the lowest precedence of the operators, and the target
+ *   requires both operands to be `Bool`.
  * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`.
  * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
  *   body, which are variable definitions, assignments, if statements and return statements. The

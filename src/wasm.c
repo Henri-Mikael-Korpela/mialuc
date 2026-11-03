@@ -1018,8 +1018,8 @@ static size_t wasm_variable_local_index(Wasm_Builder const *builder, Ast_Node_In
 /**
  * Returns the type of the value of `expression`. The expression must have been written already,
  * so that every name in it is known to have a value. Only the root matters: an arithmetic
- * operation is an `Int` and a comparison is a `Bool`, because their operands were checked, as they
- * were written.
+ * operation is an `Int` and a comparison or a logical operation is a `Bool`, because their operands
+ * were checked, as they were written.
  */
 static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
                                             Ast_Node_Index expression) {
@@ -1039,8 +1039,11 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
         assert(value_type != WASM_VALUE_TYPE_NONE);
         return value_type;
     }
+    case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_BOOL_LITERAL:
     case AST_NODE_TYPE_COMPARISON:
+    case AST_NODE_TYPE_NOT:
+    case AST_NODE_TYPE_OR:
         return WASM_VALUE_TYPE_BOOL;
     case AST_NODE_TYPE_STRING_LITERAL:
         return WASM_VALUE_TYPE_STR;
@@ -1096,8 +1099,9 @@ static Str wasm_expression_subject(Wasm_Builder const *builder, Ast_Node_Index d
 }
 
 /**
- * Checks the operands of the arithmetic operation or comparison `operation`, which were written
- * already. Arithmetic is defined for `Int` only. A comparison takes two `Int` values with any
+ * Checks the operands of the arithmetic operation, comparison or logical operation `operation`,
+ * which were written already. `and`, `or` and `not` take `Bool` values only. Arithmetic is defined
+ * for `Int` only. A comparison takes two `Int` values with any
  * operator, or two `Bool` values with `==` and `not=`, because a `Bool` has no order. Returns false
  * after it recorded an error.
  */
@@ -1108,10 +1112,32 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     Ast_Node const *node = &builder->nodes[operation];
     Ast_Node_Index left = node->first_child;
     Ast_Node_Index right = node->last_child;
-    assert(left != AST_NODE_INDEX_NONE && right != left);
+    assert(left != AST_NODE_INDEX_NONE);
+
+    if (node->node_type == AST_NODE_TYPE_NOT) {
+        assert(right == left);
+        if (wasm_expression_type(builder, left) != WASM_VALUE_TYPE_BOOL) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, left));
+        }
+        return true;
+    }
+    assert(right != left);
 
     Wasm_Value_Type left_type = wasm_expression_type(builder, left);
     Wasm_Value_Type right_type = wasm_expression_type(builder, right);
+
+    if (node->node_type == AST_NODE_TYPE_AND || node->node_type == AST_NODE_TYPE_OR) {
+        if (left_type != WASM_VALUE_TYPE_BOOL) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, left));
+        }
+        if (right_type != WASM_VALUE_TYPE_BOOL) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, right));
+        }
+        return true;
+    }
 
     if (node->node_type != AST_NODE_TYPE_COMPARISON) {
         if (left_type != WASM_VALUE_TYPE_INT) {
@@ -1214,6 +1240,9 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_MULTIPLICATION:
         case AST_NODE_TYPE_SUBTRACTION:
         case AST_NODE_TYPE_COMPARISON:
+        case AST_NODE_TYPE_AND:
+        case AST_NODE_TYPE_NOT:
+        case AST_NODE_TYPE_OR:
             if (wasm_build_code_section_body_operands(builder, definition, current) == false) {
                 return false;
             }
@@ -1225,6 +1254,18 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         switch (node->node_type) {
         case AST_NODE_TYPE_ADDITION:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_ADD);
+            break;
+        case AST_NODE_TYPE_AND:
+            // Both operands are on the stack, as 0 or 1, so the bitwise instruction is the logical
+            // one. There is no short circuit: both operands are always evaluated.
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I32_AND);
+            break;
+        case AST_NODE_TYPE_NOT:
+            // 1 for a 0 and 0 for a 1.
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I32_EQZ);
+            break;
+        case AST_NODE_TYPE_OR:
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I32_OR);
             break;
         case AST_NODE_TYPE_BOOL_LITERAL:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);

@@ -142,9 +142,22 @@ assignment = name , ws , ( "+=" | "-=" | "*=" | "/=" ) , ws , expression ;
 (* `return` and its value must be separated, or `return0` would be one identifier. *)
 return_statement = "return" , required_space , expression ;
 
-(* A sum, or a comparison of two sums, which has the lowest precedence and does not chain: `a < b`
-   is an expression, `a < b < c` is not. A comparison has the type `Bool`. *)
-expression = sum , [ ws , comparison_operator , ws , sum ] ;
+(* The operators from the loosest to the tightest are `or`, `and`, `not`, a comparison, `+` and
+   `-`, and `*` and `/`. `or` and `and` are left associative, so `a or b or c` is
+   `(a or b) or c`, and `not` may be repeated. `and`, `or` and `not` take `Bool` values, which the
+   grammar cannot tell. They are words, so a space must separate them from what is next to them,
+   unlike the symbols. There are no parentheses yet, so the precedence is the only way to group. *)
+expression = disjunction ;
+
+disjunction = conjunction , { required_space , "or" , required_space , conjunction } ;
+
+conjunction = negation , { required_space , "and" , required_space , negation } ;
+
+negation = { "not" , required_space } , comparison ;
+
+(* A sum, or a comparison of two sums, which does not chain: `a < b` is a comparison, `a < b < c`
+   is not. A comparison has the type `Bool`. *)
+comparison = sum , [ ws , comparison_operator , ws , sum ] ;
 
 (* Terms joined by `+` or `-`, which have the same precedence. The compiler reads `a - b + c` as
    `(a - b) + c`, which a grammar that only accepts or rejects text does not show. Spaces around
@@ -174,7 +187,7 @@ any_character = ? any character ? ;
 (* Names. An identifier that is a reserved word is not a name. *)
 name = identifier - reserved_word ;
 
-reserved_word = "proc" | "return" | "if" | "else" | "true" | "false" | "not" ;
+reserved_word = "proc" | "return" | "if" | "else" | "true" | "false" | "not" | "and" | "or" ;
 
 identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 

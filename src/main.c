@@ -431,11 +431,17 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_KEYWORD_FALSE:
             printf("KEYWORD_FALSE\n");
             break;
+        case TOKEN_TYPE_KEYWORD_AND:
+            printf("KEYWORD_AND\n");
+            break;
         case TOKEN_TYPE_KEYWORD_IF:
             printf("KEYWORD_IF\n");
             break;
         case TOKEN_TYPE_KEYWORD_NOT:
             printf("KEYWORD_NOT\n");
+            break;
+        case TOKEN_TYPE_KEYWORD_OR:
+            printf("KEYWORD_OR\n");
             break;
         case TOKEN_TYPE_KEYWORD_PROC:
             printf("KEYWORD_PROC\n");
@@ -589,6 +595,11 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "
                 "must be Int, or both must be Bool for == and not=.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a Bool, so it cannot be used with 'and', 'or' "
+                "or 'not'.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_CONDITION_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: the condition at '%.*s' is not a Bool, and an Int is not "

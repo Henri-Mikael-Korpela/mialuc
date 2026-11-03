@@ -576,6 +576,15 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             // The text format closes the body with the parenthesis of the function instead.
             is_ended = true;
             break;
+        case WASM_OPCODE_I32_AND:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.and"));
+            break;
+        case WASM_OPCODE_I32_EQZ:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.eqz"));
+            break;
+        case WASM_OPCODE_I32_OR:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.or"));
+            break;
         case WASM_OPCODE_I32_EQ:
             wasm_text_write_instruction(&formatter->writer, STR("i32.eq"));
             break;
