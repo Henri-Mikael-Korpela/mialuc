@@ -28,13 +28,13 @@ enum {
     OUTPUT_SIZE_BYTES_MAX = 1024 * 1024,
 };
 
-// Alphabetical, because nothing depends on the order. `COMMAND_KIND_INVALID` is the result of a
+// Alphabetical, because nothing depends on the order. `COMMAND_MODE_INVALID` is the result of a
 // command line that is not understood.
 typedef enum {
-    COMMAND_KIND_BUILD,
-    COMMAND_KIND_INVALID,
-    COMMAND_KIND_RUN,
-} Command_Kind;
+    COMMAND_MODE_BUILD,
+    COMMAND_MODE_INVALID,
+    COMMAND_MODE_RUN,
+} Command_Mode;
 
 /**
  * What the command line asks for. `output_path` is NULL unless the mode is build. The paths are
@@ -43,7 +43,7 @@ typedef enum {
 typedef struct {
     char const *source_path;
     char const *output_path;
-    Command_Kind mode;
+    Command_Mode mode;
 } Command;
 
 /**
@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
     // negative.
     Array_Slice args = array_slice_make(argv, (size_t)argc);
     Command command = main_command_parse(args);
-    if (command.mode == COMMAND_KIND_INVALID) {
+    if (command.mode == COMMAND_MODE_INVALID) {
         fprintf(stderr,
                 "Usage: %s run <source file>\n"
                 "       %s build --target wasm <output file> <source file>\n",
@@ -121,7 +121,7 @@ int main(int argc, char *argv[]) {
  *     mialuc run <source file>
  *     mialuc build --target wasm <output file> <source file>
  *
- * Returns a command with mode `COMMAND_KIND_INVALID` when it is anything else.
+ * Returns a command with mode `COMMAND_MODE_INVALID` when it is anything else.
  */
 static Command main_command_parse(Array_Slice args) {
     assert(args.elements != NULL);
@@ -132,7 +132,7 @@ static Command main_command_parse(Array_Slice args) {
     Command invalid = {
         .source_path = NULL,
         .output_path = NULL,
-        .mode = COMMAND_KIND_INVALID,
+        .mode = COMMAND_MODE_INVALID,
     };
     if (args.length < 2) {
         return invalid;
@@ -145,7 +145,7 @@ static Command main_command_parse(Array_Slice args) {
         return (Command){
             .source_path = argv[2],
             .output_path = NULL,
-            .mode = COMMAND_KIND_RUN,
+            .mode = COMMAND_MODE_RUN,
         };
     }
 
@@ -164,7 +164,7 @@ static Command main_command_parse(Array_Slice args) {
         return (Command){
             .source_path = argv[5],
             .output_path = argv[4],
-            .mode = COMMAND_KIND_BUILD,
+            .mode = COMMAND_MODE_BUILD,
         };
     }
 
@@ -177,7 +177,7 @@ static Command main_command_parse(Array_Slice args) {
 static int32_t main_run_command(Command command, Buffers const *buffers) {
     assert(buffers != NULL);
     assert(command.source_path != NULL);
-    assert(command.mode != COMMAND_KIND_INVALID);
+    assert(command.mode != COMMAND_MODE_INVALID);
 
     char const *path = command.source_path;
     Str source = main_run_command_read_file(path, buffers->source);
@@ -197,7 +197,7 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     }
     assert(result.tokens.length <= TOKEN_COUNT_MAX);
 
-    if (command.mode == COMMAND_KIND_RUN) {
+    if (command.mode == COMMAND_MODE_RUN) {
         main_run_command_print_tokens(result.tokens);
     }
 
@@ -208,7 +208,7 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     }
 
     switch (command.mode) {
-    case COMMAND_KIND_BUILD: {
+    case COMMAND_MODE_BUILD: {
         assert(command.output_path != NULL);
 
         Wasm_Build_Result build_result = wasm_build(parse_result.nodes, parse_result.root,
@@ -224,10 +224,10 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
         }
         return 0;
     }
-    case COMMAND_KIND_INVALID:
+    case COMMAND_MODE_INVALID:
         assert(false);
         return 1;
-    case COMMAND_KIND_RUN:
+    case COMMAND_MODE_RUN:
         printf("\n");
         ast_print(parse_result.nodes, parse_result.root);
         return 0;
