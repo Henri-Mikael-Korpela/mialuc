@@ -13,6 +13,33 @@ enum {
     AST_PRINT_INDENT_SPACES = 2,
 };
 
+bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
+    switch (node_type) {
+    case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+    case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+        return true;
+    case AST_NODE_TYPE_ADDITION:
+    case AST_NODE_TYPE_CONSTANT_DEFINITION:
+    case AST_NODE_TYPE_DIVISION:
+    case AST_NODE_TYPE_IDENTIFIER:
+    case AST_NODE_TYPE_INTEGER_LITERAL:
+    case AST_NODE_TYPE_MODULE:
+    case AST_NODE_TYPE_MULTIPLICATION:
+    case AST_NODE_TYPE_PARAMETER:
+    case AST_NODE_TYPE_PROCEDURE:
+    case AST_NODE_TYPE_RETURN_STATEMENT:
+    case AST_NODE_TYPE_STRING_LITERAL:
+    case AST_NODE_TYPE_SUBTRACTION:
+    case AST_NODE_TYPE_TYPE_NAME:
+    case AST_NODE_TYPE_VARIABLE_DEFINITION:
+        return false;
+    }
+
+    // Unreachable: every node type is handled above.
+    assert(false);
+    return false;
+}
+
 void ast_print(Array_Slice nodes, Ast_Node_Index root) {
     assert(nodes.elements != NULL);
     assert(root < nodes.length);
@@ -45,6 +72,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_DIVISION:
             printf("DIVISION\n");
+            break;
+        case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+            printf("DIVISION_ASSIGNMENT\n");
             break;
         case AST_NODE_TYPE_IDENTIFIER:
             printf("IDENTIFIER %.*s\n", (int)node.payload.identifier.name.length,

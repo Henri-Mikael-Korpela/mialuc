@@ -166,7 +166,7 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
             if (semantic_variable_check(analyzer, procedure, child) == false) {
                 return false;
             }
-        } else if (child_node->node_type == AST_NODE_TYPE_ADDITION_ASSIGNMENT) {
+        } else if (ast_node_type_is_assignment(child_node->node_type)) {
             if (semantic_assignment_resolve(analyzer, definition, child) == false) {
                 return false;
             }
@@ -194,7 +194,7 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
 static bool semantic_assignment_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index definition,
                                         Ast_Node_Index assignment) {
     assert(assignment < analyzer->node_count);
-    assert(analyzer->nodes[assignment].node_type == AST_NODE_TYPE_ADDITION_ASSIGNMENT);
+    assert(ast_node_type_is_assignment(analyzer->nodes[assignment].node_type));
 
     if (semantic_expression_resolve(analyzer, definition, assignment, assignment) == false) {
         return false;

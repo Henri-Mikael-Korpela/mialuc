@@ -352,7 +352,7 @@ static Ast_Node_Index parse_statement(Parser *parser) {
 }
 
 /**
- * Parses `name += value`. The node for the assignment has two children: the name, as an
+ * Parses `name += value`, or the same with another assignment operator. The node for the assignment has two children: the name, as an
  * identifier, and the value. A name that is followed by anything else than `:` or an assignment
  * operator is the error here.
  */
@@ -366,12 +366,15 @@ static Ast_Node_Index parse_assignment(Parser *parser) {
     }
 
     Token_Type operator = parse_token_current(parser)->token_type;
-    if (operator != TOKEN_TYPE_PLUS_EQUALS) {
-        return parse_fail(parser, STR("':' or '+='"));
+    Ast_Node_Type node_type = AST_NODE_TYPE_ADDITION_ASSIGNMENT;
+    if (operator == TOKEN_TYPE_SLASH_EQUALS) {
+        node_type = AST_NODE_TYPE_DIVISION_ASSIGNMENT;
+    } else if (operator != TOKEN_TYPE_PLUS_EQUALS) {
+        return parse_fail(parser, STR("':' or an assignment operator"));
     }
     parse_token_advance(parser);
 
-    Ast_Node_Index assignment = parse_node_make(parser, AST_NODE_TYPE_ADDITION_ASSIGNMENT);
+    Ast_Node_Index assignment = parse_node_make(parser, node_type);
     if (assignment == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }

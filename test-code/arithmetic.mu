@@ -26,3 +26,8 @@ add_assign_foo :: proc() Int ->
     x := 4
     x += 5
     return x
+
+divide_assign_foo :: proc() Int ->
+    x := 20
+    x /= 4
+    return x

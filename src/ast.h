@@ -1,6 +1,7 @@
 #ifndef MIALU_AST_H
 #define MIALU_AST_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include <mialu/array_slice.h>
@@ -13,6 +14,7 @@ typedef enum {
     AST_NODE_TYPE_ADDITION_ASSIGNMENT,
     AST_NODE_TYPE_CONSTANT_DEFINITION,
     AST_NODE_TYPE_DIVISION,
+    AST_NODE_TYPE_DIVISION_ASSIGNMENT,
     AST_NODE_TYPE_IDENTIFIER,
     AST_NODE_TYPE_INTEGER_LITERAL,
     AST_NODE_TYPE_MODULE,
@@ -48,6 +50,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: one child, the value that is bound to the name. It is
  *   an `AST_NODE_TYPE_PROCEDURE` or an `AST_NODE_TYPE_STRING_LITERAL`.
  * - `AST_NODE_TYPE_DIVISION`: two children, the dividend and the divisor, in that order.
+ * - `AST_NODE_TYPE_DIVISION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
+ *   variable that is divided and gets the quotient, and the divisor, in that order. It is a
+ *   statement of a procedure body.
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition. It is the root of the tree.
@@ -109,6 +114,13 @@ typedef struct {
 
 // Four 4-byte fields, followed by the 16-byte payload.
 STATIC_ASSERT(sizeof(Ast_Node) == 32, ast_node_size_is_32_bytes);
+
+/**
+ * Returns whether nodes of `node_type` are assignments: statements that change the value of a
+ * variable, such as `x += 1`. They all have the same shape, the variable and then the value, see
+ * the children of each type above.
+ */
+bool ast_node_type_is_assignment(Ast_Node_Type node_type);
 
 /**
  * Prints the tree below `root`, one node per line, indented by depth. `nodes` holds `Ast_Node`

@@ -654,7 +654,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             if (wasm_build_code_section_body_variable(builder, definition, child) == false) {
                 return false;
             }
-        } else if (child_node->node_type == AST_NODE_TYPE_ADDITION_ASSIGNMENT) {
+        } else if (ast_node_type_is_assignment(child_node->node_type)) {
             if (wasm_build_code_section_body_assignment(builder, definition, child) == false) {
                 return false;
             }
@@ -679,7 +679,7 @@ static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
                                                     Ast_Node_Index definition,
                                                     Ast_Node_Index assignment) {
     assert(assignment < builder->node_count);
-    assert(builder->nodes[assignment].node_type == AST_NODE_TYPE_ADDITION_ASSIGNMENT);
+    assert(ast_node_type_is_assignment(builder->nodes[assignment].node_type));
 
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
     Ast_Node_Index target = builder->nodes[assignment].first_child;
@@ -712,7 +712,12 @@ static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
         return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, subject);
     }
 
-    wasm_write_byte(&builder->writer, WASM_OPCODE_I64_ADD);
+    // The operator of the assignment is applied to the variable and the value.
+    byte opcode = WASM_OPCODE_I64_ADD;
+    if (builder->nodes[assignment].node_type == AST_NODE_TYPE_DIVISION_ASSIGNMENT) {
+        opcode = WASM_OPCODE_I64_DIV_S;
+    }
+    wasm_write_byte(&builder->writer, opcode);
     wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_SET);
     wasm_write_unsigned(&builder->writer, local_index);
 
@@ -912,6 +917,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
         return WASM_VALUE_TYPE_STR;
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
+    case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_PARAMETER:
     case AST_NODE_TYPE_PROCEDURE:
@@ -1009,6 +1015,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             wasm_build_code_section_body_string(builder, current);
             break;
         case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+        case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
         case AST_NODE_TYPE_MODULE:
         case AST_NODE_TYPE_PARAMETER:
         case AST_NODE_TYPE_PROCEDURE:
