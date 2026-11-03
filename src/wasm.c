@@ -829,7 +829,7 @@ static size_t wasm_variable_local_index(Wasm_Builder const *builder, Ast_Node_In
 
 /**
  * Returns the type of the value of `expression`. The expression must have been written already,
- * so that every name in it is known to have a value. Only the root matters: an addition is an
+ * so that every name in it is known to have a value. Only the root matters: an addition or a subtraction is an
  * `Int` because its operands were checked to be, as they were written.
  */
 static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
@@ -840,6 +840,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     switch (node->node_type) {
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_INTEGER_LITERAL:
+    case AST_NODE_TYPE_SUBTRACTION:
         return WASM_VALUE_TYPE_INT;
     case AST_NODE_TYPE_IDENTIFIER: {
         Semantic_Binding binding = builder->bindings[expression];
@@ -907,8 +908,11 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_ADDITION:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_ADD);
             break;
+        case AST_NODE_TYPE_SUBTRACTION:
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I64_SUB);
+            break;
         case AST_NODE_TYPE_CONSTANT_DEFINITION:
-            // The parser only makes additions, integer literals and names in an expression.
+            // The parser only makes additions, subtractions, integer literals and names in an expression.
             assert(false);
             break;
         case AST_NODE_TYPE_IDENTIFIER: {
@@ -918,9 +922,9 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             if (value_type == WASM_VALUE_TYPE_NONE) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE, name);
             }
-            // The only operator is the addition of integers, and an operand has a parent.
+            // The only operators are the arithmetic of integers, and an operand has a parent.
             if (path_count > 0 && value_type != WASM_VALUE_TYPE_INT) {
-                return wasm_fail(builder, WASM_BUILD_STATUS_ADDITION_OPERAND_TYPE_INVALID, name);
+                return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, name);
             }
 
             wasm_build_code_section_body_identifier(builder, procedure, binding);
@@ -932,7 +936,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             break;
         case AST_NODE_TYPE_STRING_LITERAL:
             if (path_count > 0) {
-                return wasm_fail(builder, WASM_BUILD_STATUS_ADDITION_OPERAND_TYPE_INVALID,
+                return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
                                  node->payload.string_literal.text);
             }
             wasm_build_code_section_body_string(builder, current);

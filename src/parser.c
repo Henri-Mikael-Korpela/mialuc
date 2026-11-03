@@ -447,8 +447,9 @@ static bool parse_line_end_expect(Parser *parser) {
 }
 
 /**
- * Parses operands separated by `+`. Addition is left associative, so `a + b + c` is `(a + b) + c`:
- * each `+` makes a node that takes the expression so far as its left operand. The parser does not
+ * Parses operands separated by `+` or `-`, which have the same precedence. They are left
+ * associative, so `a - b + c` is `(a - b) + c`: each operator makes a node that takes the
+ * expression so far as its left operand. The parser does not
  * call itself, because there are no parentheses yet.
  */
 static Ast_Node_Index parse_expression(Parser *parser) {
@@ -463,7 +464,8 @@ static Ast_Node_Index parse_expression(Parser *parser) {
     // Every operator consumes a token, so there are fewer operators than tokens, which bounds
     // the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_PLUS) {
+        Token_Type operator = parse_token_current(parser)->token_type;
+        if (operator != TOKEN_TYPE_PLUS && operator != TOKEN_TYPE_MINUS) {
             break;
         }
         parse_token_advance(parser);
@@ -473,13 +475,17 @@ static Ast_Node_Index parse_expression(Parser *parser) {
             return AST_NODE_INDEX_NONE;
         }
 
-        Ast_Node_Index addition = parse_node_make(parser, AST_NODE_TYPE_ADDITION);
-        if (addition == AST_NODE_INDEX_NONE) {
+        Ast_Node_Type node_type = AST_NODE_TYPE_ADDITION;
+        if (operator == TOKEN_TYPE_MINUS) {
+            node_type = AST_NODE_TYPE_SUBTRACTION;
+        }
+        Ast_Node_Index arithmetic = parse_node_make(parser, node_type);
+        if (arithmetic == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
-        parse_node_append_child(parser, addition, left);
-        parse_node_append_child(parser, addition, right);
-        left = addition;
+        parse_node_append_child(parser, arithmetic, left);
+        parse_node_append_child(parser, arithmetic, right);
+        left = arithmetic;
     }
 
     return left;

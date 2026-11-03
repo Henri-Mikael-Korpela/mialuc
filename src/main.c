@@ -416,6 +416,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_KEYWORD_RETURN:
             printf("KEYWORD_RETURN\n");
             break;
+        case TOKEN_TYPE_MINUS:
+            printf("MINUS\n");
+            break;
         case TOKEN_TYPE_PARENTHESIS_LEFT:
             printf("PARENTHESIS_LEFT\n");
             break;
@@ -527,8 +530,8 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     // The cast is needed because `%.*s` takes an `int` precision.
     int subject_length = (int)result.subject.length;
     switch (result.status) {
-    case WASM_BUILD_STATUS_ADDITION_OPERAND_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be added.\n", path,
+    case WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be used in arithmetic.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED:

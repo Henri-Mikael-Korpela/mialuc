@@ -59,14 +59,15 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | Operator | Description | Precedence | Example |
 |----------|-------------|------------|---------|
 | `+`      | Addition. | 1 | `x := 1 + 2` makes `x` 3 |
+| `-`      | Subtraction. | 1 | `x := 5 - 1` makes `x` 4 |
 | `:`      | Type separator. It separates a name from its type. | 0 | `x : Int = 5` |
 | `::`     | Defines a constant. It is two subsequent `:`. | 0 | `NAME :: "Bob"` |
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
 | `=`      | Sets the initial value of a variable whose type is written. | 0 | `x : Int = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals or names. Addition is defined for `Int` only.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals or names. Addition and subtraction are defined for `Int` only.
 
-Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`.
+Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2.
 
 The operators of precedence 0 define names and are not part of an expression. Each one is written after the name that it defines, and takes everything up to the end of the line as its right-hand side, so `x := a + b` means `x := (a + b)`. Spaces may be written between the characters of `::` and `:=`, because they are separate tokens.
 
@@ -148,7 +149,7 @@ The compiler has two modes: `run` prints the tokens and the syntax tree of a pro
 
 The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. `Int` and `Str` are the only types that the target supports.
 
-`Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition wraps around on overflow.
+`Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition and subtraction wrap around on overflow.
 
 `Str` is two 32-bit integers (`i32`): the address of its first byte in memory, and its length in bytes. The bytes are UTF-8, so a caller decodes them as that, as `TextDecoder` does by default. So a parameter of type `Str` is two WebAssembly parameters, one after the other, and a result of type `Str` is two WebAssembly results, which JavaScript receives as an array `[address, length]`. The bytes of all the string literals of the program are copied to the start of the memory of the module when it is instantiated, and the module exports the memory as `memory`, so that a caller can read a string:
 
@@ -169,7 +170,7 @@ The target rejects a program that the parser accepts when:
 - a procedure with no return type has a `return` statement,
 - the value that a procedure returns is not of its return type,
 - the initial value of a variable is not of the type that is written for the variable,
-- an operand of an addition is not an `Int`.
+- an operand of an addition or a subtraction is not an `Int`.
 
 The target is built from the result of scope resolution, so it also rejects every program that scope resolution rejects.
 

@@ -377,18 +377,22 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset += 1;
         }
-        // If the two subsequent characters form a `->` token, it is recognized as a single token.
-        else if (
-            character == '-' &&
-            offset + 1 < source.length &&
-            source.bytes[offset + 1] == '>'
-        ) {
+        // A `-` is the minus operator, unless the two subsequent characters form a `->` token,
+        // which is recognized as a single token.
+        else if (character == (char)TOKEN_TYPE_MINUS) {
+            Token_Type token_type = TOKEN_TYPE_MINUS;
+            size_t size_bytes = 1;
+            if (offset + 1 < source.length && source.bytes[offset + 1] == '>') {
+                token_type = TOKEN_TYPE_ARROW;
+                size_bytes = 2;
+            }
+
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_ARROW,
+                .token_type = token_type,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
-            offset += 2;
+            offset += size_bytes;
         }
         // Unrecognized characters are an error, since the language has no error recovery yet.
         else {

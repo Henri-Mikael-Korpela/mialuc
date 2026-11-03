@@ -573,6 +573,9 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             wasm_text_write_signed(&formatter->writer, number);
             break;
         }
+        case WASM_OPCODE_I64_SUB:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.sub"));
+            break;
         case WASM_OPCODE_LOCAL_GET: {
             uint32_t local_index = wasm_text_read_unsigned_32(formatter);
             wasm_text_write_instruction(&formatter->writer, STR("local.get "));

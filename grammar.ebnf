@@ -81,9 +81,10 @@ variable_definition = name , ws , ":" , ws , [ type_name , ws ] , "=" , ws , exp
 (* `return` and its value must be separated, or `return0` would be one identifier. *)
 return_statement = "return" , required_space , expression ;
 
-(* Operands joined by `+`. The compiler reads `a + b + c` as `(a + b) + c`, which a grammar that
-   only accepts or rejects text does not show. Spaces around the `+` are optional. *)
-expression = operand , { ws , "+" , ws , operand } ;
+(* Operands joined by `+` or `-`, which have the same precedence. The compiler reads `a - b + c` as
+   `(a - b) + c`, which a grammar that only accepts or rejects text does not show. Spaces around
+   the operator are optional. *)
+expression = operand , { ws , ( "+" | "-" ) , ws , operand } ;
 
 (* An integer literal, a string literal, or the use of a name, such as a parameter or a constant. *)
 operand = integer_literal | string_literal | name ;
@@ -106,7 +107,7 @@ reserved_word = "proc" | "return" ;
 identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 
 (* A number is written in decimal, and a letter or underscore may not follow it directly. Both
-   are guaranteed because only a space, a plus, a line end or the end of input is allowed after
+   are guaranteed because only a space, a plus, a minus, a line end or the end of input is allowed after
    it. *)
 integer_literal = digit , { digit } ;
 
