@@ -8,9 +8,25 @@ Mialu is a procedural programming language with straight-foward and familiar syn
 
 Indentation is made of spaces only. Tabs are not allowed in indentation. Each level of indentation is exactly 4 spaces, so the number of leading spaces on a line must be a multiple of 4. Blank lines, including lines of only spaces, are ignored.
 
+## Keywords
+
+Keywords are words that have a meaning of their own in the language, so they are reserved and cannot be used as names. Mialu has the following keywords:
+
+| Keyword  | Description |
+|----------|-------------|
+| `proc`   | Starts a procedure, see [Procedures](#procedures). |
+| `return` | Returns a value from a procedure. |
+| `if`     | Starts an if statement or an `else if` branch, see [If statements](#if-statements). |
+| `else`   | Starts the branch of an if statement that runs when no condition holds, or an `else if`. |
+| `true`   | The boolean value true, see [Booleans](#booleans). |
+| `false`  | The boolean value false. |
+| `not`    | Reserved. It has no use of its own yet, but it is the start of the inequality operator `not=`, see [Operators](#operators). |
+
+Keywords are case-sensitive, so `If` is an identifier and `if` is not. A longer identifier that only starts with a keyword, such as `returned` or `cannot`, is an identifier.
+
 ## Identifiers
 
-Identifiers can contain alphanumeric characters and underscores. Case matters for identifiers in Mialu are case-sensitive. An identifier cannot begin with a digit. The reserved words `proc`, `return`, `if`, `else`, `true`, `false` and `not` are keywords and cannot be used as names.
+Identifiers can contain alphanumeric characters and underscores. Case matters for identifiers in Mialu are case-sensitive. An identifier cannot begin with a digit. A [keyword](#keywords) cannot be used as an identifier.
 
 ## Constants
 
