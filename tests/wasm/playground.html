@@ -286,6 +286,7 @@
             "string constant": "string-constant",
             arithmetic: "arithmetic",
             variables: "variables",
+            conditions: "conditions",
             "scope resolution": "scope-resolution",
         };
         const EXAMPLE_DEFAULT = "sum";
@@ -304,7 +305,7 @@
         const HIGHLIGHT_RULES = {
             mialu: [
                 ["string", /"[^"\\\n]*"/],
-                ["keyword", /\b(?:proc|return)\b/],
+                ["keyword", /\b(?:proc|return|if|else)\b/],
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
                 ["type", /\b[A-Z]\w*\b/],
                 ["number", /\b\d+\b/],

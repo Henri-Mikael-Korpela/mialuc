@@ -14,6 +14,10 @@ enum {
     // expression in a fixed array instead of recursing. Left associative operators nest to the
     // left, so `a + b + c + ...` is as deep as it has operators. A longer chain is rejected.
     WASM_EXPRESSION_DEPTH_MAX = 1024,
+    // The most statement lists that can be open at once while the statements of a procedure are
+    // written: the body, and for each nested if statement the statement itself and its current
+    // block. The parser does not accept deeper nesting, see `AST_BLOCK_DEPTH_MAX`.
+    WASM_STATEMENT_DEPTH_MAX = 2 * AST_BLOCK_DEPTH_MAX + 2,
 };
 
 byte const WASM_MODULE_HEADER[8] = {0x00, 'a', 's', 'm', 0x01, 0x00, 0x00, 0x00};
@@ -64,6 +68,18 @@ typedef struct {
     bool has_memory;
 } Wasm_Builder;
 
+/**
+ * A node whose children are being written, and the child that is next. It is the procedure for the
+ * body, a block for the statements of the block, and an if statement for its conditions and
+ * blocks. `if_count` is how many `if` instructions of an if statement are open, which is one for
+ * the `if` and one for each `else if`, and which the end of the statement closes.
+ */
+typedef struct {
+    Ast_Node_Index node;
+    Ast_Node_Index next;
+    size_t if_count;
+} Wasm_Statement_Frame;
+
 static Wasm_Value_Type wasm_binding_value_type                (Wasm_Builder const *builder,
                                                                Semantic_Binding binding);
 static size_t          wasm_block_begin                       (Wasm_Writer *writer);
@@ -85,6 +101,9 @@ static void            wasm_build_code_section_body_identifier(Wasm_Builder *bui
                                                                Semantic_Binding binding);
 static bool            wasm_build_code_section_body_procedure (Wasm_Builder *builder,
                                                                Ast_Node_Index definition);
+static bool            wasm_build_code_section_body_return    (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index statement);
 static bool            wasm_build_code_section_body_variable  (Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index variable);
@@ -100,6 +119,7 @@ static void            wasm_build_memory_section              (Wasm_Builder *bui
 static void            wasm_build_type_section                (Wasm_Builder *builder,
                                                                Ast_Node_Index module,
                                                                size_t definition_count);
+static byte            wasm_comparison_opcode                 (Ast_Comparison_Operator operator);
 static bool            wasm_check_signatures                  (Wasm_Builder *builder,
                                                                Ast_Node_Index module,
                                                                size_t definition_count);
@@ -581,7 +601,17 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
     }
 
     // After a `return` the code is unreachable, and WebAssembly accepts anything there, so the
-    // body ends with the `end` instruction even though no value is left on the stack.
+    // body ends with the `end` instruction even though no value is left on the stack. When the
+    // last statement is not a `return`, for example an if statement that returns in every branch,
+    // WebAssembly does not know that the end cannot be reached, so it is marked as unreachable.
+    if (builder->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE) {
+        Ast_Node const *procedure_node = &builder->nodes[value];
+        bool has_result = procedure_node->payload.procedure.return_type.bytes != NULL;
+        if (has_result &&
+            builder->nodes[procedure_node->last_child].node_type != AST_NODE_TYPE_RETURN_STATEMENT) {
+            wasm_write_byte(&builder->writer, WASM_OPCODE_UNREACHABLE);
+        }
+    }
     wasm_write_byte(&builder->writer, WASM_OPCODE_END);
     wasm_block_end(&builder->writer, body);
     return true;
@@ -619,37 +649,77 @@ static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_
  * Writes the statements of a procedure. A variable definition becomes its value stored in the
  * locals of the variable, an assignment becomes the new value of the variable stored in the same
  * way, and a `return` becomes the value followed by the `return` instruction.
+ *
+ * An if statement becomes the structured instructions of WebAssembly: the condition, `if`, the
+ * statements of its block, and `else` followed by what the next branch is, up to `end`. An
+ * `else if` is an `else` that holds another `if`, so the statement ends with as many `end`
+ * instructions as it has `if` instructions. The tree is walked with an array of the lists of
+ * statements that are open, the way expressions are, instead of calling itself.
  */
 static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                                                    Ast_Node_Index definition) {
     assert(definition < builder->node_count);
 
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
-    Ast_Node_Index child = builder->nodes[procedure].first_child;
-    for (size_t i = 0; i < builder->node_count && child != AST_NODE_INDEX_NONE; i += 1) {
-        Ast_Node const *child_node = &builder->nodes[child];
 
-        if (child_node->node_type == AST_NODE_TYPE_RETURN_STATEMENT) {
-            if (builder->nodes[procedure].payload.procedure.return_type.bytes == NULL) {
-                Str name = builder->nodes[definition].payload.constant_definition.name;
-                return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISSING, name);
+    Wasm_Statement_Frame frames[WASM_STATEMENT_DEPTH_MAX];
+    frames[0] = (Wasm_Statement_Frame){
+        .node = procedure,
+        .next = builder->nodes[procedure].first_child,
+        .if_count = 0,
+    };
+    size_t frame_count = 1;
+
+    // Every step takes a child of a list or closes a list, and each node is a child once and each
+    // list is closed once, so twice the number of nodes steps are enough.
+    for (size_t step = 0; step < builder->node_count * 2 + 2 && frame_count > 0; step += 1) {
+        Wasm_Statement_Frame *frame = &frames[frame_count - 1];
+        Ast_Node const *frame_node = &builder->nodes[frame->node];
+
+        if (frame->next == AST_NODE_INDEX_NONE) {
+            for (size_t i = 0; i < frame->if_count; i += 1) {
+                wasm_write_byte(&builder->writer, WASM_OPCODE_END);
             }
+            frame_count -= 1;
+            continue;
+        }
 
-            Ast_Node_Index value = child_node->first_child;
-            if (wasm_build_code_section_body_expression(builder, definition, value) == false) {
+        Ast_Node_Index child = frame->next;
+        Ast_Node const *child_node = &builder->nodes[child];
+        frame->next = child_node->next_sibling;
+
+        if (frame_node->node_type == AST_NODE_TYPE_IF_STATEMENT) {
+            bool is_first = child == frame_node->first_child;
+            if (child_node->node_type == AST_NODE_TYPE_COMPARISON) {
+                // A condition after the first is an `else if`, which is inside the `else` of the
+                // branch before it.
+                if (is_first == false) {
+                    wasm_write_byte(&builder->writer, WASM_OPCODE_ELSE);
+                }
+                if (wasm_build_code_section_body_expression(builder, definition, child) == false) {
+                    return false;
+                }
+                wasm_write_byte(&builder->writer, WASM_OPCODE_IF);
+                wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+                frame->if_count += 1;
+            } else {
+                assert(child_node->node_type == AST_NODE_TYPE_BLOCK);
+                // A block that is last, and is not the block of a condition, is the `else`.
+                if (child == frame_node->last_child && frame_node->payload.if_statement.has_else) {
+                    wasm_write_byte(&builder->writer, WASM_OPCODE_ELSE);
+                }
+                assert(frame_count < WASM_STATEMENT_DEPTH_MAX);
+                frames[frame_count] = (Wasm_Statement_Frame){
+                    .node = child,
+                    .next = child_node->first_child,
+                    .if_count = 0,
+                };
+                frame_count += 1;
+            }
+        } else if (child_node->node_type == AST_NODE_TYPE_RETURN_STATEMENT) {
+            if (wasm_build_code_section_body_return(builder, definition, child) == false) {
                 return false;
             }
-
-            // The value on the stack must be what the procedure says that it returns. The
-            // expression was written already, so every name in it is known.
-            Str return_type_name = builder->nodes[procedure].payload.procedure.return_type;
-            Wasm_Value_Type return_type = wasm_value_type_of_name(return_type_name);
-            if (wasm_expression_type(builder, value) != return_type) {
-                Str name = builder->nodes[definition].payload.constant_definition.name;
-                return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
-            }
-
-            wasm_write_byte(&builder->writer, WASM_OPCODE_RETURN);
         } else if (child_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             if (wasm_build_code_section_body_variable(builder, definition, child) == false) {
                 return false;
@@ -658,14 +728,55 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             if (wasm_build_code_section_body_assignment(builder, definition, child) == false) {
                 return false;
             }
+        } else if (child_node->node_type == AST_NODE_TYPE_IF_STATEMENT) {
+            assert(frame_count < WASM_STATEMENT_DEPTH_MAX);
+            frames[frame_count] = (Wasm_Statement_Frame){
+                .node = child,
+                .next = child_node->first_child,
+                .if_count = 0,
+            };
+            frame_count += 1;
         } else {
             // Parameters come first and are not code.
             assert(child_node->node_type == AST_NODE_TYPE_PARAMETER);
         }
-
-        child = child_node->next_sibling;
     }
 
+    assert(frame_count == 0);
+    return true;
+}
+
+/**
+ * Writes the instructions of a `return`: the value, and the `return` instruction. The value must
+ * be of the return type of the procedure that `definition` is, which must have one. Returns false
+ * after it recorded an error.
+ */
+static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_Index definition,
+                                                Ast_Node_Index statement) {
+    assert(statement < builder->node_count);
+    assert(builder->nodes[statement].node_type == AST_NODE_TYPE_RETURN_STATEMENT);
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    if (builder->nodes[procedure].payload.procedure.return_type.bytes == NULL) {
+        Str name = builder->nodes[definition].payload.constant_definition.name;
+        return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISSING, name);
+    }
+
+    Ast_Node_Index value = builder->nodes[statement].first_child;
+    if (wasm_build_code_section_body_expression(builder, definition, value) == false) {
+        return false;
+    }
+
+    // The value on the stack must be what the procedure says that it returns. The expression was
+    // written already, so every name in it is known.
+    Str return_type_name = builder->nodes[procedure].payload.procedure.return_type;
+    Wasm_Value_Type return_type = wasm_value_type_of_name(return_type_name);
+    if (wasm_expression_type(builder, value) != return_type) {
+        Str name = builder->nodes[definition].payload.constant_definition.name;
+        return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
+    }
+
+    wasm_write_byte(&builder->writer, WASM_OPCODE_RETURN);
     return true;
 }
 
@@ -764,16 +875,17 @@ static bool wasm_build_code_section_body_variable(Wasm_Builder *builder,
 }
 
 /**
- * Checks the type of every variable of `procedure`, so that what comes after can ask for the type
- * of a variable and assume that it is known. A variable has the type that its definition gives, or
- * else the type of its value. Returns false after it recorded an error.
+ * Checks the type of every variable of `procedure`, also the ones in its blocks, so that what
+ * comes after can ask for the type of a variable and assume that it is known. A variable has the
+ * type that its definition gives, or else the type of its value. Returns false after it recorded
+ * an error.
  */
 static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index procedure) {
     assert(procedure < builder->node_count);
     assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
 
-    Ast_Node_Index statement = builder->nodes[procedure].first_child;
-    for (size_t i = 0; i < builder->node_count && statement != AST_NODE_INDEX_NONE; i += 1) {
+    Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
+    for (Ast_Node_Index statement = procedure + 1; statement < end; statement += 1) {
         Ast_Node const *statement_node = &builder->nodes[statement];
 
         if (statement_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
@@ -791,8 +903,6 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index procedure
                                  first->payload.identifier.name);
             }
         }
-
-        statement = statement_node->next_sibling;
     }
 
     return true;
@@ -800,24 +910,25 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index procedure
 
 /**
  * Writes the locals of the variables of `procedure`, which come after the parameters: a count of
- * groups, and for each variable the number of locals it takes and their type. The types must have
- * been checked by `wasm_variables_check`.
+ * groups, and for each variable the number of locals it takes and their type. The variables of the
+ * blocks are included, in the order of the source: a variable has its own local, also when
+ * another variable in another block has the same name. The types must have been checked by
+ * `wasm_variables_check`.
  */
 static void wasm_variables_write_locals(Wasm_Builder *builder, Ast_Node_Index procedure) {
     assert(procedure < builder->node_count);
 
+    Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
+
     size_t variable_count = 0;
-    Ast_Node_Index statement = builder->nodes[procedure].first_child;
-    for (size_t i = 0; i < builder->node_count && statement != AST_NODE_INDEX_NONE; i += 1) {
+    for (Ast_Node_Index statement = procedure + 1; statement < end; statement += 1) {
         if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             variable_count += 1;
         }
-        statement = builder->nodes[statement].next_sibling;
     }
     wasm_write_unsigned(&builder->writer, variable_count);
 
-    statement = builder->nodes[procedure].first_child;
-    for (size_t i = 0; i < builder->node_count && statement != AST_NODE_INDEX_NONE; i += 1) {
+    for (Ast_Node_Index statement = procedure + 1; statement < end; statement += 1) {
         if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             Wasm_Value_Type value_type = wasm_variable_type(builder, statement);
             wasm_write_unsigned(&builder->writer, wasm_value_type_slot_count(value_type));
@@ -828,7 +939,6 @@ static void wasm_variables_write_locals(Wasm_Builder *builder, Ast_Node_Index pr
                 wasm_write_byte(&builder->writer, WASM_TYPE_I64);
             }
         }
-        statement = builder->nodes[statement].next_sibling;
     }
 }
 
@@ -872,25 +982,24 @@ static Wasm_Value_Type wasm_variable_type(Wasm_Builder const *builder, Ast_Node_
 
 /**
  * Returns the index of the first local that holds `variable`. The locals of a function are its
- * parameters, then its variables, in order, so that is the number of locals of the parameters and
- * of the variables above it. The types of the parameters and variables must be known.
+ * parameters, then its variables, in the order of the source, so that is the number of locals of
+ * the parameters and of the variables above it, also the ones in blocks. The types of the
+ * parameters and variables must be known.
  */
 static size_t wasm_variable_local_index(Wasm_Builder const *builder, Ast_Node_Index procedure,
                                         Ast_Node_Index variable) {
     assert(procedure < builder->node_count);
     assert(variable < builder->node_count);
+    assert(variable > procedure);
 
     size_t local_index = wasm_parameter_slot_count(builder, procedure);
-    Ast_Node_Index statement = builder->nodes[procedure].first_child;
-    for (size_t i = 0; i < builder->node_count && statement != variable; i += 1) {
-        assert(statement != AST_NODE_INDEX_NONE);
+    for (Ast_Node_Index statement = procedure + 1; statement < variable; statement += 1) {
         if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             local_index += wasm_value_type_slot_count(wasm_variable_type(builder, statement));
         }
-        statement = builder->nodes[statement].next_sibling;
     }
 
-    assert(statement == variable);
+    assert(builder->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
     return local_index;
 }
 
@@ -920,8 +1029,11 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_STRING_LITERAL:
         return WASM_VALUE_TYPE_STR;
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+    case AST_NODE_TYPE_BLOCK:
+    case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+    case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
     case AST_NODE_TYPE_PARAMETER:
@@ -936,6 +1048,32 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     }
 
     return WASM_VALUE_TYPE_NONE;
+}
+
+/**
+ * Returns the instruction that compares two `Int` values with `operator`, and leaves a 32-bit
+ * integer on the stack that is 1 when the comparison holds and 0 when it does not. The comparison
+ * is signed, like the division.
+ */
+static byte wasm_comparison_opcode(Ast_Comparison_Operator operator) {
+    switch (operator) {
+    case AST_COMPARISON_OPERATOR_EQUAL:
+        return WASM_OPCODE_I64_EQ;
+    case AST_COMPARISON_OPERATOR_GREATER:
+        return WASM_OPCODE_I64_GT_S;
+    case AST_COMPARISON_OPERATOR_GREATER_EQUAL:
+        return WASM_OPCODE_I64_GE_S;
+    case AST_COMPARISON_OPERATOR_LESS:
+        return WASM_OPCODE_I64_LT_S;
+    case AST_COMPARISON_OPERATOR_LESS_EQUAL:
+        return WASM_OPCODE_I64_LE_S;
+    case AST_COMPARISON_OPERATOR_NOT_EQUAL:
+        return WASM_OPCODE_I64_NE;
+    }
+
+    // Unreachable: every operator is handled above.
+    assert(false);
+    return WASM_OPCODE_I64_EQ;
 }
 
 /**
@@ -981,6 +1119,11 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_ADDITION:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_ADD);
             break;
+        case AST_NODE_TYPE_COMPARISON:
+            // The operands were written, and an operand that is not an `Int` was rejected.
+            wasm_write_byte(&builder->writer,
+                            wasm_comparison_opcode(node->payload.comparison.operator));
+            break;
         case AST_NODE_TYPE_DIVISION:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_DIV_S);
             break;
@@ -1021,7 +1164,9 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             wasm_build_code_section_body_string(builder, current);
             break;
         case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+        case AST_NODE_TYPE_BLOCK:
         case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+        case AST_NODE_TYPE_IF_STATEMENT:
         case AST_NODE_TYPE_MODULE:
         case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
         case AST_NODE_TYPE_PARAMETER:

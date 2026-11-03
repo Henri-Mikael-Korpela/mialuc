@@ -317,6 +317,10 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             Token_Type token_type = TOKEN_TYPE_IDENTIFIER;
             if (str_equals(text, STR("proc"))) {
                 token_type = TOKEN_TYPE_KEYWORD_PROC;
+            } else if (str_equals(text, STR("if"))) {
+                token_type = TOKEN_TYPE_KEYWORD_IF;
+            } else if (str_equals(text, STR("else"))) {
+                token_type = TOKEN_TYPE_KEYWORD_ELSE;
             } else if (str_equals(text, STR("return"))) {
                 token_type = TOKEN_TYPE_KEYWORD_RETURN;
             }
@@ -337,13 +341,65 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset += 1;
         }
+        // An `=` is the equals sign, unless another `=` follows it directly, which makes the single
+        // token `==`.
         else if (character == (char)TOKEN_TYPE_EQUALS) {
+            Token_Type token_type = TOKEN_TYPE_EQUALS;
+            size_t size_bytes = 1;
+            if (offset + 1 < source.length && source.bytes[offset + 1] == '=') {
+                token_type = TOKEN_TYPE_EQUALS_EQUALS;
+                size_bytes = 2;
+            }
+
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_EQUALS,
+                .token_type = token_type,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
-            offset += 1;
+            offset += size_bytes;
+        }
+        // A `>` is the greater-than operator, unless an `=` follows it directly, which makes the
+        // single token `>=`.
+        else if (character == (char)TOKEN_TYPE_GREATER) {
+            Token_Type token_type = TOKEN_TYPE_GREATER;
+            size_t size_bytes = 1;
+            if (offset + 1 < source.length && source.bytes[offset + 1] == '=') {
+                token_type = TOKEN_TYPE_GREATER_EQUALS;
+                size_bytes = 2;
+            }
+
+            token_elements[result.tokens.length] = (Token){
+                .token_type = token_type,
+                .source_offset = (uint32_t)offset,
+            };
+            result.tokens.length += 1;
+            offset += size_bytes;
+        }
+        // A `<` is the less-than operator, unless an `=` follows it directly, which makes the single
+        // token `<=`.
+        else if (character == (char)TOKEN_TYPE_LESS) {
+            Token_Type token_type = TOKEN_TYPE_LESS;
+            size_t size_bytes = 1;
+            if (offset + 1 < source.length && source.bytes[offset + 1] == '=') {
+                token_type = TOKEN_TYPE_LESS_EQUALS;
+                size_bytes = 2;
+            }
+
+            token_elements[result.tokens.length] = (Token){
+                .token_type = token_type,
+                .source_offset = (uint32_t)offset,
+            };
+            result.tokens.length += 1;
+            offset += size_bytes;
+        }
+        // A `!` is only the start of the single token `!=`.
+        else if (character == '!' && offset + 1 < source.length && source.bytes[offset + 1] == '=') {
+            token_elements[result.tokens.length] = (Token){
+                .token_type = TOKEN_TYPE_NOT_EQUALS,
+                .source_offset = (uint32_t)offset,
+            };
+            result.tokens.length += 1;
+            offset += 2;
         }
         // A `*` is the asterisk operator, unless an `=` follows it directly, which makes the single
         // token `*=`.

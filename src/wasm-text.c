@@ -25,6 +25,9 @@ typedef struct {
     char *bytes;
     size_t capacity;
     size_t length;
+    // How many structured instructions are open where the next instruction is written, which is
+    // how far it is indented.
+    size_t block_depth;
     bool is_overflowed;
 } Wasm_Text_Writer;
 
@@ -126,6 +129,7 @@ Wasm_Text_Result wasm_text_format(Array_Slice module, Array_Slice output_buffer)
                 .bytes = output_buffer.elements,
                 .capacity = output_buffer.length,
                 .length = 0,
+                .block_depth = 0,
                 .is_overflowed = false,
             },
         .module = module.elements,
@@ -548,8 +552,23 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             wasm_text_write_unsigned(&formatter->writer, function_index);
             break;
         }
+        case WASM_OPCODE_ELSE:
+            // An `else` belongs to an `if` that is open, and is written like the `if`.
+            if (formatter->writer.block_depth == 0) {
+                return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_MALFORMED, opcode_offset);
+            }
+            formatter->writer.block_depth -= 1;
+            wasm_text_write_instruction(&formatter->writer, STR("else"));
+            formatter->writer.block_depth += 1;
+            break;
         case WASM_OPCODE_END:
-            // No instruction that opens a block is supported, so an `end` must close the body.
+            if (formatter->writer.block_depth > 0) {
+                // It closes an `if`, and is written like it.
+                formatter->writer.block_depth -= 1;
+                wasm_text_write_instruction(&formatter->writer, STR("end"));
+                break;
+            }
+            // Otherwise it closes the body, which must be the last instruction.
             if (formatter->offset != formatter->limit) {
                 return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED,
                                       opcode_offset);
@@ -557,6 +576,39 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             // The text format closes the body with the parenthesis of the function instead.
             is_ended = true;
             break;
+        case WASM_OPCODE_I64_EQ:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.eq"));
+            break;
+        case WASM_OPCODE_I64_GE_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.ge_s"));
+            break;
+        case WASM_OPCODE_I64_GT_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.gt_s"));
+            break;
+        case WASM_OPCODE_I64_LE_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.le_s"));
+            break;
+        case WASM_OPCODE_I64_LT_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.lt_s"));
+            break;
+        case WASM_OPCODE_I64_NE:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.ne"));
+            break;
+        case WASM_OPCODE_IF: {
+            // Only the block type that takes and leaves nothing is written by the compiler.
+            size_t block_type_offset = formatter->offset;
+            byte block_type = wasm_text_read_byte(formatter);
+            if (formatter->status != WASM_TEXT_STATUS_OK) {
+                return false;
+            }
+            if (block_type != WASM_BLOCK_TYPE_EMPTY) {
+                return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED,
+                                      block_type_offset);
+            }
+            wasm_text_write_instruction(&formatter->writer, STR("if"));
+            formatter->writer.block_depth += 1;
+            break;
+        }
         case WASM_OPCODE_I32_CONST: {
             // The immediate is a signed 32-bit number, which the 64-bit reader also reads.
             int64_t number = wasm_text_read_signed_64(formatter);
@@ -596,6 +648,9 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
         }
         case WASM_OPCODE_RETURN:
             wasm_text_write_instruction(&formatter->writer, STR("return"));
+            break;
+        case WASM_OPCODE_UNREACHABLE:
+            wasm_text_write_instruction(&formatter->writer, STR("unreachable"));
             break;
         default:
             return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, opcode_offset);
@@ -955,6 +1010,10 @@ static void wasm_text_write_instruction(Wasm_Text_Writer *writer, Str name) {
     assert(name.length > 0);
 
     wasm_text_write(writer, STR("\n    "));
+    // Two more spaces for each structured instruction that is open.
+    for (size_t i = 0; i < writer->block_depth; i += 1) {
+        wasm_text_write(writer, STR("  "));
+    }
     wasm_text_write(writer, name);
 }
 

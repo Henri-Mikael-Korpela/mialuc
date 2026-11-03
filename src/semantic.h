@@ -23,8 +23,10 @@ typedef enum {
  * parameter, or an `AST_NODE_TYPE_VARIABLE_DEFINITION` for a variable. `position` is the place of
  * the target among its kind of siblings, counted from zero: the index of the definition among the
  * definitions of the module, of the parameter among the parameters of its procedure, or of the
- * variable among the variables of its procedure. A target and its position are both kept, because a target alone
- * would have to be searched for again by whoever needs the position. For `kind`
+ * variable among the variables of its procedure, which are counted in the order of the source,
+ * also the ones in blocks, because each variable has a place of its own. A target and its position
+ * are both kept, because a target alone would have to be searched for again by whoever needs the
+ * position. For `kind`
  * `SEMANTIC_BINDING_KIND_NONE` the `target` is `AST_NODE_INDEX_NONE` and the `position` is zero.
  */
 typedef struct {
@@ -38,7 +40,6 @@ typedef enum {
     // The name that an assignment assigns to is not a variable, but a parameter or a constant.
     SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE,
     SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE,
-    SEMANTIC_STATUS_EXPRESSION_TOO_DEEP,
     SEMANTIC_STATUS_IDENTIFIER_UNKNOWN,
     SEMANTIC_STATUS_OK,
     SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE,
@@ -69,8 +70,11 @@ typedef struct {
  * There are two scopes. The module scope has the name of every constant definition, and a
  * definition can be used anywhere in the module, also above where it is defined. The scope of a
  * procedure is inside the module scope and has the names of its parameters and of its variables. A
- * variable can be used only below its definition, and not in its own initial value. A name is
- * looked up in the scope of the procedure that uses it first, and then in the module scope.
+ * variable can be used only below its definition, and not in its own initial value. The blocks of
+ * an if statement are scopes inside the scope of the procedure: a variable that is defined in a
+ * block can be used only in the rest of that block, including the blocks inside it, and not after
+ * the block ends. A name is looked up in the innermost scope that uses it first, and then in the
+ * scopes around it, up to the module scope.
  *
  * An assignment, such as `x += 1`, uses the name that it assigns to like any other use of a name,
  * and the name must stand for a variable: a parameter or a constant cannot be assigned to.
@@ -78,8 +82,9 @@ typedef struct {
  * A name cannot be declared again where it is already visible, so a name has one meaning
  * everywhere it can be used, and there is no shadowing. Two definitions cannot have one name, two
  * parameters of a procedure cannot, and a parameter cannot have the name of a constant. A variable
- * cannot have the name of a constant, of a parameter or of an earlier variable of its procedure. A name that
- * no scope has is an error as well.
+ * cannot have the name of a constant, of a parameter or of a variable that is in scope where it is
+ * defined. Two blocks that are not inside each other can have a variable of one name each, because
+ * neither is in scope in the other. A name that no scope has is an error as well.
  *
  * The analysis is about names only. It does not know what a type is, so whether the value that a
  * name stands for is of the right type is for the target to check.

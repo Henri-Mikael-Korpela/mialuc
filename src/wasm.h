@@ -32,18 +32,29 @@ enum {
     // A page of memory is 64 KiB.
     WASM_MEMORY_PAGE_SIZE_BYTES = 65536,
 
+    // The block type of a structured instruction that takes and leaves no values.
+    WASM_BLOCK_TYPE_EMPTY = 0x40,
     // Instructions.
     WASM_OPCODE_CALL = 0x10,
+    WASM_OPCODE_ELSE = 0x05,
     WASM_OPCODE_END = 0x0B,
     WASM_OPCODE_I32_CONST = 0x41,
     WASM_OPCODE_I64_ADD = 0x7C,
     WASM_OPCODE_I64_CONST = 0x42,
     WASM_OPCODE_I64_DIV_S = 0x7F,
+    WASM_OPCODE_I64_EQ = 0x51,
+    WASM_OPCODE_I64_GE_S = 0x59,
+    WASM_OPCODE_I64_GT_S = 0x55,
+    WASM_OPCODE_I64_LE_S = 0x57,
+    WASM_OPCODE_I64_LT_S = 0x53,
     WASM_OPCODE_I64_MUL = 0x7E,
+    WASM_OPCODE_I64_NE = 0x52,
     WASM_OPCODE_I64_SUB = 0x7D,
+    WASM_OPCODE_IF = 0x04,
     WASM_OPCODE_LOCAL_GET = 0x20,
     WASM_OPCODE_LOCAL_SET = 0x21,
     WASM_OPCODE_RETURN = 0x0F,
+    WASM_OPCODE_UNREACHABLE = 0x00,
 
     // The ids of the kinds of section. Custom sections are never written, but may be read.
     WASM_SECTION_ID_CODE = 10,

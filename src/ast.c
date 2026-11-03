@@ -7,8 +7,9 @@
 
 enum {
     // The deepest tree that can be printed. The printer keeps the path from the root in a fixed
-    // array instead of recursing. The parser produces trees much shallower than this.
-    AST_PRINT_DEPTH_MAX = 64,
+    // array instead of recursing. The parser produces trees much shallower than this: blocks nest
+    // up to `AST_BLOCK_DEPTH_MAX` deep, and each level is an if statement and a block.
+    AST_PRINT_DEPTH_MAX = 256,
     // Spaces printed per level of depth.
     AST_PRINT_INDENT_SPACES = 2,
 };
@@ -21,9 +22,12 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
         return true;
     case AST_NODE_TYPE_ADDITION:
+    case AST_NODE_TYPE_BLOCK:
+    case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_IDENTIFIER:
+    case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_INTEGER_LITERAL:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION:
@@ -40,6 +44,46 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     // Unreachable: every node type is handled above.
     assert(false);
     return false;
+}
+
+Ast_Node_Index ast_procedure_end(Ast_Node const *nodes, size_t node_count,
+                                 Ast_Node_Index procedure) {
+    assert(procedure < node_count);
+    assert(node_count < AST_NODE_INDEX_NONE);
+    assert(nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+
+    // The definition that the procedure is the value of is made before it, so the next one is the
+    // first node that is not part of the procedure.
+    size_t end = procedure + 1;
+    while (end < node_count && nodes[end].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION) {
+        end += 1;
+    }
+
+    return (Ast_Node_Index)end;
+}
+
+/**
+ * Returns the symbol of `operator`, as it is written in a program.
+ */
+static char const *ast_comparison_operator_name(Ast_Comparison_Operator operator) {
+    switch (operator) {
+    case AST_COMPARISON_OPERATOR_EQUAL:
+        return "==";
+    case AST_COMPARISON_OPERATOR_GREATER:
+        return ">";
+    case AST_COMPARISON_OPERATOR_GREATER_EQUAL:
+        return ">=";
+    case AST_COMPARISON_OPERATOR_LESS:
+        return "<";
+    case AST_COMPARISON_OPERATOR_LESS_EQUAL:
+        return "<=";
+    case AST_COMPARISON_OPERATOR_NOT_EQUAL:
+        return "!=";
+    }
+
+    // Unreachable: every operator is handled above.
+    assert(false);
+    return "";
 }
 
 void ast_print(Array_Slice nodes, Ast_Node_Index root) {
@@ -68,6 +112,13 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
             printf("ADDITION_ASSIGNMENT\n");
             break;
+        case AST_NODE_TYPE_BLOCK:
+            printf("BLOCK\n");
+            break;
+        case AST_NODE_TYPE_COMPARISON:
+            printf("COMPARISON %s\n",
+                   ast_comparison_operator_name(node.payload.comparison.operator));
+            break;
         case AST_NODE_TYPE_CONSTANT_DEFINITION:
             printf("CONSTANT_DEFINITION %.*s\n", (int)node.payload.constant_definition.name.length,
                    node.payload.constant_definition.name.bytes);
@@ -81,6 +132,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_IDENTIFIER:
             printf("IDENTIFIER %.*s\n", (int)node.payload.identifier.name.length,
                    node.payload.identifier.name.bytes);
+            break;
+        case AST_NODE_TYPE_IF_STATEMENT:
+            printf("IF_STATEMENT\n");
             break;
         case AST_NODE_TYPE_INTEGER_LITERAL:
             printf("INTEGER_LITERAL %" PRId64 "\n", node.payload.integer_literal.value);

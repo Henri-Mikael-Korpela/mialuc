@@ -9,6 +9,16 @@
 static uint32_t const INDENTATION_LEVEL_TOP = 0;
 
 /**
+ * A block that is open while the lines of a procedure body are parsed: the node that the
+ * statements of the block are appended to, which is the procedure for the body of the procedure,
+ * and the indentation level of the lines of the block.
+ */
+typedef struct {
+    Ast_Node_Index node;
+    uint32_t level;
+} Parse_Block;
+
+/**
  * The state shared by the parsing functions. A parsing function returns the index of the node it
  * made, or `AST_NODE_INDEX_NONE` after it recorded an error here, and its caller then returns
  * `AST_NODE_INDEX_NONE` too without recording anything more. So only the first error is kept.
@@ -26,7 +36,12 @@ typedef struct {
 } Parser;
 
 static Ast_Node_Index parse_assignment          (Parser *parser);
+static void           parse_block_close         (Parser *parser, Ast_Node_Index block);
+static Ast_Node_Index parse_branch              (Parser *parser, Ast_Node_Index statement);
+static Ast_Node_Index parse_condition           (Parser *parser);
 static Ast_Node_Index parse_constant_definition (Parser *parser);
+static Ast_Node_Index parse_else_branch         (Parser *parser, Ast_Node_Index parent);
+static Ast_Node_Index parse_if_statement        (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_operand             (Parser *parser);
 static Ast_Node_Index parse_expression          (Parser *parser);
 static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
@@ -240,7 +255,11 @@ static bool parse_procedure_parameters(Parser *parser, Ast_Node_Index procedure)
 
 /**
  * Parses the statements of the body, which are the lines that are indented one level deeper than
- * the line of the definition, and appends them to `procedure`. Returns false after it recorded an
+ * the line of the definition, and appends them to `procedure`. A line `if condition ->` or
+ * `else ->` is followed by a block, which is the lines that are indented one level deeper still,
+ * and the statements of the block are appended to it. The blocks that are open are kept in an array
+ * and not on the stack of the calls: a line that is indented less than the innermost block closes
+ * it, and as many outer ones as it is indented less than. Returns false after it recorded an
  * error.
  */
 static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
@@ -248,9 +267,15 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
     assert(procedure < parser->node_count);
     assert(indentation_level < UINT32_MAX);
 
+    // The first one is the body of the procedure, and the others are inside each other.
+    Parse_Block blocks[AST_BLOCK_DEPTH_MAX + 1];
+    blocks[0] = (Parse_Block){.node = procedure, .level = indentation_level + 1};
+    size_t block_count = 1;
+    // Whether the last line opened a block, which the next line must be the first line of.
+    bool is_block_expected = false;
+
     // Each statement consumes at least its indentation token, so there are fewer statements than
     // tokens, which bounds the loop. It stops at the first line that is not part of the body.
-    uint32_t const body_level = indentation_level + 1;
     size_t statement_count = 0;
     for (size_t i = 0; i < parser->token_count; i += 1) {
         Token const *line_start = parse_token_current(parser);
@@ -259,31 +284,224 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
         }
 
         uint32_t level = line_start->payload.indentation.level;
-        if (level < body_level) {
-            break;
-        }
-        if (level > body_level) {
-            // The false return value reports the failure, so the node index is not needed.
-            (void)parse_fail(parser, STR("a line that is not indented deeper"));
-            return false;
+        if (is_block_expected) {
+            if (level != blocks[block_count - 1].level) {
+                // The false return value reports the failure, so the node index is not needed.
+                (void)parse_fail(parser, STR("an indented block"));
+                return false;
+            }
+            is_block_expected = false;
+        } else {
+            // A line that is indented less than the block that is open ends it.
+            while (level < blocks[block_count - 1].level && block_count > 1) {
+                parse_block_close(parser, blocks[block_count - 1].node);
+                block_count -= 1;
+            }
+            if (level < blocks[block_count - 1].level) {
+                break;
+            }
+            if (level > blocks[block_count - 1].level) {
+                // The false return value reports the failure, so the node index is not needed.
+                (void)parse_fail(parser, STR("a line that is not indented deeper"));
+                return false;
+            }
         }
         parse_token_advance(parser);
 
-        Ast_Node_Index statement = parse_statement(parser);
-        if (statement == AST_NODE_INDEX_NONE) {
-            return false;
+        Ast_Node_Index parent = blocks[block_count - 1].node;
+        Token_Type next = parse_token_current(parser)->token_type;
+        if (next == TOKEN_TYPE_KEYWORD_IF || next == TOKEN_TYPE_KEYWORD_ELSE) {
+            Ast_Node_Index block = AST_NODE_INDEX_NONE;
+            if (next == TOKEN_TYPE_KEYWORD_IF) {
+                block = parse_if_statement(parser, parent);
+            } else {
+                block = parse_else_branch(parser, parent);
+            }
+            if (block == AST_NODE_INDEX_NONE) {
+                return false;
+            }
+            if (block_count == AST_BLOCK_DEPTH_MAX + 1) {
+                // The false return value reports the failure, so the node index is not needed.
+                (void)parse_fail(parser, STR("fewer nested blocks"));
+                return false;
+            }
+            blocks[block_count] = (Parse_Block){.node = block, .level = level + 1};
+            block_count += 1;
+            is_block_expected = true;
+        } else {
+            Ast_Node_Index statement = parse_statement(parser);
+            if (statement == AST_NODE_INDEX_NONE) {
+                return false;
+            }
+            parse_node_append_child(parser, parent, statement);
         }
-        parse_node_append_child(parser, procedure, statement);
         statement_count += 1;
     }
 
+    if (is_block_expected) {
+        // The false return value reports the failure, so the node index is not needed.
+        (void)parse_fail(parser, STR("an indented block"));
+        return false;
+    }
     if (statement_count == 0) {
         // The false return value reports the failure, so the node index is not needed.
         (void)parse_fail(parser, STR("an indented procedure body"));
         return false;
     }
 
+    // The body ends the blocks that are still open, innermost first.
+    for (size_t open = block_count; open > 1; open -= 1) {
+        parse_block_close(parser, blocks[open - 1].node);
+    }
+
     return true;
+}
+
+/**
+ * Closes `block`: the nodes that were made since it was are the ones in it, so the next node that
+ * is made is the end of it. The analysis and the targets tell what scope a variable is in by it.
+ */
+static void parse_block_close(Parser *parser, Ast_Node_Index block) {
+    assert(block < parser->node_count);
+    assert(parser->nodes[block].node_type == AST_NODE_TYPE_BLOCK);
+    assert(parser->node_count < AST_NODE_INDEX_NONE);
+
+    parser->nodes[block].payload.block.end = (Ast_Node_Index)parser->node_count;
+}
+
+/**
+ * Parses the header line `if condition ->`, and appends the statement that it starts to `parent`.
+ * The statement gets the condition and an empty block, which is returned so that the caller can
+ * fill it with the lines that follow. The `else if` and `else` lines that follow are added to the
+ * statement by `parse_else_branch`.
+ */
+static Ast_Node_Index parse_if_statement(Parser *parser, Ast_Node_Index parent) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_IF);
+
+    parse_token_advance(parser);
+
+    Ast_Node_Index statement = parse_node_make(parser, AST_NODE_TYPE_IF_STATEMENT);
+    if (statement == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, parent, statement);
+
+    return parse_branch(parser, statement);
+}
+
+/**
+ * Parses the header line that starts with `else`, which is `else ->` or `else if condition ->`,
+ * and adds the branch to the if statement that is the last statement of `parent`. That statement
+ * must not have an `else` already. Returns the empty block of the branch, like `parse_if_statement`.
+ */
+static Ast_Node_Index parse_else_branch(Parser *parser, Ast_Node_Index parent) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_ELSE);
+
+    Ast_Node_Index statement = parser->nodes[parent].last_child;
+    bool is_open = statement != AST_NODE_INDEX_NONE &&
+                   parser->nodes[statement].node_type == AST_NODE_TYPE_IF_STATEMENT &&
+                   parser->nodes[statement].payload.if_statement.has_else == false;
+    if (is_open == false) {
+        return parse_fail(parser, STR("an 'if' or 'else if' before 'else'"));
+    }
+    parse_token_advance(parser);
+
+    if (parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_IF) {
+        parse_token_advance(parser);
+        return parse_branch(parser, statement);
+    }
+
+    parser->nodes[statement].payload.if_statement.has_else = true;
+    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
+    if (block == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, statement, block);
+    return block;
+}
+
+/**
+ * Parses `condition ->` and the end of the line, and appends the condition and a new empty block
+ * to the if statement `statement`. Returns the block.
+ */
+static Ast_Node_Index parse_branch(Parser *parser, Ast_Node_Index statement) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->nodes[statement].node_type == AST_NODE_TYPE_IF_STATEMENT);
+
+    Ast_Node_Index condition = parse_condition(parser);
+    if (condition == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, statement, condition);
+
+    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
+    if (block == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, statement, block);
+    return block;
+}
+
+/**
+ * Parses a condition: two expressions with a comparison operator between them, such as `x > 5`.
+ * There is no type for the result of a comparison, so a comparison is only a condition.
+ */
+static Ast_Node_Index parse_condition(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Ast_Node_Index left = parse_expression(parser);
+    if (left == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Comparison_Operator operator = AST_COMPARISON_OPERATOR_EQUAL;
+    Token_Type operator_token = parse_token_current(parser)->token_type;
+    if (operator_token == TOKEN_TYPE_GREATER) {
+        operator = AST_COMPARISON_OPERATOR_GREATER;
+    } else if (operator_token == TOKEN_TYPE_GREATER_EQUALS) {
+        operator = AST_COMPARISON_OPERATOR_GREATER_EQUAL;
+    } else if (operator_token == TOKEN_TYPE_LESS) {
+        operator = AST_COMPARISON_OPERATOR_LESS;
+    } else if (operator_token == TOKEN_TYPE_LESS_EQUALS) {
+        operator = AST_COMPARISON_OPERATOR_LESS_EQUAL;
+    } else if (operator_token == TOKEN_TYPE_NOT_EQUALS) {
+        operator = AST_COMPARISON_OPERATOR_NOT_EQUAL;
+    } else if (operator_token != TOKEN_TYPE_EQUALS_EQUALS) {
+        return parse_fail(parser, STR("a comparison operator"));
+    }
+    parse_token_advance(parser);
+
+    Ast_Node_Index right = parse_expression(parser);
+    if (right == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index comparison = parse_node_make(parser, AST_NODE_TYPE_COMPARISON);
+    if (comparison == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[comparison].payload.comparison.operator = operator;
+    parse_node_append_child(parser, comparison, left);
+    parse_node_append_child(parser, comparison, right);
+
+    return comparison;
 }
 
 /**
@@ -352,20 +570,19 @@ static Ast_Node_Index parse_statement(Parser *parser) {
 }
 
 /**
- * Parses `name += value`, or the same with another assignment operator. The node for the assignment has two children: the name, as an
- * identifier, and the value. A name that is followed by anything else than `:` or an assignment
- * operator is the error here.
+ * Parses `name += value`, or the same with another assignment operator. The node for the
+ * assignment has two children: the name, as an identifier, and the value. The node is made before
+ * the name, like the node of every statement, so that the nodes of a statement come after it in
+ * the order of the source, which the analysis relies on. A name that is followed by anything else
+ * than `:` or an assignment operator is the error here.
  */
 static Ast_Node_Index parse_assignment(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index + 1 < parser->token_count);
 
-    Ast_Node_Index target = parse_identifier(parser);
-    if (target == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
-    }
-
-    Token_Type operator = parse_token_current(parser)->token_type;
+    // The operator is the token after the name, which is not the last one, because the last is
+    // `END`.
+    Token_Type operator = parser->tokens[parser->token_index + 1].token_type;
     Ast_Node_Type node_type = AST_NODE_TYPE_ADDITION_ASSIGNMENT;
     if (operator == TOKEN_TYPE_SLASH_EQUALS) {
         node_type = AST_NODE_TYPE_DIVISION_ASSIGNMENT;
@@ -374,15 +591,22 @@ static Ast_Node_Index parse_assignment(Parser *parser) {
     } else if (operator == TOKEN_TYPE_MINUS_EQUALS) {
         node_type = AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT;
     } else if (operator != TOKEN_TYPE_PLUS_EQUALS) {
+        // The error is at the token after the name.
+        parse_token_advance(parser);
         return parse_fail(parser, STR("':' or an assignment operator"));
     }
-    parse_token_advance(parser);
 
     Ast_Node_Index assignment = parse_node_make(parser, node_type);
     if (assignment == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
+
+    Ast_Node_Index target = parse_identifier(parser);
+    if (target == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
     parse_node_append_child(parser, assignment, target);
+    parse_token_advance(parser);
 
     Ast_Node_Index value = parse_expression(parser);
     if (value == AST_NODE_INDEX_NONE) {

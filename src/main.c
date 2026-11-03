@@ -405,6 +405,15 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_EQUALS:
             printf("EQUALS\n");
             break;
+        case TOKEN_TYPE_EQUALS_EQUALS:
+            printf("EQUALS_EQUALS\n");
+            break;
+        case TOKEN_TYPE_GREATER:
+            printf("GREATER\n");
+            break;
+        case TOKEN_TYPE_GREATER_EQUALS:
+            printf("GREATER_EQUALS\n");
+            break;
         case TOKEN_TYPE_IDENTIFIER:
             // The cast is needed because `%.*s` takes an `int` precision.
             printf("IDENTIFIER %.*s\n", (int)token.payload.identifier.text.length,
@@ -416,17 +425,32 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_INTEGER_LITERAL:
             printf("INTEGER_LITERAL %" PRId64 "\n", token.payload.integer_literal.value);
             break;
+        case TOKEN_TYPE_KEYWORD_ELSE:
+            printf("KEYWORD_ELSE\n");
+            break;
+        case TOKEN_TYPE_KEYWORD_IF:
+            printf("KEYWORD_IF\n");
+            break;
         case TOKEN_TYPE_KEYWORD_PROC:
             printf("KEYWORD_PROC\n");
             break;
         case TOKEN_TYPE_KEYWORD_RETURN:
             printf("KEYWORD_RETURN\n");
             break;
+        case TOKEN_TYPE_LESS:
+            printf("LESS\n");
+            break;
+        case TOKEN_TYPE_LESS_EQUALS:
+            printf("LESS_EQUALS\n");
+            break;
         case TOKEN_TYPE_MINUS:
             printf("MINUS\n");
             break;
         case TOKEN_TYPE_MINUS_EQUALS:
             printf("MINUS_EQUALS\n");
+            break;
+        case TOKEN_TYPE_NOT_EQUALS:
+            printf("NOT_EQUALS\n");
             break;
         case TOKEN_TYPE_PARENTHESIS_LEFT:
             printf("PARENTHESIS_LEFT\n");
@@ -604,10 +628,6 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     case SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is already defined.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_EXPRESSION_TOO_DEEP:
-        fprintf(stderr, "%s:%zu:%zu: an expression in '%.*s' has too many nested operators.\n",
-                path, position.line, position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_IDENTIFIER_UNKNOWN:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a variable or parameter of the procedure or a "

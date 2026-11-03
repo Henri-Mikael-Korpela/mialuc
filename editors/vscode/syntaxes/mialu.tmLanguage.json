@@ -35,6 +35,14 @@
         "operators": {
             "patterns": [
                 {
+                    "name": "punctuation.separator.arrow.mialu",
+                    "match": "->"
+                },
+                {
+                    "name": "keyword.operator.comparison.mialu",
+                    "match": "==|!=|<=|>=|<|>"
+                },
+                {
                     "name": "keyword.operator.assignment.compound.mialu",
                     "match": "\\+=|-=|\\*=|/="
                 },
@@ -61,6 +69,10 @@
                 {
                     "name": "keyword.control.return.mialu",
                     "match": "\\breturn\\b"
+                },
+                {
+                    "name": "keyword.control.conditional.mialu",
+                    "match": "\\b(if|else)\\b"
                 }
             ]
         }

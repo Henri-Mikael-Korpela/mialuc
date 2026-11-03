@@ -36,8 +36,10 @@
        which the grammar cannot tell from `Int`, and the value of a variable must be of the type
        that the variable is given.
      - A line may be indented by any number of spaces that is a multiple of 4. The grammar only
-       has procedure bodies, which are indented by exactly one level, 4 spaces. Rules for deeper
-       nesting have to be added together with the syntax that needs them.
+       has blocks nested up to the fourth level, see `block_1`. Deeper nesting is accepted by the
+       compiler, up to 32 blocks inside each other, and the grammar needs more rules for it.
+     - The condition of an if statement must compare `Int` values, and a variable defined in a
+       block can only be used in that block. Both are checked after parsing.
 *)
 
 module = { blank_line | definition } , end_of_input ;
@@ -64,15 +66,66 @@ type_name = name ;
 return_type = name ;
 
 (* At least one statement. Blank lines are allowed before, between and after statements, and are
-   not statements. *)
-procedure_body = { blank_line } , statement_line , { blank_line | statement_line } ;
+   not statements. The body is indented exactly one level, 4 spaces. A tab, or any other number of
+   spaces, does not match. *)
+procedure_body = block_1 ;
 
-(* The body of a procedure is indented exactly one level. A tab, or any other number of spaces,
-   does not match. *)
-statement_line =
-    indentation , ( return_statement | variable_definition | assignment ) , ws , line_end ;
+(* A grammar has no way to say "one level deeper than the line above", so there is a set of rules
+   for each level of indentation. A block is the lines of a body, or of a branch of an if
+   statement, which is indented one level deeper than the `if`. A block has at least one
+   statement, and blank lines are allowed before, between and after them, so a blank line before an
+   `else` belongs to the block above it. The rules go down to the fourth level, which is the body
+   and three if statements inside each other. The compiler accepts 32 levels of blocks, and
+   deeper nesting would be more sets of rules like these. *)
+block_1 = { blank_line } , statement_1 , { blank_line | statement_1 } ;
+statement_1 = simple_statement_1 | if_statement_1 ;
+simple_statement_1 =
+    indentation_1 , ( return_statement | variable_definition | assignment ) , ws , line_end ;
+if_statement_1 =
+    indentation_1 , "if" , required_space , condition , branch_end , block_2 ,
+    { indentation_1 , "else" , required_space , "if" , required_space , condition , branch_end ,
+      block_2 } ,
+    [ indentation_1 , "else" , branch_end , block_2 ] ;
 
-indentation = "    " ;
+block_2 = { blank_line } , statement_2 , { blank_line | statement_2 } ;
+statement_2 = simple_statement_2 | if_statement_2 ;
+simple_statement_2 =
+    indentation_2 , ( return_statement | variable_definition | assignment ) , ws , line_end ;
+if_statement_2 =
+    indentation_2 , "if" , required_space , condition , branch_end , block_3 ,
+    { indentation_2 , "else" , required_space , "if" , required_space , condition , branch_end ,
+      block_3 } ,
+    [ indentation_2 , "else" , branch_end , block_3 ] ;
+
+block_3 = { blank_line } , statement_3 , { blank_line | statement_3 } ;
+statement_3 = simple_statement_3 | if_statement_3 ;
+simple_statement_3 =
+    indentation_3 , ( return_statement | variable_definition | assignment ) , ws , line_end ;
+if_statement_3 =
+    indentation_3 , "if" , required_space , condition , branch_end , block_4 ,
+    { indentation_3 , "else" , required_space , "if" , required_space , condition , branch_end ,
+      block_4 } ,
+    [ indentation_3 , "else" , branch_end , block_4 ] ;
+
+block_4 = { blank_line } , statement_4 , { blank_line | statement_4 } ;
+statement_4 = simple_statement_4 ;
+simple_statement_4 =
+    indentation_4 , ( return_statement | variable_definition | assignment ) , ws , line_end ;
+
+(* The `if` with its first condition, any number of `else if`, and at most one `else` that comes
+   last. The `->` ends the line, and what is indented below it is the block of the branch. *)
+branch_end = ws , "->" , ws , line_end ;
+
+(* A comparison of two expressions. It is not an expression itself: there is no value for true
+   and false yet, so a comparison is only the condition of a branch. *)
+condition = expression , ws , comparison_operator , ws , expression ;
+
+comparison_operator = "==" | "!=" | "<=" | ">=" | "<" | ">" ;
+
+indentation_1 = "    " ;
+indentation_2 = "        " ;
+indentation_3 = "            " ;
+indentation_4 = "                " ;
 
 (* A variable and its initial value. `:=` is a ':' and a '=' for the compiler, so spaces may be
    between them, as for `::`. Without a type the type of the variable is the type of the value.
@@ -113,7 +166,7 @@ any_character = ? any character ? ;
 (* Names. An identifier that is a reserved word is not a name. *)
 name = identifier - reserved_word ;
 
-reserved_word = "proc" | "return" ;
+reserved_word = "proc" | "return" | "if" | "else" ;
 
 identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 
