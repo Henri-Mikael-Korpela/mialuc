@@ -50,6 +50,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_MODULE:
             printf("MODULE\n");
             break;
+        case AST_NODE_TYPE_MULTIPLICATION:
+            printf("MULTIPLICATION\n");
+            break;
         case AST_NODE_TYPE_PARAMETER:
             printf("PARAMETER %.*s\n", (int)node.payload.parameter.name.length,
                    node.payload.parameter.name.bytes);

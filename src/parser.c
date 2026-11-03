@@ -44,6 +44,7 @@ static bool           parse_procedure_parameters(Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_return_statement    (Parser *parser);
 static Ast_Node_Index parse_statement           (Parser *parser);
 static Ast_Node_Index parse_string_literal      (Parser *parser);
+static Ast_Node_Index parse_term                (Parser *parser);
 static void           parse_token_advance       (Parser *parser);
 static Token const *  parse_token_current       (Parser const *parser);
 static bool           parse_token_expect        (Parser *parser, Token_Type token_type,
@@ -447,16 +448,17 @@ static bool parse_line_end_expect(Parser *parser) {
 }
 
 /**
- * Parses operands separated by `+` or `-`, which have the same precedence. They are left
- * associative, so `a - b + c` is `(a - b) + c`: each operator makes a node that takes the
- * expression so far as its left operand. The parser does not
- * call itself, because there are no parentheses yet.
+ * Parses terms separated by `+` or `-`, which have the same precedence. They are left associative,
+ * so `a - b + c` is `(a - b) + c`: each operator makes a node that takes the expression so far as
+ * its left operand. The operands of these operators are terms, see `parse_term`, so the operators
+ * of a term bind tighter: `a + b * c` is `a + (b * c)`. The parser does not call itself, because
+ * there are no parentheses yet.
  */
 static Ast_Node_Index parse_expression(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
-    Ast_Node_Index left = parse_operand(parser);
+    Ast_Node_Index left = parse_term(parser);
     if (left == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -470,7 +472,7 @@ static Ast_Node_Index parse_expression(Parser *parser) {
         }
         parse_token_advance(parser);
 
-        Ast_Node_Index right = parse_operand(parser);
+        Ast_Node_Index right = parse_term(parser);
         if (right == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
@@ -486,6 +488,44 @@ static Ast_Node_Index parse_expression(Parser *parser) {
         parse_node_append_child(parser, arithmetic, left);
         parse_node_append_child(parser, arithmetic, right);
         left = arithmetic;
+    }
+
+    return left;
+}
+
+/**
+ * Parses operands separated by `*`, which have a higher precedence than `+` and `-`. Like them,
+ * the operator is left associative, so `a * b * c` is `(a * b) * c`.
+ */
+static Ast_Node_Index parse_term(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Ast_Node_Index left = parse_operand(parser);
+    if (left == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    // Every operator consumes a token, so there are fewer operators than tokens, which bounds
+    // the loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_ASTERISK) {
+            break;
+        }
+        parse_token_advance(parser);
+
+        Ast_Node_Index right = parse_operand(parser);
+        if (right == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+
+        Ast_Node_Index multiplication = parse_node_make(parser, AST_NODE_TYPE_MULTIPLICATION);
+        if (multiplication == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, multiplication, left);
+        parse_node_append_child(parser, multiplication, right);
+        left = multiplication;
     }
 
     return left;

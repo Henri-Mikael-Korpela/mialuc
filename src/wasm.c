@@ -829,8 +829,8 @@ static size_t wasm_variable_local_index(Wasm_Builder const *builder, Ast_Node_In
 
 /**
  * Returns the type of the value of `expression`. The expression must have been written already,
- * so that every name in it is known to have a value. Only the root matters: an addition or a subtraction is an
- * `Int` because its operands were checked to be, as they were written.
+ * so that every name in it is known to have a value. Only the root matters: an arithmetic
+ * operation is an `Int` because its operands were checked to be, as they were written.
  */
 static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
                                             Ast_Node_Index expression) {
@@ -840,6 +840,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     switch (node->node_type) {
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_INTEGER_LITERAL:
+    case AST_NODE_TYPE_MULTIPLICATION:
     case AST_NODE_TYPE_SUBTRACTION:
         return WASM_VALUE_TYPE_INT;
     case AST_NODE_TYPE_IDENTIFIER: {
@@ -908,11 +909,14 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_ADDITION:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_ADD);
             break;
+        case AST_NODE_TYPE_MULTIPLICATION:
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I64_MUL);
+            break;
         case AST_NODE_TYPE_SUBTRACTION:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_SUB);
             break;
         case AST_NODE_TYPE_CONSTANT_DEFINITION:
-            // The parser only makes additions, subtractions, integer literals and names in an expression.
+            // The parser only makes arithmetic, integer literals and names in an expression.
             assert(false);
             break;
         case AST_NODE_TYPE_IDENTIFIER: {

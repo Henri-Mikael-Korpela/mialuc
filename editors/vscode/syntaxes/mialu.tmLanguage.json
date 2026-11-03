@@ -40,7 +40,7 @@
                 },
                 {
                     "name": "keyword.operator.arithmetic.mialu",
-                    "match": "\\+|-"
+                    "match": "\\+|-|\\*"
                 },
                 {
                     "name": "keyword.operator.type.mialu",

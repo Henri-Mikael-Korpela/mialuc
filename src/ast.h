@@ -14,6 +14,7 @@ typedef enum {
     AST_NODE_TYPE_IDENTIFIER,
     AST_NODE_TYPE_INTEGER_LITERAL,
     AST_NODE_TYPE_MODULE,
+    AST_NODE_TYPE_MULTIPLICATION,
     AST_NODE_TYPE_PARAMETER,
     AST_NODE_TYPE_PROCEDURE,
     AST_NODE_TYPE_RETURN_STATEMENT,
@@ -44,6 +45,7 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition. It is the root of the tree.
+ * - `AST_NODE_TYPE_MULTIPLICATION`: two children, the left and the right operand, in that order.
  * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`.
  * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
  *   body, which are variable definitions and return statements. The return type is in the
