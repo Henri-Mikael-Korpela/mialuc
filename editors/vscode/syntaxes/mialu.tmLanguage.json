@@ -16,8 +16,21 @@
     "repository": {
         "strings": {
             "name": "string.quoted.double.mialu",
-            "comment": "A string has no escape sequences yet, and ends with its line.",
-            "match": "\"[^\"\\\\\\n]*\""
+            "comment": "A string has no escape sequences, so a backslash is invalid, and it ends with its line.",
+            "begin": "\"",
+            "beginCaptures": {
+                "0": { "name": "punctuation.definition.string.begin.mialu" }
+            },
+            "end": "\"|(?=$)",
+            "endCaptures": {
+                "0": { "name": "punctuation.definition.string.end.mialu" }
+            },
+            "patterns": [
+                {
+                    "name": "invalid.illegal.backslash.mialu",
+                    "match": "\\\\"
+                }
+            ]
         },
         "operators": {
             "name": "keyword.operator.arithmetic.mialu",
