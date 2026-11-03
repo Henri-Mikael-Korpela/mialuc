@@ -7,8 +7,21 @@ Compiler for the Mialu programming language. See the [language specification](do
 ```
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_C_COMPILER=gcc
 cmake --build build
-build/mialuc.exe <source file>
+build/mialuc.exe run <source file>
+build/mialuc.exe build --target wasm <output file> <source file>
 ```
+
+`run` prints the tokens and the syntax tree of a source file. `build` writes a program for a target; `wasm` is the only target for now. See [build-wasm.ps1](build-wasm.ps1) and [run.ps1](run.ps1).
+
+## WebAssembly test site
+
+`build-wasm.ps1` writes `tests/wasm/sum.wasm`. To call it from a browser:
+
+```
+python tests/wasm/serve.py
+```
+
+Then open http://localhost:8000/. See [tests/wasm](tests/wasm).
 
 ## Grammar
 

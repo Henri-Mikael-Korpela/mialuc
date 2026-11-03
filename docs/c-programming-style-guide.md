@@ -124,6 +124,7 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 ## Structs
 
 - Put a declaration of each struct field on its own line, and order fields from largest to smallest alignment so that padding is minimal. Assert the struct size with `static_assert` when layout matters.
+- Put each field in struct object initialization on its own line. Use trailing comma for each line, because this helps when one uses line-based change review tool like Git.
 
 ## Assertions
 

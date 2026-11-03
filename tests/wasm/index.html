@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Mialu WASM test</title>
+    <style>
+        body { font-family: sans-serif; max-width: 32rem; margin: 2rem auto; }
+        input { width: 8rem; }
+        #result, #error { font-family: monospace; }
+        #error { color: #b00020; }
+    </style>
+</head>
+<body>
+    <h1>sum.wasm</h1>
+    <p>Calls <code>sum</code> from <code>sum.wasm</code>, which was built from
+        <code>test-code/sum.mu</code>.</p>
+    <p>
+        <input id="a" type="number" value="2" step="1"> +
+        <input id="b" type="number" value="40" step="1"> =
+        <span id="result">…</span>
+    </p>
+    <p id="error"></p>
+
+    <script>
+        const inputA = document.getElementById("a");
+        const inputB = document.getElementById("b");
+        const result = document.getElementById("result");
+        const error = document.getElementById("error");
+
+        async function main() {
+            // Needs the server to send "application/wasm", which serve.py does.
+            const { instance } = await WebAssembly.instantiateStreaming(fetch("sum.wasm"));
+
+            function update() {
+                try {
+                    // Mialu's `Int` is a 64-bit integer, which JavaScript passes as a BigInt.
+                    const sum = instance.exports.sum(BigInt(inputA.value), BigInt(inputB.value));
+                    result.textContent = sum.toString();
+                    error.textContent = "";
+                } catch (e) {
+                    result.textContent = "…";
+                    error.textContent = e.message;
+                }
+            }
+
+            inputA.addEventListener("input", update);
+            inputB.addEventListener("input", update);
+            update();
+        }
+
+        main().catch((e) => {
+            error.textContent = "Cannot load sum.wasm. Build it first with build-wasm.ps1. " + e;
+        });
+    </script>
+</body>
+</html>

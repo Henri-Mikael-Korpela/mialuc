@@ -1,0 +1,50 @@
+#ifndef MIALU_WASM_H
+#define MIALU_WASM_H
+
+#include <stddef.h>
+
+#include <mialu/array_slice.h>
+#include <mialu/ast.h>
+#include <mialu/str.h>
+
+// Alphabetical, because nothing depends on the order.
+typedef enum {
+    WASM_BUILD_STATUS_DEFINITION_NAME_DUPLICATE,
+    WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP,
+    WASM_BUILD_STATUS_IDENTIFIER_UNKNOWN,
+    WASM_BUILD_STATUS_OK,
+    WASM_BUILD_STATUS_OUTPUT_TOO_LARGE,
+    WASM_BUILD_STATUS_PARAMETER_NAME_DUPLICATE,
+    WASM_BUILD_STATUS_RETURN_TYPE_MISSING,
+    WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
+} Wasm_Build_Status;
+
+/**
+ * On `WASM_BUILD_STATUS_OK`, `bytes` is the filled start of the output buffer, as `byte`
+ * elements, and it is a complete WebAssembly binary module. Otherwise `bytes.length` is zero and
+ * `subject` is the text in the source that the error is about, as a view into the source that the
+ * syntax tree was parsed from, so the caller can work out the position. `subject` has `bytes`
+ * NULL for `WASM_BUILD_STATUS_OUTPUT_TOO_LARGE`, which is not about any place in the source.
+ */
+typedef struct {
+    Array_Slice bytes;
+    Str subject;
+    Wasm_Build_Status status;
+} Wasm_Build_Result;
+
+/**
+ * Builds a WebAssembly binary module from the syntax tree below `root`, which must be the
+ * `AST_NODE_TYPE_MODULE` node of a successful `parse`. `nodes` holds `Ast_Node` elements. The
+ * module is written to `output_buffer`, which holds `byte` elements.
+ *
+ * Every definition becomes a function that the module exports under the name of the definition.
+ * `Int` is the only type for now, and it is a 64-bit integer (`i64`), so callers from JavaScript
+ * pass and receive `BigInt`.
+ *
+ * The syntax tree can be valid for the parser but not for the target, for example when it uses a
+ * name that no parameter has. Such trees are rejected with a status other than
+ * `WASM_BUILD_STATUS_OK`.
+ */
+Wasm_Build_Result wasm_build(Array_Slice nodes, Ast_Node_Index root, Array_Slice output_buffer);
+
+#endif

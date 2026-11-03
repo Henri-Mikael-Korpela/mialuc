@@ -52,3 +52,18 @@ procedure_name :: proc() ->
 ```
 
 A procedure body consists of a series of statements, which can include variable declarations, expressions, and control flow statements. The procedure body is indented to indicate its scope.
+
+## Compilation targets
+
+The compiler has two modes: `run` prints the tokens and the syntax tree of a program, and `build --target <target> <output file> <source file>` writes a program for a target.
+
+### WebAssembly
+
+The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition wraps around on overflow. `Int` is the only type that the target supports.
+
+The target rejects a program that the parser accepts when:
+
+- a type is not `Int`,
+- a name in an expression is not a parameter of the procedure,
+- two parameters, or two definitions, have the same name,
+- a procedure with no return type has a `return` statement.
