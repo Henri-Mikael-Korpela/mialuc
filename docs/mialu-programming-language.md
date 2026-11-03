@@ -38,13 +38,6 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 | `Int` | A signed 64-bit integer. Written as a decimal number, such as `42`. |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
 
-Parameters and return types name their type, as in `proc(name: Str) Str`. A procedure that returns a string has the return type `Str`:
-
-```
-get_name :: proc() Str ->
-    return "Bob"
-```
-
 ### Strings
 
 A string literal is the text between a pair of double quotes, on one line:
@@ -53,13 +46,11 @@ A string literal is the text between a pair of double quotes, on one line:
 "Hello, world"
 ```
 
-A `Str` is encoded in UTF-8: its bytes are always a valid UTF-8 encoding of text, as defined by [RFC 3629](https://www.rfc-editor.org/rfc/rfc3629). A string can hold any Unicode character, such as `"héllo"` or `"日本語"`, and each character takes one to four bytes. The encoding is strict: an overlong encoding, a surrogate (U+D800 to U+DFFF), a value above U+10FFFF and a stray continuation byte are all invalid. The character U+0000 is valid, and is one byte of zero.
+A `Str` is encoded in UTF-8: its bytes are always a valid UTF-8 encoding of text, as defined by [RFC 3629](https://www.rfc-editor.org/rfc/rfc3629). A string can hold any Unicode character, such as `"héllo"` or `"日本語"`, and each character takes one to four bytes.
 
 A string is length-based, not null-terminated. It is its bytes together with the number of them, so the length is known without looking for an end, and a string can hold a zero byte. The length counts bytes, not characters: `"héllo"` has a length of 6, because `é` takes two bytes. The empty string `""` has a length of zero. A string is immutable, and does not own its bytes: a string literal is a view of bytes that are part of the program, so returning one from a procedure is safe.
 
-The bytes of a string literal are the bytes of the source file between the quotes, so a source file that has a string must be UTF-8 at that place. The compiler rejects a string literal that is not valid UTF-8. A string cannot contain a double quote or a line break, because they would end it, and cannot contain a backslash. There are no escape sequences yet, and the backslash is kept for them, so a program that is written today does not change its meaning when they are added.
-
-A string has no operators yet. In particular `+` does not join strings.
+The compiler rejects a string literal that is not valid UTF-8. A string cannot contain a double quote or a line break, because they would end it, and cannot contain a backslash. There are no escape sequences.
 
 ## Operators
 
