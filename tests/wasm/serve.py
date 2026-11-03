@@ -16,7 +16,8 @@ the compiler, build/mialuc.exe, which must be built first, and answers with JSON
 A program that does not compile is a normal answer, so it comes with status 200 too.
 
 The directory test-code of the project is served under /test-code/, so that the playground can
-offer the example programs that are kept there.
+offer the example programs that are kept there: a Mialu file, such as sum.mu, and the JavaScript
+that calls it, such as sum.client.js.
 """
 
 import base64

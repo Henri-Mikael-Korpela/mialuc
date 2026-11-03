@@ -188,8 +188,6 @@
 
         .console-line.is-error { color: var(--error); }
         .console-line.is-warn { color: var(--warning); }
-        .console-line.is-result { color: var(--text-muted); }
-        .console-line.is-result::before { content: "\2190  "; }
         .console-line.is-info { color: #75beff; }
     </style>
 </head>
@@ -231,65 +229,16 @@
 
         /*
          * The examples. The Mialu program of each is the file in test-code that the server
-         * serves, so that there is one copy of it. The JavaScript is what calls it.
+         * serves, so that there is one copy of it, and the JavaScript that calls it is the file
+         * next to it with the same name, such as sum.mu and sum.client.js.
          */
         const EXAMPLES = {
-            sum: {
-                file: "sum.mu",
-                javascript: [
-                    "// The procedures of the Mialu program are in scope, and in `exports`.",
-                    "// Int is a 64-bit integer, so it comes back as a BigInt.",
-                    "sum(10, 15)",
-                    "",
-                ].join("\n"),
-            },
-            strings: {
-                file: "strings.mu",
-                javascript: [
-                    "// A Str is two numbers: the address of its bytes in memory, and their count.",
-                    "// A procedure that returns one gives them as an array.",
-                    "const name = get_name();",
-                    "console.log(name);",
-                    "",
-                    "// Str(...) reads the bytes, and makes a JavaScript string of them.",
-                    "Str(name)",
-                    "",
-                ].join("\n"),
-            },
-            "string constant": {
-                file: "string-constant.mu",
-                javascript: [
-                    "// A constant that is a string is a procedure without parameters.",
-                    "// A Str parameter takes the two numbers, so `...` passes a string on.",
-                    "[Str(greeting()), Str(echo(...greeting())), Str(second(1, ...greeting(), ...empty()))]",
-                    "",
-                ].join("\n"),
-            },
-            arithmetic: {
-                file: "arithmetic.mu",
-                javascript: [
-                    "// Addition and subtraction of Int, which come back as BigInt.",
-                    "[add_foo(), subtract_foo()]",
-                    "",
-                ].join("\n"),
-            },
-            variables: {
-                file: "variables.mu",
-                javascript: [
-                    "// `x := 4` deduces the type of x, and `x : Int = 5` gives it.",
-                    "[foo(), foo2()]",
-                    "",
-                ].join("\n"),
-            },
-            "scope resolution": {
-                file: "scope-resolution.mu",
-                javascript: [
-                    "// get_name uses the constant NAME, which is defined outside the procedure.",
-                    "// NAME is a procedure without parameters too, so it can be called as well.",
-                    "[Str(get_name()), Str(NAME())]",
-                    "",
-                ].join("\n"),
-            },
+            sum: "sum",
+            strings: "strings",
+            "string constant": "string-constant",
+            arithmetic: "arithmetic",
+            variables: "variables",
+            "scope resolution": "scope-resolution",
         };
         const EXAMPLE_DEFAULT = "sum";
 
@@ -579,29 +528,6 @@
                 }
             }
 
-            /*
-             * Shows the value of the code like a console does when it is an expression, or ends
-             * in one. Tries the code as one expression, then with its last line as the value,
-             * then as plain statements, and takes the first that is valid JavaScript.
-             */
-            function compileCode(parameterNames, code) {
-                const lines = code.replace(/\s+$/, "").split("\n");
-                const lastLine = lines.pop().replace(/;\s*$/, "");
-                const candidates = [
-                    `return (\n${code}\n);`,
-                    `${lines.join("\n")}\nreturn (\n${lastLine}\n);`,
-                    code,
-                ];
-                for (const candidate of candidates.slice(0, -1)) {
-                    try {
-                        return new AsyncFunction(...parameterNames, candidate);
-                    } catch {
-                        // Not an expression, so the next form is tried.
-                    }
-                }
-                return new AsyncFunction(...parameterNames, candidates[candidates.length - 1]);
-            }
-
             function format(value, depth, seen) {
                 switch (typeof value) {
                 case "bigint":
@@ -668,12 +594,10 @@
 
                     // The names of the program come after `Str`, so that they win if it has one.
                     const names = Object.keys(exports).filter(isParameterName);
-                    const run = compileCode(["Str", ...names, "console", "exports"], code);
-                    const result = await run(makeStrReader(instance.exports.memory),
+                    // Only what the code passes to `console` is shown, like in a program.
+                    const run = new AsyncFunction("Str", ...names, "console", "exports", code);
+                    await run(makeStrReader(instance.exports.memory),
                         ...names.map((name) => exports[name]), playgroundConsole, exports);
-                    if (result !== undefined) {
-                        send("result", [result]);
-                    }
                 } catch (error) {
                     send("error", [error]);
                 }
@@ -768,22 +692,32 @@
         // Counts loads, so that a slow answer for an example that was replaced is ignored.
         let exampleLoadCount = 0;
 
+        // Returns the text of a file of test-code, or throws when the server does not have it.
+        async function fetchExample(file) {
+            const response = await fetch(`/test-code/${file}`);
+            if (response.ok === false) {
+                throw new Error(`The server answered ${response.status} for test-code/${file}.`);
+            }
+            return response.text();
+        }
+
         async function loadExample(name) {
             exampleLoadCount += 1;
             const loadIndex = exampleLoadCount;
-            const example = EXAMPLES[name];
+            const mialuFile = `${EXAMPLES[name]}.mu`;
+            const javascriptFile = `${EXAMPLES[name]}.client.js`;
 
             let source = "";
+            let javascript = "";
             try {
-                const response = await fetch(`/test-code/${example.file}`);
-                if (response.ok === false) {
-                    throw new Error(`The server answered ${response.status}.`);
-                }
-                source = await response.text();
+                [source, javascript] = await Promise.all([
+                    fetchExample(mialuFile),
+                    fetchExample(javascriptFile),
+                ]);
             } catch (error) {
                 if (loadIndex === exampleLoadCount) {
                     consoleOutput.replaceChildren();
-                    print("error", `Cannot load test-code/${example.file}. Start the server with: `
+                    print("error", `Cannot load the example ${name}. Start the server with: `
                         + `python tests/wasm/serve.py\n${error}`);
                 }
                 return;
@@ -794,7 +728,7 @@
 
             mialuEditor.value = source;
             mialuEditor.render();
-            javascriptEditor.value = example.javascript;
+            javascriptEditor.value = javascript;
             javascriptEditor.render();
             clearTimeout(compileTimer);
             compileTimer = 0;
