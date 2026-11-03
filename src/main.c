@@ -425,6 +425,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_MINUS:
             printf("MINUS\n");
             break;
+        case TOKEN_TYPE_MINUS_EQUALS:
+            printf("MINUS_EQUALS\n");
+            break;
         case TOKEN_TYPE_PARENTHESIS_LEFT:
             printf("PARENTHESIS_LEFT\n");
             break;

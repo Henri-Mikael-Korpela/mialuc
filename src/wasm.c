@@ -718,6 +718,8 @@ static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
         opcode = WASM_OPCODE_I64_DIV_S;
     } else if (builder->nodes[assignment].node_type == AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT) {
         opcode = WASM_OPCODE_I64_MUL;
+    } else if (builder->nodes[assignment].node_type == AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT) {
+        opcode = WASM_OPCODE_I64_SUB;
     }
     wasm_write_byte(&builder->writer, opcode);
     wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_SET);
@@ -925,6 +927,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_PARAMETER:
     case AST_NODE_TYPE_PROCEDURE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
+    case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
     case AST_NODE_TYPE_TYPE_NAME:
     case AST_NODE_TYPE_VARIABLE_DEFINITION:
         // None of these is part of an expression.
@@ -1024,6 +1027,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_PARAMETER:
         case AST_NODE_TYPE_PROCEDURE:
         case AST_NODE_TYPE_RETURN_STATEMENT:
+        case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
         case AST_NODE_TYPE_TYPE_NAME:
         case AST_NODE_TYPE_VARIABLE_DEFINITION:
             // Same as above: none of these is part of an expression.

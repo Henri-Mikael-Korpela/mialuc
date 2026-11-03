@@ -36,7 +36,7 @@
             "patterns": [
                 {
                     "name": "keyword.operator.assignment.compound.mialu",
-                    "match": "\\+=|\\*=|/="
+                    "match": "\\+=|-=|\\*=|/="
                 },
                 {
                     "name": "keyword.operator.assignment.mialu",

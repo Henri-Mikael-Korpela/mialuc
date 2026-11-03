@@ -18,6 +18,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
     case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
+    case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
         return true;
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
@@ -114,6 +115,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_SUBTRACTION:
             printf("SUBTRACTION\n");
+            break;
+        case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
+            printf("SUBTRACTION_ASSIGNMENT\n");
             break;
         case AST_NODE_TYPE_TYPE_NAME:
             printf("TYPE_NAME %.*s\n", (int)node.payload.type_name.name.length,

@@ -420,13 +420,16 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset += 1;
         }
-        // A `-` is the minus operator, unless the two subsequent characters form a `->` token,
-        // which is recognized as a single token.
+        // A `-` is the minus operator, unless the two subsequent characters form a `->` or a `-=`
+        // token, which are recognized as single tokens.
         else if (character == (char)TOKEN_TYPE_MINUS) {
             Token_Type token_type = TOKEN_TYPE_MINUS;
             size_t size_bytes = 1;
             if (offset + 1 < source.length && source.bytes[offset + 1] == '>') {
                 token_type = TOKEN_TYPE_ARROW;
+                size_bytes = 2;
+            } else if (offset + 1 < source.length && source.bytes[offset + 1] == '=') {
+                token_type = TOKEN_TYPE_MINUS_EQUALS;
                 size_bytes = 2;
             }
 

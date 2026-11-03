@@ -25,6 +25,7 @@ typedef enum {
     AST_NODE_TYPE_RETURN_STATEMENT,
     AST_NODE_TYPE_STRING_LITERAL,
     AST_NODE_TYPE_SUBTRACTION,
+    AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT,
     AST_NODE_TYPE_TYPE_NAME,
     AST_NODE_TYPE_VARIABLE_DEFINITION,
 } Ast_Node_Type;
@@ -68,6 +69,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child, the returned value.
  * - `AST_NODE_TYPE_STRING_LITERAL`: no children.
  * - `AST_NODE_TYPE_SUBTRACTION`: two children, the minuend and the subtrahend, in that order.
+ * - `AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
+ *   variable that gets the difference, and the value that is subtracted from it, in that order.
+ *   It is a statement of a procedure body.
  * - `AST_NODE_TYPE_TYPE_NAME`: no children.
  * - `AST_NODE_TYPE_VARIABLE_DEFINITION`: the initial value, preceded by the type, an
  *   `AST_NODE_TYPE_TYPE_NAME`, when the definition gives one. Without it the type is deduced from

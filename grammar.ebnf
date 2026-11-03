@@ -79,11 +79,11 @@ indentation = "    " ;
    `x : Int = 5` gives the type. *)
 variable_definition = name , ws , ":" , ws , [ type_name , ws ] , "=" , ws , expression ;
 
-(* An assignment to a variable that is already defined: `x += 2` adds 2 to `x`, `x *= 2`
-   multiplies `x` by 2, and `x /= 2` divides `x` by 2. The operator is a single token, so no
-   space may be written inside it. The name must be a variable, not a parameter or a constant,
-   which the grammar cannot tell. *)
-assignment = name , ws , ( "+=" | "*=" | "/=" ) , ws , expression ;
+(* An assignment to a variable that is already defined: `x += 2` adds 2 to `x`, `x -= 2`
+   subtracts 2 from it, `x *= 2` multiplies it by 2, and `x /= 2` divides it by 2. The operator
+   is a single token, so no space may be written inside it. The name must be a variable, not a
+   parameter or a constant, which the grammar cannot tell. *)
+assignment = name , ws , ( "+=" | "-=" | "*=" | "/=" ) , ws , expression ;
 
 (* `return` and its value must be separated, or `return0` would be one identifier. *)
 return_statement = "return" , required_space , expression ;

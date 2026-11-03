@@ -2,6 +2,7 @@
 console.log("Addition:", add_foo());
 console.log("Addition assignment:", add_assign_foo());
 console.log("Subtraction:", subtract_foo());
+console.log("Subtraction assignment:", subtract_assign_foo());
 console.log("Multiplication:", multiply_foo());
 console.log("Multiplication assignment:", multiply_assign_foo());
 console.log("Division:", divide_foo());

@@ -36,3 +36,8 @@ multiply_assign_foo :: proc() Int ->
     x := 6
     x *= 7
     return x
+
+subtract_assign_foo :: proc() Int ->
+    x := 9
+    x -= 4
+    return x
