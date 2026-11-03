@@ -10,17 +10,17 @@ Indentation is made of spaces only. Tabs are not allowed in indentation. Each le
 
 ## Keywords
 
-Keywords are words that have a meaning of their own in the language, so they are reserved and cannot be used as names. Mialu has the following keywords:
+Keywords are words that have a meaning of their own in the language, so they are reserved and cannot be used as identifiers. Mialu has the following keywords, in alphabetical order:
 
-| Keyword  | Description |
-|----------|-------------|
-| `proc`   | Starts a procedure, see [Procedures](#procedures). |
-| `return` | Returns a value from a procedure. |
-| `if`     | Starts an if statement or an `else if` branch, see [If statements](#if-statements). |
-| `else`   | Starts the branch of an if statement that runs when no condition holds, or an `else if`. |
-| `true`   | The boolean value true, see [Booleans](#booleans). |
-| `false`  | The boolean value false. |
-| `not`    | Reserved. It has no use of its own yet, but it is the start of the inequality operator `not=`, see [Operators](#operators). |
+```
+else
+false
+if
+not
+proc
+return
+true
+```
 
 Keywords are case-sensitive, so `If` is an identifier and `if` is not. A longer identifier that only starts with a keyword, such as `returned` or `cannot`, is an identifier.
 
