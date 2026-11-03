@@ -340,6 +340,9 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                 token_type = TOKEN_TYPE_KEYWORD_TRUE;
             } else if (str_equals(text, STR("false"))) {
                 token_type = TOKEN_TYPE_KEYWORD_FALSE;
+            } else if (str_equals(text, STR("not"))) {
+                // Reserved. A `not` followed by `=` was taken above as the token `not=`.
+                token_type = TOKEN_TYPE_KEYWORD_NOT;
             }
 
             token_elements[result.tokens.length] = (Token){

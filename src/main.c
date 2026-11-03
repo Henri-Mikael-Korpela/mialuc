@@ -434,6 +434,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_KEYWORD_IF:
             printf("KEYWORD_IF\n");
             break;
+        case TOKEN_TYPE_KEYWORD_NOT:
+            printf("KEYWORD_NOT\n");
+            break;
         case TOKEN_TYPE_KEYWORD_PROC:
             printf("KEYWORD_PROC\n");
             break;

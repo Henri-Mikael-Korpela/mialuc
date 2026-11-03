@@ -10,7 +10,7 @@ Indentation is made of spaces only. Tabs are not allowed in indentation. Each le
 
 ## Identifiers
 
-Identifiers can contain alphanumeric characters and underscores. Case matters for identifiers in Mialu are case-sensitive. An identifier cannot begin with a digit. The reserved words `proc`, `return`, `if`, `else`, `true` and `false` are keywords and cannot be used as names.
+Identifiers can contain alphanumeric characters and underscores. Case matters for identifiers in Mialu are case-sensitive. An identifier cannot begin with a digit. The reserved words `proc`, `return`, `if`, `else`, `true`, `false` and `not` are keywords and cannot be used as names.
 
 ## Constants
 
