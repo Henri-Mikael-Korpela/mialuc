@@ -1,5 +1,9 @@
 # Mialu Programming Language Specification
 
+This document describes the Mialu programming language, its syntax, semantics and compilation targets.
+
+Mialu is a procedural programming language with straight-foward and familiar syntax, built with simplicity and performance in mind. It is influenced by multiple languages including, but not limited to, C, C++, Go, Jai (currently unreleased), Odin and Python, fully embracing the fact that it comes after many of them, so it has learned from their mistakes and successes.
+
 ## Indentation
 
 Indentation is made of spaces only. Tabs are not allowed in indentation. Each level of indentation is exactly 4 spaces, so the number of leading spaces on a line must be a multiple of 4. Blank lines, including lines of only spaces, are ignored.
@@ -79,43 +83,21 @@ The operators of precedence 0 define names or assign to them, and are not part o
 
 See [Variables](#variables) for variable definitions and [Constants](#constants) for constants.
 
-## Procedures
-
-Procedures are blocks of code that perform a specific task. They can be defined by placing the keyword `proc` after an identifier, followed by a list of parameters and an optional return type:
-
-```
-procedure_name :: proc(param1: Type1, param2: Type2) ReturnType ->
-    // procedure body
-```
-
-A procedure parameter list can be empty, and the return type can be omitted if the procedure does not return a value. Example of a procedure with no parameters and no return type:
-
-```
-procedure_name :: proc() ->
-    // procedure body
-```
-
-A procedure body consists of a series of statements, which are variable definitions, assignments and `return` statements for now. The procedure body is indented to indicate its scope.
-
 ## Variables
 
 A variable is a name for a value that is local to a procedure. It is defined by a name followed by `:=` and its initial value, which is an expression:
 
 ```
-foo :: proc() Int ->
-    x := 4
-    return x
+x := 4
 ```
 
-The type of the variable is deduced from the initial value: `x` above is an `Int` because `4` is. A name as the value has the type of what it stands for, so `y := x` is an `Int` too. The type can also be written, between the `:` and the `=`:
+The type of the variable is deduced from the initial value. It is implicit. `x` above is of type `Int` because literal `4` is.
+
+The type can also be written explicitly, between the `:` and the `=`:
 
 ```
-foo :: proc() Int ->
-    x : Int = 5
-    return x
+x : Int = 5
 ```
-
-`:=` is the type separator `:` followed by `=`, with the type left out. The type that is written must be the type of the initial value.
 
 A variable is defined once, with its initial value, and every variable has one. It can be used in the statements below its definition, but not above it and not in its own initial value. The variables of a procedure are not visible outside of it, so two procedures can have a variable of the same name.
 
@@ -158,6 +140,24 @@ foo :: proc() Int ->
 ```
 
 `foo` returns 5. Dividing by zero is an error at run time, see [WebAssembly](#webassembly). The value is evaluated first, with the value that the variable has before the assignment, so `x += x` doubles `x`, `x += 2 * 3` adds 6, `x -= 1 + 1` subtracts 2, `x *= 1 + 2` multiplies `x` by 3, and `x /= 1 + 1` divides `x` by 2. The name must be a variable of the procedure, defined above the assignment: a parameter or a constant cannot be assigned to. The variable and the value must be an `Int`, because addition, subtraction, multiplication and division are defined for `Int` only.
+
+## Procedures
+
+Procedures are blocks of code that perform a specific task. They can be defined by placing the keyword `proc` after an identifier, followed by a list of parameters and an optional return type:
+
+```
+procedure_name :: proc(param1: Type1, param2: Type2) ReturnType ->
+    // procedure body
+```
+
+A procedure parameter list can be empty, and the return type can be omitted if the procedure does not return a value. Example of a procedure with no parameters and no return type:
+
+```
+procedure_name :: proc() ->
+    // procedure body
+```
+
+A procedure body consists of a series of statements, which are variable definitions, assignments and `return` statements for now. The procedure body is indented to indicate its scope.
 
 ## Scope resolution
 
