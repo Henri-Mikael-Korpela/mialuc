@@ -434,8 +434,14 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_KEYWORD_AND:
             printf("KEYWORD_AND\n");
             break;
+        case TOKEN_TYPE_KEYWORD_FOR:
+            printf("KEYWORD_FOR\n");
+            break;
         case TOKEN_TYPE_KEYWORD_IF:
             printf("KEYWORD_IF\n");
+            break;
+        case TOKEN_TYPE_KEYWORD_IN:
+            printf("KEYWORD_IN\n");
             break;
         case TOKEN_TYPE_KEYWORD_NOT:
             printf("KEYWORD_NOT\n");
@@ -478,6 +484,12 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
             break;
         case TOKEN_TYPE_PLUS_EQUALS:
             printf("PLUS_EQUALS\n");
+            break;
+        case TOKEN_TYPE_RANGE_EXCLUSIVE:
+            printf("RANGE_EXCLUSIVE\n");
+            break;
+        case TOKEN_TYPE_RANGE_INCLUSIVE:
+            printf("RANGE_INCLUSIVE\n");
             break;
         case TOKEN_TYPE_SLASH:
             printf("SLASH\n");
@@ -637,6 +649,11 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     case WASM_BUILD_STATUS_OUTPUT_TOO_LARGE:
         assert(false);
         break;
+    case WASM_BUILD_STATUS_RANGE_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be the start or the end of a "
+                "range.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' returns a value that is not of its return type.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
@@ -668,6 +685,11 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     case SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a variable, so it cannot be assigned to.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is the iterator of a for loop, so it cannot be assigned "
+                "to.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a procedure, so it cannot be called.\n", path,

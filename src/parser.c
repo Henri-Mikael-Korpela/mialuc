@@ -52,6 +52,7 @@ static Ast_Node_Index parse_expression          (Parser *parser);
 static Ast_Node_Index parse_negation            (Parser *parser);
 static Ast_Node_Index parse_sum                 (Parser *parser);
 static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
+static Ast_Node_Index parse_for_statement       (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_identifier          (Parser *parser);
 static Ast_Node_Index parse_integer_literal     (Parser *parser);
 static bool           parse_line_end_expect     (Parser *parser);
@@ -317,10 +318,13 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
 
         Ast_Node_Index parent = blocks[block_count - 1].node;
         Token_Type next = parse_token_current(parser)->token_type;
-        if (next == TOKEN_TYPE_KEYWORD_IF || next == TOKEN_TYPE_KEYWORD_ELSE) {
+        if (next == TOKEN_TYPE_KEYWORD_IF || next == TOKEN_TYPE_KEYWORD_ELSE ||
+            next == TOKEN_TYPE_KEYWORD_FOR) {
             Ast_Node_Index block = AST_NODE_INDEX_NONE;
             if (next == TOKEN_TYPE_KEYWORD_IF) {
                 block = parse_if_statement(parser, parent);
+            } else if (next == TOKEN_TYPE_KEYWORD_FOR) {
+                block = parse_for_statement(parser, parent);
             } else {
                 block = parse_else_branch(parser, parent);
             }
@@ -395,6 +399,77 @@ static Ast_Node_Index parse_if_statement(Parser *parser, Ast_Node_Index parent) 
     parse_node_append_child(parser, parent, statement);
 
     return parse_branch(parser, statement);
+}
+
+/**
+ * Parses the header line `for name in first..<end ->`, or `first..<=end` for a range that
+ * includes its end, and appends the statement that it starts to `parent`. The statement gets a
+ * range and an empty block, which is returned so that the caller can fill it with the lines that
+ * follow. The nodes are made in the order of the source, so the iterator is not in scope in the
+ * range, only in the block.
+ */
+static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_FOR);
+
+    parse_token_advance(parser);
+
+    Token const *iterator = parse_token_current(parser);
+    if (iterator->token_type != TOKEN_TYPE_IDENTIFIER) {
+        return parse_fail(parser, STR("the name of the iterator"));
+    }
+
+    Ast_Node_Index statement = parse_node_make(parser, AST_NODE_TYPE_FOR_STATEMENT);
+    if (statement == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[statement].payload.for_statement.name = iterator->payload.identifier.text;
+    parse_node_append_child(parser, parent, statement);
+    parse_token_advance(parser);
+
+    if (parse_token_expect(parser, TOKEN_TYPE_KEYWORD_IN, STR("'in'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index range = parse_node_make(parser, AST_NODE_TYPE_RANGE);
+    if (range == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, statement, range);
+
+    Ast_Node_Index first = parse_expression(parser);
+    if (first == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, range, first);
+
+    Token_Type range_operator = parse_token_current(parser)->token_type;
+    if (range_operator != TOKEN_TYPE_RANGE_EXCLUSIVE &&
+        range_operator != TOKEN_TYPE_RANGE_INCLUSIVE) {
+        return parse_fail(parser, STR("'..<' or '..<='"));
+    }
+    parser->nodes[range].payload.range.is_inclusive = range_operator == TOKEN_TYPE_RANGE_INCLUSIVE;
+    parse_token_advance(parser);
+
+    Ast_Node_Index end = parse_expression(parser);
+    if (end == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, range, end);
+
+    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
+    if (block == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, statement, block);
+    return block;
 }
 
 /**

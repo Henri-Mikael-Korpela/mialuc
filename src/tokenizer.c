@@ -330,6 +330,10 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             Token_Type token_type = TOKEN_TYPE_IDENTIFIER;
             if (str_equals(text, STR("proc"))) {
                 token_type = TOKEN_TYPE_KEYWORD_PROC;
+            } else if (str_equals(text, STR("for"))) {
+                token_type = TOKEN_TYPE_KEYWORD_FOR;
+            } else if (str_equals(text, STR("in"))) {
+                token_type = TOKEN_TYPE_KEYWORD_IN;
             } else if (str_equals(text, STR("if"))) {
                 token_type = TOKEN_TYPE_KEYWORD_IF;
             } else if (str_equals(text, STR("else"))) {
@@ -502,6 +506,31 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             } else if (offset + 1 < source.length && source.bytes[offset + 1] == '=') {
                 token_type = TOKEN_TYPE_MINUS_EQUALS;
                 size_bytes = 2;
+            }
+
+            token_elements[result.tokens.length] = (Token){
+                .token_type = token_type,
+                .source_offset = (uint32_t)offset,
+            };
+            result.tokens.length += 1;
+            offset += size_bytes;
+        }
+        // The only token that starts with a `.` is `..<`, or `..<=` when an `=` follows it
+        // directly. A lone `.` or `..` is an unexpected character, since nothing else uses it yet.
+        else if (character == '.') {
+            bool is_range = offset + 2 < source.length && source.bytes[offset + 1] == '.' &&
+                            source.bytes[offset + 2] == '<';
+            if (is_range == false) {
+                result.status = TOKENIZE_STATUS_UNEXPECTED_CHARACTER;
+                result.error_offset = offset;
+                return result;
+            }
+
+            Token_Type token_type = TOKEN_TYPE_RANGE_EXCLUSIVE;
+            size_t size_bytes = 3;
+            if (offset + 3 < source.length && source.bytes[offset + 3] == '=') {
+                token_type = TOKEN_TYPE_RANGE_INCLUSIVE;
+                size_bytes = 4;
             }
 
             token_elements[result.tokens.length] = (Token){

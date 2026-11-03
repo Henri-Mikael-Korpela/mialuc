@@ -21,6 +21,7 @@ typedef enum {
     AST_NODE_TYPE_CONSTANT_DEFINITION,
     AST_NODE_TYPE_DIVISION,
     AST_NODE_TYPE_DIVISION_ASSIGNMENT,
+    AST_NODE_TYPE_FOR_STATEMENT,
     AST_NODE_TYPE_IDENTIFIER,
     AST_NODE_TYPE_IF_STATEMENT,
     AST_NODE_TYPE_INTEGER_LITERAL,
@@ -31,6 +32,7 @@ typedef enum {
     AST_NODE_TYPE_OR,
     AST_NODE_TYPE_PARAMETER,
     AST_NODE_TYPE_PROCEDURE,
+    AST_NODE_TYPE_RANGE,
     AST_NODE_TYPE_RETURN_STATEMENT,
     AST_NODE_TYPE_STRING_LITERAL,
     AST_NODE_TYPE_SUBTRACTION,
@@ -97,6 +99,11 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_DIVISION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that is divided and gets the quotient, and the divisor, in that order. It is a
  *   statement of a procedure body.
+ * - `AST_NODE_TYPE_FOR_STATEMENT`: two children, an `AST_NODE_TYPE_RANGE` and the
+ *   `AST_NODE_TYPE_BLOCK` that runs once for each number of the range, in that order. The name of
+ *   the iterator is in the payload. The iterator is a variable of type `Int` that exists only in
+ *   the block, and it cannot be assigned to. The nodes of the range come before the block, so the
+ *   iterator is not in scope in the range. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_IF_STATEMENT`: a chain of `if`, any number of `else if` and an optional
  *   `else`, as the children in the order of the source: a condition, which is any expression
@@ -117,8 +124,13 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   requires both operands to be `Bool`.
  * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`.
  * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
- *   body, which are variable definitions, assignments, if statements and return statements. The
+ *   body, which are variable definitions, assignments, if statements, for statements and return
+ *   statements. The
  *   return type is in the payload.
+ * - `AST_NODE_TYPE_RANGE`: two children, the first number and the end of the range, in that order,
+ *   each one an expression (the target requires them to be `Int`). Whether the end is part of the
+ *   range is in the payload. It is the child of an `AST_NODE_TYPE_FOR_STATEMENT`, and not an
+ *   expression itself.
  * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child, the returned value.
  * - `AST_NODE_TYPE_STRING_LITERAL`: no children.
  * - `AST_NODE_TYPE_SUBTRACTION`: two children, the minuend and the subtrahend, in that order.
@@ -163,8 +175,16 @@ typedef struct {
             Ast_Comparison_Operator operator;
         } comparison;
         struct {
+            // Views the source text, like the other names.
+            Str name;
+        } for_statement;
+        struct {
             bool has_else;
         } if_statement;
+        struct {
+            // Whether the end is a number of the range: `..<=` is inclusive, `..<` is not.
+            bool is_inclusive;
+        } range;
         struct {
             // The name of the return type, as a view of the source text. Empty, with `bytes` NULL,
             // when the procedure does not declare one. Types are only names for now, so a name is

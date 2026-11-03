@@ -290,6 +290,7 @@
             conditions: "conditions",
             "boolean logic": "boolean-logic",
             procedures: "procedures",
+            loops: "loops",
             "scope resolution": "scope-resolution",
         };
         const EXAMPLE_DEFAULT = "sum";
@@ -308,7 +309,7 @@
         const HIGHLIGHT_RULES = {
             mialu: [
                 ["string", /"[^"\\\n]*"/],
-                ["keyword", /\b(?:proc|return|if|else|true|false|and|or)\b|\bnot\b(?!=)/],
+                ["keyword", /\b(?:proc|return|if|else|for|in|true|false|and|or)\b|\bnot\b(?!=)/],
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
                 ["function", /\b[A-Za-z_]\w*(?=\()/],
                 ["type", /\b[A-Z]\w*\b/],

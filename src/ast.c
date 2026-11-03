@@ -30,6 +30,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_DIVISION:
+    case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_IDENTIFIER:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_INTEGER_LITERAL:
@@ -39,6 +40,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_OR:
     case AST_NODE_TYPE_PARAMETER:
     case AST_NODE_TYPE_PROCEDURE:
+    case AST_NODE_TYPE_RANGE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
     case AST_NODE_TYPE_STRING_LITERAL:
     case AST_NODE_TYPE_SUBTRACTION:
@@ -147,6 +149,10 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
             printf("DIVISION_ASSIGNMENT\n");
             break;
+        case AST_NODE_TYPE_FOR_STATEMENT:
+            printf("FOR_STATEMENT %.*s\n", (int)node.payload.for_statement.name.length,
+                   node.payload.for_statement.name.bytes);
+            break;
         case AST_NODE_TYPE_IDENTIFIER:
             printf("IDENTIFIER %.*s\n", (int)node.payload.identifier.name.length,
                    node.payload.identifier.name.bytes);
@@ -183,6 +189,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
                 printf("PROCEDURE returns %.*s\n", (int)node.payload.procedure.return_type.length,
                        node.payload.procedure.return_type.bytes);
             }
+            break;
+        case AST_NODE_TYPE_RANGE:
+            printf("RANGE %s\n", node.payload.range.is_inclusive ? "inclusive" : "exclusive");
             break;
         case AST_NODE_TYPE_RETURN_STATEMENT:
             printf("RETURN_STATEMENT\n");

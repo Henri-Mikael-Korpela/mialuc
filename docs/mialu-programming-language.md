@@ -16,7 +16,9 @@ Keywords are words that have a meaning of their own in the language, so they are
 and
 else
 false
+for
 if
+in
 not
 or
 proc
@@ -337,13 +339,61 @@ foo :: proc() Int ->
 
 A block is a scope, see [Scope resolution](#scope-resolution): a variable that is defined in a block can be used in the rest of that block, but not after it.
 
+## For statements
+
+A for statement runs a block of statements once for each number in a range. After `for` comes the name of the iterator, then the keyword `in`, and then the range. The `->` after the range starts the block, which is indented one level deeper than the `for`, like the block of an `if`:
+
+```
+sum_to_nine :: proc() Int ->
+    total := 0
+    for i in 1..<10 ->
+        total += i
+    return total
+```
+
+Here `sum_to_nine` returns 45, because the block runs for `i` equal to 1, 2, and so on up to 9. The range is written `first..<end`, where `first` is the number that the iterator starts at and the loop stops before it reaches `end`, so the end is not part of the range, which is an exclusive range. `first..<=end` is an inclusive range, which also runs the block for `end`:
+
+```
+sum_to_ten :: proc() Int ->
+    total := 0
+    for i in 1..<=10 ->
+        total += i
+    return total
+```
+
+`sum_to_ten` returns 55. The range `0..<n` has `n` numbers, and `0..<=n` has one more. When `end` is below `first` the range is empty, and so is an exclusive range where they are equal, and the block does not run at all. An inclusive range where they are equal has one number.
+
+The first number and the end are expressions of type `Int`, so they can be numbers, names, calls and arithmetic, and they are read once, before the loop starts, in the order they are written. So changing a variable that the end came from inside the block does not change the number of times that the block runs. `..<` and `..<=` are single tokens, like `->`, so no space may be written inside them, and a range needs the whole of one: `0..3` is an error.
+
+```
+sum_between :: proc(low: Int, high: Int) Int ->
+    total := 0
+    for i in low..<=high ->
+        total += i * i
+    return total
+```
+
+The iterator is a variable of type `Int` that exists only in the block of the statement. It counts up by one for every pass. It cannot be assigned to, so `i += 1` in the block is an error, and it is not in scope in the range itself, so `for i in 0..<i ->` is an error too. The iterator follows the rules for the names of variables, see [Scope resolution](#scope-resolution): a for statement cannot have an iterator with the name of a constant, a parameter or a variable that is in scope. Two for statements one after another can use the same name, because the first iterator is gone when its block ends.
+
+The block of a for statement is a block like that of an `if`: it can define variables, which are in scope in the rest of the block, and it can have if statements, `return` statements and other for statements. A `return` in the block ends the procedure at once. For statements and if statements can be inside each other, as many as 32 levels deep:
+
+```
+count_pairs :: proc(n: Int) Int ->
+    count := 0
+    for row in 0..<n ->
+        for column in 0..<=row ->
+            if row not= column ->
+                count += 1
+    return count
+```
+
 ## Scope resolution
 
 Every name that is used refers to something that is declared, and the compiler finds out what before the program is built for a target. This is called scope resolution. There are two scopes:
 
 - The module scope has the name of every constant that is defined in the file, such as the procedures and the strings.
 - The parameters and the variables of a procedure live in a local scope nested inside it. A variable is in scope below its definition only.
-- Every block of an if statement is a scope nested inside the one that it is written in. A variable that is defined in a block is in scope below its definition until the block ends, so the blocks inside it can use it, and the statements after the block cannot.
+- Every block of an if statement or a for statement is a scope nested inside the one that it is written in. A variable that is defined in a block is in scope below its definition until the block ends, so the blocks inside it can use it, and the statements after the block cannot. The iterator of a for statement is in scope in the block of the statement, but not in its range.
 
 A name is looked up in the local scope of the procedure that uses it first, and then in the module scope. So a procedure can use a constant that is defined outside of it:
 
@@ -364,7 +414,7 @@ There is no shadowing of names so a name cannot be declared twice in the same sc
 - a variable has the name of a constant, of a parameter, or of a variable that is in scope where it is defined, so a block cannot define a variable that the blocks around it have, but two blocks that are not inside each other can each define a variable of the same name,
 - a name in an expression is neither a variable that is in scope there, nor a parameter of the procedure, nor a constant,
 - the name in a call is not a constant that is a procedure, which is also the case when it is a variable or a parameter,
-- the name that an assignment assigns to is not a variable, but a parameter or a constant.
+- the name that an assignment assigns to is not a variable, but a parameter or a constant, or the iterator of a for statement.
 
 Scope resolution is about names only. Whether the value of a name has the right type is checked separately for the target, see below.
 
@@ -387,7 +437,7 @@ const [address, length] = instance.exports.get_name();
 new TextDecoder().decode(new Uint8Array(instance.exports.memory.buffer, address, length));
 ```
 
-The variables of a procedure are locals of its function, after the parameters, and a `Str` variable is two locals, like a `Str` parameter. The variables of the blocks of if statements are locals of the function too, each one a local of its own, after the ones above it, also when two variables have the same name in different blocks. The definition of a variable stores the initial value in them, and an assignment such as `x += 2` pushes the value of the variable, then the value, adds them and stores the result in the local of the variable. The assignment `x /= y` traps in the same cases as the division `x / y`.
+The variables of a procedure are locals of its function, after the parameters, and a `Str` variable is two locals, like a `Str` parameter. The variables of the blocks of if statements and for statements are locals of the function too, each one a local of its own, after the ones above it, also when two variables have the same name in different blocks. The definition of a variable stores the initial value in them, and an assignment such as `x += 2` pushes the value of the variable, then the value, adds them and stores the result in the local of the variable. The assignment `x /= y` traps in the same cases as the division `x / y`.
 
 A module has a memory only when the program has a string literal. A procedure cannot be called `memory`, whether the program has a string literal or not, because that is the name of the export.
 
@@ -405,11 +455,14 @@ The target rejects a program that the parser accepts when:
 - the operands of a comparison are not both `Int`, or not both `Bool` for `==` and `not=`,
 - an operand of `and`, `or` or `not` is not a `Bool`,
 - the condition of an if statement is not a `Bool`,
+- the first number or the end of a range is not an `Int`,
 - the variable or the value of an assignment such as `x += 2`, `x -= 2`, `x *= 2` or `x /= 2` is not an `Int`.
 
 The target is built from the result of scope resolution, so it also rejects every program that scope resolution rejects.
 
 An if statement becomes the structured instructions of WebAssembly: the condition, which leaves 1 or 0 (for a comparison, its two operands and the signed comparison of them), then `if`, the block, `else` and the next branch, up to `end`. An `else if` is written as an `else` with another `if` in it, so the statement ends with an `end` for each of its conditions. When the last statement of a procedure that returns a value is not a `return`, for example an if statement that returns in all of its branches, the body ends with the `unreachable` instruction, because WebAssembly cannot tell that the end of it cannot be reached. A body that gets there anyway traps.
+
+A for statement becomes a `block` that holds a `loop`. The iterator is a local, and the end of the range is a local right after it, which is where the end is read once. First the start and the end are stored, then the loop begins with a test that leaves the `block` with `br_if` when the iterator is not below the end, or above it for an inclusive range. After the statements of the block the iterator is increased by one and `br` goes back to the start of the `loop`. For an inclusive range the loop leaves the `block` before the increase when the iterator is equal to the end, so an inclusive range that ends at the largest `Int` stops instead of wrapping around.
 
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 

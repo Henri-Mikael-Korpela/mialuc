@@ -152,7 +152,8 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
             if (semantic_parameter_check(analyzer, procedure, current) == false) {
                 return false;
             }
-        } else if (node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+        } else if (node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
+                   node_type == AST_NODE_TYPE_FOR_STATEMENT) {
             statement = current;
             if (semantic_variable_check(analyzer, procedure, current) == false) {
                 return false;
@@ -207,16 +208,20 @@ static bool semantic_parameter_check(Semantic_Analyzer *analyzer, Ast_Node_Index
 }
 
 /**
- * Checks that the name of `variable` is new: no constant, parameter or earlier variable of the
+ * Checks that the name of `variable`, a variable definition or the iterator of a for statement, is new: no constant, parameter or earlier variable of the
  * procedure has it. Like a parameter, a variable with such a name would hide it. Returns false
  * after it recorded an error.
  */
 static bool semantic_variable_check(Semantic_Analyzer *analyzer, Ast_Node_Index procedure,
                                     Ast_Node_Index variable) {
     assert(variable < analyzer->node_count);
-    assert(analyzer->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
+    assert(analyzer->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
+           analyzer->nodes[variable].node_type == AST_NODE_TYPE_FOR_STATEMENT);
 
     Str name = analyzer->nodes[variable].payload.variable_definition.name;
+    if (analyzer->nodes[variable].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+        name = analyzer->nodes[variable].payload.for_statement.name;
+    }
 
     Semantic_Binding earlier = semantic_variable_find(analyzer, procedure, variable,
                                                      AST_NODE_INDEX_NONE, name);
@@ -281,6 +286,9 @@ static bool semantic_identifier_resolve(Semantic_Analyzer *analyzer, Ast_Node_In
                      analyzer->nodes[statement].first_child == identifier;
     if (is_target && binding.kind != SEMANTIC_BINDING_KIND_VARIABLE) {
         return semantic_fail(analyzer, SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE, name);
+    }
+    if (is_target && analyzer->nodes[binding.target].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+        return semantic_fail(analyzer, SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR, name);
     }
 
     return true;
@@ -429,6 +437,19 @@ static Semantic_Binding semantic_variable_find(Semantic_Analyzer const *analyzer
             assert(block_count < AST_BLOCK_DEPTH_MAX);
             block_ends[block_count] = node->payload.block.end;
             block_count += 1;
+        } else if (node->node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            // The iterator is in scope in the block of the statement, which is its last child and
+            // comes after the range.
+            Ast_Node_Index block = node->last_child;
+            bool is_in_scope = block <= before && before < analyzer->nodes[block].payload.block.end;
+            if (is_in_scope && str_equals(node->payload.for_statement.name, name)) {
+                found = (Semantic_Binding){
+                    .target = current,
+                    .position = position,
+                    .kind = SEMANTIC_BINDING_KIND_VARIABLE,
+                };
+            }
+            position += 1;
         } else if (node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             // The variable is in scope at `before` when the block that it is in goes on after it.
             bool is_in_scope = block_count == 0 || block_ends[block_count - 1] > before;

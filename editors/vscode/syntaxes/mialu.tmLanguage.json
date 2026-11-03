@@ -42,6 +42,11 @@
                     "match": "->"
                 },
                 {
+                    "name": "keyword.operator.range.mialu",
+                    "comment": "The end of a range in a for statement, exclusive or inclusive. It comes before the comparisons, so that the < and <= in it are not taken for them.",
+                    "match": "\\.\\.<=|\\.\\.<"
+                },
+                {
                     "name": "keyword.operator.comparison.mialu",
                     "match": "==|not=|<=|>=|<|>"
                 },
@@ -85,6 +90,10 @@
                 {
                     "name": "keyword.control.conditional.mialu",
                     "match": "\\b(if|else)\\b"
+                },
+                {
+                    "name": "keyword.control.loop.mialu",
+                    "match": "\\b(for|in)\\b"
                 },
                 {
                     "name": "keyword.operator.word.mialu",

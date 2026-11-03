@@ -546,6 +546,37 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
         // The opcode is a byte of the module rather than an enumeration, so any value can come,
         // and the default case is the ones that the formatter does not know.
         switch (opcode) {
+        case WASM_OPCODE_BLOCK:
+        case WASM_OPCODE_LOOP: {
+            // Like `if`, only the block type that takes and leaves nothing is written.
+            size_t block_type_offset = formatter->offset;
+            byte block_type = wasm_text_read_byte(formatter);
+            if (formatter->status != WASM_TEXT_STATUS_OK) {
+                return false;
+            }
+            if (block_type != WASM_BLOCK_TYPE_EMPTY) {
+                return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED,
+                                      block_type_offset);
+            }
+            if (opcode == WASM_OPCODE_BLOCK) {
+                wasm_text_write_instruction(&formatter->writer, STR("block"));
+            } else {
+                wasm_text_write_instruction(&formatter->writer, STR("loop"));
+            }
+            formatter->writer.block_depth += 1;
+            break;
+        }
+        case WASM_OPCODE_BR:
+        case WASM_OPCODE_BR_IF: {
+            uint32_t label_index = wasm_text_read_unsigned_32(formatter);
+            if (opcode == WASM_OPCODE_BR) {
+                wasm_text_write_instruction(&formatter->writer, STR("br "));
+            } else {
+                wasm_text_write_instruction(&formatter->writer, STR("br_if "));
+            }
+            wasm_text_write_unsigned(&formatter->writer, label_index);
+            break;
+        }
         case WASM_OPCODE_CALL: {
             uint32_t function_index = wasm_text_read_unsigned_32(formatter);
             wasm_text_write_instruction(&formatter->writer, STR("call "));

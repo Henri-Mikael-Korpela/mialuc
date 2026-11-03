@@ -73,12 +73,16 @@ typedef struct {
  * A node whose children are being written, and the child that is next. It is the procedure for the
  * body, a block for the statements of the block, and an if statement for its conditions and
  * blocks. `if_count` is how many `if` instructions of an if statement are open, which is one for
- * the `if` and one for each `else if`, and which the end of the statement closes.
+ * the `if` and one for each `else if`, and which the end of the statement closes. A block that is
+ * the body of a for statement has the statement in `for_statement`.
  */
 typedef struct {
     Ast_Node_Index node;
     Ast_Node_Index next;
     size_t if_count;
+    // The for statement whose block this is, or `AST_NODE_INDEX_NONE`. The end of the block writes
+    // what the loop does after each pass, and closes the loop.
+    Ast_Node_Index for_statement;
 } Wasm_Statement_Frame;
 
 static Wasm_Value_Type wasm_binding_value_type                (Wasm_Builder const *builder,
@@ -94,6 +98,14 @@ static bool            wasm_build_code_section_body           (Wasm_Builder *bui
 static bool            wasm_build_code_section_body_call      (Wasm_Builder *builder,
                                                                Ast_Node_Index call,
                                                                bool is_result_unused);
+static bool            wasm_build_code_section_body_for        (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index statement);
+static void            wasm_build_code_section_body_for_end    (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index statement);
+static size_t          wasm_variable_slot_count                (Wasm_Builder const *builder,
+                                                               Ast_Node_Index variable);
 static bool            wasm_build_code_section_body_call_statement(Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index statement);
@@ -670,6 +682,8 @@ static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_
  * locals of the variable, an assignment becomes the new value of the variable stored in the same
  * way, and a `return` becomes the value followed by the `return` instruction.
  *
+ * A for statement becomes a `block` that holds a `loop`, see `wasm_build_code_section_body_for`.
+ *
  * An if statement becomes the structured instructions of WebAssembly: the condition, `if`, the
  * statements of its block, and `else` followed by what the next branch is, up to `end`. An
  * `else if` is an `else` that holds another `if`, so the statement ends with as many `end`
@@ -687,6 +701,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
         .node = procedure,
         .next = builder->nodes[procedure].first_child,
         .if_count = 0,
+        .for_statement = AST_NODE_INDEX_NONE,
     };
     size_t frame_count = 1;
 
@@ -699,6 +714,9 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
         if (frame->next == AST_NODE_INDEX_NONE) {
             for (size_t i = 0; i < frame->if_count; i += 1) {
                 wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+            }
+            if (frame->for_statement != AST_NODE_INDEX_NONE) {
+                wasm_build_code_section_body_for_end(builder, definition, frame->for_statement);
             }
             frame_count -= 1;
             continue;
@@ -738,6 +756,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                     .node = child,
                     .next = child_node->first_child,
                     .if_count = 0,
+                    .for_statement = AST_NODE_INDEX_NONE,
                 };
                 frame_count += 1;
             }
@@ -763,6 +782,20 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 .node = child,
                 .next = child_node->first_child,
                 .if_count = 0,
+                .for_statement = AST_NODE_INDEX_NONE,
+            };
+            frame_count += 1;
+        } else if (child_node->node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            if (wasm_build_code_section_body_for(builder, definition, child) == false) {
+                return false;
+            }
+            Ast_Node_Index block = child_node->last_child;
+            assert(frame_count < WASM_STATEMENT_DEPTH_MAX);
+            frames[frame_count] = (Wasm_Statement_Frame){
+                .node = block,
+                .next = builder->nodes[block].first_child,
+                .if_count = 0,
+                .for_statement = child,
             };
             frame_count += 1;
         } else {
@@ -773,6 +806,116 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
 
     assert(frame_count == 0);
     return true;
+}
+
+/**
+ * Writes the start of the for statement `statement`: the first number of the range is stored in the
+ * local of the iterator and the end in the local after it, so that the end is read once and the
+ * block cannot change it. Then come a `block` that a finished loop leaves, a `loop` that is
+ * repeated, and the test that leaves the block when the iterator is past the end, which is when it
+ * is not below the end of an exclusive range or above the end of an inclusive one. The statements
+ * of the block follow, and then `wasm_build_code_section_body_for_end`. Returns false after it
+ * recorded an error.
+ */
+static bool wasm_build_code_section_body_for(Wasm_Builder *builder, Ast_Node_Index definition,
+                                             Ast_Node_Index statement) {
+    assert(statement < builder->node_count);
+    assert(builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT);
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index range = builder->nodes[statement].first_child;
+    assert(builder->nodes[range].node_type == AST_NODE_TYPE_RANGE);
+    Ast_Node_Index first = builder->nodes[range].first_child;
+    Ast_Node_Index end = builder->nodes[range].last_child;
+
+    size_t local_index = wasm_variable_local_index(builder, procedure, statement);
+
+    // Both ends are `Int`, there is no conversion to one.
+    Ast_Node_Index ends[2] = {first, end};
+    for (size_t i = 0; i < 2; i += 1) {
+        if (wasm_build_code_section_body_expression(builder, definition, ends[i], false) == false) {
+            return false;
+        }
+        if (wasm_expression_type(builder, ends[i]) != WASM_VALUE_TYPE_INT) {
+            Str subject = wasm_expression_subject(builder, definition, ends[i]);
+            return wasm_fail(builder, WASM_BUILD_STATUS_RANGE_TYPE_INVALID, subject);
+        }
+        wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_SET);
+        wasm_write_unsigned(&builder->writer, local_index + i);
+    }
+
+    wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
+    wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_LOOP);
+    wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+
+    wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
+    wasm_write_unsigned(&builder->writer, local_index);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
+    wasm_write_unsigned(&builder->writer, local_index + 1);
+    if (builder->nodes[range].payload.range.is_inclusive) {
+        wasm_write_byte(&builder->writer, WASM_OPCODE_I64_GT_S);
+    } else {
+        wasm_write_byte(&builder->writer, WASM_OPCODE_I64_GE_S);
+    }
+    // Label 0 is the loop, and label 1 is the block around it, which is left.
+    wasm_write_byte(&builder->writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(&builder->writer, 1);
+
+    return true;
+}
+
+/**
+ * Writes the end of the for statement `statement`, after the statements of its block: the
+ * iterator goes to the next number and the loop starts over. An inclusive range leaves the loop
+ * before the step when the iterator is at the end, so that the step cannot overflow when the end is
+ * the largest `Int`.
+ */
+static void wasm_build_code_section_body_for_end(Wasm_Builder *builder, Ast_Node_Index definition,
+                                                 Ast_Node_Index statement) {
+    assert(statement < builder->node_count);
+    assert(builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT);
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index range = builder->nodes[statement].first_child;
+    size_t local_index = wasm_variable_local_index(builder, procedure, statement);
+
+    if (builder->nodes[range].payload.range.is_inclusive) {
+        wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
+        wasm_write_unsigned(&builder->writer, local_index);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
+        wasm_write_unsigned(&builder->writer, local_index + 1);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EQ);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_BR_IF);
+        wasm_write_unsigned(&builder->writer, 1);
+    }
+
+    wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
+    wasm_write_unsigned(&builder->writer, local_index);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(&builder->writer, 1);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I64_ADD);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_SET);
+    wasm_write_unsigned(&builder->writer, local_index);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(&builder->writer, 0);
+
+    // The `loop` and then the `block`.
+    wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+}
+
+/**
+ * Returns the number of locals that `variable` takes: the ones of its type for a variable
+ * definition, and two for the iterator of a for statement, which also keeps the end of its range.
+ */
+static size_t wasm_variable_slot_count(Wasm_Builder const *builder, Ast_Node_Index variable) {
+    assert(variable < builder->node_count);
+
+    if (builder->nodes[variable].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+        return 2;
+    }
+    return wasm_value_type_slot_count(wasm_variable_type(builder, variable));
 }
 
 /**
@@ -1017,14 +1160,19 @@ static void wasm_variables_write_locals(Wasm_Builder *builder, Ast_Node_Index pr
 
     size_t variable_count = 0;
     for (Ast_Node_Index statement = procedure + 1; statement < end; statement += 1) {
-        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
+            builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
             variable_count += 1;
         }
     }
     wasm_write_unsigned(&builder->writer, variable_count);
 
     for (Ast_Node_Index statement = procedure + 1; statement < end; statement += 1) {
-        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+        if (builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            // The iterator and the end of the range, which are both `Int`.
+            wasm_write_unsigned(&builder->writer, wasm_variable_slot_count(builder, statement));
+            wasm_write_byte(&builder->writer, WASM_TYPE_I64);
+        } else if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             Wasm_Value_Type value_type = wasm_variable_type(builder, statement);
             wasm_write_unsigned(&builder->writer, wasm_value_type_slot_count(value_type));
             // A `Str` is two locals of one type, so one group holds all the locals of a variable.
@@ -1046,12 +1194,17 @@ static void wasm_variables_write_locals(Wasm_Builder *builder, Ast_Node_Index pr
  */
 static Wasm_Value_Type wasm_variable_type(Wasm_Builder const *builder, Ast_Node_Index variable) {
     assert(variable < builder->node_count);
-    assert(builder->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
+    assert(builder->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
+           builder->nodes[variable].node_type == AST_NODE_TYPE_FOR_STATEMENT);
 
     Ast_Node_Index current = variable;
     // Each step goes to a variable above, so there are fewer steps than nodes.
     for (size_t i = 0; i < builder->node_count; i += 1) {
         Ast_Node const *current_node = &builder->nodes[current];
+        if (current_node->node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            // The iterator counts numbers.
+            return WASM_VALUE_TYPE_INT;
+        }
         Ast_Node const *first = &builder->nodes[current_node->first_child];
         if (first->node_type == AST_NODE_TYPE_TYPE_NAME) {
             return wasm_value_type_of_name(first->payload.type_name.name);
@@ -1089,12 +1242,14 @@ static size_t wasm_variable_local_index(Wasm_Builder const *builder, Ast_Node_In
 
     size_t local_index = wasm_parameter_slot_count(builder, procedure);
     for (Ast_Node_Index statement = procedure + 1; statement < variable; statement += 1) {
-        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
-            local_index += wasm_value_type_slot_count(wasm_variable_type(builder, statement));
+        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
+            builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            local_index += wasm_variable_slot_count(builder, statement);
         }
     }
 
-    assert(builder->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
+    assert(builder->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
+           builder->nodes[variable].node_type == AST_NODE_TYPE_FOR_STATEMENT);
     return local_index;
 }
 
@@ -1145,11 +1300,13 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_CALL_STATEMENT:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+    case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
     case AST_NODE_TYPE_PARAMETER:
     case AST_NODE_TYPE_PROCEDURE:
+    case AST_NODE_TYPE_RANGE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
     case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
     case AST_NODE_TYPE_TYPE_NAME:
@@ -1432,11 +1589,13 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_BLOCK:
         case AST_NODE_TYPE_CALL_STATEMENT:
         case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+        case AST_NODE_TYPE_FOR_STATEMENT:
         case AST_NODE_TYPE_IF_STATEMENT:
         case AST_NODE_TYPE_MODULE:
         case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
         case AST_NODE_TYPE_PARAMETER:
         case AST_NODE_TYPE_PROCEDURE:
+        case AST_NODE_TYPE_RANGE:
         case AST_NODE_TYPE_RETURN_STATEMENT:
         case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
         case AST_NODE_TYPE_TYPE_NAME:

@@ -35,6 +35,9 @@ enum {
     // The block type of a structured instruction that takes and leaves no values.
     WASM_BLOCK_TYPE_EMPTY = 0x40,
     // Instructions.
+    WASM_OPCODE_BLOCK = 0x02,
+    WASM_OPCODE_BR = 0x0C,
+    WASM_OPCODE_BR_IF = 0x0D,
     WASM_OPCODE_CALL = 0x10,
     WASM_OPCODE_DROP = 0x1A,
     WASM_OPCODE_ELSE = 0x05,
@@ -59,6 +62,7 @@ enum {
     WASM_OPCODE_IF = 0x04,
     WASM_OPCODE_LOCAL_GET = 0x20,
     WASM_OPCODE_LOCAL_SET = 0x21,
+    WASM_OPCODE_LOOP = 0x03,
     WASM_OPCODE_RETURN = 0x0F,
     WASM_OPCODE_UNREACHABLE = 0x00,
 
@@ -96,6 +100,7 @@ typedef enum {
     WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
     WASM_BUILD_STATUS_OK,
     WASM_BUILD_STATUS_OUTPUT_TOO_LARGE,
+    WASM_BUILD_STATUS_RANGE_TYPE_INVALID,
     WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH,
     WASM_BUILD_STATUS_RETURN_TYPE_MISSING,
     WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
@@ -124,7 +129,8 @@ typedef struct {
  *
  * Every definition becomes a function that the module exports under the name of the definition.
  * A variable of a procedure is a local of its function, or two locals when it is a `Str`, after the
- * parameters. A definition whose value is a string literal becomes a function without parameters
+ * parameters. The iterator of a for statement is a local too, followed by one more local that holds
+ * the end of its range, which is read once before the loop. A definition whose value is a string literal becomes a function without parameters
  * that returns the string. A use of such a constant in a procedure is a call of that function, so the constant
  * can be used above its definition as well.
  *
