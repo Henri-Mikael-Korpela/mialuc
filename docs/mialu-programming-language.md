@@ -220,70 +220,6 @@ foo :: proc() Int ->
 
 `foo` returns 5. Dividing by zero is an error at run time, see [WebAssembly](#webassembly). The value is evaluated first, with the value that the variable has before the assignment, so `x += x` doubles `x`, `x += 2 * 3` adds 6, `x -= 1 + 1` subtracts 2, `x *= 1 + 2` multiplies `x` by 3, and `x /= 1 + 1` divides `x` by 2. The name must be a variable of the procedure, defined above the assignment: a parameter or a constant cannot be assigned to. The variable and the value must be an `Int`, because addition, subtraction, multiplication and division are defined for `Int` only.
 
-## Procedures
-
-Procedures are blocks of code that perform a specific task. They can be defined by placing the keyword `proc` after an identifier, followed by a list of parameters and an optional return type:
-
-```
-procedure_name :: proc(param1: Type1, param2: Type2) ReturnType ->
-    // procedure body
-```
-
-A procedure parameter list can be empty, and the return type can be omitted if the procedure does not return a value. Example of a procedure with no parameters and no return type:
-
-```
-procedure_name :: proc() ->
-    // procedure body
-```
-
-A procedure body consists of a series of statements, which are variable definitions, assignments, [if statements](#if-statements), `return` statements and [calls](#calling-procedures) for now. The procedure body is indented to indicate its scope.
-
-### Calling procedures
-
-A procedure is called by writing its name and, between parentheses, a value for each of its parameters, separated by commas. The parentheses are written also when there are no arguments:
-
-```
-forty :: proc() Int ->
-    return 40
-
-add :: proc(a: Int, b: Int) Int ->
-    return a + b
-
-forty_two :: proc() Int ->
-    return add(forty(), 2)
-```
-
-Here `forty_two` returns 42. When a procedure is called, its arguments are evaluated first, from left to right, and the procedure runs with its parameters set to them. The call has the value that the procedure returns.
-
-A call is an expression, so it can be the value of a variable or of a `return`, a condition, an operand of an operator, or an argument of another call. It binds tighter than any operator, so `double(3) + 1` means `(double(3)) + 1`, which is 7, and `not is_even(3)` is `not (is_even(3))`. Arguments are expressions as well, so `add(1 + 2, double(4))` is valid.
-
-The call must match the procedure:
-
-- the name must be that of a constant that is a procedure, so a call of a variable, of a parameter or of a constant string is an error,
-- there must be as many arguments as the procedure has parameters,
-- each argument must have the type of the parameter that it is given to, because nothing is converted: an `Int` is not a `Bool`, and `add(1, true)` is an error.
-
-The procedure is looked up in the module scope, so it can be defined above or below the procedure that calls it, and a procedure can call itself, which makes it recursive:
-
-```
-factorial :: proc(n: Int) Int ->
-    if n <= 1 ->
-        return 1
-    return n * factorial(n - 1)
-```
-
-Mialu does not check that a recursion ends, and every call takes space of the stack of the target, so a recursion that never ends, or that is too deep, makes the program fail at run time. For the WebAssembly target the call from JavaScript throws a `RangeError`.
-
-A procedure that has no return type returns nothing, so its call has no value and cannot be used as one: `x := log(1)` and `return log(1)` are errors when `log` has no return type. A call can also be a statement of its own, on a line by itself, and then the value is thrown away when there is one:
-
-```
-ignores_result :: proc(n: Int) Int ->
-    double(n)
-    return n
-```
-
-A call that is a statement is the way to call a procedure that returns nothing.
-
 ## If statements
 
 An if statement runs a block of statements only when a condition holds. It is written like in C, but the condition has no parentheses. The `->` after the condition starts the block, which is the lines that are indented one level deeper than the `if`, so an indented block takes the place of the curly braces:
@@ -386,6 +322,70 @@ count_pairs :: proc(n: Int) Int ->
                 count += 1
     return count
 ```
+
+## Procedures
+
+Procedures are blocks of code that perform a specific task. They can be defined by placing the keyword `proc` after an identifier, followed by a list of parameters and an optional return type:
+
+```
+procedure_name :: proc(param1: Type1, param2: Type2) ReturnType ->
+    // procedure body
+```
+
+A procedure parameter list can be empty, and the return type can be omitted if the procedure does not return a value. Example of a procedure with no parameters and no return type:
+
+```
+procedure_name :: proc() ->
+    // procedure body
+```
+
+A procedure body consists of a series of statements, which are variable definitions, assignments, [if statements](#if-statements), `return` statements and [calls](#calling-procedures) for now. The procedure body is indented to indicate its scope.
+
+### Calling procedures
+
+A procedure is called by writing its name and, between parentheses, a value for each of its parameters, separated by commas. The parentheses are written also when there are no arguments:
+
+```
+forty :: proc() Int ->
+    return 40
+
+add :: proc(a: Int, b: Int) Int ->
+    return a + b
+
+forty_two :: proc() Int ->
+    return add(forty(), 2)
+```
+
+Here `forty_two` returns 42. When a procedure is called, its arguments are evaluated first, from left to right, and the procedure runs with its parameters set to them. The call has the value that the procedure returns.
+
+A call is an expression, so it can be the value of a variable or of a `return`, a condition, an operand of an operator, or an argument of another call. It binds tighter than any operator, so `double(3) + 1` means `(double(3)) + 1`, which is 7, and `not is_even(3)` is `not (is_even(3))`. Arguments are expressions as well, so `add(1 + 2, double(4))` is valid.
+
+The call must match the procedure:
+
+- the name must be that of a constant that is a procedure, so a call of a variable, of a parameter or of a constant string is an error,
+- there must be as many arguments as the procedure has parameters,
+- each argument must have the type of the parameter that it is given to, because nothing is converted: an `Int` is not a `Bool`, and `add(1, true)` is an error.
+
+The procedure is looked up in the module scope, so it can be defined above or below the procedure that calls it, and a procedure can call itself, which makes it recursive:
+
+```
+factorial :: proc(n: Int) Int ->
+    if n <= 1 ->
+        return 1
+    return n * factorial(n - 1)
+```
+
+Mialu does not check that a recursion ends, and every call takes space of the stack of the target, so a recursion that never ends, or that is too deep, makes the program fail at run time. For the WebAssembly target the call from JavaScript throws a `RangeError`.
+
+A procedure that has no return type returns nothing, so its call has no value and cannot be used as one: `x := log(1)` and `return log(1)` are errors when `log` has no return type. A call can also be a statement of its own, on a line by itself, and then the value is thrown away when there is one:
+
+```
+ignores_result :: proc(n: Int) Int ->
+    double(n)
+    return n
+```
+
+A call that is a statement is the way to call a procedure that returns nothing.
 
 ## Scope resolution
 
