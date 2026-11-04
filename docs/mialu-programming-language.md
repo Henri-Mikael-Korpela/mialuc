@@ -1050,6 +1050,20 @@ The `wat` target writes the same module in the WebAssembly text format, so that 
 
 There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree and the module as text, and runs JavaScript against it. See the README.
 
+## Possible future features
+
+### Parametric polymorphism
+
+```
+sum :: proc(a: $T, b: T) T ->
+    return a + b
+
+main :: proc() ->
+    x := sum(1, 2)
+    y := sum(1.0, 2.0)
+    ...
+```
+
 ## Rejected ideas
 
 Below is a list of ideas that were considered for Mialu, but rejected. They are not part of the language, but they exist to document the decisions that were made.
