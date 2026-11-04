@@ -36,6 +36,9 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
     case AST_NODE_TYPE_DIVISION:
+    case AST_NODE_TYPE_FIELD:
+    case AST_NODE_TYPE_FIELD_ACCESS:
+    case AST_NODE_TYPE_FIELD_INITIALIZER:
     case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
     case AST_NODE_TYPE_IDENTIFIER:
@@ -55,6 +58,8 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_SCOPE_STATEMENT:
     case AST_NODE_TYPE_SLICE:
     case AST_NODE_TYPE_STRING_LITERAL:
+    case AST_NODE_TYPE_STRUCT_LITERAL:
+    case AST_NODE_TYPE_STRUCT_TYPE:
     case AST_NODE_TYPE_SUBSCRIPT:
     case AST_NODE_TYPE_SUBTRACTION:
     case AST_NODE_TYPE_TYPE_NAME:
@@ -203,6 +208,18 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
             printf("DIVISION_ASSIGNMENT\n");
             break;
+        case AST_NODE_TYPE_FIELD:
+            printf("FIELD %.*s\n", (int)node.payload.field.name.length,
+                   node.payload.field.name.bytes);
+            break;
+        case AST_NODE_TYPE_FIELD_ACCESS:
+            printf("FIELD_ACCESS %.*s\n", (int)node.payload.field_access.name.length,
+                   node.payload.field_access.name.bytes);
+            break;
+        case AST_NODE_TYPE_FIELD_INITIALIZER:
+            printf("FIELD_INITIALIZER %.*s\n", (int)node.payload.field_initializer.name.length,
+                   node.payload.field_initializer.name.bytes);
+            break;
         case AST_NODE_TYPE_FOR_STATEMENT:
             printf("FOR_STATEMENT %.*s\n", (int)node.payload.for_statement.name.length,
                    node.payload.for_statement.name.bytes);
@@ -275,6 +292,17 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_STRING_LITERAL:
             printf("STRING_LITERAL \"%.*s\"\n", (int)node.payload.string_literal.text.length,
                    node.payload.string_literal.text.bytes);
+            break;
+        case AST_NODE_TYPE_STRUCT_LITERAL:
+            if (node.payload.struct_literal.name.bytes == NULL) {
+                printf("STRUCT_LITERAL\n");
+            } else {
+                printf("STRUCT_LITERAL %.*s\n", (int)node.payload.struct_literal.name.length,
+                       node.payload.struct_literal.name.bytes);
+            }
+            break;
+        case AST_NODE_TYPE_STRUCT_TYPE:
+            printf("STRUCT_TYPE\n");
             break;
         case AST_NODE_TYPE_SUBSCRIPT:
             printf("SUBSCRIPT\n");

@@ -27,6 +27,10 @@ typedef struct {
     Token const *tokens;
     Ast_Node *nodes;
     Str expected;
+    // How many array literals and struct literals are open, which are inside each other because
+    // their elements and fields are expressions. It is bounded by `AST_BLOCK_DEPTH_MAX`, so that
+    // the recursion that this needs cannot go on without end.
+    size_t literal_depth;
     size_t token_count;
     size_t token_index;
     size_t node_count;
@@ -75,6 +79,9 @@ static bool           parse_procedure_parameters(Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_return_statement    (Parser *parser);
 static Ast_Node_Index parse_statement           (Parser *parser);
 static Ast_Node_Index parse_string_literal      (Parser *parser);
+static void           parse_skip_indentation    (Parser *parser);
+static Ast_Node_Index parse_struct_literal      (Parser *parser);
+static Ast_Node_Index parse_struct_type         (Parser *parser, uint32_t indentation_level);
 static Ast_Node_Index parse_subscripts          (Parser *parser, Ast_Node_Index operand);
 static Ast_Node_Index parse_term                (Parser *parser);
 static void           parse_token_advance       (Parser *parser);
@@ -96,6 +103,7 @@ Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
         .tokens = token_elements,
         .nodes = node_buffer.elements,
         .expected = STR(""),
+        .literal_depth = 0,
         .token_count = tokens.length,
         .token_index = 0,
         .node_count = 0,
@@ -193,9 +201,12 @@ static Ast_Node_Index parse_definition(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
-    // The value is a string, or a procedure, which is what any other token here starts.
+    // The value is a string, a struct, or a procedure, which is what any other token here starts.
     Ast_Node_Index value = AST_NODE_INDEX_NONE;
-    if (parse_token_current(parser)->token_type == TOKEN_TYPE_STRING_LITERAL) {
+    if (parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_STRUCT) {
+        // Like a procedure, a struct ends with its body.
+        value = parse_struct_type(parser, INDENTATION_LEVEL_TOP);
+    } else if (parse_token_current(parser)->token_type == TOKEN_TYPE_STRING_LITERAL) {
         value = parse_string_literal(parser);
         // A procedure ends with its body, but a string is one line, so its end is checked here.
         if (value != AST_NODE_INDEX_NONE && parse_line_end_expect(parser) == false) {
@@ -1050,13 +1061,13 @@ static Ast_Node_Index parse_statement(Parser *parser) {
 }
 
 /**
- * Parses `name += value`, or the same with another assignment operator, or `name[index] = value`.
- * The node for the assignment has two children: the target and the value. The target is the name,
- * as an identifier, or an element of an array, which has subscripts after the name. The plain `=`
- * is only for elements, as variables are given their value when they are defined. The node is made
- * before the name, like the node of every statement, so that the nodes of a statement come after it
- * in the order of the source, which the analysis relies on. A target that is followed by anything
- * else than an assignment operator is the error here.
+ * Parses `name += value`, or the same with another assignment operator, or `name = value`. The
+ * node for the assignment has two children: the target and the value. The target is the name, as an
+ * identifier, or an element of an array or a field of a struct, which has subscripts and field
+ * names after the name. The node is made before the name, like the node of every statement, so
+ * that the nodes of a statement come after it in the order of the source, which the analysis
+ * relies on. A target that is followed by anything else than an assignment operator is the error
+ * here.
  */
 static Ast_Node_Index parse_assignment(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -1081,7 +1092,6 @@ static Ast_Node_Index parse_assignment(Parser *parser) {
 
     // The error for anything else is at the token after the target.
     Token_Type operator = parse_token_current(parser)->token_type;
-    bool is_element = parser->nodes[target].node_type != AST_NODE_TYPE_IDENTIFIER;
     Ast_Node_Type node_type = AST_NODE_TYPE_ADDITION_ASSIGNMENT;
     if (operator == TOKEN_TYPE_SLASH_EQUALS) {
         node_type = AST_NODE_TYPE_DIVISION_ASSIGNMENT;
@@ -1089,7 +1099,7 @@ static Ast_Node_Index parse_assignment(Parser *parser) {
         node_type = AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT;
     } else if (operator == TOKEN_TYPE_MINUS_EQUALS) {
         node_type = AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT;
-    } else if (operator == TOKEN_TYPE_EQUALS && is_element) {
+    } else if (operator == TOKEN_TYPE_EQUALS) {
         node_type = AST_NODE_TYPE_ASSIGNMENT;
     } else if (operator != TOKEN_TYPE_PLUS_EQUALS) {
         return parse_fail(parser, STR("':' or an assignment operator"));
@@ -1137,14 +1147,27 @@ static Ast_Node_Index parse_variable_definition(Parser *parser) {
     }
 
     // `:=` has no type, which is then deduced from the value. Otherwise the type comes before `=`.
+    bool has_type = false;
     if (parse_token_current(parser)->token_type != TOKEN_TYPE_EQUALS) {
         Ast_Node_Index type = parse_type(parser, STR("a type name or '='"));
         if (type == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
         parse_node_append_child(parser, definition, type);
+        has_type = true;
     }
-    if (parse_token_expect(parser, TOKEN_TYPE_EQUALS, STR("'='")) == false) {
+
+    // A variable with a type can leave its value out, as in `p : Person`. It then gets the default
+    // value of its type, so the type is the only child.
+    Token_Type after_type = parse_token_current(parser)->token_type;
+    if (has_type && (after_type == TOKEN_TYPE_INDENTATION || after_type == TOKEN_TYPE_END)) {
+        return definition;
+    }
+    Str expected = STR("'='");
+    if (has_type) {
+        expected = STR("'=' or the end of the line");
+    }
+    if (parse_token_expect(parser, TOKEN_TYPE_EQUALS, expected) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1387,6 +1410,14 @@ static Ast_Node_Index parse_operand(Parser *parser) {
         if (parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_PARENTHESIS_LEFT) {
             return parse_call(parser);
         }
+        // A name directly followed by a brace starts a struct literal, such as `Person { ... }`.
+        if (parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_BRACE_LEFT) {
+            Ast_Node_Index literal = parse_struct_literal(parser);
+            if (literal == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            return parse_subscripts(parser, literal);
+        }
         Ast_Node_Index identifier = parse_identifier(parser);
         if (identifier == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
@@ -1408,16 +1439,16 @@ static Ast_Node_Index parse_operand(Parser *parser) {
     }
 
     return parse_fail(parser, STR("an integer literal, a string literal, 'true', 'false', a name, "
-                                  "a call or an array literal"));
+                                  "a call, an array literal or a struct literal"));
 }
 
 /**
- * Parses the subscripts that follow `operand`, which is the node of a name or of an array literal:
- * `[index]` is the element at an index, and `[first:end]` is the array slice of the elements from
- * the first index up to, and not including, the end. They can follow each other, and each one
- * takes everything before it as its first child. Like the operator of an arithmetic operation,
- * the node of a subscript is made after the nodes of its operands. Returns the node of the last
- * subscript, or `operand` when there is none.
+ * Parses the subscripts that follow `operand`, which is the node of a name or of a literal:
+ * `[index]` is the element at an index, `[first:end]` is the array slice of the elements from the
+ * first index up to, and not including, the end, and `.name` is a field of a struct. They can
+ * follow each other, and each one takes everything before it as its first child. Like the
+ * operator of an arithmetic operation, the node of a subscript is made after the nodes of its
+ * operands. Returns the node of the last subscript, or `operand` when there is none.
  */
 static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -1427,7 +1458,24 @@ static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
     // Every subscript consumes a token, so there are fewer subscripts than tokens, which bounds
     // the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_BRACKET_LEFT) {
+        Token_Type next = parse_token_current(parser)->token_type;
+        if (next == TOKEN_TYPE_DOT) {
+            parse_token_advance(parser);
+            Token const *field_name = parse_token_current(parser);
+            if (field_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+                return parse_fail(parser, STR("a field name"));
+            }
+            Ast_Node_Index access = parse_node_make(parser, AST_NODE_TYPE_FIELD_ACCESS);
+            if (access == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            parser->nodes[access].payload.field_access.name = field_name->payload.identifier.text;
+            parse_token_advance(parser);
+            parse_node_append_child(parser, access, base);
+            base = access;
+            continue;
+        }
+        if (next != TOKEN_TYPE_BRACKET_LEFT) {
             break;
         }
         parse_token_advance(parser);
@@ -1489,6 +1537,9 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
         return parse_fail(parser, STR("an array length or 'const'"));
     }
 
+    if (parser->literal_depth >= AST_BLOCK_DEPTH_MAX) {
+        return parse_fail(parser, STR("fewer nested literals"));
+    }
     Ast_Node_Index literal = parse_node_make(parser, AST_NODE_TYPE_ARRAY_LITERAL);
     if (literal == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
@@ -1504,28 +1555,239 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
-    if (parse_token_current(parser)->token_type != TOKEN_TYPE_BRACE_RIGHT) {
-        // Every element consumes a token, so there are fewer elements than tokens, which bounds
-        // the loop. A comma means that another element has to follow.
-        for (size_t i = 0; i < parser->token_count; i += 1) {
-            Ast_Node_Index element = parse_expression(parser);
-            if (element == AST_NODE_INDEX_NONE) {
-                return AST_NODE_INDEX_NONE;
-            }
-            parse_node_append_child(parser, literal, element);
-
-            if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
-                break;
-            }
-            parse_token_advance(parser);
+    // The elements can be on lines of their own, and a comma can come after the last one. Every
+    // element consumes a token, so there are fewer elements than tokens, which bounds the loop.
+    parser->literal_depth += 1;
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        parse_skip_indentation(parser);
+        if (parse_token_current(parser)->token_type == TOKEN_TYPE_BRACE_RIGHT) {
+            break;
         }
-    }
 
+        Ast_Node_Index element = parse_expression(parser);
+        if (element == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, literal, element);
+
+        parse_skip_indentation(parser);
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
+            break;
+        }
+        parse_token_advance(parser);
+    }
+    parser->literal_depth -= 1;
+
+    parse_skip_indentation(parser);
     if (parse_token_expect(parser, TOKEN_TYPE_BRACE_RIGHT, STR("',' or '}'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
     return literal;
+}
+
+/**
+ * Skips the indentation tokens of the lines of a literal between braces, which can be spread over
+ * several lines. The indentation of those lines is not part of the structure of the program.
+ */
+static void parse_skip_indentation(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+
+    // Every indentation token is a token, so there are fewer of them than tokens.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_INDENTATION) {
+            break;
+        }
+        parse_token_advance(parser);
+    }
+}
+
+/**
+ * Parses a struct literal, `Person { age = 30, name = "Bob" }`: the name of the struct, and the
+ * fields that are given a value between braces. A field is its name, `=` and an expression, or a
+ * literal `{ ... }` without a name when the field is a struct of its own. The fields are separated
+ * by commas, can be on lines of their own, and can be in any order. A comma can come after the
+ * last one. The literal without a name is only parsed as the value of a field, because it gets its
+ * type from there. The node is made before the nodes of the fields.
+ */
+static Ast_Node_Index parse_struct_literal(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+
+    Token const *start = parse_token_current(parser);
+    assert(start->token_type == TOKEN_TYPE_IDENTIFIER ||
+           start->token_type == TOKEN_TYPE_BRACE_LEFT);
+
+    if (parser->literal_depth >= AST_BLOCK_DEPTH_MAX) {
+        return parse_fail(parser, STR("fewer nested literals"));
+    }
+    Ast_Node_Index literal = parse_node_make(parser, AST_NODE_TYPE_STRUCT_LITERAL);
+    if (literal == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (start->token_type == TOKEN_TYPE_IDENTIFIER) {
+        parser->nodes[literal].payload.struct_literal.name = start->payload.identifier.text;
+        parse_token_advance(parser);
+    }
+
+    if (parse_token_expect(parser, TOKEN_TYPE_BRACE_LEFT, STR("'{'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    // Every field consumes a token, so there are fewer fields than tokens, which bounds the loop.
+    parser->literal_depth += 1;
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        parse_skip_indentation(parser);
+        if (parse_token_current(parser)->token_type == TOKEN_TYPE_BRACE_RIGHT) {
+            break;
+        }
+
+        Token const *field_name = parse_token_current(parser);
+        if (field_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+            return parse_fail(parser, STR("a field name or '}'"));
+        }
+        Ast_Node_Index initializer = parse_node_make(parser, AST_NODE_TYPE_FIELD_INITIALIZER);
+        if (initializer == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[initializer].payload.field_initializer.name =
+            field_name->payload.identifier.text;
+        parse_token_advance(parser);
+        parse_node_append_child(parser, literal, initializer);
+
+        if (parse_token_expect(parser, TOKEN_TYPE_EQUALS, STR("'='")) == false) {
+            return AST_NODE_INDEX_NONE;
+        }
+        Ast_Node_Index value = AST_NODE_INDEX_NONE;
+        if (parse_token_current(parser)->token_type == TOKEN_TYPE_BRACE_LEFT) {
+            value = parse_struct_literal(parser);
+        } else {
+            value = parse_expression(parser);
+        }
+        if (value == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, initializer, value);
+
+        parse_skip_indentation(parser);
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
+            break;
+        }
+        parse_token_advance(parser);
+    }
+    parser->literal_depth -= 1;
+
+    parse_skip_indentation(parser);
+    if (parse_token_expect(parser, TOKEN_TYPE_BRACE_RIGHT, STR("',' or '}'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    return literal;
+}
+
+/**
+ * Parses the definition of a struct after `::`: the word `struct`, `->`, and the fields, which are
+ * the lines that are indented one level deeper than the line of the definition, each of them
+ * `name: Type`. A field can be a struct of its own, written `name: struct ->`, whose fields are
+ * the lines below it, indented one level deeper still. The structs that are open are kept in an
+ * array, like the blocks of a procedure, and a line that is indented less than the innermost one
+ * closes it, and as many outer ones as it is indented less than. Every struct must have a field.
+ * The current token is `struct`, and `indentation_level` is the level of the line it is on.
+ */
+static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_level) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_STRUCT);
+    assert(indentation_level < UINT32_MAX);
+
+    parse_token_advance(parser);
+    Ast_Node_Index root = parse_node_make(parser, AST_NODE_TYPE_STRUCT_TYPE);
+    if (root == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false ||
+        parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    // The first one is the struct itself, and the others are inside each other.
+    Parse_Block structs[AST_BLOCK_DEPTH_MAX + 1];
+    structs[0] = (Parse_Block){.node = root, .level = indentation_level + 1};
+    size_t struct_count = 1;
+
+    // Each field consumes at least its indentation token, so there are fewer fields than tokens,
+    // which bounds the loop. It stops at the first line that is not part of the struct.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        Token const *line_start = parse_token_current(parser);
+        if (line_start->token_type != TOKEN_TYPE_INDENTATION) {
+            break;
+        }
+
+        uint32_t level = line_start->payload.indentation.level;
+        while (level < structs[struct_count - 1].level && struct_count > 1) {
+            if (parser->nodes[structs[struct_count - 1].node].first_child == AST_NODE_INDEX_NONE) {
+                return parse_fail(parser, STR("a field"));
+            }
+            struct_count -= 1;
+        }
+        if (level < structs[struct_count - 1].level) {
+            break;
+        }
+        if (level > structs[struct_count - 1].level) {
+            return parse_fail(parser, STR("a line that is not indented deeper"));
+        }
+        parse_token_advance(parser);
+
+        Token const *field_name = parse_token_current(parser);
+        if (field_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+            return parse_fail(parser, STR("a field name"));
+        }
+        Ast_Node_Index field = parse_node_make(parser, AST_NODE_TYPE_FIELD);
+        if (field == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[field].payload.field.name = field_name->payload.identifier.text;
+        parse_token_advance(parser);
+        parse_node_append_child(parser, structs[struct_count - 1].node, field);
+
+        if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("':'")) == false) {
+            return AST_NODE_INDEX_NONE;
+        }
+
+        if (parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_STRUCT) {
+            if (struct_count == AST_BLOCK_DEPTH_MAX + 1) {
+                return parse_fail(parser, STR("fewer nested structs"));
+            }
+            parse_token_advance(parser);
+            Ast_Node_Index nested = parse_node_make(parser, AST_NODE_TYPE_STRUCT_TYPE);
+            if (nested == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            parse_node_append_child(parser, field, nested);
+            if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false ||
+                parse_line_end_expect(parser) == false) {
+                return AST_NODE_INDEX_NONE;
+            }
+            structs[struct_count] = (Parse_Block){.node = nested, .level = level + 1};
+            struct_count += 1;
+        } else {
+            Ast_Node_Index type = parse_type(parser, STR("a type name or 'struct'"));
+            if (type == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            parse_node_append_child(parser, field, type);
+            if (parse_line_end_expect(parser) == false) {
+                return AST_NODE_INDEX_NONE;
+            }
+        }
+    }
+
+    // The structs that are still open end here, and each one needs a field.
+    for (size_t open = struct_count; open > 0; open -= 1) {
+        if (parser->nodes[structs[open - 1].node].first_child == AST_NODE_INDEX_NONE) {
+            return parse_fail(parser, STR("a field"));
+        }
+    }
+
+    return root;
 }
 
 /**

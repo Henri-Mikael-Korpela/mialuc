@@ -16,6 +16,8 @@ enum {
     WASM_TEXT_DECIMAL_DIGITS_MAX = 20,
     // The natural alignment of a 64-bit load or store, as a power of two: 8 bytes.
     WASM_TEXT_ALIGNMENT_I64 = 3,
+    // The same for a 32-bit load or store: 4 bytes.
+    WASM_TEXT_ALIGNMENT_I32 = 2,
 };
 
 /**
@@ -728,6 +730,9 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
         case WASM_OPCODE_I32_LT_S:
             wasm_text_write_instruction(&formatter->writer, STR("i32.lt_s"));
             break;
+        case WASM_OPCODE_I32_MUL:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.mul"));
+            break;
         case WASM_OPCODE_I32_SHL:
             wasm_text_write_instruction(&formatter->writer, STR("i32.shl"));
             break;
@@ -746,14 +751,23 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
         case WASM_OPCODE_I64_LE_U:
             wasm_text_write_instruction(&formatter->writer, STR("i64.le_u"));
             break;
+        case WASM_OPCODE_I32_LOAD:
+        case WASM_OPCODE_I32_STORE:
         case WASM_OPCODE_I64_LOAD:
         case WASM_OPCODE_I64_STORE: {
             // The immediates are the alignment, as a power of two, and the offset. Like
             // `wasm2wat`, the text leaves out the offset when it is zero and the alignment when it
-            // is the size of the value, which is 8 bytes.
+            // is the size of the value, which is 8 bytes or 4 bytes.
             uint32_t alignment = wasm_text_read_unsigned_32(formatter);
             uint32_t offset_bytes = wasm_text_read_unsigned_32(formatter);
-            if (opcode == WASM_OPCODE_I64_LOAD) {
+            uint32_t alignment_natural = WASM_TEXT_ALIGNMENT_I64;
+            if (opcode == WASM_OPCODE_I32_LOAD) {
+                wasm_text_write_instruction(&formatter->writer, STR("i32.load"));
+                alignment_natural = WASM_TEXT_ALIGNMENT_I32;
+            } else if (opcode == WASM_OPCODE_I32_STORE) {
+                wasm_text_write_instruction(&formatter->writer, STR("i32.store"));
+                alignment_natural = WASM_TEXT_ALIGNMENT_I32;
+            } else if (opcode == WASM_OPCODE_I64_LOAD) {
                 wasm_text_write_instruction(&formatter->writer, STR("i64.load"));
             } else {
                 wasm_text_write_instruction(&formatter->writer, STR("i64.store"));
@@ -762,9 +776,9 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
                 wasm_text_write(&formatter->writer, STR(" offset="));
                 wasm_text_write_unsigned(&formatter->writer, offset_bytes);
             }
-            if (alignment != WASM_TEXT_ALIGNMENT_I64) {
+            if (alignment != alignment_natural) {
                 // An alignment above the size of the value is not valid.
-                if (alignment > WASM_TEXT_ALIGNMENT_I64) {
+                if (alignment > alignment_natural) {
                     return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_MALFORMED,
                                           opcode_offset);
                 }

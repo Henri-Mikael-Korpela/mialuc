@@ -412,6 +412,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_COMMA:
             printf("COMMA\n");
             break;
+        case TOKEN_TYPE_DOT:
+            printf("DOT\n");
+            break;
         case TOKEN_TYPE_END:
             printf("END\n");
             break;
@@ -479,6 +482,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
             break;
         case TOKEN_TYPE_KEYWORD_RETURN:
             printf("KEYWORD_RETURN\n");
+            break;
+        case TOKEN_TYPE_KEYWORD_STRUCT:
+            printf("KEYWORD_STRUCT\n");
             break;
         case TOKEN_TYPE_KEYWORD_TRUE:
             printf("KEYWORD_TRUE\n");
@@ -637,7 +643,7 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 path, position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, and the elements of an array are.\n",
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not of the type of the elements of the array.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_ARRAY_EXPECTED:
@@ -658,6 +664,33 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: an array of '%.*s' cannot be the type here. A parameter can "
                 "be an array slice, as in []%.*s, and a global variable can be neither.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes,
+                subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_FIELD_BASE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is read or assigned through a value that "
+                "is not a variable, a parameter or an element of an array.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_STRUCT_EXPECTED:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a struct, so it has no fields.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_STRUCT_FIELD_DUPLICATE:
+        fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is given a value twice.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the value of the field '%.*s' is not of the type of the "
+                "field.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_STRUCT_FIELD_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: the struct has no field called '%.*s'.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_STRUCT_RECURSIVE:
+        fprintf(stderr, "%s:%zu:%zu: the struct with the field '%.*s' contains itself, so it "
+                "would be infinitely large.\n", path, position.line, position.column,
                 subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH:
@@ -703,8 +736,8 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is a procedure, which the wasm target cannot use as a "
-                "value.\n", path, position.line, position.column, subject_length,
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is a procedure or a struct, which the wasm target "
+                "cannot use as a value.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_OK:
@@ -761,6 +794,10 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an attribute of a global variable. The only "
                 "one is 'static'.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_FIELD_NAME_DUPLICATE:
+        fprintf(stderr, "%s:%zu:%zu: the struct already has a field called '%.*s'.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_GLOBAL_NOT_STATIC:
         fprintf(stderr, "%s:%zu:%zu: global variable '%.*s' must have the attribute #(static).\n",

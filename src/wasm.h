@@ -51,10 +51,13 @@ enum {
     WASM_OPCODE_I32_EQ = 0x46,
     WASM_OPCODE_I32_EQZ = 0x45,
     WASM_OPCODE_I32_GE_U = 0x4F,
+    WASM_OPCODE_I32_LOAD = 0x28,
     WASM_OPCODE_I32_LT_S = 0x48,
+    WASM_OPCODE_I32_MUL = 0x6C,
     WASM_OPCODE_I32_NE = 0x47,
     WASM_OPCODE_I32_OR = 0x72,
     WASM_OPCODE_I32_SHL = 0x74,
+    WASM_OPCODE_I32_STORE = 0x36,
     WASM_OPCODE_I32_SUB = 0x6B,
     WASM_OPCODE_I32_WRAP_I64 = 0xA7,
     WASM_OPCODE_I64_ADD = 0x7C,
@@ -129,6 +132,9 @@ typedef enum {
     WASM_BUILD_STATUS_CONDITION_TYPE_INVALID,
     WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED,
     WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP,
+    // A field is read or assigned through something that is not a variable, a parameter or an
+    // element of an array, such as the result of a call. The subject is the name of the field.
+    WASM_BUILD_STATUS_FIELD_BASE_INVALID,
     WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE,
     // An index, or the end of a slice, that is not an `Int`.
     WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
@@ -138,6 +144,17 @@ typedef enum {
     WASM_BUILD_STATUS_RANGE_TYPE_INVALID,
     WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH,
     WASM_BUILD_STATUS_RETURN_TYPE_MISSING,
+    // A field is accessed on a value that is not a struct. The subject is the name before the dot.
+    WASM_BUILD_STATUS_STRUCT_EXPECTED,
+    // A field that is given a value twice in one struct literal. The subject is the second one.
+    WASM_BUILD_STATUS_STRUCT_FIELD_DUPLICATE,
+    // A value that is not of the type of the field that it is given to or assigned to.
+    WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
+    // A field that the struct does not have, in a struct literal or an access.
+    WASM_BUILD_STATUS_STRUCT_FIELD_UNKNOWN,
+    // A struct that has itself as a field, directly or through other structs, so it would be
+    // infinitely large. The subject is the name of the first field of the struct.
+    WASM_BUILD_STATUS_STRUCT_RECURSIVE,
     WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
     WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
 } Wasm_Build_Status;
@@ -187,6 +204,13 @@ typedef struct {
  * in elements, which are `Int` values of 8 bytes. So a parameter that is an array slice is two
  * WebAssembly parameters, and a caller from JavaScript passes the address of elements that it
  * wrote to the memory of the module, and their number.
+ *
+ * A struct is the values of its fields, one after the other, in the order of the definition, so it
+ * is as many WebAssembly values as its fields take together, where a field that is a struct takes
+ * its own fields in its place. A parameter that is a struct is that many parameters, and a result
+ * is that many results, which JavaScript receives as an array. A variable of a struct type is that
+ * many locals. A struct is never stored in memory as a whole, except as an element of an array:
+ * every value of it takes 8 bytes there, whether it is a 32-bit or a 64-bit one.
  *
  * An array is on a stack in the memory of the module: a procedure that has an array literal makes
  * room for all of its array literals when it starts, and gives it back when it returns. Only the

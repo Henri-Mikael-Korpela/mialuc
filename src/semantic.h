@@ -56,6 +56,8 @@ typedef enum {
     // The name that is called is not a procedure: a variable, a parameter or a constant string.
     SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE,
     SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE,
+    // Two fields of one struct with the same name. The subject is the second one.
+    SEMANTIC_STATUS_FIELD_NAME_DUPLICATE,
     // A global variable without the `static` attribute. The subject is its name.
     SEMANTIC_STATUS_GLOBAL_NOT_STATIC,
     SEMANTIC_STATUS_IDENTIFIER_UNKNOWN,
@@ -111,6 +113,13 @@ typedef struct {
  * the statement only, not in its range, and it cannot be assigned to. A name is looked up in the
  * innermost scope that uses it first, and then in the scopes around it, up to the module scope.
  *
+ * A constant can be a struct, such as `Person :: struct -> ...`. It has its name in the module
+ * scope like any other constant, but it is a type and not a value, so it is not counted among the
+ * constants that the `position` of a binding is the place of. The names of the fields of a struct
+ * are not names in a scope, and must only differ from each other in the struct. The names of types
+ * and of the fields of a literal or an access are not looked up here, because whether they stand
+ * for something is for the target to check.
+ *
  * The name in a call, such as `f(1)`, must stand for a constant that is a procedure. It is looked
  * up among the definitions of the module only, because no other name can be the same as one of
  * them.
@@ -126,7 +135,7 @@ typedef struct {
  *
  * An assignment, such as `x += 1`, uses the name that it assigns to like any other use of a name,
  * and the name must stand for a variable or a global variable: a parameter or a constant cannot be
- * assigned to.
+ * assigned to. The same goes for the name that a field is assigned to through, as in `p.age = 1`.
  *
  * A name cannot be declared again where it is already visible, so a name has one meaning
  * everywhere it can be used, and there is no shadowing. Two definitions cannot have one name, two

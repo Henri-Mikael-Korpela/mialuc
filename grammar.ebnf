@@ -56,13 +56,22 @@
      - The condition of an if statement must be a `Bool`, so a number or a string is not one, and
        the operands of a comparison must both be `Int`, or both `Bool` for `==` and `not=`. A
        variable defined in a block can only be used in that block. All are checked after parsing.
-     - The elements of an array and of an array slice must be `Int`, an array literal must have as
-       many elements as the length of its type when that is a number, and a variable of an array
-       type must be given an array literal. What is subscripted, sliced or gone through by a for
+     - The elements of an array and of an array slice must be `Int`, `Bool`, `Str` or a struct, an
+       array literal must have as many elements as the length of its type when that is a number,
+       and a variable of an array type must be given an array literal. What is subscripted, sliced or gone through by a for
        statement must be an array or an array slice, and an index must be an `Int`. An array can
        be a variable, but not a parameter, a global variable or a returned value. The grammar
        cannot tell a name that is an array from any other. A for statement with a range and one
        with elements both have an expression after `in`, and the range operator tells them apart.
+     - The name of the type of a variable, a parameter or a field, and the name of a struct literal,
+       must be `Int`, `Bool`, `Str` or a struct that is defined. A field of a struct cannot be an
+       array, and a struct cannot contain itself, directly or through other structs. The fields of
+       a struct have different names. In a struct literal every field must be a field of the
+       struct, must be given a value at most once, and must be given a value of its type, and the
+       literal `{ ... }` without a name is for a field that is a struct. A field is accessed
+       through a variable, a parameter or an element of an array, and not through the result of a
+       call. The grammar allows the lines of a literal between braces to be indented by any
+       number of spaces, but the compiler requires a multiple of 4, as everywhere.
 *)
 
 module = { blank_line | definition } , end_of_input ;
@@ -72,9 +81,34 @@ definition = constant_definition | global_variable_definition ;
 
 (* A constant definition. It starts in the first column, so a line that starts with a space or a
    tab does not match here. `::` is two separate ':' characters for the compiler, so spaces may
-   be between them. The value is a procedure, or a string on one line. *)
+   be between them. The value is a procedure, a struct, or a string on one line. *)
 constant_definition =
-    name , ws , ":" , ws , ":" , ws , ( procedure | string_literal , ws , line_end ) ;
+    name , ws , ":" , ws , ":" , ws ,
+    ( procedure | string_literal , ws , line_end | struct_definition ) ;
+
+(* A struct is a record type: `struct ->` and then its fields, one on each line, indented one level
+   deeper, each of them `name: Type`. The type of a field can be `struct ->` again, followed by
+   the fields of that struct one level deeper still, so a struct can be inside a struct. Like the
+   blocks, the rules go down to the fourth level. *)
+struct_definition = "struct" , branch_end , struct_body_1 ;
+
+struct_body_1 = { blank_line } , struct_field_1 , { blank_line | struct_field_1 } ;
+struct_field_1 =
+    indentation_1 , name , ws , ":" , ws ,
+    ( type , ws , line_end | "struct" , branch_end , struct_body_2 ) ;
+
+struct_body_2 = { blank_line } , struct_field_2 , { blank_line | struct_field_2 } ;
+struct_field_2 =
+    indentation_2 , name , ws , ":" , ws ,
+    ( type , ws , line_end | "struct" , branch_end , struct_body_3 ) ;
+
+struct_body_3 = { blank_line } , struct_field_3 , { blank_line | struct_field_3 } ;
+struct_field_3 =
+    indentation_3 , name , ws , ":" , ws ,
+    ( type , ws , line_end | "struct" , branch_end , struct_body_4 ) ;
+
+struct_body_4 = { blank_line } , struct_field_4 , { blank_line | struct_field_4 } ;
+struct_field_4 = indentation_4 , name , ws , ":" , ws , type , ws , line_end ;
 
 (* A global variable, which is also defined in the first column. It has static storage duration:
    it exists for as long as the program runs, and it is initialized once, before any procedure is
@@ -253,18 +287,22 @@ indentation_4 = "                " ;
 (* A variable and its initial value. `:=` is a ':' and a '=' for the compiler, so spaces may be
    between them, as for `::`. Without a type the type of the variable is the type of the value.
    `x : Int = 5` gives the type. *)
-variable_definition = name , ws , ":" , ws , [ type , ws ] , "=" , ws , expression ;
+variable_definition =
+    name , ws , ":" , ws , [ type , ws ] , "=" , ws , expression |
+    name , ws , ":" , ws , type ;
+
+(* A variable can leave its value out when its type is written, as in `p : Person`. It then has the
+   default value of its type: zero for an `Int`, `false` for a `Bool`, the empty string for a
+   `Str`, an empty array slice for an array slice, and the default of each field for a struct. *)
 
 (* An assignment to a variable that is already defined: `x += 2` adds 2 to `x`, `x -= 2`
    subtracts 2 from it, `x *= 2` multiplies it by 2, and `x /= 2` divides it by 2. The operator
    is a single token, so no space may be written inside it. The name must be a variable, not a
    parameter or a constant, which the grammar cannot tell. The same operators change an element of
-   an array: `a[1] += 2`. A plain `=` assigns to an element, as in `a[1] = 2`, or copies to a range
-   of elements, as in `a[0:3] = b`, but a variable has its value from its definition only, so
-   `x = 2` is not an assignment. *)
-assignment =
-    name , { ws , subscript } , ws , ( "+=" | "-=" | "*=" | "/=" ) , ws , expression |
-    name , ws , subscript , { ws , subscript } , ws , "=" , ws , expression ;
+   an array: `a[1] += 2`, and a field of a struct: `p.age += 1`. A plain `=` gives a variable a
+   new value, as in `x = 2` or `p = Person { }`, assigns to an element or a field, as in
+   `a[1] = 2` and `p.age = 2`, or copies to a range of elements, as in `a[0:3] = b`. *)
+assignment = name , { ws , postfix } , ws , ( "+=" | "-=" | "*=" | "/=" | "=" ) , ws , expression ;
 
 (* `return` and its value must be separated, or `return0` would be one identifier. *)
 return_statement = "return" , required_space , expression ;
@@ -296,12 +334,19 @@ sum = term , { ws , ( "+" | "-" ) , ws , term } ;
 term = operand , { ws , ( "*" | "/" ) , ws , operand } ;
 
 (* An integer literal, a string literal, `true` or `false`, a call of a procedure, or the use of a
-   name, such as a parameter or a constant, or an array literal. A call starts with a name too, and
-   is told from the use of a name by the opening parenthesis after it. A name and an array literal
-   can have subscripts after them. *)
+   name, such as a parameter or a constant, or an array literal or a struct literal. A call starts
+   with a name too, and is told from the use of a name by the opening parenthesis after it, and a
+   struct literal by the brace. A name and the literals can have subscripts and fields after
+   them. *)
 operand =
-    integer_literal | string_literal | bool_literal | call | ( name | array_literal ) ,
-    { ws , subscript } ;
+    integer_literal | string_literal | bool_literal | call |
+    ( name | array_literal | struct_literal ) , { ws , postfix } ;
+
+(* What can follow a name or a literal: a subscript, or a field, such as `p.age`. They can follow
+   each other, as in `lines[1].end.y`. *)
+postfix = subscript | field_access ;
+
+field_access = "." , ws , name ;
 
 (* A subscript is the index of an element between brackets, `a[2]`, or the two indices of an array
    slice, `a[1:4]`, which has the elements from the first index up to, and not including, the
@@ -310,11 +355,27 @@ subscript = "[" , ws , expression , ws , [ ":" , ws , expression , ws ] , "]" ;
 
 (* An array literal is the type of an array, which has a length or `const`, followed by its
    elements between braces. The elements are expressions separated by commas, and there may be none.
-   They are on one line. *)
+   They can be on lines of their own, and a comma can come after the last one. *)
 array_literal =
-    "[" , ws , array_length , ws , "]" , ws , type_name , ws , "{" , ws , [ elements , ws ] , "}" ;
+    "[" , ws , array_length , ws , "]" , ws , type_name , ws , "{" , gap , [ elements , gap ] , "}" ;
 
-elements = expression , { ws , "," , ws , expression } ;
+elements = expression , { gap , "," , gap , expression } , [ gap , "," ] ;
+
+(* A struct literal is the name of a struct and the fields that are given a value, between braces,
+   in any order, as in `Person { name = "Bob", age = 30 }`. The fields that are left out get their
+   default value. The fields are separated by commas, and can be on lines of their own, and a
+   comma can come after the last one. A field that is a struct can be given its value without a
+   name, `{ x = 1, y = 2 }`, since the field says which struct it is. *)
+struct_literal = name , ws , struct_fields ;
+
+struct_fields = "{" , gap , [ field_initializers , gap ] , "}" ;
+
+field_initializers = field_initializer , { gap , "," , gap , field_initializer } , [ gap , "," ] ;
+
+field_initializer = name , ws , "=" , ws , ( struct_fields | expression ) ;
+
+(* Spaces and line breaks between the parts of a literal between braces. *)
+gap = { " " | "\t" | "\r" | "\n" } ;
 
 (* The name of a procedure, and the values to give to its parameters between parentheses, which
    are separated by commas and can be none. A call is an expression, and a line that is only a call
@@ -341,8 +402,8 @@ any_character = ? any character ? ;
 name = identifier - reserved_word ;
 
 reserved_word =
-    "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "true" |
-    "false" | "not" | "and" | "or" ;
+    "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "struct" |
+    "true" | "false" | "not" | "and" | "or" ;
 
 identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 

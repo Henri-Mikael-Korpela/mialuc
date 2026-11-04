@@ -21,6 +21,11 @@
   - [Array literals](#array-literals)
   - [Elements](#elements)
   - [Array slices](#array-slices)
+- [Structs](#structs)
+  - [Struct objects](#struct-objects)
+  - [Fields](#fields)
+  - [Structs in structs](#structs-in-structs)
+  - [Structs in arrays](#structs-in-arrays)
 - [Procedures](#procedures)
   - [Calling procedures](#calling-procedures)
 - [Loops without a range](#loops-without-a-range)
@@ -94,6 +99,7 @@ not
 or
 proc
 return
+struct
 true
 ```
 
@@ -118,7 +124,7 @@ sum :: proc(a: Int, b: Int) Int ->
     return a + b
 ```
 
-A constant can also be a string, which is written on its own line:
+A constant can also be a [struct](#structs), which is a type, and a string, which is written on its own line:
 
 ```
 greeting :: "Hello, world"
@@ -135,6 +141,7 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
 | `[5]Int` | An array: a fixed number of values, here five `Int` values, that are one after the other. See [Arrays](#arrays). |
 | `[]Int` | An array slice: a view of some of the elements of an array, whose number is not known until the program runs. See [Array slices](#array-slices). |
+| `Person` | A struct, which is a record type that is defined by the program, such as `Person :: struct -> ...`. See [Structs](#structs). |
 
 ### Strings
 
@@ -219,6 +226,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `*`      | Multiplication. | 6 | `x := 2 + 3 * 4` makes `x` 14 |
 | `/`      | Division. The result is truncated toward zero. | 6 | `x := 20 - 12 / 4` makes `x` 17 |
 | `[ ]`    | Subscript. The index of an element between brackets. It is written after the name of an array or of an array slice, and binds tighter than every operator. See [Elements](#elements). | 7 | `a[2]` is the element at index 2 of `a` |
+| `.`      | Field access. The name of a field after a struct object, which is a name, an element of an array, or another field. See [Fields](#fields). | 7 | `p.age` is the field `age` of `p` |
 | `[ : ]`  | Slice. The two bounds of an array slice between brackets, separated by a colon. It includes the low bound and excludes the high bound. See [Array slices](#array-slices). | 7 | `a[1:4]` has the elements 1 through 3 |
 | `+=`     | Addition assignment. It adds the value to a variable that is defined already. | 0 | `x += 2` adds 2 to `x` |
 | `-=`     | Subtraction assignment. It subtracts the value from a variable. | 0 | `x -= 2` makes `x` 2 less |
@@ -227,7 +235,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `:`      | Type separator. It separates a name from its type. | 0 | `x : Int = 5` |
 | `::`     | Defines a constant. It is two subsequent `:`. | 0 | `NAME :: "Bob"` |
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
-| `=`      | Sets the initial value of a variable whose type is written. It also assigns to an element, or copies to a range of elements, which are the only things that it assigns to. | 0 | `x : Int = 5`, `a[0] = 5` |
+| `=`      | Sets the initial value of a variable whose type is written. It also assigns a new value to a variable, an element or a field, and copies to a range of elements. | 0 | `x : Int = 5`, `x = 6`, `a[0] = 5`, `p.age = 5` |
 
 A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. `not` is a unary operator, written before its operand. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values for `==` and `not=`, and its result is a `Bool`.
 
@@ -253,13 +261,22 @@ The type can also be written explicitly, between the `:` and the `=`:
 x : Int = 5
 ```
 
+When the type is written, the value can be left out. The variable then has the default value of its type, and it can be given another one with an assignment later:
+
+```
+x : Int
+p : Person
+```
+
+The default value is 0 for an `Int`, `false` for a `Bool`, the empty string `""` for a `Str`, an array slice with no elements for an array slice, and for a [struct](#structs) the default value of each of its fields. An array has no default value, since it is made by an array literal, so `a : [3]Int` is an error.
+
 A variable is defined once, with its initial value, and every variable has one. It can be used in the statements below its definition, but not above it and not in its own initial value. The variables of a procedure are not visible outside of it, so two procedures can have a variable of the same name.
 
 A variable that is defined outside of every procedure is a [global variable](#global-variables).
 
 ## Assignment
 
-An assignment changes the value of a variable that is defined already. It is a statement that has the name of the variable, an assignment operator and a value, which is an expression. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was:
+An assignment changes the value of a variable that is defined already. It is a statement that has the name of the variable, an assignment operator and a value, which is an expression. The plain assignment `=` gives the variable a new value of its type, whatever the type is: `x = 5` for an `Int`, and `p = Person { age = 30 }` for a struct object, which replaces all of its fields. The value must be of the type of the variable, so `x = true` is an error for an `Int`. An array is not assigned to as a whole. The other assignments work on an `Int` only. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was:
 
 ```
 foo :: proc() Int ->
@@ -400,7 +417,7 @@ count_pairs :: proc(n: Int) Int ->
     return count
 ```
 
-The elements of an array or of an array slice can be gone through as well. Instead of a range, the expression after `in` is the array or the slice, and the block runs once for each element, in order from the first. The iterator is the value of the element, an `Int`:
+The elements of an array or of an array slice can be gone through as well. Instead of a range, the expression after `in` is the array or the slice, and the block runs once for each element, in order from the first. The iterator is a copy of the element, which has the type of the elements, an `Int` for an array of `Int`:
 
 ```
 sum_of_elements :: proc() Int ->
@@ -423,7 +440,7 @@ fill :: proc() Int ->
 
 ## Arrays
 
-An array is a fixed number of values of one type, which are called its elements. The elements are one after the other, and the number of them is the length of the array. The length is known when the program is compiled, and it never changes. An array lives on the stack of the procedure that defines it: it takes no allocation, and it is gone when the procedure returns. The type of an array is its length between square brackets, followed by the type of its elements, so `[5]Int` is an array of five `Int` values. Elements are numbered from zero, so the elements of `[5]Int` have the indexes 0, 1, 2, 3 and 4. The compiler supports `Int` as the type of the elements and nothing else yet.
+An array is a fixed number of values of one type, which are called its elements. The elements are one after the other, and the number of them is the length of the array. The length is known when the program is compiled, and it never changes. An array lives on the stack of the procedure that defines it: it takes no allocation, and it is gone when the procedure returns. The type of an array is its length between square brackets, followed by the type of its elements, so `[5]Int` is an array of five `Int` values. Elements are numbered from zero, so the elements of `[5]Int` have the indexes 0, 1, 2, 3 and 4. The elements can be `Int`, `Bool` or `Str` values, or [struct objects](#structs-in-arrays), and not arrays.
 
 ### Array literals
 
@@ -439,7 +456,14 @@ When the length of the type is the keyword `const` instead of a number, the leng
 a := [const]Int { 1, 2, 3, 4, 5 }
 ```
 
-`a` above is of type `[5]Int`, which is deduced from the value like the type of any variable. A literal that has a number as its length must have exactly that many elements, so `[3]Int { 1, 2 }` is an error. A literal must have a number or `const` as its length, so `[]Int { 1, 2 }` is an error: that is the type of an array slice, which has no elements of its own, see [Array slices](#array-slices). The elements are expressions of type `Int`, and there may be none, so `[const]Int { }` is an array of length zero. The whole literal is written on one line.
+`a` above is of type `[5]Int`, which is deduced from the value like the type of any variable. A literal that has a number as its length must have exactly that many elements, so `[3]Int { 1, 2 }` is an error. A literal must have a number or `const` as its length, so `[]Int { 1, 2 }` is an error: that is the type of an array slice, which has no elements of its own, see [Array slices](#array-slices). The elements are expressions of the type of the elements, and there may be none, so `[const]Int { }` is an array of length zero. The elements can be on lines of their own, and a comma can come after the last one:
+
+```
+names := [const]Str {
+    "Bob",
+    "Alice",
+}
+```
 
 A variable of an array type is defined with an array literal, and not with another array or a call: `b := a` is an error, because an array is not copied by a definition. The type can be written as well, as long as the literal has the number of elements that it says:
 
@@ -463,7 +487,7 @@ array_element_access :: proc() Int ->
 
 `array_element_access` returns 4, which is `1 + a[2]`. An index that is not in the array, which is one that is negative or not below the length, is an error at run time: the program traps, see [WebAssembly](#webassembly).
 
-An element is a place that can be assigned to. The plain assignment `=` is for elements only, because a variable is given its value when it is defined, and `x = 5` is an error. The assignment operators `+=`, `-=`, `*=` and `/=` work on an element like they do on a variable:
+An element is a place that can be assigned to. The plain assignment `=` works on an element like on a variable, and the assignment operators `+=`, `-=`, `*=` and `/=` work on an element of type `Int` like they do on a variable:
 
 ```
 array_element_assignment :: proc() Int ->
@@ -473,7 +497,7 @@ array_element_assignment :: proc() Int ->
     return a[0] + a[1]
 ```
 
-`array_element_assignment` returns 17. The index and the array are evaluated before the value, and the value is an `Int`.
+`array_element_assignment` returns 17. The index and the array are evaluated before the value, and the value must be of the type of the elements.
 
 ### Array slices
 
@@ -515,7 +539,138 @@ array_element_range_assignment :: proc() Int ->
     return sum(a)
 ```
 
-`array_element_range_assignment` returns 69. The assignment operators such as `+=` are for one element, so `a[0:3] += 1` is an error.
+`array_element_range_assignment` returns 69. The elements of the value must be of the type of the elements of the range. The assignment operators such as `+=` are for one element, so `a[0:3] += 1` is an error.
+
+## Structs
+
+A struct is a record type: a name for a fixed set of fields, each with a name and a type. A struct is defined as a [constant](#constants) whose value is `struct ->` followed by its fields, one on each line, indented one level deeper than the line of the definition. A field is its name, a colon and its type:
+
+```
+Person :: struct ->
+    age: Int
+    name: Str
+```
+
+The type of a field can be `Int`, `Bool`, `Str` or another struct, and it cannot be an [array or an array slice](#arrays). The fields of a struct have different names, and a struct cannot contain itself, since it would never end: not directly, as in a field `next: Person` of `Person`, and not through other structs. A struct is a type and not a value, so its name is written where a type is, and in a struct literal, but `x := Person` is an error. Like any constant, a struct can be defined below the procedures that use it.
+
+### Struct objects
+
+A value of a struct type is called a struct object. It is made with a struct literal: the name of the struct and then the fields that are given a value between braces, each of them the name of the field, `=` and an expression of the type of the field, separated by commas:
+
+```
+create_struct_object :: proc() Str ->
+    p := Person { age = 30, name = "Bob" }
+    return p.name
+```
+
+The fields can be given in any order, and each field at most once. A comma can come after the last one, which is the convention when the fields are on lines of their own. The literal can be spread over several lines, as long as every line is indented by a multiple of 4 spaces like any line:
+
+```
+p := Person {
+    age = 30,
+    name = "Bob",
+}
+```
+
+A field that is not given a value has the default value of its type. The default is 0 for an `Int`, `false` for a `Bool`, the empty string `""` for a `Str`, and for a field that is a struct the default value of each of its fields. So `Person { }` is a person whose age is 0 and whose name is empty, and `Person { name = "Bob" }` has age 0. The values are expressions, so they can be calls and arithmetic, and they are evaluated in the order of the fields in the definition of the struct, and not in the order in which they are written. A field that does not exist in the struct, a field that is given a value twice and a value that is not of the type of its field are errors.
+
+A struct object is a value, like an `Int`: nothing is shared. Defining a variable from another variable, assigning one to another, passing one to a procedure and returning one all make a copy, so changing a field of the copy does not change the original:
+
+```
+struct_object_is_a_value :: proc() Int ->
+    p := Person { age = 1, name = "Bob" }
+    q := p
+    q.age = 99
+    return p.age * 100 + q.age
+```
+
+`struct_object_is_a_value` returns 199. A struct can be a parameter and a returned value: `proc(person: Person) Person ->`. Two struct types are different types also when they have the same fields, so a `Person` is not accepted where a `Point` is wanted.
+
+A variable can be defined with a struct type and without a value, such as `p : Person`, and then it has the default value, see [Variables](#variables). A new value can be assigned to it later with `=`, which is how a variable can get one of several values depending on a condition:
+
+```
+late_initialization_of_struct_object :: proc(flag: Bool) Str ->
+    p : Person
+    if flag ->
+        p = Person { age = 30, name = "Bob" }
+    else ->
+        p = Person { age = 40, name = "Alice" }
+    return p.name
+```
+
+### Fields
+
+A field of a struct object is read by writing a dot and its name after the object, such as `p.age`. Fields are assigned to like variables, with `=` and with the operators `+=`, `-=`, `*=` and `/=` for an `Int`:
+
+```
+assign_field_of_struct_object :: proc() Int ->
+    p := Person { age = 30, name = "Bob" }
+    p.age = 31
+    p.age += 1
+    return p.age
+```
+
+`assign_field_of_struct_object` returns 32. A field can be a struct itself, and then the dots follow each other, such as `info.address.area_name`. A field is read or assigned through a variable, a parameter or an element of an array, such as `persons[0].age`, and not through the value of a call: `birthday(p).age` is an error, and has to be written with a variable that is given the result first. The same rules as for the variables apply to the assignment: a parameter and the iterator of a for statement are not assigned to, so neither is a field of one.
+
+### Structs in structs
+
+A field can be a struct that is defined by name:
+
+```
+Point :: struct ->
+    x: Int
+    y: Int
+
+Line :: struct ->
+    start: Point
+    end: Point
+```
+
+or a struct that is defined where the field is, which is written `struct ->` as the type of the field, with its fields one level deeper than the field:
+
+```
+Info :: struct ->
+    name: Str
+    age: Int
+    address: struct ->
+        area_name: Str
+        house_no: Int
+        district: Str
+```
+
+The value of a field that is a struct is a struct literal, which does not need the name of the struct when the field says which struct it is, and which is the only place where a literal without a name is allowed:
+
+```
+create_nested_struct_object :: proc() Str ->
+    info := Info {
+        name = "Bob",
+        age = 30,
+        address = {
+            area_name = "Downtown",
+            house_no = 123,
+            district = "Central",
+        },
+    }
+    return info.address.area_name
+```
+
+A field that is a struct and is left out has the default value of each of its own fields.
+
+### Structs in arrays
+
+The elements of an [array](#arrays) can be struct objects, and so can the elements of an array slice. The array literal gives them with struct literals, which can be on lines of their own with a comma after the last one:
+
+```
+create_array_of_struct_objects :: proc() Int ->
+    persons := [const]Person {
+        Person { age = 30, name = "Bob", },
+        Person { age = 25, name = "Alice", },
+        Person { age = 40, name = "Charlie", },
+    }
+    return persons[0].age
+```
+
+An element is a struct object, so `persons[1]` can be assigned a whole struct object, a field of an element is read and assigned with `persons[1].age`, a [for statement](#for-statements) over the array goes through the struct objects, and a range of them can be copied.
 
 ## Procedures
 
@@ -779,7 +934,8 @@ There is no shadowing of names so a name cannot be declared twice in the same sc
 - an attribute of a global variable is not `static`, or is given twice, or the global variable does not have the attribute `static`,
 - a `break` is not inside a loop or a scope, or a `continue` is not inside the block of a loop,
 - the label of a `break` or a `continue` is not the label of a statement that it is inside of, the label of a `continue` is not the one of a loop, or a statement has the label of a statement around it,
-- the name that an assignment assigns to is not a variable or a global variable, but a parameter or a constant, or the iterator of a for statement.
+- two fields of a struct have the same name,
+- the name that an assignment assigns to is not a variable or a global variable, but a parameter or a constant, or the iterator of a for statement, which includes a field that is assigned through a parameter or an iterator.
 
 Scope resolution is about names only. Whether the value of a name has the right type is checked separately for the target, see below.
 
@@ -823,7 +979,7 @@ The compiler has two modes: `run` prints the tokens and the syntax tree of a pro
 
 ### WebAssembly
 
-The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool` and `Str` are the only types that the target supports, and the arrays and array slices of `Int`.
+The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool` and `Str` are the basic types that the target supports, and then the structs, and the arrays and array slices of any of them.
 
 `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition, subtraction and multiplication wrap around on overflow. Division truncates toward zero, so `(0 - 7) / 2` is -3. It traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
 
@@ -840,9 +996,9 @@ A global variable is a mutable global of the module, or two when it is a `Str`, 
 
 The variables of a procedure are locals of its function, after the parameters, and a `Str` variable is two locals, like a `Str` parameter. The variables of the blocks of if statements and for statements are locals of the function too, each one a local of its own, after the ones above it, also when two variables have the same name in different blocks. The definition of a variable stores the initial value in them, and an assignment such as `x += 2` pushes the value of the variable, then the value, adds them and stores the result in the local of the variable. The assignment `x /= y` traps in the same cases as the division `x / y`.
 
-An array is stored in the memory of the module, on a stack that grows down from the end of the memory, and not in locals, because an array slice refers to elements by their address. A procedure that has array literals makes room for the elements of all of them when it starts, by moving a stack pointer, which is a mutable global of the module that comes after the globals of the program, and moves it back before it returns. The elements are `Int` values of 8 bytes. A variable of an array type is a local that holds the address of its first element, and its length is part of the program: the code that needs it, such as a bounds check, has it as a constant. An array literal stores each of its elements at its place with `i64.store`, and leaves the address of the first one, which is the stack pointer of the procedure plus the offset of the literal. The stack is 1 MiB. A call that would need more traps, by comparing the new stack pointer with the end of the stack. After a trap the stack pointer is not moved back, since nothing runs to do it, so an instance that has trapped has less stack left, and a program should make a new one.
+An array is stored in the memory of the module, on a stack that grows down from the end of the memory, and not in locals, because an array slice refers to elements by their address. A procedure that has array literals makes room for the elements of all of them when it starts, by moving a stack pointer, which is a mutable global of the module that comes after the globals of the program, and moves it back before it returns. Every value of an element takes 8 bytes in memory, also a 32-bit one, so an element takes 8 bytes for each value it is made of, see below for structs. A variable of an array type is a local that holds the address of its first element, and its length is part of the program: the code that needs it, such as a bounds check, has it as a constant. An array literal stores each of its elements at its place with `i64.store` or `i32.store`, and leaves the address of the first one, which is the stack pointer of the procedure plus the offset of the literal. The stack is 1 MiB. A call that would need more traps, by comparing the new stack pointer with the end of the stack. After a trap the stack pointer is not moved back, since nothing runs to do it, so an instance that has trapped has less stack left, and a program should make a new one.
 
-An array slice is two 32-bit integers (`i32`), like a `Str`: the address of its first element and its number of elements, and a parameter of that type is two WebAssembly parameters. A caller from JavaScript writes the elements as `Int` values, which are `BigInt64Array` elements, to the memory that the module exports as `memory`, and passes the address and the length:
+An array slice is two 32-bit integers (`i32`), like a `Str`: the address of its first element and its number of elements, and a parameter of that type is two WebAssembly parameters. A caller from JavaScript writes the elements, which are `BigInt64Array` elements for `Int` values, to the memory that the module exports as `memory`, and passes the address and the length:
 
 ```js
 new BigInt64Array(memory.buffer, 0, 3).set([10n, 20n, 30n]);
@@ -853,15 +1009,21 @@ An array is made into a slice where one is wanted by writing its length after it
 
 A for statement that goes through the elements of an array or a slice is the same three structured instructions as one with a range, with two 32-bit locals after the iterator: the address of the next element and the address after the last one. Before the loop the end is stored, which is the address plus the length times 8. The loop begins with a test that leaves the `block` with `br_if` when the next address is not below the end. The iterator is loaded from the next address, and the address moves up by 8 before the statements of the block, so what comes after the second `block`, where `continue` goes, is only the `br` back to the start of the `loop`.
 
+A struct is made of the values of its fields, one after the other, in the order of its definition, where a field that is a struct takes its own fields in its place, and nothing else: it has no header and no padding. So a `Person` is three values, the `i64` of the age and the `i32` address and `i32` length of the name. A parameter of a struct type is that many parameters, a variable is that many locals, and a procedure that returns a struct has that many results, which JavaScript receives as an array, in the order of the fields. Reading a field of a variable or a parameter is a `local.get` for each of its values, with no cost for the rest of the struct, and assigning to a field is a `local.set`; a struct literal pushes the values of the fields in the order of the struct, with the default value, which is zero, for the ones that it does not give. The values of a struct literal are written in the order of the fields of the struct, so a string in a literal can have its address in the data section before one that comes before it in the source, which the address of a string allows, since it is the length of the strings before it in the source. A struct in an array is in memory, with 8 bytes for each of its values, so `Person` takes 24 bytes there. The field of an element is read with a load at the address of the element plus 8 times the number of values before the field, and is assigned with a store there. An assignment of a whole struct to an element is a store of each of its values, with the last on the stack stored first, using a local to hold each value while the address is pushed below it. A default value is `i64.const 0` or `i32.const 0` for each value. A struct is not a function: the definition of one is a constant that has no code and no export.
+
 A module has a memory only when the program has a string literal, which includes the value of a global variable, or an array type, which includes the array literals and the array slices. The strings are at the start of the memory, and the stack of the arrays is after them. A procedure cannot be called `memory`, whether the module has one or not, because that is the name of the export.
 
 The target rejects a program that the parser accepts when:
 
-- a type, also the one of a global variable, is not `Int`, `Bool` or `Str`, or an array or an array slice of `Int`,
+- a type, also the one of a global variable, is not `Int`, `Bool`, `Str`, a struct that is defined, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
+- a struct contains itself, or has a field that is an array or an array slice,
+- a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field,
+- a field is accessed on a value that is not a struct, or does not exist, or is accessed through something that is not a variable, a parameter or an element of an array,
+- a value that is assigned with `=` is not of the type of the variable, the field or the element,
 - the type of a parameter is an array, or the type of a global variable is an array or an array slice,
 - an array literal has another number of elements than the length of its type, or a variable of an array type with a length has another number than that,
 - a variable of an array type is not given an array literal,
-- an element of an array literal, or the value that is assigned to an element, is not an `Int`,
+- an element of an array literal, or the value that is assigned to an element, is not of the type of the elements,
 - what is subscripted, sliced or gone through by a for statement, or what is copied to a range of elements, is not an array or an array slice, or an index or a bound is not an `Int`,
 - a name in an expression, or the initial value of a variable, is a procedure, which is not a value that the target can use yet,
 - the initial value of a global variable is not of the type that is written for the variable,

@@ -175,6 +175,8 @@ static Token_Type tokenizer_keyword_type(Str text) {
         return TOKEN_TYPE_KEYWORD_ELSE;
     } else if (str_equals(text, STR("return"))) {
         return TOKEN_TYPE_KEYWORD_RETURN;
+    } else if (str_equals(text, STR("struct"))) {
+        return TOKEN_TYPE_KEYWORD_STRUCT;
     } else if (str_equals(text, STR("true"))) {
         return TOKEN_TYPE_KEYWORD_TRUE;
     } else if (str_equals(text, STR("false"))) {
@@ -537,15 +539,20 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset += size_bytes;
         }
-        // The only token that starts with a `.` is `..<`, or `..<=` when an `=` follows it
-        // directly. A lone `.` or `..` is an unexpected character, since nothing else uses it yet.
+        // The tokens that start with a `.` are `..<`, or `..<=` when an `=` follows it directly,
+        // and the single dot of a field access. A `..` that is not followed by `<` is two dots,
+        // which the parser rejects.
         else if (character == '.') {
             bool is_range = offset + 2 < source.length && source.bytes[offset + 1] == '.' &&
                             source.bytes[offset + 2] == '<';
             if (is_range == false) {
-                result.status = TOKENIZE_STATUS_UNEXPECTED_CHARACTER;
-                result.error_offset = offset;
-                return result;
+                token_elements[result.tokens.length] = (Token){
+                    .token_type = TOKEN_TYPE_DOT,
+                    .source_offset = (uint32_t)offset,
+                };
+                result.tokens.length += 1;
+                offset += 1;
+                continue;
             }
 
             Token_Type token_type = TOKEN_TYPE_RANGE_EXCLUSIVE;

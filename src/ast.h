@@ -27,6 +27,9 @@ typedef enum {
     AST_NODE_TYPE_CONTINUE_STATEMENT,
     AST_NODE_TYPE_DIVISION,
     AST_NODE_TYPE_DIVISION_ASSIGNMENT,
+    AST_NODE_TYPE_FIELD,
+    AST_NODE_TYPE_FIELD_ACCESS,
+    AST_NODE_TYPE_FIELD_INITIALIZER,
     AST_NODE_TYPE_FOR_STATEMENT,
     AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION,
     AST_NODE_TYPE_IDENTIFIER,
@@ -47,6 +50,8 @@ typedef enum {
     AST_NODE_TYPE_SCOPE_STATEMENT,
     AST_NODE_TYPE_SLICE,
     AST_NODE_TYPE_STRING_LITERAL,
+    AST_NODE_TYPE_STRUCT_LITERAL,
+    AST_NODE_TYPE_STRUCT_TYPE,
     AST_NODE_TYPE_SUBSCRIPT,
     AST_NODE_TYPE_SUBTRACTION,
     AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT,
@@ -116,7 +121,7 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   the type of a parameter or of a variable, or it starts an array literal. How the length is
  *   given, and the length when it is a fixed one, is in the payload.
  * - `AST_NODE_TYPE_ASSIGNMENT`: two children, the target and the value, in that order. It is a
- *   plain `=`, which only an element can be assigned with, so the target is an
+ *   plain `=`. The target is an `AST_NODE_TYPE_IDENTIFIER`, an `AST_NODE_TYPE_FIELD_ACCESS`, an
  *   `AST_NODE_TYPE_SUBSCRIPT` or, for a range of elements, an `AST_NODE_TYPE_SLICE`. It is a
  *   statement of a procedure body.
  * - `AST_NODE_TYPE_ATTRIBUTE`: no children. One attribute of a definition, such as `static` in
@@ -143,7 +148,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   an expression of type `Bool` with the lowest precedence of the operators, so its operands are
  *   not comparisons. The operator is in the payload.
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: one child, the value that is bound to the name. It is
- *   an `AST_NODE_TYPE_PROCEDURE` or an `AST_NODE_TYPE_STRING_LITERAL`.
+ *   an `AST_NODE_TYPE_PROCEDURE`, an `AST_NODE_TYPE_STRING_LITERAL` or an
+ *   `AST_NODE_TYPE_STRUCT_TYPE`.
  * - `AST_NODE_TYPE_CONTINUE_STATEMENT`: no children, or one `AST_NODE_TYPE_LABEL` when the
  *   statement names the loop to go on with. It ends the current pass of the innermost loop that it
  *   is in, or of the labeled loop, and goes on with the next one. The word is in the payload. It is
@@ -152,6 +158,15 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_DIVISION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that is divided and gets the quotient, and the divisor, in that order. It is a
  *   statement of a procedure body.
+ * - `AST_NODE_TYPE_FIELD`: one child, the type of the field, which is an `AST_NODE_TYPE_TYPE_NAME`
+ *   or, for a field that is a struct of its own, an `AST_NODE_TYPE_STRUCT_TYPE`. The name of the
+ *   field is in the payload. It is a child of an `AST_NODE_TYPE_STRUCT_TYPE`.
+ * - `AST_NODE_TYPE_FIELD_ACCESS`: one child, the expression whose field is read, such as `p` in
+ *   `p.age`. The name of the field is in the payload. It is an expression, and it can be the
+ *   target of an assignment. Like a subscript it is made after its child.
+ * - `AST_NODE_TYPE_FIELD_INITIALIZER`: one child, the value of the field, which is an expression
+ *   or, for a field that is a struct, an `AST_NODE_TYPE_STRUCT_LITERAL` without a name. The name of
+ *   the field is in the payload. It is a child of an `AST_NODE_TYPE_STRUCT_LITERAL`.
  * - `AST_NODE_TYPE_FOR_STATEMENT`: two children, an `AST_NODE_TYPE_RANGE` and the
  *   `AST_NODE_TYPE_BLOCK` that runs once for each number of the range, in that order. Instead of
  *   the range the first child can be an expression, the array or array slice that the block runs
@@ -216,6 +231,14 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   the one at index 1 up to the one at index 3. It is an expression, and it can be the target of
  *   an `AST_NODE_TYPE_ASSIGNMENT`.
  * - `AST_NODE_TYPE_STRING_LITERAL`: no children.
+ * - `AST_NODE_TYPE_STRUCT_LITERAL`: one `AST_NODE_TYPE_FIELD_INITIALIZER` for each field that is
+ *   given a value, in the order of the source, which is not necessarily the order of the fields of
+ *   the struct. `Person { age = 30 }` is a struct literal. The name of the struct is in the
+ *   payload, with `bytes` NULL for the literal `{ ... }` of a field that is a struct, which gets
+ *   its type from the field. It is an expression.
+ * - `AST_NODE_TYPE_STRUCT_TYPE`: one `AST_NODE_TYPE_FIELD` for each field, in the order of the
+ *   source. It is the value of an `AST_NODE_TYPE_CONSTANT_DEFINITION` that defines a struct, or the
+ *   type of a field.
  * - `AST_NODE_TYPE_SUBSCRIPT`: two children, the array or array slice and the index of the element,
  *   in that order, each one an expression. `a[2]` is the element at index 2 of `a`. It is an
  *   expression, and it can be the target of an assignment.
@@ -225,7 +248,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   It is a statement of a procedure body.
  * - `AST_NODE_TYPE_TYPE_NAME`: no children.
  * - `AST_NODE_TYPE_VARIABLE_DEFINITION`: the initial value, preceded by the type, an
- *   `AST_NODE_TYPE_TYPE_NAME` or an `AST_NODE_TYPE_ARRAY_TYPE`, when the definition gives one.
+ *   `AST_NODE_TYPE_TYPE_NAME` or an `AST_NODE_TYPE_ARRAY_TYPE`, when the definition gives one. A
+ *   definition that gives a type can leave the value out, and then the type is its only child and
+ *   the variable gets the default value of the type.
  *   Without it the type is deduced from the value, so the value is the only child. The name is in
  *   the payload.
  */
@@ -277,7 +302,23 @@ typedef struct {
         struct {
             // Views the source text, like the other names.
             Str name;
+        } field;
+        struct {
+            // Views the source text, like the other names.
+            Str name;
+        } field_access;
+        struct {
+            // Views the source text, like the other names.
+            Str name;
+        } field_initializer;
+        struct {
+            // Views the source text, like the other names.
+            Str name;
         } for_statement;
+        struct {
+            // Views the source text. `bytes` is NULL for a literal that has no name.
+            Str name;
+        } struct_literal;
         struct {
             // The word `break` or `continue`, as a view of the source text, so that an error can
             // point at it.

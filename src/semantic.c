@@ -39,6 +39,7 @@ static bool             semantic_call_resolve       (Semantic_Analyzer *analyzer
                                                      Ast_Node_Index call);
 static Semantic_Binding semantic_definition_find    (Semantic_Analyzer const *analyzer, Str name);
 static bool             semantic_definitions_check  (Semantic_Analyzer *analyzer);
+static bool             semantic_fields_check       (Semantic_Analyzer *analyzer);
 static bool             semantic_fail               (Semantic_Analyzer *analyzer,
                                                      Semantic_Status status, Str subject);
 static bool             semantic_identifier_resolve (Semantic_Analyzer *analyzer,
@@ -102,6 +103,9 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
     // The definitions are checked before any name is looked up, so that a procedure can use a
     // constant that is defined below it, and so that a lookup finds the only definition of a name.
     bool is_ok = semantic_definitions_check(&analyzer);
+    if (is_ok) {
+        is_ok = semantic_fields_check(&analyzer);
+    }
 
     Ast_Node_Index definition = node_elements[root].first_child;
     // Every definition is a distinct node, so there cannot be more than there are nodes.
@@ -155,6 +159,35 @@ static bool semantic_definitions_check(Semantic_Analyzer *analyzer) {
         }
 
         definition = analyzer->nodes[definition].next_sibling;
+    }
+
+    return true;
+}
+
+/**
+ * Checks that no two fields of a struct have the same name, in every struct of the module, also
+ * the ones that are the type of a field. Returns false after it recorded an error.
+ */
+static bool semantic_fields_check(Semantic_Analyzer *analyzer) {
+    for (size_t i = 0; i < analyzer->node_count; i += 1) {
+        if (analyzer->nodes[i].node_type != AST_NODE_TYPE_STRUCT_TYPE) {
+            continue;
+        }
+
+        Ast_Node_Index field = analyzer->nodes[i].first_child;
+        // Every field is a distinct node, so there cannot be more than there are nodes.
+        for (size_t j = 0; j < analyzer->node_count && field != AST_NODE_INDEX_NONE; j += 1) {
+            Str name = analyzer->nodes[field].payload.field.name;
+            Ast_Node_Index other = analyzer->nodes[field].next_sibling;
+            for (size_t k = 0; k < analyzer->node_count && other != AST_NODE_INDEX_NONE; k += 1) {
+                if (str_equals(analyzer->nodes[other].payload.field.name, name)) {
+                    return semantic_fail(analyzer, SEMANTIC_STATUS_FIELD_NAME_DUPLICATE,
+                                         analyzer->nodes[other].payload.field.name);
+                }
+                other = analyzer->nodes[other].next_sibling;
+            }
+            field = analyzer->nodes[field].next_sibling;
+        }
     }
 
     return true;
@@ -488,10 +521,20 @@ static bool semantic_identifier_resolve(Semantic_Analyzer *analyzer, Ast_Node_In
 
     analyzer->bindings[identifier] = binding;
 
-    // The first child of an assignment is the name that is assigned to.
-    bool is_target = statement != AST_NODE_INDEX_NONE &&
-                     ast_node_type_is_assignment(analyzer->nodes[statement].node_type) &&
-                     analyzer->nodes[statement].first_child == identifier;
+    // The first child of an assignment is the name that is assigned to, or the field of a struct
+    // that is, which is found through the name of the variable that has it.
+    bool is_target = false;
+    if (statement != AST_NODE_INDEX_NONE &&
+        ast_node_type_is_assignment(analyzer->nodes[statement].node_type)) {
+        Ast_Node_Index target = analyzer->nodes[statement].first_child;
+        // Each step goes down one level, so there are fewer steps than nodes.
+        for (size_t i = 0; i < analyzer->node_count &&
+                           analyzer->nodes[target].node_type == AST_NODE_TYPE_FIELD_ACCESS;
+             i += 1) {
+            target = analyzer->nodes[target].first_child;
+        }
+        is_target = target == identifier;
+    }
     if (is_target && binding.kind != SEMANTIC_BINDING_KIND_VARIABLE &&
         binding.kind != SEMANTIC_BINDING_KIND_GLOBAL) {
         return semantic_fail(analyzer, SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE, name);
@@ -575,7 +618,10 @@ static Semantic_Binding semantic_definition_find(Semantic_Analyzer const *analyz
 
         if (is_global) {
             global_count += 1;
-        } else {
+        } else if (analyzer->nodes[analyzer->nodes[definition].first_child].node_type !=
+                   AST_NODE_TYPE_STRUCT_TYPE) {
+            // A struct is a type and becomes no function, so it takes no place among the
+            // constants.
             constant_count += 1;
         }
         definition = analyzer->nodes[definition].next_sibling;

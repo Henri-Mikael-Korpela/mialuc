@@ -17,6 +17,8 @@ typedef enum {
     TOKEN_TYPE_BRACKET_LEFT = '[',
     TOKEN_TYPE_BRACKET_RIGHT = ']',
     TOKEN_TYPE_COMMA = ',',
+    // The dot of a field access, as in `p.age`. `..<` and `..<=` are the tokens of a range.
+    TOKEN_TYPE_DOT = '.',
     TOKEN_TYPE_EQUALS = '=',
     TOKEN_TYPE_GREATER = '>',
     // Starts the attribute list of a definition, such as `#(static)`.
@@ -51,6 +53,7 @@ typedef enum {
     TOKEN_TYPE_KEYWORD_OR,
     TOKEN_TYPE_KEYWORD_PROC,
     TOKEN_TYPE_KEYWORD_RETURN,
+    TOKEN_TYPE_KEYWORD_STRUCT,
     TOKEN_TYPE_KEYWORD_TRUE,
     // `@` and a name with nothing in between, such as `@outer`. The name without the `@` is in the
     // `identifier` payload.
