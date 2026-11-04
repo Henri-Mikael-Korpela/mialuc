@@ -3,7 +3,8 @@
 ## Table of contents
 
 - [Introduction](#introduction)
-- [Indentation](#indentation)
+- [Source code representation](#source-code-representation)
+- [Lines, spaces and indentation](#lines-spaces-and-indentation)
 - [Keywords](#keywords)
 - [Identifiers](#identifiers)
 - [Constants](#constants)
@@ -39,9 +40,37 @@ Where does the name Mialu come from? It comes from the first syllables of my chi
 
 Mialu source code is a sequence of Unicode characters, encoded in UTF-8. Source code files should have the `.mu` extension.
 
-## Indentation
+## Lines, spaces and indentation
+
+Mialu doesn't use curly brackets for defining blocks. Mialu borrows its indentation-based syntax from Python, so the structure of the code is defined by its indentation, like this
+
+```
+foo :: proc() Int ->
+    x := 4
+    if x > 5 ->
+        return 1
+    return 2
+```
+
+instead of this:
+
+```
+foo :: proc() Int {
+    x := 4
+    if x > 5 {
+        return 1
+    }
+    return 2
+}
+```
+
+A line that is indented deeper than the previous one starts a block, and a line that is indented less ends it. Instead of using colon (`:`) to start a block, Mialu uses `->` after the header of a statement to starts a block or scope.
+
+The reason for using indentation-based approach for blocks is to both make the code more readable and to reduce the amount of vertical space, which is a problem in languages that use curly brackets (and especially if you use language like C# where a general convention is to set each curly bracket on its own line).
 
 Indentation is made of spaces only. Tabs are not allowed in indentation. Each level of indentation is exactly 4 spaces, so the number of leading spaces on a line must be a multiple of 4. Blank lines, including lines of only spaces, are ignored.
+
+Mialu doesn't need semicolons (`;`) to separate statements. Each statement is on its own line, and a line can have at most one statement.
 
 ## Keywords
 
