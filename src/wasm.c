@@ -74,15 +74,16 @@ typedef struct {
  * body, a block for the statements of the block, and an if statement for its conditions and
  * blocks. `if_count` is how many `if` instructions of an if statement are open, which is one for
  * the `if` and one for each `else if`, and which the end of the statement closes. A block that is
- * the body of a for statement has the statement in `for_statement`.
+ * the body of a for statement, a loop statement or a scope statement has the statement in `statement`.
  */
 typedef struct {
     Ast_Node_Index node;
     Ast_Node_Index next;
     size_t if_count;
-    // The for statement or loop statement whose block this is, or `AST_NODE_INDEX_NONE`. The end of
-    // the block writes what the loop does after each pass, and closes the loop.
-    Ast_Node_Index for_statement;
+    // The for statement, loop statement or scope statement whose block this is, or
+    // `AST_NODE_INDEX_NONE`. The end of the block of a loop writes what the loop does after each
+    // pass, and closes the loop, and the end of the block of a scope closes its `block`.
+    Ast_Node_Index statement;
 } Wasm_Statement_Frame;
 
 static Wasm_Value_Type wasm_binding_value_type                (Wasm_Builder const *builder,
@@ -707,7 +708,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
         .node = procedure,
         .next = builder->nodes[procedure].first_child,
         .if_count = 0,
-        .for_statement = AST_NODE_INDEX_NONE,
+        .statement = AST_NODE_INDEX_NONE,
     };
     size_t frame_count = 1;
 
@@ -721,8 +722,11 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             for (size_t i = 0; i < frame->if_count; i += 1) {
                 wasm_write_byte(&builder->writer, WASM_OPCODE_END);
             }
-            if (frame->for_statement != AST_NODE_INDEX_NONE) {
-                wasm_build_code_section_body_for_end(builder, definition, frame->for_statement);
+            if (frame->statement != AST_NODE_INDEX_NONE &&
+                builder->nodes[frame->statement].node_type == AST_NODE_TYPE_SCOPE_STATEMENT) {
+                wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+            } else if (frame->statement != AST_NODE_INDEX_NONE) {
+                wasm_build_code_section_body_for_end(builder, definition, frame->statement);
             }
             frame_count -= 1;
             continue;
@@ -762,7 +766,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                     .node = child,
                     .next = child_node->first_child,
                     .if_count = 0,
-                    .for_statement = AST_NODE_INDEX_NONE,
+                    .statement = AST_NODE_INDEX_NONE,
                 };
                 frame_count += 1;
             }
@@ -788,12 +792,25 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 .node = child,
                 .next = child_node->first_child,
                 .if_count = 0,
-                .for_statement = AST_NODE_INDEX_NONE,
+                .statement = AST_NODE_INDEX_NONE,
             };
             frame_count += 1;
         } else if (child_node->node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
                    child_node->node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
             wasm_build_code_section_body_jump(builder, frames, frame_count, child);
+        } else if (child_node->node_type == AST_NODE_TYPE_SCOPE_STATEMENT) {
+            // A scope is a `block` that `break` leaves with a `br`.
+            wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
+            wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+            Ast_Node_Index block = child_node->last_child;
+            assert(frame_count < WASM_STATEMENT_DEPTH_MAX);
+            frames[frame_count] = (Wasm_Statement_Frame){
+                .node = block,
+                .next = builder->nodes[block].first_child,
+                .if_count = 0,
+                .statement = child,
+            };
+            frame_count += 1;
         } else if (child_node->node_type == AST_NODE_TYPE_LOOP_STATEMENT) {
             // The same three structured instructions as a for statement has, without a test.
             wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
@@ -808,7 +825,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 .node = block,
                 .next = builder->nodes[block].first_child,
                 .if_count = 0,
-                .for_statement = child,
+                .statement = child,
             };
             frame_count += 1;
         } else if (child_node->node_type == AST_NODE_TYPE_FOR_STATEMENT) {
@@ -821,7 +838,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 .node = block,
                 .next = builder->nodes[block].first_child,
                 .if_count = 0,
-                .for_statement = child,
+                .statement = child,
             };
             frame_count += 1;
         } else {
@@ -963,12 +980,13 @@ static size_t wasm_variable_slot_count(Wasm_Builder const *builder, Ast_Node_Ind
 
 /**
  * Writes the `br` of the `break` or `continue` statement `jump`. A loop is written as a `block`
- * that holds a `loop` that holds a second `block`, around the statements of its block. `continue`
- * leaves the inner `block`, which is followed by what the loop does after every pass, and `break`
- * leaves the outer one. The label is the number of structured instructions between the jump and
- * the target: the `if` instructions that are open inside the loop, which are counted by the frames
- * above the one of the innermost loop, and then the inner `block` for a `break`, and the `loop`
- * itself.
+ * that holds a `loop` that holds a second `block`, around the statements of its block, and a scope
+ * as a `block`. `continue` leaves the inner `block` of a loop, which is followed by what the loop
+ * does after every pass, and `break` leaves the outer one, or the `block` of a scope. The label is
+ * the number of structured instructions between the jump and the target, which the analysis bound
+ * the jump to: going down the frames from the jump, each `if` that is open counts one, a scope
+ * that is passed counts one, and a loop that is passed counts three, until the frame of the target.
+ * Then the inner `block` and the `loop` are counted for a `break` out of a loop.
  */
 static void wasm_build_code_section_body_jump(Wasm_Builder *builder,
                                               Wasm_Statement_Frame const *frames,
@@ -976,19 +994,26 @@ static void wasm_build_code_section_body_jump(Wasm_Builder *builder,
     assert(frame_count > 0);
     assert(builder->nodes[jump].node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
            builder->nodes[jump].node_type == AST_NODE_TYPE_CONTINUE_STATEMENT);
+    assert(builder->bindings[jump].kind == SEMANTIC_BINDING_KIND_JUMP_TARGET);
 
-    // Each frame above the loop is a block of an if statement, or the if statement itself.
-    size_t open_ifs = 0;
+    Ast_Node_Index target = builder->bindings[jump].target;
+
+    size_t label = 0;
     size_t i = frame_count;
-    while (i > 0 && frames[i - 1].for_statement == AST_NODE_INDEX_NONE) {
-        open_ifs += frames[i - 1].if_count;
+    // The analysis checked that the target is around the jump, so it is found before the bottom.
+    while (i > 0 && frames[i - 1].statement != target) {
+        label += frames[i - 1].if_count;
+        if (frames[i - 1].statement != AST_NODE_INDEX_NONE) {
+            bool is_scope = builder->nodes[frames[i - 1].statement].node_type ==
+                            AST_NODE_TYPE_SCOPE_STATEMENT;
+            label += is_scope ? 1 : 3;
+        }
         i -= 1;
     }
-    // The analysis checked that the jump is in a loop.
     assert(i > 0);
 
-    size_t label = open_ifs;
-    if (builder->nodes[jump].node_type == AST_NODE_TYPE_BREAK_STATEMENT) {
+    bool is_loop = builder->nodes[target].node_type != AST_NODE_TYPE_SCOPE_STATEMENT;
+    if (is_loop && builder->nodes[jump].node_type == AST_NODE_TYPE_BREAK_STATEMENT) {
         label += 2;
     }
     wasm_write_byte(&builder->writer, WASM_OPCODE_BR);
@@ -1381,6 +1406,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
     case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_IF_STATEMENT:
+    case AST_NODE_TYPE_LABEL:
     case AST_NODE_TYPE_LOOP_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
@@ -1388,6 +1414,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_PROCEDURE:
     case AST_NODE_TYPE_RANGE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
+    case AST_NODE_TYPE_SCOPE_STATEMENT:
     case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
     case AST_NODE_TYPE_TYPE_NAME:
     case AST_NODE_TYPE_VARIABLE_DEFINITION:
@@ -1673,6 +1700,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_CONTINUE_STATEMENT:
         case AST_NODE_TYPE_FOR_STATEMENT:
         case AST_NODE_TYPE_IF_STATEMENT:
+        case AST_NODE_TYPE_LABEL:
         case AST_NODE_TYPE_LOOP_STATEMENT:
         case AST_NODE_TYPE_MODULE:
         case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
@@ -1680,6 +1708,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_PROCEDURE:
         case AST_NODE_TYPE_RANGE:
         case AST_NODE_TYPE_RETURN_STATEMENT:
+        case AST_NODE_TYPE_SCOPE_STATEMENT:
         case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
         case AST_NODE_TYPE_TYPE_NAME:
         case AST_NODE_TYPE_VARIABLE_DEFINITION:
@@ -1728,8 +1757,9 @@ static void wasm_build_code_section_body_identifier(Wasm_Builder *builder,
         wasm_write_byte(&builder->writer, WASM_OPCODE_CALL);
         wasm_write_unsigned(&builder->writer, binding.position);
         break;
+    case SEMANTIC_BINDING_KIND_JUMP_TARGET:
     case SEMANTIC_BINDING_KIND_NONE:
-        // A name that is used was bound by the analysis.
+        // A name that is used was bound by the analysis, and is not a jump.
         assert(false);
         break;
     case SEMANTIC_BINDING_KIND_PARAMETER: {
@@ -1772,6 +1802,7 @@ static Wasm_Value_Type wasm_binding_value_type(Wasm_Builder const *builder,
         // A procedure has no value that can be passed around yet.
         return WASM_VALUE_TYPE_NONE;
     }
+    case SEMANTIC_BINDING_KIND_JUMP_TARGET:
     case SEMANTIC_BINDING_KIND_NONE:
         assert(false);
         break;

@@ -27,6 +27,7 @@ typedef enum {
     AST_NODE_TYPE_IDENTIFIER,
     AST_NODE_TYPE_IF_STATEMENT,
     AST_NODE_TYPE_INTEGER_LITERAL,
+    AST_NODE_TYPE_LABEL,
     AST_NODE_TYPE_LOOP_STATEMENT,
     AST_NODE_TYPE_MODULE,
     AST_NODE_TYPE_MULTIPLICATION,
@@ -37,6 +38,7 @@ typedef enum {
     AST_NODE_TYPE_PROCEDURE,
     AST_NODE_TYPE_RANGE,
     AST_NODE_TYPE_RETURN_STATEMENT,
+    AST_NODE_TYPE_SCOPE_STATEMENT,
     AST_NODE_TYPE_STRING_LITERAL,
     AST_NODE_TYPE_SUBTRACTION,
     AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT,
@@ -84,12 +86,15 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   expression of type `Bool` and the target requires both operands to be `Bool`. It binds
  *   tighter than `AST_NODE_TYPE_OR` and looser than `AST_NODE_TYPE_NOT`.
  * - `AST_NODE_TYPE_BLOCK`: one child per statement. It is the body of a branch of an
- *   `AST_NODE_TYPE_IF_STATEMENT`, and it has its own scope: a variable defined in it cannot be
+ *   `AST_NODE_TYPE_IF_STATEMENT`, of a loop or of a scope statement, and it has its own scope: a variable defined in it cannot be
  *   used below it. Its payload has the end of the block, see below.
  * - `AST_NODE_TYPE_BOOL_LITERAL`: no children. It is `true` or `false`, which is in the payload.
- * - `AST_NODE_TYPE_BREAK_STATEMENT`: no children. It leaves the innermost loop that it is in, which
- *   is an `AST_NODE_TYPE_FOR_STATEMENT` or an `AST_NODE_TYPE_LOOP_STATEMENT`. The word is in the
- *   payload. It is a statement of a procedure body.
+ * - `AST_NODE_TYPE_BREAK_STATEMENT`: no children, or one `AST_NODE_TYPE_LABEL` when the statement
+ *   names the scope to leave. Without a label it leaves the innermost loop or scope that it is in,
+ *   which is an `AST_NODE_TYPE_FOR_STATEMENT`, an `AST_NODE_TYPE_LOOP_STATEMENT` or an
+ *   `AST_NODE_TYPE_SCOPE_STATEMENT`, and the blocks of if statements are not among them. With a
+ *   label it leaves the scope with that label. The word is in the payload. It is a statement of a
+ *   procedure body.
  * - `AST_NODE_TYPE_CALL`: one child per argument, in the order of the source, each one an
  *   expression. It is a call of the procedure that the name in the payload stands for, and an
  *   expression like the others. The node is made before its arguments. Whether it has a value
@@ -120,6 +125,10 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   and for every `else if`, and then, when `has_else` is set in the payload, the last child is the
  *   `AST_NODE_TYPE_BLOCK` of the `else`.
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.
+ * - `AST_NODE_TYPE_LABEL`: no children. The name of a label, without the `@` that it is written
+ *   with, in the payload. It is the first child of an `AST_NODE_TYPE_SCOPE_STATEMENT` that has a
+ *   label, which declares it, and the only child of an `AST_NODE_TYPE_BREAK_STATEMENT` that names
+ *   one, which uses it. Labels are not names of variables, so the analysis does not bind them.
  * - `AST_NODE_TYPE_LOOP_STATEMENT`: one child, the `AST_NODE_TYPE_BLOCK` that runs again and again
  *   until a `break` or a `return` leaves it. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition. It is the root of the tree.
@@ -143,6 +152,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   range is in the payload. It is the child of an `AST_NODE_TYPE_FOR_STATEMENT`, and not an
  *   expression itself.
  * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child, the returned value.
+ * - `AST_NODE_TYPE_SCOPE_STATEMENT`: an optional `AST_NODE_TYPE_LABEL`, and then the
+ *   `AST_NODE_TYPE_BLOCK` that runs once, in a scope of its own. A `break` inside it leaves it.
+ *   It is a statement of a procedure body.
  * - `AST_NODE_TYPE_STRING_LITERAL`: no children.
  * - `AST_NODE_TYPE_SUBTRACTION`: two children, the minuend and the subtrahend, in that order.
  * - `AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
@@ -214,6 +226,10 @@ typedef struct {
         struct {
             int64_t value;
         } integer_literal;
+        struct {
+            // Views the source text, like the other names. Without the `@`.
+            Str name;
+        } label;
         struct {
             Str name;
         } parameter;

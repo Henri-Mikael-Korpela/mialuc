@@ -18,6 +18,17 @@ typedef struct {
     Semantic_Status status;
 } Semantic_Analyzer;
 
+/**
+ * A loop or a scope that a `break` can leave: the node of the statement, the index after the last
+ * node of its block, and its label, which has `bytes` NULL when it has none.
+ */
+typedef struct {
+    Ast_Node_Index node;
+    Ast_Node_Index end;
+    Str label;
+    bool is_loop;
+} Semantic_Jump_Target;
+
 static bool             semantic_call_resolve       (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index procedure,
                                                      Ast_Node_Index call);
@@ -29,6 +40,9 @@ static bool             semantic_identifier_resolve (Semantic_Analyzer *analyzer
                                                      Ast_Node_Index procedure,
                                                      Ast_Node_Index statement,
                                                      Ast_Node_Index identifier);
+static bool             semantic_jump_resolve       (Semantic_Analyzer *analyzer,
+                                                     Semantic_Jump_Target const *targets,
+                                                     size_t target_count, Ast_Node_Index jump);
 static bool             semantic_parameter_check    (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index procedure,
                                                      Ast_Node_Index parameter);
@@ -143,27 +157,46 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
 
     Ast_Node_Index end = ast_procedure_end(analyzer->nodes, analyzer->node_count, procedure);
     Ast_Node_Index statement = AST_NODE_INDEX_NONE;
-    // The ends of the blocks of the loops that the pass is in, the innermost last.
-    Ast_Node_Index loop_ends[AST_BLOCK_DEPTH_MAX] = {0};
-    size_t loop_count = 0;
+    // The loops and the scopes that the pass is in, the innermost last. A `break` leaves one of
+    // them, and a `continue` goes on with the innermost loop.
+    Semantic_Jump_Target targets[AST_BLOCK_DEPTH_MAX] = {0};
+    size_t target_count = 0;
     for (Ast_Node_Index current = procedure + 1; current < end; current += 1) {
         Ast_Node_Type node_type = analyzer->nodes[current].node_type;
 
-        while (loop_count > 0 && loop_ends[loop_count - 1] <= current) {
-            loop_count -= 1;
+        while (target_count > 0 && targets[target_count - 1].end <= current) {
+            target_count -= 1;
         }
-        if (node_type == AST_NODE_TYPE_FOR_STATEMENT || node_type == AST_NODE_TYPE_LOOP_STATEMENT) {
-            // The block is the last child, and a loop is inside a block of its own, so there is room.
-            assert(loop_count < AST_BLOCK_DEPTH_MAX);
+        if (node_type == AST_NODE_TYPE_FOR_STATEMENT || node_type == AST_NODE_TYPE_LOOP_STATEMENT ||
+            node_type == AST_NODE_TYPE_SCOPE_STATEMENT) {
+            // The block is the last child, and a statement is inside a block of its own, so there
+            // is room.
+            assert(target_count < AST_BLOCK_DEPTH_MAX);
             Ast_Node_Index block = analyzer->nodes[current].last_child;
-            loop_ends[loop_count] = analyzer->nodes[block].payload.block.end;
-            loop_count += 1;
+            Ast_Node_Index first = analyzer->nodes[current].first_child;
+            Str label = STR_EMPTY;
+            if (node_type == AST_NODE_TYPE_SCOPE_STATEMENT &&
+                analyzer->nodes[first].node_type == AST_NODE_TYPE_LABEL) {
+                label = analyzer->nodes[first].payload.label.name;
+                // A label means one scope wherever it can be used.
+                for (size_t i = 0; i < target_count; i += 1) {
+                    if (targets[i].label.bytes != NULL && str_equals(targets[i].label, label)) {
+                        return semantic_fail(analyzer, SEMANTIC_STATUS_LABEL_DUPLICATE, label);
+                    }
+                }
+            }
+            targets[target_count] = (Semantic_Jump_Target){
+                .node = current,
+                .end = analyzer->nodes[block].payload.block.end,
+                .label = label,
+                .is_loop = node_type != AST_NODE_TYPE_SCOPE_STATEMENT,
+            };
+            target_count += 1;
         }
         if (node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
             node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
-            if (loop_count == 0) {
-                return semantic_fail(analyzer, SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP,
-                                     analyzer->nodes[current].payload.jump.keyword);
+            if (semantic_jump_resolve(analyzer, targets, target_count, current) == false) {
+                return false;
             }
             statement = current;
         }
@@ -198,6 +231,59 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
         }
     }
 
+    return true;
+}
+
+/**
+ * Binds the `break` or `continue` statement `jump` to the statement that it leaves or continues,
+ * out of `targets`, which are the loops and scopes that it is in, the innermost last. A `break`
+ * without a label leaves the innermost one, a `break` with a label leaves the scope with that
+ * label, and a `continue` goes on with the innermost loop, also when scopes are inside it. Returns
+ * false after it recorded an error.
+ */
+static bool semantic_jump_resolve(Semantic_Analyzer *analyzer, Semantic_Jump_Target const *targets,
+                                  size_t target_count, Ast_Node_Index jump) {
+    assert(jump < analyzer->node_count);
+    assert(target_count <= AST_BLOCK_DEPTH_MAX);
+
+    Ast_Node const *jump_node = &analyzer->nodes[jump];
+    bool is_break = jump_node->node_type == AST_NODE_TYPE_BREAK_STATEMENT;
+    assert(is_break || jump_node->node_type == AST_NODE_TYPE_CONTINUE_STATEMENT);
+
+    Ast_Node_Index found = AST_NODE_INDEX_NONE;
+    if (jump_node->first_child != AST_NODE_INDEX_NONE) {
+        Str label = analyzer->nodes[jump_node->first_child].payload.label.name;
+        for (size_t i = target_count; i > 0 && found == AST_NODE_INDEX_NONE; i -= 1) {
+            Semantic_Jump_Target const *target = &targets[i - 1];
+            if (target->label.bytes != NULL && str_equals(target->label, label)) {
+                found = target->node;
+            }
+        }
+        if (found == AST_NODE_INDEX_NONE) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_LABEL_UNKNOWN, label);
+        }
+    } else {
+        for (size_t i = target_count; i > 0 && found == AST_NODE_INDEX_NONE; i -= 1) {
+            Semantic_Jump_Target const *target = &targets[i - 1];
+            if (is_break || target->is_loop) {
+                found = target->node;
+            }
+        }
+        if (found == AST_NODE_INDEX_NONE && is_break) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_BREAK_OUTSIDE_SCOPE,
+                                 jump_node->payload.jump.keyword);
+        }
+        if (found == AST_NODE_INDEX_NONE) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP,
+                                 jump_node->payload.jump.keyword);
+        }
+    }
+
+    analyzer->bindings[jump] = (Semantic_Binding){
+        .target = found,
+        .position = 0,
+        .kind = SEMANTIC_BINDING_KIND_JUMP_TARGET,
+    };
     return true;
 }
 

@@ -36,6 +36,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_IDENTIFIER:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_INTEGER_LITERAL:
+    case AST_NODE_TYPE_LABEL:
     case AST_NODE_TYPE_LOOP_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION:
@@ -45,6 +46,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_PROCEDURE:
     case AST_NODE_TYPE_RANGE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
+    case AST_NODE_TYPE_SCOPE_STATEMENT:
     case AST_NODE_TYPE_STRING_LITERAL:
     case AST_NODE_TYPE_SUBTRACTION:
     case AST_NODE_TYPE_TYPE_NAME:
@@ -172,6 +174,10 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_INTEGER_LITERAL:
             printf("INTEGER_LITERAL %" PRId64 "\n", node.payload.integer_literal.value);
             break;
+        case AST_NODE_TYPE_LABEL:
+            printf("LABEL %.*s\n", (int)node.payload.label.name.length,
+                   node.payload.label.name.bytes);
+            break;
         case AST_NODE_TYPE_LOOP_STATEMENT:
             printf("LOOP_STATEMENT\n");
             break;
@@ -207,6 +213,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_RETURN_STATEMENT:
             printf("RETURN_STATEMENT\n");
+            break;
+        case AST_NODE_TYPE_SCOPE_STATEMENT:
+            printf("SCOPE_STATEMENT\n");
             break;
         case AST_NODE_TYPE_STRING_LITERAL:
             printf("STRING_LITERAL \"%.*s\"\n", (int)node.payload.string_literal.text.length,

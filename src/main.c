@@ -464,6 +464,10 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_KEYWORD_TRUE:
             printf("KEYWORD_TRUE\n");
             break;
+        case TOKEN_TYPE_LABEL:
+            printf("LABEL %.*s\n", (int)token.payload.identifier.text.length,
+                   token.payload.identifier.text.bytes);
+            break;
         case TOKEN_TYPE_LESS:
             printf("LESS\n");
             break;
@@ -540,6 +544,10 @@ static void main_run_command_report_tokenize_error(char const *path, Str source,
     case TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE:
         fprintf(stderr, "%s:%zu:%zu: integer literal does not fit in 64 bits.\n", path, line,
                 column);
+        break;
+    case TOKENIZE_STATUS_LABEL_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: a label is '@' directly followed by a name that is not a "
+                "reserved word.\n", path, line, column);
         break;
     case TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH:
         fprintf(stderr, "%s:%zu:%zu: a string cannot contain a backslash, because escape "
@@ -713,6 +721,19 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     case SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not inside a loop.\n", path, position.line, position.column,
                 subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_BREAK_OUTSIDE_SCOPE:
+        fprintf(stderr, "%s:%zu:%zu: 'break' is not inside a loop or a scope.\n", path,
+                position.line, position.column);
+        break;
+    case SEMANTIC_STATUS_LABEL_DUPLICATE:
+        fprintf(stderr, "%s:%zu:%zu: the label '%.*s' is already used by a scope around this "
+                "one.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_LABEL_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not the label of a scope around this 'break'.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_OK:
         assert(false);

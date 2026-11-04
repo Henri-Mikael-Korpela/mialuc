@@ -22,6 +22,7 @@ static bool   char_is_lower     (char character);
 static bool   char_is_upper     (char character);
 static bool   char_is_whitespace(char character);
 static size_t utf8_sequence_size(Str text, size_t offset);
+static Token_Type tokenizer_keyword_type(Str text);
 
 /**
  * Returns the number of bytes of the UTF-8 encoded character that starts at `offset` in `text`,
@@ -111,6 +112,41 @@ static bool char_is_whitespace(char character) {
         character == '\r' ||
         character == '\n'
     );
+}
+
+/**
+ * Returns the keyword token type of `text`, or `TOKEN_TYPE_IDENTIFIER` when it is not a reserved
+ * word. `not` followed by `=` must be handled before, because that is the token `not=`.
+ */
+static Token_Type tokenizer_keyword_type(Str text) {
+    if (str_equals(text, STR("proc"))) {
+        return TOKEN_TYPE_KEYWORD_PROC;
+    } else if (str_equals(text, STR("break"))) {
+        return TOKEN_TYPE_KEYWORD_BREAK;
+    } else if (str_equals(text, STR("continue"))) {
+        return TOKEN_TYPE_KEYWORD_CONTINUE;
+    } else if (str_equals(text, STR("for"))) {
+        return TOKEN_TYPE_KEYWORD_FOR;
+    } else if (str_equals(text, STR("in"))) {
+        return TOKEN_TYPE_KEYWORD_IN;
+    } else if (str_equals(text, STR("if"))) {
+        return TOKEN_TYPE_KEYWORD_IF;
+    } else if (str_equals(text, STR("else"))) {
+        return TOKEN_TYPE_KEYWORD_ELSE;
+    } else if (str_equals(text, STR("return"))) {
+        return TOKEN_TYPE_KEYWORD_RETURN;
+    } else if (str_equals(text, STR("true"))) {
+        return TOKEN_TYPE_KEYWORD_TRUE;
+    } else if (str_equals(text, STR("false"))) {
+        return TOKEN_TYPE_KEYWORD_FALSE;
+    } else if (str_equals(text, STR("not"))) {
+        return TOKEN_TYPE_KEYWORD_NOT;
+    } else if (str_equals(text, STR("and"))) {
+        return TOKEN_TYPE_KEYWORD_AND;
+    } else if (str_equals(text, STR("or"))) {
+        return TOKEN_TYPE_KEYWORD_OR;
+    }
+    return TOKEN_TYPE_IDENTIFIER;
 }
 
 Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
@@ -327,40 +363,44 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             // Keywords are scanned like identifiers and told apart afterwards, so that a longer
             // identifier such as `returned` is not split into a keyword and a remainder.
-            Token_Type token_type = TOKEN_TYPE_IDENTIFIER;
-            if (str_equals(text, STR("proc"))) {
-                token_type = TOKEN_TYPE_KEYWORD_PROC;
-            } else if (str_equals(text, STR("break"))) {
-                token_type = TOKEN_TYPE_KEYWORD_BREAK;
-            } else if (str_equals(text, STR("continue"))) {
-                token_type = TOKEN_TYPE_KEYWORD_CONTINUE;
-            } else if (str_equals(text, STR("for"))) {
-                token_type = TOKEN_TYPE_KEYWORD_FOR;
-            } else if (str_equals(text, STR("in"))) {
-                token_type = TOKEN_TYPE_KEYWORD_IN;
-            } else if (str_equals(text, STR("if"))) {
-                token_type = TOKEN_TYPE_KEYWORD_IF;
-            } else if (str_equals(text, STR("else"))) {
-                token_type = TOKEN_TYPE_KEYWORD_ELSE;
-            } else if (str_equals(text, STR("return"))) {
-                token_type = TOKEN_TYPE_KEYWORD_RETURN;
-            } else if (str_equals(text, STR("true"))) {
-                token_type = TOKEN_TYPE_KEYWORD_TRUE;
-            } else if (str_equals(text, STR("false"))) {
-                token_type = TOKEN_TYPE_KEYWORD_FALSE;
-            } else if (str_equals(text, STR("not"))) {
-                // Reserved. A `not` followed by `=` was taken above as the token `not=`.
-                token_type = TOKEN_TYPE_KEYWORD_NOT;
-            } else if (str_equals(text, STR("and"))) {
-                token_type = TOKEN_TYPE_KEYWORD_AND;
-            } else if (str_equals(text, STR("or"))) {
-                token_type = TOKEN_TYPE_KEYWORD_OR;
-            }
+            Token_Type token_type = tokenizer_keyword_type(text);
 
             token_elements[result.tokens.length] = (Token){
                 .token_type = token_type,
                 .source_offset = (uint32_t)offset,
                 .payload.identifier.text = text,
+            };
+            result.tokens.length += 1;
+            offset = end;
+        }
+        // A label is an `@` directly followed by a name: no space may be in between. A reserved
+        // word is not a name, as it is not for a variable.
+        else if (character == '@') {
+            size_t end = offset + 1;
+            bool is_name_start = end < source.length &&
+                                 (char_is_letter(source.bytes[end]) || source.bytes[end] == '_');
+            if (is_name_start == false) {
+                result.status = TOKENIZE_STATUS_LABEL_INVALID;
+                result.error_offset = offset;
+                return result;
+            }
+            while (end < source.length && (char_is_letter(source.bytes[end]) ||
+                                           char_is_digit(source.bytes[end]) ||
+                                           source.bytes[end] == '_')) {
+                end += 1;
+            }
+
+            Str name = str_make(source.bytes + offset + 1, end - offset - 1);
+            if (tokenizer_keyword_type(name) != TOKEN_TYPE_IDENTIFIER) {
+                result.status = TOKENIZE_STATUS_LABEL_INVALID;
+                result.error_offset = offset;
+                return result;
+            }
+
+            token_elements[result.tokens.length] = (Token){
+                .token_type = TOKEN_TYPE_LABEL,
+                .source_offset = (uint32_t)offset,
+                .payload.identifier.text = name,
             };
             result.tokens.length += 1;
             offset = end;

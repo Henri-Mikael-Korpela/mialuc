@@ -157,6 +157,7 @@
         .token-function { color: #dcdcaa; }
         .token-instruction { color: #9cdcfe; }
         .token-keyword { color: #569cd6; }
+        .token-label { color: #c586c0; }
         .token-number { color: #b5cea8; }
         .token-string { color: #ce9178; }
         .token-type { color: #4ec9b0; }
@@ -291,6 +292,7 @@
             "boolean logic": "boolean-logic",
             procedures: "procedures",
             loops: "loops",
+            "control flow": "control-flow",
             "scope resolution": "scope-resolution",
         };
         const EXAMPLE_DEFAULT = "sum";
@@ -309,6 +311,7 @@
         const HIGHLIGHT_RULES = {
             mialu: [
                 ["string", /"[^"\\\n]*"/],
+                ["label", /@[A-Za-z_]\w*/],
                 ["keyword", /\b(?:proc|return|if|else|for|in|break|continue|true|false|and|or)\b|\bnot\b(?!=)/],
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
                 ["function", /\b[A-Za-z_]\w*(?=\()/],

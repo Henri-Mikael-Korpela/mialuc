@@ -43,6 +43,9 @@ typedef enum {
     TOKEN_TYPE_KEYWORD_PROC,
     TOKEN_TYPE_KEYWORD_RETURN,
     TOKEN_TYPE_KEYWORD_TRUE,
+    // `@` and a name with nothing in between, such as `@outer`. The name without the `@` is in the
+    // `identifier` payload.
+    TOKEN_TYPE_LABEL,
     TOKEN_TYPE_LESS_EQUALS,
     TOKEN_TYPE_MINUS_EQUALS,
     TOKEN_TYPE_NOT_EQUALS,
@@ -95,6 +98,8 @@ typedef enum {
     TOKENIZE_STATUS_INDENTATION_TAB,
     TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID,
     TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE,
+    // An `@` that is not directly followed by a name, or whose name is a reserved word.
+    TOKENIZE_STATUS_LABEL_INVALID,
     // A backslash in a string. It is kept for escape sequences, which the language does not have
     // yet, so that strings written today keep their meaning when it gets them.
     TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH,

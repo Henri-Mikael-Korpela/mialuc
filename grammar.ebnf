@@ -43,7 +43,10 @@
      - The first number and the end of a range must be `Int`, and the iterator of a for statement is
        a variable of its block that cannot be assigned to, and that no other name may have. A name
        in the range cannot be the iterator of the same statement. All are checked after parsing.
-     - A `break` or a `continue` must be inside the block of a for statement or a loop statement.
+     - A `break` must be inside a loop or a scope, and a `continue` must be inside the block of a
+       for statement or a loop statement. The label of a `break` must be the label of a scope that
+       the `break` is inside of, and a scope cannot have the label of a scope around it. Labels are
+       separate from the names of variables.
      - The condition of an if statement must be a `Bool`, so a number or a string is not one, and
        the operands of a comparison must both be `Int`, or both `Bool` for `==` and `not=`. A
        variable defined in a block can only be used in that block. All are checked after parsing.
@@ -82,11 +85,12 @@ procedure_body = block_1 ;
    statement, which is indented one level deeper than the `if`. A block has at least one
    statement, and blank lines are allowed before, between and after them, so a blank line before an
    `else` belongs to the block above it. The rules go down to the fourth level, which is the body
-   and three if, for or loop statements inside each other. The compiler accepts 32 levels of blocks, and
-   deeper nesting would be more sets of rules like these. *)
+   and three if, for, loop or scope statements inside each other. The compiler accepts 32 levels of
+   blocks, and deeper nesting would be more sets of rules like these. *)
 block_1 = { blank_line } , statement_1 , { blank_line | statement_1 } ;
 statement_1 =
-    simple_statement_1 | if_statement_1 | for_statement_1 | loop_statement_1 ;
+    simple_statement_1 | if_statement_1 | for_statement_1 | loop_statement_1 |
+    scope_statement_1 ;
 simple_statement_1 =
     indentation_1 ,
     ( return_statement | variable_definition | assignment | call | jump_statement ) , ws ,
@@ -100,10 +104,12 @@ for_statement_1 =
     indentation_1 , "for" , required_space , name , required_space , "in" , required_space ,
     range , branch_end , block_2 ;
 loop_statement_1 = indentation_1 , "for" , branch_end , block_2 ;
+scope_statement_1 = indentation_1 , [ label ] , branch_end , block_2 ;
 
 block_2 = { blank_line } , statement_2 , { blank_line | statement_2 } ;
 statement_2 =
-    simple_statement_2 | if_statement_2 | for_statement_2 | loop_statement_2 ;
+    simple_statement_2 | if_statement_2 | for_statement_2 | loop_statement_2 |
+    scope_statement_2 ;
 simple_statement_2 =
     indentation_2 ,
     ( return_statement | variable_definition | assignment | call | jump_statement ) , ws ,
@@ -117,10 +123,12 @@ for_statement_2 =
     indentation_2 , "for" , required_space , name , required_space , "in" , required_space ,
     range , branch_end , block_3 ;
 loop_statement_2 = indentation_2 , "for" , branch_end , block_3 ;
+scope_statement_2 = indentation_2 , [ label ] , branch_end , block_3 ;
 
 block_3 = { blank_line } , statement_3 , { blank_line | statement_3 } ;
 statement_3 =
-    simple_statement_3 | if_statement_3 | for_statement_3 | loop_statement_3 ;
+    simple_statement_3 | if_statement_3 | for_statement_3 | loop_statement_3 |
+    scope_statement_3 ;
 simple_statement_3 =
     indentation_3 ,
     ( return_statement | variable_definition | assignment | call | jump_statement ) , ws ,
@@ -134,6 +142,7 @@ for_statement_3 =
     indentation_3 , "for" , required_space , name , required_space , "in" , required_space ,
     range , branch_end , block_4 ;
 loop_statement_3 = indentation_3 , "for" , branch_end , block_4 ;
+scope_statement_3 = indentation_3 , [ label ] , branch_end , block_4 ;
 
 block_4 = { blank_line } , statement_4 , { blank_line | statement_4 } ;
 statement_4 = simple_statement_4 ;
@@ -145,6 +154,12 @@ simple_statement_4 =
 (* A loop statement runs its block again and again, until a `break` or a `return` leaves it. It is a
    `for` without an iterator and a range. *)
 
+(* A scope statement is a block that runs once, in a scope of its own: a `->` alone on a line, with
+   the block indented one level deeper. A `break` inside it leaves it. It can have a label, which
+   is written `@` and a name with no space in between, such as `@outer ->`. A `break` names the
+   label with the name only, without the `@`. *)
+label = "@" , name ;
+
 (* A for statement runs its block once for each number of a range. The name is the iterator, which is
    an `Int` that exists only in the block. The range has a first number and an end, and `..<` leaves
    the end out of the range, while `..<=` keeps it. Both are expressions that the compiler requires
@@ -152,10 +167,12 @@ simple_statement_4 =
    it is the block. *)
 range = expression , ws , ( "..<=" | "..<" ) , ws , expression ;
 
-(* `break` leaves the innermost loop, and `continue` goes on with the next pass of it. The compiler
-   requires them to be inside the block of a for statement or a loop statement, which may be inside
-   if statements. *)
-jump_statement = "break" | "continue" ;
+(* `break` leaves the innermost loop or scope, or the scope that has the label after it, and
+   `continue` goes on with the next pass of the innermost loop. The compiler requires a `break` to be
+   inside a loop or a scope and the label to be one of a scope around it, and a `continue` to be
+   inside the block of a for statement or a loop statement, which may have if statements and scopes
+   in between. *)
+jump_statement = "break" , [ required_space , name ] | "continue" ;
 
 (* The `if` with its first condition, any number of `else if`, and at most one `else` that comes
    last. The `->` ends the line, and what is indented below it is the block of the branch. *)

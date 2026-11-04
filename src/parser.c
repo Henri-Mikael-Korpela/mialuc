@@ -54,6 +54,7 @@ static Ast_Node_Index parse_sum                 (Parser *parser);
 static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
 static Ast_Node_Index parse_for_statement       (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_jump_statement      (Parser *parser);
+static Ast_Node_Index parse_scope_statement     (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_identifier          (Parser *parser);
 static Ast_Node_Index parse_integer_literal     (Parser *parser);
 static bool           parse_line_end_expect     (Parser *parser);
@@ -320,9 +321,12 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
         Ast_Node_Index parent = blocks[block_count - 1].node;
         Token_Type next = parse_token_current(parser)->token_type;
         if (next == TOKEN_TYPE_KEYWORD_IF || next == TOKEN_TYPE_KEYWORD_ELSE ||
-            next == TOKEN_TYPE_KEYWORD_FOR) {
+            next == TOKEN_TYPE_KEYWORD_FOR || next == TOKEN_TYPE_ARROW ||
+            next == TOKEN_TYPE_LABEL) {
             Ast_Node_Index block = AST_NODE_INDEX_NONE;
-            if (next == TOKEN_TYPE_KEYWORD_IF) {
+            if (next == TOKEN_TYPE_ARROW || next == TOKEN_TYPE_LABEL) {
+                block = parse_scope_statement(parser, parent);
+            } else if (next == TOKEN_TYPE_KEYWORD_IF) {
                 block = parse_if_statement(parser, parent);
             } else if (next == TOKEN_TYPE_KEYWORD_FOR) {
                 block = parse_for_statement(parser, parent);
@@ -494,8 +498,52 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
 }
 
 /**
- * Parses `break` or `continue` and the end of the line. The node has no children, and keeps the
- * word so that the analysis can point at it. Whether it is inside a loop is for the analysis.
+ * Parses the header line of a scope statement, `->` or `@label ->`, and appends the statement that
+ * it starts to `parent`. The statement gets the label, if there is one, and an empty block, which is
+ * returned so that the caller can fill it with the lines that follow.
+ */
+static Ast_Node_Index parse_scope_statement(Parser *parser, Ast_Node_Index parent) {
+    assert(parser->status == PARSE_STATUS_OK);
+
+    Token const *label = parse_token_current(parser);
+    assert(label->token_type == TOKEN_TYPE_ARROW || label->token_type == TOKEN_TYPE_LABEL);
+
+    Ast_Node_Index statement = parse_node_make(parser, AST_NODE_TYPE_SCOPE_STATEMENT);
+    if (statement == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, parent, statement);
+
+    if (label->token_type == TOKEN_TYPE_LABEL) {
+        Ast_Node_Index label_node = parse_node_make(parser, AST_NODE_TYPE_LABEL);
+        if (label_node == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[label_node].payload.label.name = label->payload.identifier.text;
+        parse_node_append_child(parser, statement, label_node);
+        parse_token_advance(parser);
+    }
+
+    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
+    if (block == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, statement, block);
+    return block;
+}
+
+/**
+ * Parses `break` or `continue` and the end of the line. A `break` may name the scope to leave
+ * with the name of its label, without the `@`, which becomes its child. The node keeps the word so
+ * that the analysis can point at it. Whether the jump is inside a loop or a scope, and whether the
+ * label exists, is for the analysis.
  */
 static Ast_Node_Index parse_jump_statement(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -514,6 +562,20 @@ static Ast_Node_Index parse_jump_statement(Parser *parser) {
     }
     parser->nodes[jump].payload.jump.keyword = keyword->payload.identifier.text;
     parse_token_advance(parser);
+
+    Token const *name = parse_token_current(parser);
+    if (node_type == AST_NODE_TYPE_BREAK_STATEMENT && name->token_type == TOKEN_TYPE_IDENTIFIER) {
+        Ast_Node_Index label = parse_node_make(parser, AST_NODE_TYPE_LABEL);
+        if (label == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[label].payload.label.name = name->payload.identifier.text;
+        parse_node_append_child(parser, jump, label);
+        parse_token_advance(parser);
+    } else if (node_type == AST_NODE_TYPE_BREAK_STATEMENT && name->token_type == TOKEN_TYPE_LABEL) {
+        // The prefix is only for declaring a label.
+        return parse_fail(parser, STR("the name of a label without '@'"));
+    }
 
     if (parse_line_end_expect(parser) == false) {
         return AST_NODE_INDEX_NONE;

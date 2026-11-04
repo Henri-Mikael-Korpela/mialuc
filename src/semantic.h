@@ -12,6 +12,9 @@
 // node has that is not a use of a name.
 typedef enum {
     SEMANTIC_BINDING_KIND_CONSTANT,
+    // A `break` or a `continue`: the target is the loop or scope statement that it leaves or goes
+    // on with.
+    SEMANTIC_BINDING_KIND_JUMP_TARGET,
     SEMANTIC_BINDING_KIND_NONE,
     SEMANTIC_BINDING_KIND_PARAMETER,
     SEMANTIC_BINDING_KIND_VARIABLE,
@@ -46,8 +49,14 @@ typedef enum {
     SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE,
     SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE,
     SEMANTIC_STATUS_IDENTIFIER_UNKNOWN,
-    // A `break` or a `continue` that is not in the block of a loop.
+    // A `break` that is not in a loop or a scope.
+    SEMANTIC_STATUS_BREAK_OUTSIDE_SCOPE,
+    // A `continue` that is not in the block of a loop.
     SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP,
+    // A scope with the label of a scope around it.
+    SEMANTIC_STATUS_LABEL_DUPLICATE,
+    // A `break` with a label that no scope around it has.
+    SEMANTIC_STATUS_LABEL_UNKNOWN,
     SEMANTIC_STATUS_OK,
     SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE,
     SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS,
@@ -89,8 +98,13 @@ typedef struct {
  * The name in a call, such as `f(1)`, must stand for a constant that is a procedure. It is looked
  * up among the constants only, because no other name can be the same as one of them.
  *
- * A `break` or a `continue` must be in the block of a for statement or a loop, also when it is in
- * the block of an if statement inside it. It belongs to the innermost loop.
+ * A scope statement is a block of its own, and a `break` leaves the innermost loop or scope that it
+ * is in, also when it is in the block of an if statement inside it, which is not one to leave. A
+ * `break` with a label leaves the scope with that label, which must be around it. Labels are
+ * separate from the other names, but a scope cannot have the label of a scope around it. A
+ * `continue` must be in the block of a for statement or a loop, and goes on with the innermost
+ * one, also when scopes are in between. The jump is bound to the statement that it leaves or goes
+ * on with, see `SEMANTIC_BINDING_KIND_JUMP_TARGET`.
  *
  * An assignment, such as `x += 1`, uses the name that it assigns to like any other use of a name,
  * and the name must stand for a variable: a parameter or a constant cannot be assigned to.
