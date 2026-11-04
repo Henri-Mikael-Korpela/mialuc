@@ -38,6 +38,16 @@ python scripts/verify_grammar.py test-code/main-function.mu
 
 The script uses only the Python standard library, so there is nothing to install. It prints `OK`, or the line and column where the file stops matching and what the grammar expected there. It exits with 0 when every file matches, 1 when a file does not, and 2 when the grammar or the arguments are wrong.
 
+## Language specification
+
+The table of contents of the [language specification](docs/mialu-programming-language.md) is generated from its section titles. After adding or renaming a section, run:
+
+```
+python scripts/update_language_spec_table_of_contents.py
+```
+
+Add `--check` to only test whether it is up to date. The script uses only the Python standard library.
+
 ## Editor support
 
 [editors/vscode](editors/vscode) is a VS Code extension that highlights the reserved words, the operators, labels, attribute lists such as `#(static)`, strings and calls in `.mu` files. See its [README](editors/vscode/README.md) for how to install it.
