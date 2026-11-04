@@ -58,6 +58,10 @@ typedef enum {
     SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE,
     // Two fields of one struct with the same name. The subject is the second one.
     SEMANTIC_STATUS_FIELD_NAME_DUPLICATE,
+    // A second `import foreign js`. The subject is the name of its object.
+    SEMANTIC_STATUS_FOREIGN_IMPORT_DUPLICATE,
+    // A foreign procedure without an `import foreign js` before it. The subject is its name.
+    SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING,
     // A global variable without the `static` attribute. The subject is its name.
     SEMANTIC_STATUS_GLOBAL_NOT_STATIC,
     SEMANTIC_STATUS_IDENTIFIER_UNKNOWN,
@@ -119,6 +123,11 @@ typedef struct {
  * are not names in a scope, and must only differ from each other in the struct. The names of types
  * and of the fields of a literal or an access are not looked up here, because whether they stand
  * for something is for the target to check.
+ *
+ * Foreign procedures, which a `foreign js ->` block declares, are constants like the others and
+ * are called the same way. They need an `import foreign js "name"` that says where they come from,
+ * once and above all of them, because the object that it names is where the target looks for every
+ * one of them.
  *
  * The name in a call, such as `f(1)`, must stand for a constant that is a procedure. It is looked
  * up among the definitions of the module only, because no other name can be the same as one of

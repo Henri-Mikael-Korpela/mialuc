@@ -46,6 +46,9 @@ static void           parse_block_close         (Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_block_open          (Parser *parser, Ast_Node_Index statement);
 static Ast_Node_Index parse_branch              (Parser *parser, Ast_Node_Index statement);
 static Ast_Node_Index parse_definition          (Parser *parser);
+static bool           parse_foreign_block       (Parser *parser, Ast_Node_Index module);
+static Ast_Node_Index parse_foreign_import      (Parser *parser);
+static bool           parse_foreign_target_expect(Parser *parser);
 static Ast_Node_Index parse_else_branch         (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_if_statement        (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_bool_literal        (Parser *parser);
@@ -72,7 +75,8 @@ static void           parse_node_append_child   (Parser *parser, Ast_Node_Index 
                                                  Ast_Node_Index child);
 static Ast_Node_Index parse_node_make           (Parser *parser, Ast_Node_Type node_type);
 static Ast_Node_Index parse_parameter           (Parser *parser);
-static Ast_Node_Index parse_procedure           (Parser *parser, uint32_t indentation_level);
+static Ast_Node_Index parse_procedure           (Parser *parser, uint32_t indentation_level,
+                                         bool is_foreign);
 static bool           parse_procedure_body      (Parser *parser, Ast_Node_Index procedure,
                                                  uint32_t indentation_level);
 static bool           parse_procedure_parameters(Parser *parser, Ast_Node_Index procedure);
@@ -142,6 +146,17 @@ static Ast_Node_Index parse_module(Parser *parser) {
             break;
         }
 
+        // A `foreign` block declares several procedures at once, so it appends them itself. The
+        // token after the indentation tells it from any other definition.
+        if (parse_token_current(parser)->token_type == TOKEN_TYPE_INDENTATION &&
+            parser->token_index + 1 < parser->token_count &&
+            parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_KEYWORD_FOREIGN) {
+            if (parse_foreign_block(parser, module) == false) {
+                return AST_NODE_INDEX_NONE;
+            }
+            continue;
+        }
+
         Ast_Node_Index definition = parse_definition(parser);
         if (definition == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
@@ -166,6 +181,11 @@ static Ast_Node_Index parse_definition(Parser *parser) {
         return parse_fail(parser, STR("no indentation"));
     }
     parse_token_advance(parser);
+
+    // `import foreign js "name"` is not a definition: it has no name of its own.
+    if (parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_IMPORT) {
+        return parse_foreign_import(parser);
+    }
 
     // Expect a definition to start with an identifier.
     Token const *name = parse_token_current(parser);
@@ -213,7 +233,7 @@ static Ast_Node_Index parse_definition(Parser *parser) {
             return AST_NODE_INDEX_NONE;
         }
     } else {
-        value = parse_procedure(parser, INDENTATION_LEVEL_TOP);
+        value = parse_procedure(parser, INDENTATION_LEVEL_TOP, false);
     }
     if (value == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
@@ -222,6 +242,148 @@ static Ast_Node_Index parse_definition(Parser *parser) {
 
     assert(parser->nodes[definition].first_child == value);
     return definition;
+}
+
+/**
+ * Parses `import foreign js "name"`. The current token is `import`. The node has the name between
+ * the quotes in its payload. `js` is the only target, so `foreign` and `js` are checked here and
+ * not stored.
+ */
+static Ast_Node_Index parse_foreign_import(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_IMPORT);
+
+    Ast_Node_Index import = parse_node_make(parser, AST_NODE_TYPE_FOREIGN_IMPORT);
+    if (import == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_token_advance(parser);
+
+    if (parse_token_expect(parser, TOKEN_TYPE_KEYWORD_FOREIGN, STR("'foreign'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_foreign_target_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Token const *module_name = parse_token_current(parser);
+    if (module_name->token_type != TOKEN_TYPE_STRING_LITERAL) {
+        return parse_fail(parser, STR("the name of the object to import from, in quotes"));
+    }
+    parser->nodes[import].payload.foreign_import.module_name =
+        module_name->payload.string_literal.text;
+    parse_token_advance(parser);
+
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return import;
+}
+
+/**
+ * Consumes the name of the target of a foreign import or block, which must be `js`, because
+ * JavaScript is the only language that Mialu can import from. It is an ordinary name and not a
+ * keyword, so that programs can have a variable called `js`. Returns false after it recorded an
+ * error.
+ */
+static bool parse_foreign_target_expect(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+
+    Token const *target = parse_token_current(parser);
+    if (target->token_type != TOKEN_TYPE_IDENTIFIER ||
+        str_equals(target->payload.identifier.text, STR("js")) == false) {
+        // The false return value reports the failure, so the node index is not needed.
+        (void)parse_fail(parser, STR("'js', the only foreign target"));
+        return false;
+    }
+
+    parse_token_advance(parser);
+    return true;
+}
+
+/**
+ * Parses `foreign js ->` and the procedures below it, one on each line, indented one level:
+ * `name :: proc(parameters) Type -> ...`. Each becomes a constant definition that is appended to
+ * `module`, like any other, so the block has no node of its own. The current token is the
+ * indentation of the `foreign` line. Returns false after it recorded an error.
+ */
+static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_INDENTATION);
+
+    if (parse_token_current(parser)->payload.indentation.level != INDENTATION_LEVEL_TOP) {
+        // The false return value reports the failure, so the node index is not needed.
+        (void)parse_fail(parser, STR("no indentation"));
+        return false;
+    }
+    parse_token_advance(parser);
+
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_FOREIGN);
+    parse_token_advance(parser);
+    if (parse_foreign_target_expect(parser) == false) {
+        return false;
+    }
+    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
+        return false;
+    }
+    if (parse_line_end_expect(parser) == false) {
+        return false;
+    }
+
+    // Every procedure consumes at least its indentation token, so there are fewer of them than
+    // tokens, which bounds the loop. It stops at the first line that is not indented.
+    size_t procedure_count = 0;
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        Token const *line_start = parse_token_current(parser);
+        if (line_start->token_type != TOKEN_TYPE_INDENTATION) {
+            break;
+        }
+        if (line_start->payload.indentation.level == INDENTATION_LEVEL_TOP) {
+            break;
+        }
+        if (line_start->payload.indentation.level != INDENTATION_LEVEL_TOP + 1) {
+            // The false return value reports the failure, so the node index is not needed.
+            (void)parse_fail(parser, STR("a line that is not indented deeper"));
+            return false;
+        }
+        parse_token_advance(parser);
+
+        Token const *name = parse_token_current(parser);
+        if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+            // The false return value reports the failure, so the node index is not needed.
+            (void)parse_fail(parser, STR("the name of a foreign procedure"));
+            return false;
+        }
+        Ast_Node_Index definition = parse_node_make(parser, AST_NODE_TYPE_CONSTANT_DEFINITION);
+        if (definition == AST_NODE_INDEX_NONE) {
+            return false;
+        }
+        parser->nodes[definition].payload.constant_definition.name = name->payload.identifier.text;
+        parse_token_advance(parser);
+
+        // `::` is two separator tokens, one after the other.
+        if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("'::'")) == false) {
+            return false;
+        }
+        if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("'::'")) == false) {
+            return false;
+        }
+
+        Ast_Node_Index procedure = parse_procedure(parser, INDENTATION_LEVEL_TOP + 1, true);
+        if (procedure == AST_NODE_INDEX_NONE) {
+            return false;
+        }
+        parse_node_append_child(parser, definition, procedure);
+        parse_node_append_child(parser, module, definition);
+        procedure_count += 1;
+    }
+
+    if (procedure_count == 0) {
+        // The false return value reports the failure, so the node index is not needed.
+        (void)parse_fail(parser, STR("an indented foreign procedure"));
+        return false;
+    }
+    return true;
 }
 
 /**
@@ -336,7 +498,13 @@ static bool parse_attributes(Parser *parser, Ast_Node_Index definition) {
     return true;
 }
 
-static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level) {
+/**
+ * Parses a procedure: `proc(parameters) Type ->` and its body. With `is_foreign` the body is the
+ * `...` that stands for code which is not in the program, and nothing else is on the line, as in a
+ * `foreign js ->` block. Without it the body is the indented statements below.
+ */
+static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level,
+                                      bool is_foreign) {
     assert(indentation_level < UINT32_MAX);
     assert(parser->status == PARSE_STATUS_OK);
 
@@ -368,6 +536,20 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
 
     if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
         return AST_NODE_INDEX_NONE;
+    }
+    if (is_foreign) {
+        Ast_Node_Index body = parse_node_make(parser, AST_NODE_TYPE_FOREIGN_BODY);
+        if (body == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        if (parse_token_expect(parser, TOKEN_TYPE_ELLIPSIS, STR("'...'")) == false) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, procedure, body);
+        if (parse_line_end_expect(parser) == false) {
+            return AST_NODE_INDEX_NONE;
+        }
+        return procedure;
     }
     if (parse_procedure_body(parser, procedure, indentation_level) == false) {
         return AST_NODE_INDEX_NONE;

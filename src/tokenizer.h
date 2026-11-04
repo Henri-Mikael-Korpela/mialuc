@@ -35,6 +35,9 @@ typedef enum {
     // above the ASCII range so that it cannot be the value of a single-character token:
     TOKEN_TYPE_ARROW = 256,
     TOKEN_TYPE_ASTERISK_EQUALS,
+    // `...`, which stands where the body of a procedure would be, for a procedure that is defined
+    // elsewhere.
+    TOKEN_TYPE_ELLIPSIS,
     TOKEN_TYPE_EQUALS_EQUALS,
     TOKEN_TYPE_GREATER_EQUALS,
     TOKEN_TYPE_IDENTIFIER,
@@ -47,7 +50,9 @@ typedef enum {
     TOKEN_TYPE_KEYWORD_ELSE,
     TOKEN_TYPE_KEYWORD_FALSE,
     TOKEN_TYPE_KEYWORD_FOR,
+    TOKEN_TYPE_KEYWORD_FOREIGN,
     TOKEN_TYPE_KEYWORD_IF,
+    TOKEN_TYPE_KEYWORD_IMPORT,
     TOKEN_TYPE_KEYWORD_IN,
     TOKEN_TYPE_KEYWORD_NOT,
     TOKEN_TYPE_KEYWORD_OR,

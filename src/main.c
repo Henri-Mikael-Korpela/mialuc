@@ -415,6 +415,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_DOT:
             printf("DOT\n");
             break;
+        case TOKEN_TYPE_ELLIPSIS:
+            printf("ELLIPSIS\n");
+            break;
         case TOKEN_TYPE_END:
             printf("END\n");
             break;
@@ -465,8 +468,14 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_KEYWORD_FOR:
             printf("KEYWORD_FOR\n");
             break;
+        case TOKEN_TYPE_KEYWORD_FOREIGN:
+            printf("KEYWORD_FOREIGN\n");
+            break;
         case TOKEN_TYPE_KEYWORD_IF:
             printf("KEYWORD_IF\n");
+            break;
+        case TOKEN_TYPE_KEYWORD_IMPORT:
+            printf("KEYWORD_IMPORT\n");
             break;
         case TOKEN_TYPE_KEYWORD_IN:
             printf("KEYWORD_IN\n");
@@ -798,6 +807,15 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     case SEMANTIC_STATUS_FIELD_NAME_DUPLICATE:
         fprintf(stderr, "%s:%zu:%zu: the struct already has a field called '%.*s'.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_FOREIGN_IMPORT_DUPLICATE:
+        fprintf(stderr, "%s:%zu:%zu: the program already imports foreign procedures, and can do "
+                "it once only.\n", path, position.line, position.column);
+        break;
+    case SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING:
+        fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' needs an 'import foreign js' "
+                "above it.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case SEMANTIC_STATUS_GLOBAL_NOT_STATIC:
         fprintf(stderr, "%s:%zu:%zu: global variable '%.*s' must have the attribute #(static).\n",

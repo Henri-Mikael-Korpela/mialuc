@@ -19,6 +19,9 @@ enum {
     WASM_EXPORT_KIND_FUNCTION = 0x00,
     WASM_EXPORT_KIND_MEMORY = 0x02,
 
+    // The kind of thing that an import brings in. Only functions are imported.
+    WASM_IMPORT_KIND_FUNCTION = 0x00,
+
     // The flag of a global that its instructions can change, as opposed to 0x00 for one that is
     // fixed.
     WASM_GLOBAL_MUTABLE = 0x01,
@@ -96,6 +99,7 @@ enum {
     WASM_SECTION_ID_EXPORT = 7,
     WASM_SECTION_ID_FUNCTION = 3,
     WASM_SECTION_ID_GLOBAL = 6,
+    WASM_SECTION_ID_IMPORT = 2,
     WASM_SECTION_ID_MEMORY = 5,
     WASM_SECTION_ID_TYPE = 1,
 

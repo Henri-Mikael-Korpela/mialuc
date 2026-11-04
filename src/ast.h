@@ -31,6 +31,8 @@ typedef enum {
     AST_NODE_TYPE_FIELD_ACCESS,
     AST_NODE_TYPE_FIELD_INITIALIZER,
     AST_NODE_TYPE_FOR_STATEMENT,
+    AST_NODE_TYPE_FOREIGN_BODY,
+    AST_NODE_TYPE_FOREIGN_IMPORT,
     AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION,
     AST_NODE_TYPE_IDENTIFIER,
     AST_NODE_TYPE_IF_STATEMENT,
@@ -174,6 +176,15 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   variable of type `Int` that exists only in the block, and it cannot be assigned to. The nodes
  *   of the range come before the block, so the iterator is not in scope in the range. It is a
  *   statement of a procedure body.
+ * - `AST_NODE_TYPE_FOREIGN_BODY`: no children. The `...` that takes the place of the statements of a
+ *   procedure that is declared in a `foreign js ->` block: its code is not in the program but is
+ *   provided from outside. It is the only child after the parameters of such an
+ *   `AST_NODE_TYPE_PROCEDURE`, see `ast_procedure_is_foreign`.
+ * - `AST_NODE_TYPE_FOREIGN_IMPORT`: no children. `import foreign js "functions"`: the program
+ *   gets the foreign procedures that its `foreign js ->` blocks declare from the JavaScript object
+ *   that has the name between the quotes, which is in the payload. `js` is the only target
+ *   there is, so the node does not store it. It is a child of the `AST_NODE_TYPE_MODULE`, and not
+ *   a definition: it has no name.
  * - `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`: a global variable, which is defined at file scope.
  *   Its children are one `AST_NODE_TYPE_ATTRIBUTE` for each attribute of its attribute list, in the
  *   order of the source, then the type, an `AST_NODE_TYPE_TYPE_NAME` or an
@@ -200,8 +211,10 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_LOOP_STATEMENT`: one child, the `AST_NODE_TYPE_BLOCK` that runs again and again
  *   until a `break` or a `return` leaves it. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition, which is an
- *   `AST_NODE_TYPE_CONSTANT_DEFINITION` or an `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`. It is the
- *   root of the tree.
+ *   `AST_NODE_TYPE_CONSTANT_DEFINITION` or an `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`, and one
+ *   per `import foreign`, which is an `AST_NODE_TYPE_FOREIGN_IMPORT`. A procedure that a
+ *   `foreign js ->` block declares is a constant definition of the module like any other, so the
+ *   block itself has no node. It is the root of the tree.
  * - `AST_NODE_TYPE_MULTIPLICATION`: two children, the left and the right operand, in that order.
  * - `AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that gets the product, and the factor that it is multiplied by, in that order. It
@@ -216,7 +229,7 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   `AST_NODE_TYPE_ARRAY_TYPE`.
  * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
  *   body, which are variable definitions, assignments, if statements, loops, jumps and return
- *   statements. The
+ *   statements. A foreign procedure has one `AST_NODE_TYPE_FOREIGN_BODY` instead of statements. The
  *   return type is in the payload.
  * - `AST_NODE_TYPE_RANGE`: two children, the first number and the end of the range, in that order,
  *   each one an expression (the target requires them to be `Int`). Whether the end is part of the
@@ -316,6 +329,12 @@ typedef struct {
             Str name;
         } for_statement;
         struct {
+            // The bytes between the quotes, as a view of the source text: the name of the object
+            // that the foreign procedures are properties of. It is valid UTF-8, and `bytes` is
+            // never NULL.
+            Str module_name;
+        } foreign_import;
+        struct {
             // Views the source text. `bytes` is NULL for a literal that has no name.
             Str name;
         } struct_literal;
@@ -371,6 +390,12 @@ STATIC_ASSERT(sizeof(Ast_Node) == 32, ast_node_size_is_32_bytes);
  * the children of each type above.
  */
 bool ast_node_type_is_assignment(Ast_Node_Type node_type);
+
+/**
+ * Returns whether `procedure`, an `AST_NODE_TYPE_PROCEDURE`, is declared in a `foreign js ->` block:
+ * it has no statements but the `...` that stands for its body, which is the last child.
+ */
+bool ast_procedure_is_foreign(Ast_Node const *nodes, Ast_Node_Index procedure);
 
 /**
  * Returns the name of `definition`, which must be an `AST_NODE_TYPE_CONSTANT_DEFINITION` or an

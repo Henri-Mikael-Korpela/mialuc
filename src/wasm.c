@@ -136,6 +136,9 @@ typedef struct {
     Str subject;
     size_t node_count;
     Ast_Node_Index module;
+    // The number of foreign procedures. They are imported functions, which come before the
+    // functions of the module in the function index space, see `wasm_function_index`.
+    size_t foreign_count;
     size_t data_size_bytes;
     // Where the stack of the arrays ends at the low side, which is after the data, and where it
     // starts. The stack grows down from the top, which is the end of the memory.
@@ -243,8 +246,20 @@ static size_t          wasm_children_count                    (Wasm_Builder cons
 static bool            wasm_check_globals                     (Wasm_Builder *builder);
 static Ast_Node_Index  wasm_constant_find                     (Wasm_Builder const *builder,
                                                                Ast_Node_Index from);
-static size_t          wasm_constant_count                    (Wasm_Builder const *builder,
+static Ast_Node_Index  wasm_function_find                     (Wasm_Builder const *builder,
+                                                               Ast_Node_Index from,
+                                                               bool is_foreign);
+static size_t          wasm_function_count                    (Wasm_Builder const *builder,
+                                                               Ast_Node_Index module,
+                                                               bool is_foreign);
+static size_t          wasm_function_index                    (Wasm_Builder const *builder,
+                                                               Ast_Node_Index definition);
+static bool            wasm_constant_is_foreign               (Wasm_Builder const *builder,
+                                                               Ast_Node_Index definition);
+static void            wasm_build_import_section              (Wasm_Builder *builder,
                                                                Ast_Node_Index module);
+static void            wasm_build_function_type               (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition);
 static Ast_Node_Index  wasm_global_value                      (Wasm_Builder const *builder,
                                                                Ast_Node_Index global);
 static size_t          wasm_global_slot_index                 (Wasm_Builder const *builder,
@@ -462,6 +477,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
         .subject = STR_EMPTY,
         .node_count = nodes.length,
         .module = root,
+        .foreign_count = 0,
         .data_size_bytes = 0,
         .stack_limit_bytes = 0,
         .stack_top_bytes = 0,
@@ -472,7 +488,9 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
     };
 
     // Only the constant definitions are functions. A global variable is a global of the module.
-    size_t definition_count = wasm_constant_count(&builder, root);
+    // The foreign ones are imported, and the others are defined in the module and exported.
+    builder.foreign_count = wasm_function_count(&builder, root, true);
+    size_t definition_count = wasm_function_count(&builder, root, false);
     wasm_write_bytes(&builder.writer, WASM_MODULE_HEADER, sizeof(WASM_MODULE_HEADER));
 
     // The types are checked first, so that the sections below can rely on every type being known.
@@ -493,6 +511,9 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
     // by the index of its definition, so one count describes the type, function and code sections.
     if (is_ok) {
         wasm_build_type_section(&builder, root, definition_count);
+        if (builder.foreign_count > 0) {
+            wasm_build_import_section(&builder, root);
+        }
         wasm_build_function_section(&builder, definition_count);
         if (builder.has_memory) {
             wasm_build_memory_section(&builder);
@@ -658,19 +679,84 @@ static Ast_Node_Index wasm_constant_find(Wasm_Builder const *builder, Ast_Node_I
 }
 
 /**
- * Returns the number of constant definitions of `module`, which is the number of functions.
+ * Returns whether the constant `definition` is a procedure that is declared in a `foreign js ->`
+ * block, which is imported and has no body in the module.
  */
-static size_t wasm_constant_count(Wasm_Builder const *builder, Ast_Node_Index module) {
+static bool wasm_constant_is_foreign(Wasm_Builder const *builder, Ast_Node_Index definition) {
+    assert(definition < builder->node_count);
+    assert(builder->nodes[definition].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION);
+
+    Ast_Node_Index value = builder->nodes[definition].first_child;
+    return builder->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE &&
+           ast_procedure_is_foreign(builder->nodes, value);
+}
+
+/**
+ * Returns the first function among the constant definitions `from` and the siblings after it that
+ * is foreign when `is_foreign` is set and defined in the module otherwise, or
+ * `AST_NODE_INDEX_NONE` when there is none. `from` can be `AST_NODE_INDEX_NONE`.
+ */
+static Ast_Node_Index wasm_function_find(Wasm_Builder const *builder, Ast_Node_Index from,
+                                         bool is_foreign) {
+    Ast_Node_Index current = wasm_constant_find(builder, from);
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && current != AST_NODE_INDEX_NONE; i += 1) {
+        if (wasm_constant_is_foreign(builder, current) == is_foreign) {
+            return current;
+        }
+        current = wasm_constant_find(builder, builder->nodes[current].next_sibling);
+    }
+
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Returns the number of functions of `module` that are foreign when `is_foreign` is set, and of
+ * those that are defined in it otherwise.
+ */
+static size_t wasm_function_count(Wasm_Builder const *builder, Ast_Node_Index module,
+                                  bool is_foreign) {
     assert(module < builder->node_count);
 
     size_t count = 0;
-    Ast_Node_Index definition = wasm_constant_find(builder, builder->nodes[module].first_child);
+    Ast_Node_Index definition = wasm_function_find(builder, builder->nodes[module].first_child,
+                                                   is_foreign);
     for (size_t i = 0; i < builder->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
         count += 1;
-        definition = wasm_constant_find(builder, builder->nodes[definition].next_sibling);
+        definition = wasm_function_find(builder, builder->nodes[definition].next_sibling,
+                                        is_foreign);
     }
 
     return count;
+}
+
+/**
+ * Returns the index of the function that the constant `definition` is, in the function index space
+ * of WebAssembly, where the imported functions come first. So a foreign procedure has the number of
+ * foreign procedures above it, and any other has the number of foreign procedures there are in all
+ * and the number of functions above it that are not foreign. That is not the position of the
+ * definition among the constants, which does not tell the two kinds apart.
+ */
+static size_t wasm_function_index(Wasm_Builder const *builder, Ast_Node_Index definition) {
+    assert(definition < builder->node_count);
+    assert(builder->nodes[definition].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION);
+
+    bool is_foreign = wasm_constant_is_foreign(builder, definition);
+    size_t index = 0;
+    Ast_Node_Index current = wasm_function_find(builder, builder->nodes[builder->module].first_child,
+                                                is_foreign);
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && current != definition; i += 1) {
+        assert(current != AST_NODE_INDEX_NONE);
+        index += 1;
+        current = wasm_function_find(builder, builder->nodes[current].next_sibling, is_foreign);
+    }
+
+    assert(current == definition);
+    if (is_foreign) {
+        return index;
+    }
+    return builder->foreign_count + index;
 }
 
 /**
@@ -895,9 +981,11 @@ static size_t wasm_stack_global_index(Wasm_Builder const *builder) {
 }
 
 /**
- * Writes the type section, which has one function type per definition: the parameters and the
- * result of its procedure. Types are not shared, because that would save only a few bytes. The
- * types in the signatures must have been checked by `wasm_check_signatures`.
+ * Writes the type section, which has one function type per function: first the foreign procedures,
+ * which are the imported functions, and then the definitions of the module, so that the function at
+ * index `i` has the type at index `i`. The type is the parameters and the result of its procedure.
+ * Types are not shared, because that would save only a few bytes. The types in the signatures must
+ * have been checked by `wasm_check_signatures`.
  */
 static void wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module,
                                     size_t definition_count) {
@@ -905,47 +993,112 @@ static void wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module
     assert(builder->nodes[module].node_type == AST_NODE_TYPE_MODULE);
 
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_TYPE);
-    wasm_write_unsigned(&builder->writer, definition_count);
+    wasm_write_unsigned(&builder->writer, builder->foreign_count + definition_count);
 
-    Ast_Node_Index definition = wasm_constant_find(builder, builder->nodes[module].first_child);
-    for (size_t i = 0; i < definition_count; i += 1) {
-        assert(definition != AST_NODE_INDEX_NONE);
-
-        wasm_write_byte(&builder->writer, WASM_TYPE_FUNCTION);
-
-        Ast_Node_Index value = builder->nodes[definition].first_child;
-        if (builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL) {
-            // A constant string is a function without parameters that returns the string.
-            wasm_write_unsigned(&builder->writer, 0);
-            Wasm_Type string = wasm_type_make(WASM_VALUE_TYPE_STR);
-            wasm_write_unsigned(&builder->writer, wasm_type_slot_count(builder, string));
-            wasm_write_type(builder, string);
-        } else {
-            Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
-
-            // A `Str` is two WebAssembly values, so the count is of values and not of parameters.
-            wasm_write_unsigned(&builder->writer, wasm_parameter_slot_count(builder, procedure));
-            Ast_Node_Index parameter = builder->nodes[procedure].first_child;
-            size_t parameter_count = wasm_parameter_count(builder, procedure);
-            for (size_t j = 0; j < parameter_count; j += 1) {
-                assert(parameter != AST_NODE_INDEX_NONE);
-                Ast_Node const *parameter_node = &builder->nodes[parameter];
-
-                wasm_write_type(builder, wasm_type_of_node(builder, parameter_node->first_child));
-                parameter = parameter_node->next_sibling;
-            }
-
-            Str return_type_name = builder->nodes[procedure].payload.procedure.return_type;
-            if (return_type_name.bytes == NULL) {
-                wasm_write_unsigned(&builder->writer, 0);
-            } else {
-                Wasm_Type return_type = wasm_type_of_name(builder, return_type_name);
-                wasm_write_unsigned(&builder->writer, wasm_type_slot_count(builder, return_type));
-                wasm_write_type(builder, return_type);
-            }
+    // Every function is in one of the two passes, and the foreign ones are first.
+    for (int pass = 0; pass < 2; pass += 1) {
+        bool is_foreign = pass == 0;
+        size_t count = definition_count;
+        if (is_foreign) {
+            count = builder->foreign_count;
         }
 
-        definition = wasm_constant_find(builder, builder->nodes[definition].next_sibling);
+        Ast_Node_Index definition =
+            wasm_function_find(builder, builder->nodes[module].first_child, is_foreign);
+        for (size_t i = 0; i < count; i += 1) {
+            assert(definition != AST_NODE_INDEX_NONE);
+
+            wasm_build_function_type(builder, definition);
+
+            definition = wasm_function_find(builder, builder->nodes[definition].next_sibling,
+                                            is_foreign);
+        }
+    }
+
+    wasm_block_end(&builder->writer, section);
+}
+
+/**
+ * Writes the function type of the constant `definition`: the marker, the parameters and the result.
+ */
+static void wasm_build_function_type(Wasm_Builder *builder, Ast_Node_Index definition) {
+    assert(definition < builder->node_count);
+
+    wasm_write_byte(&builder->writer, WASM_TYPE_FUNCTION);
+
+    Ast_Node_Index value = builder->nodes[definition].first_child;
+    if (builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL) {
+        // A constant string is a function without parameters that returns the string.
+        wasm_write_unsigned(&builder->writer, 0);
+        Wasm_Type string = wasm_type_make(WASM_VALUE_TYPE_STR);
+        wasm_write_unsigned(&builder->writer, wasm_type_slot_count(builder, string));
+        wasm_write_type(builder, string);
+        return;
+    }
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+
+    // A `Str` is two WebAssembly values, so the count is of values and not of parameters.
+    wasm_write_unsigned(&builder->writer, wasm_parameter_slot_count(builder, procedure));
+    Ast_Node_Index parameter = builder->nodes[procedure].first_child;
+    size_t parameter_count = wasm_parameter_count(builder, procedure);
+    for (size_t j = 0; j < parameter_count; j += 1) {
+        assert(parameter != AST_NODE_INDEX_NONE);
+        Ast_Node const *parameter_node = &builder->nodes[parameter];
+
+        wasm_write_type(builder, wasm_type_of_node(builder, parameter_node->first_child));
+        parameter = parameter_node->next_sibling;
+    }
+
+    Str return_type_name = builder->nodes[procedure].payload.procedure.return_type;
+    if (return_type_name.bytes == NULL) {
+        wasm_write_unsigned(&builder->writer, 0);
+    } else {
+        Wasm_Type return_type = wasm_type_of_name(builder, return_type_name);
+        wasm_write_unsigned(&builder->writer, wasm_type_slot_count(builder, return_type));
+        wasm_write_type(builder, return_type);
+    }
+}
+
+/**
+ * Writes the import section, which brings in the foreign procedures as functions. The module name
+ * of an import is the name that `import foreign js` gives, which is the property of the object of
+ * imports that JavaScript passes when it instantiates the module, and the name of the import is the
+ * name of the procedure, which is the property of that object. The type of the import at index `i`
+ * is the type at index `i`, see `wasm_build_type_section`.
+ */
+static void wasm_build_import_section(Wasm_Builder *builder, Ast_Node_Index module) {
+    assert(module < builder->node_count);
+    assert(builder->foreign_count > 0);
+
+    // The analysis checked that the program has one, above the first foreign procedure.
+    Str module_name = STR_EMPTY;
+    Ast_Node_Index child = builder->nodes[module].first_child;
+    // Every child is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && child != AST_NODE_INDEX_NONE; i += 1) {
+        if (builder->nodes[child].node_type == AST_NODE_TYPE_FOREIGN_IMPORT) {
+            module_name = builder->nodes[child].payload.foreign_import.module_name;
+            break;
+        }
+        child = builder->nodes[child].next_sibling;
+    }
+    assert(module_name.bytes != NULL);
+
+    size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_IMPORT);
+    wasm_write_unsigned(&builder->writer, builder->foreign_count);
+
+    Ast_Node_Index definition =
+        wasm_function_find(builder, builder->nodes[module].first_child, true);
+    for (size_t i = 0; i < builder->foreign_count; i += 1) {
+        assert(definition != AST_NODE_INDEX_NONE);
+
+        wasm_write_text(&builder->writer, module_name);
+        wasm_write_text(&builder->writer, builder->nodes[definition].payload.constant_definition.name);
+        wasm_write_byte(&builder->writer, WASM_IMPORT_KIND_FUNCTION);
+        // One type for each function, and the imports are the first of them.
+        wasm_write_unsigned(&builder->writer, i);
+
+        definition = wasm_function_find(builder, builder->nodes[definition].next_sibling, true);
     }
 
     wasm_block_end(&builder->writer, section);
@@ -1009,8 +1162,10 @@ static void wasm_build_data_section(Wasm_Builder *builder) {
 }
 
 /**
- * Writes the function section, which says which type each function has. The function at index
- * `i` has the type at index `i`, because the type section has one type per definition.
+ * Writes the function section, which says which type each function of the module has. The
+ * function at index `i` has the type at index `i`, because the type section has one type per
+ * function. The imported functions are before the ones of the module, so the type of the first
+ * function of the module is the one after theirs.
  */
 static void wasm_build_function_section(Wasm_Builder *builder, size_t definition_count) {
     assert(definition_count <= builder->node_count);
@@ -1018,14 +1173,15 @@ static void wasm_build_function_section(Wasm_Builder *builder, size_t definition
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_FUNCTION);
     wasm_write_unsigned(&builder->writer, definition_count);
     for (size_t i = 0; i < definition_count; i += 1) {
-        wasm_write_unsigned(&builder->writer, i);
+        // The types of the imported functions come first.
+        wasm_write_unsigned(&builder->writer, builder->foreign_count + i);
     }
     wasm_block_end(&builder->writer, section);
 }
 
 /**
- * Writes the export section, which makes every function callable from outside the module under
- * the name of its definition, and the memory, if there is one, readable under the name `memory`.
+ * Writes the export section, which makes every function of the module callable from outside it
+ * under the name of its definition, which the imported functions are not, and the memory, if there is one, readable under the name `memory`.
  */
 static bool wasm_build_export_section(Wasm_Builder *builder, Ast_Node_Index module,
                                       size_t definition_count) {
@@ -1042,7 +1198,8 @@ static bool wasm_build_export_section(Wasm_Builder *builder, Ast_Node_Index modu
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_EXPORT);
     wasm_write_unsigned(&builder->writer, definition_count + memory_export_count);
 
-    Ast_Node_Index definition = wasm_constant_find(builder, builder->nodes[module].first_child);
+    Ast_Node_Index definition =
+        wasm_function_find(builder, builder->nodes[module].first_child, false);
     for (size_t i = 0; i < definition_count; i += 1) {
         assert(definition != AST_NODE_INDEX_NONE);
         Str name = builder->nodes[definition].payload.constant_definition.name;
@@ -1058,9 +1215,9 @@ static bool wasm_build_export_section(Wasm_Builder *builder, Ast_Node_Index modu
 
         wasm_write_text(&builder->writer, name);
         wasm_write_byte(&builder->writer, WASM_EXPORT_KIND_FUNCTION);
-        wasm_write_unsigned(&builder->writer, i);
+        wasm_write_unsigned(&builder->writer, builder->foreign_count + i);
 
-        definition = wasm_constant_find(builder, builder->nodes[definition].next_sibling);
+        definition = wasm_function_find(builder, builder->nodes[definition].next_sibling, false);
     }
 
     if (builder->has_memory) {
@@ -1084,14 +1241,15 @@ static bool wasm_build_code_section(Wasm_Builder *builder, Ast_Node_Index module
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_CODE);
     wasm_write_unsigned(&builder->writer, definition_count);
 
-    Ast_Node_Index definition = wasm_constant_find(builder, builder->nodes[module].first_child);
+    Ast_Node_Index definition =
+        wasm_function_find(builder, builder->nodes[module].first_child, false);
     for (size_t i = 0; i < definition_count; i += 1) {
         assert(definition != AST_NODE_INDEX_NONE);
 
         if (wasm_build_code_section_body(builder, definition) == false) {
             return false;
         }
-        definition = wasm_constant_find(builder, builder->nodes[definition].next_sibling);
+        definition = wasm_function_find(builder, builder->nodes[definition].next_sibling, false);
     }
 
     wasm_block_end(&builder->writer, section);
@@ -2256,6 +2414,8 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     case AST_NODE_TYPE_FIELD:
     case AST_NODE_TYPE_FIELD_INITIALIZER:
     case AST_NODE_TYPE_FOR_STATEMENT:
+    case AST_NODE_TYPE_FOREIGN_BODY:
+    case AST_NODE_TYPE_FOREIGN_IMPORT:
     case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_LABEL:
@@ -2516,9 +2676,11 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             wasm_write_byte(&builder->writer, WASM_OPCODE_I32_OR);
             break;
         case AST_NODE_TYPE_CALL:
-            // The function index of a procedure is the position of its definition.
+            // The function index of a procedure is not the position of its definition, because the
+            // foreign procedures are imported, and so come first.
             wasm_write_byte(&builder->writer, WASM_OPCODE_CALL);
-            wasm_write_unsigned(&builder->writer, builder->bindings[current].position);
+            wasm_write_unsigned(&builder->writer,
+                                wasm_function_index(builder, builder->bindings[current].target));
             break;
         case AST_NODE_TYPE_BOOL_LITERAL:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
@@ -2609,6 +2771,8 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_BREAK_STATEMENT:
         case AST_NODE_TYPE_CONTINUE_STATEMENT:
         case AST_NODE_TYPE_FOR_STATEMENT:
+        case AST_NODE_TYPE_FOREIGN_BODY:
+        case AST_NODE_TYPE_FOREIGN_IMPORT:
         case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
         case AST_NODE_TYPE_IF_STATEMENT:
         case AST_NODE_TYPE_LABEL:
@@ -2660,8 +2824,8 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
 /**
  * Writes the instructions that push the value that a name stands for. A parameter is already in
  * locals of the function, and a constant string is the result of a function of its own, which is
- * called. The constant is the definition at `binding.position`, and the function at an index is
- * the definition at that index, see `wasm_build_function_section`.
+ * called. The constant is the definition `binding.target`, and its function is found by
+ * `wasm_function_index`.
  */
 static void wasm_build_code_section_body_identifier(Wasm_Builder *builder,
                                                     Ast_Node_Index procedure,
@@ -2674,7 +2838,7 @@ static void wasm_build_code_section_body_identifier(Wasm_Builder *builder,
     switch (binding.kind) {
     case SEMANTIC_BINDING_KIND_CONSTANT:
         wasm_write_byte(&builder->writer, WASM_OPCODE_CALL);
-        wasm_write_unsigned(&builder->writer, binding.position);
+        wasm_write_unsigned(&builder->writer, wasm_function_index(builder, binding.target));
         break;
     case SEMANTIC_BINDING_KIND_GLOBAL: {
         // Every global of the value is pushed, which is two for a `Str`.

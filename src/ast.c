@@ -40,6 +40,8 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_FIELD_ACCESS:
     case AST_NODE_TYPE_FIELD_INITIALIZER:
     case AST_NODE_TYPE_FOR_STATEMENT:
+    case AST_NODE_TYPE_FOREIGN_BODY:
+    case AST_NODE_TYPE_FOREIGN_IMPORT:
     case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
     case AST_NODE_TYPE_IDENTIFIER:
     case AST_NODE_TYPE_IF_STATEMENT:
@@ -79,14 +81,24 @@ Ast_Node_Index ast_procedure_end(Ast_Node const *nodes, size_t node_count,
     assert(nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
 
     // The definition that the procedure is the value of is made before it, so the next one is the
-    // first node that is not part of the procedure.
+    // first node that is not part of the procedure. An `import foreign` is not a definition but
+    // ends the procedure before it just the same.
     size_t end = procedure + 1;
     while (end < node_count && nodes[end].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION &&
+           nodes[end].node_type != AST_NODE_TYPE_FOREIGN_IMPORT &&
            nodes[end].node_type != AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
         end += 1;
     }
 
     return (Ast_Node_Index)end;
+}
+
+bool ast_procedure_is_foreign(Ast_Node const *nodes, Ast_Node_Index procedure) {
+    assert(nodes != NULL);
+    assert(nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+
+    Ast_Node_Index last = nodes[procedure].last_child;
+    return last != AST_NODE_INDEX_NONE && nodes[last].node_type == AST_NODE_TYPE_FOREIGN_BODY;
 }
 
 Str ast_definition_name(Ast_Node const *definition) {
@@ -223,6 +235,14 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_FOR_STATEMENT:
             printf("FOR_STATEMENT %.*s\n", (int)node.payload.for_statement.name.length,
                    node.payload.for_statement.name.bytes);
+            break;
+        case AST_NODE_TYPE_FOREIGN_BODY:
+            printf("FOREIGN_BODY\n");
+            break;
+        case AST_NODE_TYPE_FOREIGN_IMPORT:
+            printf("FOREIGN_IMPORT \"%.*s\"\n",
+                   (int)node.payload.foreign_import.module_name.length,
+                   node.payload.foreign_import.module_name.bytes);
             break;
         case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
             printf("GLOBAL_VARIABLE_DEFINITION %.*s\n",

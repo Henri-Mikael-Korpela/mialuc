@@ -167,6 +167,10 @@ static Token_Type tokenizer_keyword_type(Str text) {
         return TOKEN_TYPE_KEYWORD_CONTINUE;
     } else if (str_equals(text, STR("for"))) {
         return TOKEN_TYPE_KEYWORD_FOR;
+    } else if (str_equals(text, STR("foreign"))) {
+        return TOKEN_TYPE_KEYWORD_FOREIGN;
+    } else if (str_equals(text, STR("import"))) {
+        return TOKEN_TYPE_KEYWORD_IMPORT;
     } else if (str_equals(text, STR("in"))) {
         return TOKEN_TYPE_KEYWORD_IN;
     } else if (str_equals(text, STR("if"))) {
@@ -540,9 +544,20 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             offset += size_bytes;
         }
         // The tokens that start with a `.` are `..<`, or `..<=` when an `=` follows it directly,
-        // and the single dot of a field access. A `..` that is not followed by `<` is two dots,
-        // which the parser rejects.
+        // `...`, and the single dot of a field access. A `..` that is not followed by `<` or by a
+        // third dot is two dots, which the parser rejects.
         else if (character == '.') {
+            if (offset + 2 < source.length && source.bytes[offset + 1] == '.' &&
+                source.bytes[offset + 2] == '.') {
+                token_elements[result.tokens.length] = (Token){
+                    .token_type = TOKEN_TYPE_ELLIPSIS,
+                    .source_offset = (uint32_t)offset,
+                };
+                result.tokens.length += 1;
+                offset += 3;
+                continue;
+            }
+
             bool is_range = offset + 2 < source.length && source.bytes[offset + 1] == '.' &&
                             source.bytes[offset + 2] == '<';
             if (is_range == false) {

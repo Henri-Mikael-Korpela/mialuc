@@ -32,6 +32,10 @@
        global variable of the module, a variable can only be used below its definition, and no name
        may be declared twice, for example a variable may not have the name of a parameter. This is
        scope resolution, which the compiler does after parsing.
+     - A program that has a foreign block must have exactly one `import foreign js` above the
+       first of them, and no more. A foreign procedure takes and gives `Int`, `Bool`, `Str` or a
+       struct, as any other procedure does, and an array only as a slice. The name of the object
+       is not checked, because it is not known until the program runs.
      - The only attribute is `static`, it cannot be given twice, and every global variable must
        have it, because a global variable has static storage duration. A global variable can be
        used in every procedure of the module, also above where it is defined, and it can be assigned
@@ -74,10 +78,32 @@
        number of spaces, but the compiler requires a multiple of 4, as everywhere.
 *)
 
-module = { blank_line | definition } , end_of_input ;
+module = { blank_line | definition | foreign_import | foreign_block } , end_of_input ;
 
 (* A definition at file scope: a constant, or a global variable. *)
 definition = constant_definition | global_variable_definition ;
+
+(* `import foreign js "functions"` says that the procedures of the foreign blocks come from the
+   JavaScript object that has the name between the quotes, which the program that runs the module
+   passes to it when it instantiates it: the object `functions` in `{ functions: { ... } }`. `js`
+   is the only foreign target there is. Like a definition it starts in the first column. *)
+foreign_import =
+    "import" , required_space , "foreign" , required_space , "js" , ws , string_literal , ws ,
+    line_end ;
+
+(* A foreign block lists procedures which are not in the program but in JavaScript: `foreign js ->`
+   and below it, one level deeper, one line for each. Such a procedure has `...` where the body of
+   a procedure would be, and it is called like any other. Its parameters and its return type are
+   the ones that JavaScript receives and has to give back. Like a definition it starts in the
+   first column, and the program may have any number of blocks. *)
+foreign_block = "foreign" , required_space , "js" , branch_end , foreign_body ;
+
+foreign_body = { blank_line } , foreign_procedure , { blank_line | foreign_procedure } ;
+
+foreign_procedure =
+    indentation_1 , name , ws , ":" , ws , ":" , ws ,
+    "proc" , ws , "(" , ws , [ parameters , ws ] , ")" , ws , [ return_type , ws ] , "->" , ws ,
+    "..." , ws , line_end ;
 
 (* A constant definition. It starts in the first column, so a line that starts with a space or a
    tab does not match here. `::` is two separate ':' characters for the compiler, so spaces may
@@ -403,7 +429,7 @@ name = identifier - reserved_word ;
 
 reserved_word =
     "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "struct" |
-    "true" | "false" | "not" | "and" | "or" ;
+    "true" | "false" | "not" | "and" | "or" | "foreign" | "import" ;
 
 identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 

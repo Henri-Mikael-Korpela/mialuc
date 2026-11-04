@@ -93,6 +93,11 @@
                     "match": ":"
                 },
                 {
+                    "name": "keyword.operator.ellipsis.mialu",
+                    "comment": "The ... that stands where the body of a foreign procedure would be. It comes before the dot of a field access, so its dots are not taken for that.",
+                    "match": "\\.\\.\\."
+                },
+                {
                     "name": "punctuation.accessor.dot.mialu",
                     "comment": "The dot of a field access, as in p.age. The tokens ..< and ..<= of a range come before it, so their dots are not taken for it.",
                     "match": "\\."
@@ -151,6 +156,11 @@
                 {
                     "name": "keyword.control.flow.mialu",
                     "match": "\\b(break|continue)\\b"
+                },
+                {
+                    "name": "keyword.control.import.mialu",
+                    "comment": "The words of import foreign js \"name\" and of foreign js ->, which declare the procedures that come from JavaScript.",
+                    "match": "\\b(foreign|import)\\b"
                 },
                 {
                     "name": "storage.type.struct.mialu",

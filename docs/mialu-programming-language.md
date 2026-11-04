@@ -34,8 +34,14 @@
 - [Scope resolution](#scope-resolution)
 - [Attributes](#attributes)
 - [Global variables](#global-variables)
+- [Foreign procedures](#foreign-procedures)
+  - [Foreign procedures in WebAssembly](#foreign-procedures-in-webassembly)
 - [Compilation targets](#compilation-targets)
   - [WebAssembly](#webassembly)
+- [Possible future features](#possible-future-features)
+  - [Parametric polymorphism](#parametric-polymorphism)
+- [Rejected ideas](#rejected-ideas)
+  - [Interfaces](#interfaces)
 
 ## Introduction
 
@@ -93,7 +99,9 @@ continue
 else
 false
 for
+foreign
 if
+import
 in
 not
 or
@@ -973,6 +981,52 @@ ready #(static) : Bool = false
 
 The initial value is a literal: a number, `true` or `false`, or a string. It is stored when the program starts, before any code runs, so it cannot be an expression, a name or a call. A global variable can be used and assigned to in every procedure of the module, also in the ones that are written above its definition, because it is in the module scope, see [Scope resolution](#scope-resolution). Like a constant, it has a name of its own in that scope, so it cannot have the name of a constant or of another global variable, and a parameter or a variable of a procedure cannot have its name.
 
+## Foreign procedures
+
+A program can call procedures that are not written in Mialu but in another language, which is JavaScript for now. They are called foreign procedures, and the language that they are in is the foreign target. Two things are needed: an import, which says where the procedures come from, and a foreign block, which lists the ones that the program uses, with their parameters and return types:
+
+```
+import foreign js "functions"
+
+foreign js ->
+    alert :: proc(msg: Str) -> ...
+
+print_hello :: proc() ->
+    alert("Hello, world!")
+```
+
+`import foreign js "functions"` is written in the first column, like a definition. `foreign` and `import` are [keywords](#keywords). `js` is the foreign target, and it is the only one there is. The text in quotes is the name of the object that the procedures are properties of. It is a name and not a path, and Mialu does not check that it exists, because that is only known when the program runs. A program imports once, above the first foreign block, and a second `import foreign` is an error.
+
+A foreign block is `foreign js ->` in the first column, and below it, indented one level, the procedures, one on each line. A program can have any number of blocks. A foreign procedure is written like a procedure, but where its body would be it has `...`, which stands for the code that is somewhere else:
+
+```
+foreign js ->
+    add :: proc(a: Int, b: Int) Int -> ...
+    log :: proc(message: Str) -> ...
+```
+
+The parameters and the return type are what the other language receives and has to give back, and the types are the ones that any procedure can have. A foreign procedure is a constant of the module, like a procedure that has a body, so it has a name in the same scope, which no other definition can have, and it is called in the same way as the others, with [arguments](#calling-procedures) that must match its parameters, from the procedure above or below its block. It can return a value, which is used like the value of any call. A foreign procedure is not a value: it can only be called. The `...` can only be written in a foreign block, so `f :: proc() -> ...` anywhere else is an error, and the block lists procedures only, nothing else.
+
+The compiler cannot know what the other language does, so it trusts the declaration. What happens when the code of a foreign procedure does not match it depends on the target.
+
+### Foreign procedures in WebAssembly
+
+The target makes a foreign procedure an imported function of the module. The name of the object in `import foreign js` is the name of the module of the import, and the name of the procedure is the name of the import. So the program above needs an object of imports like this when it is instantiated:
+
+```js
+const imports = {
+    functions: {
+        alert: (address, length) => {
+            const bytes = new Uint8Array(instance.exports.memory.buffer, address, length);
+            console.log(new TextDecoder().decode(bytes));
+        },
+    },
+};
+const { instance } = await WebAssembly.instantiate(bytes, imports);
+```
+
+The function gets the parameters as the target passes them everywhere: an `Int` is a `BigInt`, a `Bool` is the number 0 or 1, and a `Str` is two numbers, the address of its bytes in the memory of the module and their count, which is how the function above reads the message. The memory is the one that the module exports as `memory`, which a program has when it has a string or an array type. A function that returns something returns it in the same way, so a procedure that returns an `Int` is a function that returns a `BigInt`, and one that returns a `Str` returns an array of the address and the length. If the object does not have the function, `WebAssembly.instantiate` rejects with a `LinkError` that names it.
+
 ## Compilation targets
 
 The compiler has two modes: `run` prints the tokens and the syntax tree of a program, after which it resolves the names, and `build --target <target> <output file> <source file>` writes a program for a target.
@@ -993,6 +1047,8 @@ new TextDecoder().decode(new Uint8Array(instance.exports.memory.buffer, address,
 ```
 
 A global variable is a mutable global of the module, or two when it is a `Str`, which are the address and the length of the string, in the order of the definitions in the source. They are not exported. The initial value is the constant expression of the global, which WebAssembly evaluates once when the module is instantiated, which is why it is a literal. The bytes of a string literal that is the value of a global variable are in the data section, as the bytes of the other string literals are. A use of a global variable is a `global.get` for each of its globals, and an assignment such as `x += 2` pushes it with `global.get`, then the value, adds them and stores the result with `global.set`. So a global variable keeps its value from one call of the exported functions to the next, for as long as the instance lives.
+
+A foreign procedure is an imported function, which the module gets from the object of imports when it is instantiated, see [foreign procedures](#foreign-procedures-in-webassembly). The imported functions come before the other functions of the module, because WebAssembly numbers them first, so a foreign procedure has the index of its place among the foreign procedures, and any other procedure has the number of foreign procedures plus its place among the others. That index is what the `call` instruction has, so it is not the place of the constant in the source. The module has an import section, with one function for each foreign procedure, whose type is the signature of the declaration, and the type section lists the types of the imports before the ones of the other functions. A foreign procedure has no export and no code of its own, and a program that has no foreign procedure has no import section.
 
 The variables of a procedure are locals of its function, after the parameters, and a `Str` variable is two locals, like a `Str` parameter. The variables of the blocks of if statements and for statements are locals of the function too, each one a local of its own, after the ones above it, also when two variables have the same name in different blocks. The definition of a variable stores the initial value in them, and an assignment such as `x += 2` pushes the value of the variable, then the value, adds them and stores the result in the local of the variable. The assignment `x /= y` traps in the same cases as the division `x / y`.
 
@@ -1048,7 +1104,7 @@ A for statement with a range becomes a `block` that holds a `loop`, and the stat
 
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 
-There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree and the module as text, and runs JavaScript against it. See the README.
+There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree and the module as text, and runs JavaScript against it, also the functions that the program imports with `import foreign js`, which are written in a section of their own. See the README.
 
 ## Possible future features
 

@@ -91,6 +91,7 @@
         /* The program is what one works on most, so it gets the most room. */
         #panel-mialu { flex: 3; }
         #panel-javascript { flex: 2; }
+        #panel-imports { flex: 2; }
         #panel-console { flex: 2; }
         #panel-wat { flex: 3; }
 
@@ -250,6 +251,10 @@
                 <div class="panel-title">JavaScript</div>
                 <div class="editor" id="editor-javascript"></div>
             </section>
+            <section class="panel" id="panel-imports">
+                <div class="panel-title">JavaScript imports</div>
+                <div class="editor" id="editor-imports" data-label="JavaScript imports"></div>
+            </section>
         </div>
         <div class="column">
             <section class="panel" id="panel-console">
@@ -289,6 +294,7 @@
             "boolean logic": "boolean-logic",
             conditions: "conditions",
             "control flow": "control-flow",
+            "foreign functions": "foreign-functions",
             "global variables": "global-variables",
             loops: "loops",
             procedures: "procedures",
@@ -300,6 +306,14 @@
             variables: "variables",
         };
         const EXAMPLE_DEFAULT = "sum";
+
+        /*
+         * The examples that import JavaScript functions into the program, with `import foreign js`.
+         * The functions are in the file next to the program with the same name, such as
+         * foreign-functions.imports.js. The other examples have no such file, and the section
+         * stays empty for them.
+         */
+        const EXAMPLES_WITH_IMPORTS = new Set(["foreign-functions"]);
 
         // Waits this long after the last key press before compiling, so that typing does not send
         // a request per key.
@@ -317,7 +331,7 @@
                 ["string", /"[^"\\\n]*"/],
                 ["attribute", /#(?:[ \t]*\([ \t]*[A-Za-z_]\w*[ \t]*\))+/],
                 ["label", /@[A-Za-z_]\w*/],
-                ["keyword", /\b(?:proc|return|if|else|for|in|break|const|continue|struct|true|false|and|or)\b|\bnot\b(?!=)/],
+                ["keyword", /\b(?:proc|return|if|else|for|in|break|const|continue|struct|foreign|import|true|false|and|or)\b|\bnot\b(?!=)/],
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
                 ["function", /\b[A-Za-z_]\w*(?=\()/],
                 ["type", /\b[A-Z]\w*\b/],
@@ -447,6 +461,9 @@
         const mialuEditor = createEditor(document.getElementById("editor-mialu"), "mialu", "",
             false);
         const javascriptEditor = createEditor(document.getElementById("editor-javascript"),
+            "javascript", "", false);
+        // The functions that the program imports, see `workerMain`.
+        const importsEditor = createEditor(document.getElementById("editor-imports"),
             "javascript", "", false);
         const watEditor = createEditor(watContainer, "wat", "", true);
 
@@ -629,21 +646,45 @@
             }
 
             // Makes the function that reads a `Str`, which is the address of its bytes in the
-            // memory, and their count. A program has a memory only when it has a string or an
+            // memory, and their count. It takes them as the array that a procedure returns, or as
+            // two numbers, which is how an imported function receives a `Str`. `instance` is the
+            // module, which does not exist yet while the imports are made, so the memory is looked
+            // up when a string is read. A program has a memory only when it has a string or an
             // array type.
-            function makeStrReader(memory) {
-                return function Str(pair) {
+            function makeStrReader(instance) {
+                return function Str(...values) {
+                    const memory = instance.exports.memory;
                     if (memory === undefined) {
                         throw new Error("The program has no strings or arrays, so it has no "
                             + "memory.");
                     }
-                    if (Array.isArray(pair) === false || pair.length !== 2) {
-                        throw new TypeError("Str takes the [address, length] of a string.");
+                    const [address, length] = values.length === 1 && Array.isArray(values[0])
+                        ? values[0] : values;
+                    if (values.length > 2 || Number.isInteger(address) === false
+                        || Number.isInteger(length) === false) {
+                        throw new TypeError("Str takes the [address, length] of a string, or the "
+                            + "address and the length as two arguments.");
                     }
-                    const [address, length] = pair;
                     return new TextDecoder().decode(
                         new Uint8Array(memory.buffer, address, length));
                 };
+            }
+
+            /*
+             * Runs the code of the imports section, which defines `imports`, the object that
+             * WebAssembly takes the foreign procedures from: the property that `import foreign js`
+             * names holds a function for each procedure of the program's `foreign js ->` blocks.
+             * The code can use `Str`, `console` and `instance`, whose `exports.memory` is the
+             * memory of the module once it exists, which is before any of the functions is called.
+             * Empty code means that the program imports nothing.
+             */
+            async function makeImports(code, instance, playgroundConsole) {
+                if (code.trim() === "") {
+                    return {};
+                }
+                const run = new AsyncFunction("Str", "instance", "console",
+                    `${code}\n;return imports;`);
+                return run(makeStrReader(instance), instance, playgroundConsole);
             }
 
             // A name can be a parameter if it is an identifier and not a reserved word, which the
@@ -710,12 +751,17 @@
             };
 
             self.onmessage = async (event) => {
-                const { bytes, wat, code } = event.data;
+                const { bytes, wat, code, importsCode } = event.data;
                 try {
-                    const { instance } = await WebAssembly.instantiate(bytes);
+                    // The imports are made before the module, but they read its memory when they
+                    // are called, so they get an object that is given the exports afterwards.
+                    const instance = { exports: {} };
+                    const imports = await makeImports(importsCode, instance, playgroundConsole);
+                    const { instance: created } = await WebAssembly.instantiate(bytes, imports);
+                    instance.exports = created.exports;
                     const signatures = parseSignatures(wat);
                     const exports = {};
-                    for (const [name, exported] of Object.entries(instance.exports)) {
+                    for (const [name, exported] of Object.entries(created.exports)) {
                         if (typeof exported === "function") {
                             exports[name] = wrapExport(name, exported, signatures.get(name) ?? []);
                         }
@@ -727,7 +773,7 @@
                     // Only what the code passes to `console` is shown, like in a program.
                     const run = new AsyncFunction("Str", "memory", ...names, "console", "exports",
                         code);
-                    await run(makeStrReader(instance.exports.memory), instance.exports.memory,
+                    await run(makeStrReader(instance), created.exports.memory,
                         ...names.map((name) => exports[name]), playgroundConsole, exports);
                 } catch (error) {
                     send("error", [error]);
@@ -795,6 +841,7 @@
                 bytes: answer.bytes,
                 wat: answer.wat,
                 code: javascriptEditor.value,
+                importsCode: importsEditor.value,
             });
         }
 
@@ -837,13 +884,17 @@
             const loadIndex = exampleLoadCount;
             const mialuFile = `${EXAMPLES[name]}.mu`;
             const javascriptFile = `${EXAMPLES[name]}.client.js`;
+            const importsFile = `${EXAMPLES[name]}.imports.js`;
 
             let source = "";
             let javascript = "";
+            let importsJavascript = "";
             try {
-                [source, javascript] = await Promise.all([
+                [source, javascript, importsJavascript] = await Promise.all([
                     fetchExample(mialuFile),
                     fetchExample(javascriptFile),
+                    EXAMPLES_WITH_IMPORTS.has(EXAMPLES[name])
+                        ? fetchExample(importsFile) : Promise.resolve(""),
                 ]);
             } catch (error) {
                 if (loadIndex === exampleLoadCount) {
@@ -861,6 +912,8 @@
             mialuEditor.render();
             javascriptEditor.value = javascript;
             javascriptEditor.render();
+            importsEditor.value = importsJavascript;
+            importsEditor.render();
             clearTimeout(compileTimer);
             compileTimer = 0;
             compile();

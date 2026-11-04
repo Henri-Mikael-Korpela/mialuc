@@ -55,6 +55,7 @@ typedef struct {
     Wasm_Text_Section export;
     Wasm_Text_Section function;
     Wasm_Text_Section global;
+    Wasm_Text_Section import;
     Wasm_Text_Section memory;
     Wasm_Text_Section type;
 } Wasm_Text_Sections;
@@ -80,6 +81,9 @@ typedef struct {
     size_t error_offset;
     uint32_t type_count;
     uint32_t type_cursor_index;
+    // The number of imported functions, which come first in the function index space, so the
+    // first function of the function section has this index.
+    uint32_t import_count;
     Wasm_Text_Status status;
 } Wasm_Text_Formatter;
 
@@ -91,6 +95,8 @@ static bool               wasm_text_format_data                       (Wasm_Text
 static bool               wasm_text_format_exports                    (Wasm_Text_Formatter *formatter,
                                                                        Wasm_Text_Section section);
 static bool               wasm_text_format_function_type              (Wasm_Text_Formatter *formatter);
+static bool               wasm_text_format_imports                    (Wasm_Text_Formatter *formatter,
+                                                                       Wasm_Text_Section section);
 static bool               wasm_text_format_functions                  (Wasm_Text_Formatter *formatter,
                                                                        Wasm_Text_Section function,
                                                                        Wasm_Text_Section code);
@@ -149,6 +155,7 @@ Wasm_Text_Result wasm_text_format(Array_Slice module, Array_Slice output_buffer)
         .error_offset = 0,
         .type_count = 0,
         .type_cursor_index = 0,
+        .import_count = 0,
         .status = WASM_TEXT_STATUS_OK,
     };
 
@@ -159,6 +166,9 @@ Wasm_Text_Result wasm_text_format(Array_Slice module, Array_Slice output_buffer)
     if (is_ok) {
         wasm_text_write(&formatter.writer, STR("(module"));
         is_ok = wasm_text_format_types(&formatter, sections.type);
+    }
+    if (is_ok) {
+        is_ok = wasm_text_format_imports(&formatter, sections.import);
     }
     if (is_ok) {
         is_ok = wasm_text_format_functions(&formatter, sections.function, sections.code);
@@ -219,6 +229,7 @@ static Wasm_Text_Sections wasm_text_sections_find(Wasm_Text_Formatter *formatter
         .export = absent,
         .function = absent,
         .global = absent,
+        .import = absent,
         .memory = absent,
         .type = absent,
     };
@@ -277,6 +288,9 @@ static Wasm_Text_Sections wasm_text_sections_find(Wasm_Text_Formatter *formatter
             break;
         case WASM_SECTION_ID_GLOBAL:
             known = &sections.global;
+            break;
+        case WASM_SECTION_ID_IMPORT:
+            known = &sections.import;
             break;
         case WASM_SECTION_ID_MEMORY:
             known = &sections.memory;
@@ -376,6 +390,87 @@ static bool wasm_text_format_function_type(Wasm_Text_Formatter *formatter) {
 }
 
 /**
+ * Writes one `(import ...)` per entry of the import section, with the signature repeated from its
+ * type, as for a function, because the instructions refer to the parameters by position and the
+ * reader should not have to look up the type. The module only imports functions. The imported
+ * functions come before the ones of the function section in the function index space, so their
+ * number is remembered for the index that the functions are shown with.
+ */
+static bool wasm_text_format_imports(Wasm_Text_Formatter *formatter, Wasm_Text_Section section) {
+    assert(formatter->status == WASM_TEXT_STATUS_OK);
+    assert(section.start <= section.end);
+
+    uint32_t count = wasm_text_section_count_read(formatter, section);
+    size_t cursor = formatter->offset;
+    // Bounded like the loop over the types: every entry takes at least one byte, and a read past
+    // the end of the section fails.
+    for (uint32_t i = 0; i < count && formatter->status == WASM_TEXT_STATUS_OK; i += 1) {
+        formatter->offset = cursor;
+        formatter->limit = section.end;
+
+        // The module name and then the name of the function, each with its length before it.
+        byte const *names[2] = {NULL, NULL};
+        uint32_t name_lengths[2] = {0, 0};
+        for (size_t j = 0; j < 2; j += 1) {
+            size_t name_offset = formatter->offset;
+            name_lengths[j] = wasm_text_read_unsigned_32(formatter);
+            if (formatter->status != WASM_TEXT_STATUS_OK) {
+                return false;
+            }
+            if (name_lengths[j] > formatter->limit - formatter->offset) {
+                return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_MALFORMED, name_offset);
+            }
+            names[j] = formatter->module + formatter->offset;
+            formatter->offset += name_lengths[j];
+        }
+
+        size_t kind_offset = formatter->offset;
+        byte kind = wasm_text_read_byte(formatter);
+        size_t type_index_offset = formatter->offset;
+        uint32_t type_index = wasm_text_read_unsigned_32(formatter);
+        cursor = formatter->offset;
+        if (formatter->status != WASM_TEXT_STATUS_OK) {
+            return false;
+        }
+        // Tables, memories and globals can be imported too, but the module imports functions only.
+        if (kind != WASM_IMPORT_KIND_FUNCTION) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, kind_offset);
+        }
+        if (type_index >= formatter->type_count) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_MALFORMED, type_index_offset);
+        }
+
+        wasm_text_write(&formatter->writer, STR("\n  (import "));
+        wasm_text_write_string(&formatter->writer, names[0], name_lengths[0]);
+        wasm_text_write(&formatter->writer, STR(" "));
+        wasm_text_write_string(&formatter->writer, names[1], name_lengths[1]);
+        wasm_text_write(&formatter->writer, STR(" (func (;"));
+        wasm_text_write_unsigned(&formatter->writer, i);
+        wasm_text_write(&formatter->writer, STR(";) (type "));
+        wasm_text_write_unsigned(&formatter->writer, type_index);
+        wasm_text_write(&formatter->writer, STR(")"));
+
+        formatter->offset = wasm_text_type_find(formatter, type_index);
+        formatter->limit = formatter->type_entries_end;
+        bool is_type_ok = wasm_text_format_function_type(formatter);
+        // The types were formatted already, so formatting one again cannot fail.
+        assert(is_type_ok);
+        (void)is_type_ok;
+
+        wasm_text_write(&formatter->writer, STR("))"));
+    }
+
+    if (formatter->status != WASM_TEXT_STATUS_OK) {
+        return false;
+    }
+
+    formatter->offset = cursor;
+    formatter->limit = section.end;
+    formatter->import_count = count;
+    return wasm_text_section_end(formatter);
+}
+
+/**
  * Reads one value type and writes its name.
  */
 static bool wasm_text_format_value_type(Wasm_Text_Formatter *formatter) {
@@ -432,7 +527,7 @@ static bool wasm_text_format_functions(Wasm_Text_Formatter *formatter, Wasm_Text
         }
 
         wasm_text_write(&formatter->writer, STR("\n  (func (;"));
-        wasm_text_write_unsigned(&formatter->writer, i);
+        wasm_text_write_unsigned(&formatter->writer, formatter->import_count + i);
         wasm_text_write(&formatter->writer, STR(";) (type "));
         wasm_text_write_unsigned(&formatter->writer, type_index);
         wasm_text_write(&formatter->writer, STR(")"));

@@ -20,7 +20,8 @@ A program that does not compile is a normal answer, so it comes with status 200 
 
 The directory test-code of the project is served under /test-code/, so that the playground can
 offer the example programs that are kept there: a Mialu file, such as sum.mu, and the JavaScript
-that calls it, such as sum.client.js.
+that calls it, such as sum.client.js. A program that imports JavaScript functions, such as
+foreign-functions.mu, has a third file with them, such as foreign-functions.imports.js.
 """
 
 import base64

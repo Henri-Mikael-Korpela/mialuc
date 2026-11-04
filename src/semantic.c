@@ -141,8 +141,29 @@ static bool semantic_definitions_check(Semantic_Analyzer *analyzer) {
     assert(analyzer->nodes[analyzer->module].node_type == AST_NODE_TYPE_MODULE);
 
     Ast_Node_Index definition = analyzer->nodes[analyzer->module].first_child;
+    bool has_foreign_import = false;
     for (size_t i = 0; i < analyzer->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
+        // An `import foreign` has no name. There is one at most, and it must come before the
+        // foreign procedures that it is for.
+        if (analyzer->nodes[definition].node_type == AST_NODE_TYPE_FOREIGN_IMPORT) {
+            Str module_name = analyzer->nodes[definition].payload.foreign_import.module_name;
+            if (has_foreign_import) {
+                return semantic_fail(analyzer, SEMANTIC_STATUS_FOREIGN_IMPORT_DUPLICATE,
+                                     module_name);
+            }
+            has_foreign_import = true;
+            definition = analyzer->nodes[definition].next_sibling;
+            continue;
+        }
+
         Str name = ast_definition_name(&analyzer->nodes[definition]);
+        if (analyzer->nodes[definition].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION) {
+            Ast_Node_Index value = analyzer->nodes[definition].first_child;
+            if (analyzer->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE &&
+                ast_procedure_is_foreign(analyzer->nodes, value) && has_foreign_import == false) {
+                return semantic_fail(analyzer, SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING, name);
+            }
+        }
 
         // The search finds the first definition of the name, which is this one unless an earlier
         // definition has the name as well.
@@ -599,6 +620,11 @@ static Semantic_Binding semantic_definition_find(Semantic_Analyzer const *analyz
     Ast_Node_Index definition = analyzer->nodes[analyzer->module].first_child;
     // Every definition is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < analyzer->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
+        if (analyzer->nodes[definition].node_type == AST_NODE_TYPE_FOREIGN_IMPORT) {
+            definition = analyzer->nodes[definition].next_sibling;
+            continue;
+        }
+
         bool is_global =
             analyzer->nodes[definition].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION;
         if (str_equals(ast_definition_name(&analyzer->nodes[definition]), name)) {
