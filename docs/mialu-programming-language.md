@@ -1049,3 +1049,70 @@ A for statement with a range becomes a `block` that holds a `loop`, and the stat
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 
 There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree and the module as text, and runs JavaScript against it. See the README.
+
+## Rejected ideas
+
+Below is a list of ideas that were considered for Mialu, but rejected. They are not part of the language, but they exist to document the decisions that were made.
+
+### Interfaces
+
+I had this idea in 2026-11-04 that I could give a procedure an interface parameter. This interface parameter would allow any struct that has the same fields as the interface to be passed to the procedure. The procedure could then access the fields of the struct through the interface parameter, without knowing the exact type of the struct. This would allow for more generic programming and code reuse.
+
+This implementation would have not required any specialization of the procedure for each struct type or some genetic programming template generation because individual fields can just be parameters implicitly. For a given interface, the actual parameters would be determined based on the order of fields defined.
+
+Here's an example of how this would work:
+
+```
+Person :: struct ->
+    age: Int
+    name: Str
+
+Aged :: interface ->
+    age: Int
+
+bar :: proc(p: Aged) Int ->
+    return p.age
+
+foo :: proc() Int ->
+    p := Person {
+        age = 30,
+        name = "Bob",
+    }
+    return bar(p)
+```
+
+The bar procedure would actually be represented this way:
+
+```
+bar :: proc(age: Int) Int ->
+    return p.age
+```
+
+If you have multiple fields in a struct
+
+```
+Restaurant :: struct ->
+    name: Str
+    location: Str
+    rating: Int
+```
+
+and the interface also included multiple fields like this
+
+```
+Company :: interface ->
+    location: Str
+    name: Str
+
+get_location :: proc(c: Company) Str ->
+    return c.location
+```
+
+then the parameters would work this way then:
+
+```
+get_location :: proc(location: Str, name: Str) Str ->
+    return p.location
+```
+
+The reason I rejected this idea is that I couldn't really find good enough use cases for it.
