@@ -53,7 +53,9 @@ typedef enum {
  * of the literal nodes. The parser makes the nodes of an expression from left to right, which is
  * the order that the code is written in, so the code can tell the address of a literal while
  * it is written, before the data. `data_cursor_bytes` is that address, and `data_last_literal`
- * is the last literal that got one, which is checked to keep the two orders the same.
+ * is the last literal that got one, which is checked to keep the two orders the same. The strings
+ * of global variables are in the data too, but no procedure writes them, so they are passed over when
+ * the next literal gets its address, see `wasm_data_skip_globals`.
  */
 typedef struct {
     Wasm_Writer writer;
@@ -61,6 +63,7 @@ typedef struct {
     Semantic_Binding const *bindings;
     Str subject;
     size_t node_count;
+    Ast_Node_Index module;
     size_t data_size_bytes;
     size_t data_cursor_bytes;
     Ast_Node_Index data_last_literal;
@@ -159,6 +162,21 @@ static bool            wasm_check_signatures                  (Wasm_Builder *bui
                                                                size_t definition_count);
 static size_t          wasm_children_count                    (Wasm_Builder const *builder,
                                                                Ast_Node_Index parent);
+static bool            wasm_check_globals                     (Wasm_Builder *builder);
+static Ast_Node_Index  wasm_constant_find                     (Wasm_Builder const *builder,
+                                                               Ast_Node_Index from);
+static size_t          wasm_constant_count                    (Wasm_Builder const *builder,
+                                                               Ast_Node_Index module);
+static void            wasm_data_skip_globals                 (Wasm_Builder *builder,
+                                                               Ast_Node_Index until);
+static Ast_Node_Index  wasm_global_value                      (Wasm_Builder const *builder,
+                                                               Ast_Node_Index global);
+static Wasm_Value_Type wasm_global_type                       (Wasm_Builder const *builder,
+                                                               Ast_Node_Index global);
+static size_t          wasm_global_slot_index                 (Wasm_Builder const *builder,
+                                                               Ast_Node_Index global);
+static size_t          wasm_global_slot_count                 (Wasm_Builder const *builder);
+static void            wasm_build_global_section              (Wasm_Builder *builder);
 static bool            wasm_data_measure                      (Wasm_Builder *builder);
 static Wasm_Value_Type wasm_expression_type                   (Wasm_Builder const *builder,
                                                                Ast_Node_Index expression);
@@ -227,6 +245,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
         .bindings = binding_elements,
         .subject = STR_EMPTY,
         .node_count = nodes.length,
+        .module = root,
         .data_size_bytes = 0,
         .data_cursor_bytes = 0,
         .data_last_literal = AST_NODE_INDEX_NONE,
@@ -234,7 +253,8 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
         .has_memory = false,
     };
 
-    size_t definition_count = wasm_children_count(&builder, root);
+    // Only the constant definitions are functions. A global variable is a global of the module.
+    size_t definition_count = wasm_constant_count(&builder, root);
     wasm_write_bytes(&builder.writer, WASM_MODULE_HEADER, sizeof(WASM_MODULE_HEADER));
 
     // The types are checked first, so that the sections below can rely on every type being known.
@@ -243,6 +263,9 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
     bool is_ok = wasm_data_measure(&builder);
     if (is_ok) {
         is_ok = wasm_check_signatures(&builder, root, definition_count);
+    }
+    if (is_ok) {
+        is_ok = wasm_check_globals(&builder);
     }
 
     // The sections must come in this order, and each function refers to its type and to its body
@@ -253,14 +276,19 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
         if (builder.has_memory) {
             wasm_build_memory_section(&builder);
         }
+        if (wasm_global_slot_count(&builder) > 0) {
+            wasm_build_global_section(&builder);
+        }
         is_ok = wasm_build_export_section(&builder, root, definition_count);
     }
     if (is_ok) {
         is_ok = wasm_build_code_section(&builder, root, definition_count);
     }
     if (is_ok && builder.has_memory) {
-        // The code gave every literal its address, and the data must be what those addresses
+        // The code gave every literal its address, except for the ones of global variables, which
+        // are after the last one that the code wrote, and the data must be what those addresses
         // were counted from.
+        wasm_data_skip_globals(&builder, (Ast_Node_Index)builder.node_count);
         assert(builder.data_cursor_bytes == builder.data_size_bytes);
         wasm_build_data_section(&builder);
     }
@@ -329,7 +357,7 @@ static bool wasm_check_signatures(Wasm_Builder *builder, Ast_Node_Index module,
     assert(module < builder->node_count);
     assert(builder->nodes[module].node_type == AST_NODE_TYPE_MODULE);
 
-    Ast_Node_Index definition = builder->nodes[module].first_child;
+    Ast_Node_Index definition = wasm_constant_find(builder, builder->nodes[module].first_child);
     for (size_t i = 0; i < definition_count; i += 1) {
         assert(definition != AST_NODE_INDEX_NONE);
 
@@ -359,10 +387,242 @@ static bool wasm_check_signatures(Wasm_Builder *builder, Ast_Node_Index module,
             }
         }
 
-        definition = builder->nodes[definition].next_sibling;
+        definition = wasm_constant_find(builder, builder->nodes[definition].next_sibling);
     }
 
     return true;
+}
+
+/**
+ * Returns the first constant definition among `from` and the siblings after it, or
+ * `AST_NODE_INDEX_NONE` when there is none. `from` can be `AST_NODE_INDEX_NONE`. The children of
+ * the module are constant definitions, which become functions, and global variables, which do not.
+ */
+static Ast_Node_Index wasm_constant_find(Wasm_Builder const *builder, Ast_Node_Index from) {
+    Ast_Node_Index current = from;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && current != AST_NODE_INDEX_NONE; i += 1) {
+        if (builder->nodes[current].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION) {
+            return current;
+        }
+        current = builder->nodes[current].next_sibling;
+    }
+
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Returns the number of constant definitions of `module`, which is the number of functions.
+ */
+static size_t wasm_constant_count(Wasm_Builder const *builder, Ast_Node_Index module) {
+    assert(module < builder->node_count);
+
+    size_t count = 0;
+    Ast_Node_Index definition = wasm_constant_find(builder, builder->nodes[module].first_child);
+    for (size_t i = 0; i < builder->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
+        count += 1;
+        definition = wasm_constant_find(builder, builder->nodes[definition].next_sibling);
+    }
+
+    return count;
+}
+
+/**
+ * Returns the initial value of the global variable `global`, which is its last child.
+ */
+static Ast_Node_Index wasm_global_value(Wasm_Builder const *builder, Ast_Node_Index global) {
+    assert(global < builder->node_count);
+    assert(builder->nodes[global].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION);
+
+    Ast_Node_Index value = builder->nodes[global].last_child;
+    assert(value != AST_NODE_INDEX_NONE);
+    return value;
+}
+
+/**
+ * Returns the type of the global variable `global`: the one its definition gives, which is the
+ * child after the attributes, or else the type of its value. Returns `WASM_VALUE_TYPE_NONE` when
+ * the type that the definition gives is not one that the target has, which `wasm_check_globals`
+ * rejects.
+ */
+static Wasm_Value_Type wasm_global_type(Wasm_Builder const *builder, Ast_Node_Index global) {
+    assert(global < builder->node_count);
+    assert(builder->nodes[global].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION);
+
+    Ast_Node_Index child = builder->nodes[global].first_child;
+    // Every child is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        assert(child != AST_NODE_INDEX_NONE);
+        if (builder->nodes[child].node_type != AST_NODE_TYPE_ATTRIBUTE) {
+            break;
+        }
+        child = builder->nodes[child].next_sibling;
+    }
+
+    if (builder->nodes[child].node_type == AST_NODE_TYPE_TYPE_NAME) {
+        return wasm_value_type_of_name(builder->nodes[child].payload.type_name.name);
+    }
+    // Without a type the only child left is the value, which is a literal.
+    return wasm_expression_type(builder, child);
+}
+
+/**
+ * Checks the type of every global variable: the type it gives must be one that the target has, and
+ * the value must be of that type. Returns false after it recorded an error. What comes after can
+ * ask for the type of a global variable and assume that it is known.
+ */
+static bool wasm_check_globals(Wasm_Builder *builder) {
+    Ast_Node_Index global = builder->nodes[builder->module].first_child;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && global != AST_NODE_INDEX_NONE; i += 1) {
+        if (builder->nodes[global].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            Wasm_Value_Type global_type = wasm_global_type(builder, global);
+            Ast_Node_Index value = wasm_global_value(builder, global);
+            if (global_type == WASM_VALUE_TYPE_NONE) {
+                // The only way to have no type is a type name that the target does not have, and
+                // it is the child before the value.
+                Ast_Node_Index child = builder->nodes[global].first_child;
+                for (size_t j = 0; j < builder->node_count; j += 1) {
+                    if (builder->nodes[child].node_type == AST_NODE_TYPE_TYPE_NAME) {
+                        break;
+                    }
+                    child = builder->nodes[child].next_sibling;
+                }
+                return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
+                                 builder->nodes[child].payload.type_name.name);
+            }
+            if (wasm_expression_type(builder, value) != global_type) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
+                                 builder->nodes[global].payload.global_variable_definition.name);
+            }
+        }
+        global = builder->nodes[global].next_sibling;
+    }
+
+    return true;
+}
+
+/**
+ * Returns the index of the first WebAssembly global that holds the global variable `global`: the
+ * number of globals that the global variables before it take, which is not their number, because a
+ * `Str` takes two. The types of the global variables must be known.
+ */
+static size_t wasm_global_slot_index(Wasm_Builder const *builder, Ast_Node_Index global) {
+    assert(global < builder->node_count);
+    assert(builder->nodes[global].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION);
+
+    size_t slot_index = 0;
+    Ast_Node_Index current = builder->nodes[builder->module].first_child;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && current != global; i += 1) {
+        assert(current != AST_NODE_INDEX_NONE);
+        if (builder->nodes[current].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            slot_index += wasm_value_type_slot_count(wasm_global_type(builder, current));
+        }
+        current = builder->nodes[current].next_sibling;
+    }
+
+    assert(current == global);
+    return slot_index;
+}
+
+/**
+ * Returns the number of WebAssembly globals that all the global variables take together.
+ */
+static size_t wasm_global_slot_count(Wasm_Builder const *builder) {
+    size_t slot_count = 0;
+    Ast_Node_Index current = builder->nodes[builder->module].first_child;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && current != AST_NODE_INDEX_NONE; i += 1) {
+        if (builder->nodes[current].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            slot_count += wasm_value_type_slot_count(wasm_global_type(builder, current));
+        }
+        current = builder->nodes[current].next_sibling;
+    }
+
+    return slot_count;
+}
+
+/**
+ * Writes the global section, which has the WebAssembly globals of all the global variables, in the
+ * order of the source: one for an `Int` or a `Bool`, and two for a `Str`, its address and its
+ * length. They are mutable, so a procedure can assign to them, and the initial value is a constant
+ * expression, which is evaluated once when the module is instantiated. That is why the value of a
+ * global variable is a literal. The address of a string is where its bytes are in the data section,
+ * which is the length of the strings whose nodes come before it. The types must have been checked
+ * by `wasm_check_globals`.
+ */
+static void wasm_build_global_section(Wasm_Builder *builder) {
+    size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_GLOBAL);
+    wasm_write_unsigned(&builder->writer, wasm_global_slot_count(builder));
+
+    // The length of the strings in the nodes before `scanned_end`.
+    size_t address = 0;
+    size_t scanned_end = 0;
+    Ast_Node_Index global = builder->nodes[builder->module].first_child;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && global != AST_NODE_INDEX_NONE; i += 1) {
+        if (builder->nodes[global].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            Wasm_Value_Type value_type = wasm_global_type(builder, global);
+            Ast_Node_Index value = wasm_global_value(builder, global);
+            Ast_Node const *value_node = &builder->nodes[value];
+
+            // Both are written as `i32.const` or `i64.const` followed by the end of the expression.
+            if (value_type == WASM_VALUE_TYPE_STR) {
+                for (; scanned_end < value; scanned_end += 1) {
+                    if (builder->nodes[scanned_end].node_type == AST_NODE_TYPE_STRING_LITERAL) {
+                        address += builder->nodes[scanned_end].payload.string_literal.text.length;
+                    }
+                }
+                size_t length_bytes = value_node->payload.string_literal.text.length;
+
+                for (size_t slot = 0; slot < 2; slot += 1) {
+                    wasm_write_byte(&builder->writer, WASM_TYPE_I32);
+                    wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
+                    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
+                    // Both are below 2 GiB, because `wasm_data_measure` checked the total.
+                    wasm_write_signed(&builder->writer,
+                                      (int64_t)(slot == 0 ? address : length_bytes));
+                    wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+                }
+            } else if (value_type == WASM_VALUE_TYPE_BOOL) {
+                wasm_write_byte(&builder->writer, WASM_TYPE_I32);
+                wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
+                wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
+                wasm_write_signed(&builder->writer, value_node->payload.bool_literal.value ? 1 : 0);
+                wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+            } else {
+                wasm_write_byte(&builder->writer, WASM_TYPE_I64);
+                wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
+                wasm_write_byte(&builder->writer, WASM_OPCODE_I64_CONST);
+                wasm_write_signed(&builder->writer, value_node->payload.integer_literal.value);
+                wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+            }
+        }
+        global = builder->nodes[global].next_sibling;
+    }
+
+    wasm_block_end(&builder->writer, section);
+}
+
+/**
+ * Adds the length of the strings whose nodes are after the last literal that the code wrote and
+ * before `until` to the address that the next literal gets. Those are the strings of global
+ * variables, which are in the data because the data has every string literal in the order of the
+ * nodes, but which no procedure writes.
+ */
+static void wasm_data_skip_globals(Wasm_Builder *builder, Ast_Node_Index until) {
+    assert(until <= builder->node_count);
+
+    size_t from = 0;
+    if (builder->data_last_literal != AST_NODE_INDEX_NONE) {
+        from = (size_t)builder->data_last_literal + 1;
+    }
+    for (size_t i = from; i < until; i += 1) {
+        if (builder->nodes[i].node_type == AST_NODE_TYPE_STRING_LITERAL) {
+            builder->data_cursor_bytes += builder->nodes[i].payload.string_literal.text.length;
+        }
+    }
 }
 
 /**
@@ -378,7 +638,7 @@ static void wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_TYPE);
     wasm_write_unsigned(&builder->writer, definition_count);
 
-    Ast_Node_Index definition = builder->nodes[module].first_child;
+    Ast_Node_Index definition = wasm_constant_find(builder, builder->nodes[module].first_child);
     for (size_t i = 0; i < definition_count; i += 1) {
         assert(definition != AST_NODE_INDEX_NONE);
 
@@ -416,7 +676,7 @@ static void wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module
             }
         }
 
-        definition = builder->nodes[definition].next_sibling;
+        definition = wasm_constant_find(builder, builder->nodes[definition].next_sibling);
     }
 
     wasm_block_end(&builder->writer, section);
@@ -560,7 +820,7 @@ static bool wasm_build_export_section(Wasm_Builder *builder, Ast_Node_Index modu
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_EXPORT);
     wasm_write_unsigned(&builder->writer, definition_count + memory_export_count);
 
-    Ast_Node_Index definition = builder->nodes[module].first_child;
+    Ast_Node_Index definition = wasm_constant_find(builder, builder->nodes[module].first_child);
     for (size_t i = 0; i < definition_count; i += 1) {
         assert(definition != AST_NODE_INDEX_NONE);
         Str name = builder->nodes[definition].payload.constant_definition.name;
@@ -578,7 +838,7 @@ static bool wasm_build_export_section(Wasm_Builder *builder, Ast_Node_Index modu
         wasm_write_byte(&builder->writer, WASM_EXPORT_KIND_FUNCTION);
         wasm_write_unsigned(&builder->writer, i);
 
-        definition = builder->nodes[definition].next_sibling;
+        definition = wasm_constant_find(builder, builder->nodes[definition].next_sibling);
     }
 
     if (builder->has_memory) {
@@ -602,14 +862,14 @@ static bool wasm_build_code_section(Wasm_Builder *builder, Ast_Node_Index module
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_CODE);
     wasm_write_unsigned(&builder->writer, definition_count);
 
-    Ast_Node_Index definition = builder->nodes[module].first_child;
+    Ast_Node_Index definition = wasm_constant_find(builder, builder->nodes[module].first_child);
     for (size_t i = 0; i < definition_count; i += 1) {
         assert(definition != AST_NODE_INDEX_NONE);
 
         if (wasm_build_code_section_body(builder, definition) == false) {
             return false;
         }
-        definition = builder->nodes[definition].next_sibling;
+        definition = wasm_constant_find(builder, builder->nodes[definition].next_sibling);
     }
 
     wasm_block_end(&builder->writer, section);
@@ -674,6 +934,10 @@ static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_
     // address that is somebody else's string.
     assert(builder->data_last_literal == AST_NODE_INDEX_NONE ||
            literal > builder->data_last_literal);
+
+    // The strings of global variables are in the data as well, but the code of a procedure does not
+    // write them, so they are passed here.
+    wasm_data_skip_globals(builder, literal);
 
     size_t length_bytes = builder->nodes[literal].payload.string_literal.text.length;
     assert(builder->data_cursor_bytes + length_bytes <= builder->data_size_bytes);
@@ -1134,8 +1398,9 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
 /**
  * Writes the instructions of `assignment`, such as `x += 2`: the value of the variable is pushed,
  * then the value of the assignment, then the operator is applied to them, and the result is stored
- * in the local of the variable. Only an `Int` can be assigned this way, so a variable of any other
- * type, or a value of any other type, is rejected. Returns false after it recorded an error.
+ * in the local of the variable, or in the global when it is a global variable. Only an `Int` can be
+ * assigned this way, so a variable of any other type, or a value of any other type, is rejected.
+ * Returns false after it recorded an error.
  */
 static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
                                                     Ast_Node_Index definition,
@@ -1147,17 +1412,26 @@ static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
     Ast_Node_Index target = builder->nodes[assignment].first_child;
     Ast_Node_Index value = builder->nodes[assignment].last_child;
 
-    // The analysis checked that the name stands for a variable.
+    // The analysis checked that the name stands for a variable or a global variable. A global is
+    // read and stored with the global instructions, and a variable with the local ones.
     Semantic_Binding binding = builder->bindings[target];
-    assert(binding.kind == SEMANTIC_BINDING_KIND_VARIABLE);
+    assert(binding.kind == SEMANTIC_BINDING_KIND_VARIABLE ||
+           binding.kind == SEMANTIC_BINDING_KIND_GLOBAL);
+    bool is_global = binding.kind == SEMANTIC_BINDING_KIND_GLOBAL;
     Str target_name = builder->nodes[target].payload.identifier.name;
-    if (wasm_variable_type(builder, binding.target) != WASM_VALUE_TYPE_INT) {
+    if (wasm_binding_value_type(builder, binding) != WASM_VALUE_TYPE_INT) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, target_name);
     }
 
-    size_t local_index = wasm_variable_local_index(builder, procedure, binding.target);
-    wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
-    wasm_write_unsigned(&builder->writer, local_index);
+    size_t storage_index = 0;
+    if (is_global) {
+        storage_index = wasm_global_slot_index(builder, binding.target);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_GLOBAL_GET);
+    } else {
+        storage_index = wasm_variable_local_index(builder, procedure, binding.target);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
+    }
+    wasm_write_unsigned(&builder->writer, storage_index);
 
     if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
         return false;
@@ -1178,8 +1452,12 @@ static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
         opcode = WASM_OPCODE_I64_SUB;
     }
     wasm_write_byte(&builder->writer, opcode);
-    wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_SET);
-    wasm_write_unsigned(&builder->writer, local_index);
+    if (is_global) {
+        wasm_write_byte(&builder->writer, WASM_OPCODE_GLOBAL_SET);
+    } else {
+        wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_SET);
+    }
+    wasm_write_unsigned(&builder->writer, storage_index);
 
     return true;
 }
@@ -1408,6 +1686,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_STRING_LITERAL:
         return WASM_VALUE_TYPE_STR;
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+    case AST_NODE_TYPE_ATTRIBUTE:
     case AST_NODE_TYPE_BLOCK:
     case AST_NODE_TYPE_CALL_STATEMENT:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
@@ -1415,6 +1694,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_BREAK_STATEMENT:
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
     case AST_NODE_TYPE_FOR_STATEMENT:
+    case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_LABEL:
     case AST_NODE_TYPE_LABELED_STATEMENT:
@@ -1705,12 +1985,14 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             wasm_build_code_section_body_string(builder, current);
             break;
         case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+        case AST_NODE_TYPE_ATTRIBUTE:
         case AST_NODE_TYPE_BLOCK:
         case AST_NODE_TYPE_CALL_STATEMENT:
         case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
         case AST_NODE_TYPE_BREAK_STATEMENT:
         case AST_NODE_TYPE_CONTINUE_STATEMENT:
         case AST_NODE_TYPE_FOR_STATEMENT:
+        case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
         case AST_NODE_TYPE_IF_STATEMENT:
         case AST_NODE_TYPE_LABEL:
         case AST_NODE_TYPE_LABELED_STATEMENT:
@@ -1770,6 +2052,16 @@ static void wasm_build_code_section_body_identifier(Wasm_Builder *builder,
         wasm_write_byte(&builder->writer, WASM_OPCODE_CALL);
         wasm_write_unsigned(&builder->writer, binding.position);
         break;
+    case SEMANTIC_BINDING_KIND_GLOBAL: {
+        // Every global of the value is pushed, which is two for a `Str`.
+        size_t global_index = wasm_global_slot_index(builder, binding.target);
+        size_t slot_count = wasm_value_type_slot_count(value_type);
+        for (size_t slot = 0; slot < slot_count; slot += 1) {
+            wasm_write_byte(&builder->writer, WASM_OPCODE_GLOBAL_GET);
+            wasm_write_unsigned(&builder->writer, global_index + slot);
+        }
+        break;
+    }
     case SEMANTIC_BINDING_KIND_JUMP_TARGET:
     case SEMANTIC_BINDING_KIND_NONE:
         // A name that is used was bound by the analysis, and is not a jump.
@@ -1815,6 +2107,8 @@ static Wasm_Value_Type wasm_binding_value_type(Wasm_Builder const *builder,
         // A procedure has no value that can be passed around yet.
         return WASM_VALUE_TYPE_NONE;
     }
+    case SEMANTIC_BINDING_KIND_GLOBAL:
+        return wasm_global_type(builder, binding.target);
     case SEMANTIC_BINDING_KIND_JUMP_TARGET:
     case SEMANTIC_BINDING_KIND_NONE:
         assert(false);

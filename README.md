@@ -40,7 +40,7 @@ The script uses only the Python standard library, so there is nothing to install
 
 ## Editor support
 
-[editors/vscode](editors/vscode) is a VS Code extension that highlights the reserved words in `.mu` files. See its [README](editors/vscode/README.md) for how to install it.
+[editors/vscode](editors/vscode) is a VS Code extension that highlights the reserved words, the operators, labels, attribute lists such as `#(static)`, strings and calls in `.mu` files. See its [README](editors/vscode/README.md) for how to install it.
 
 See the [C programming style guide](docs/c-programming-style-guide.md) for coding conventions.
 

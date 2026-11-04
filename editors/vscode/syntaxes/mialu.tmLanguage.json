@@ -7,6 +7,9 @@
             "include": "#strings"
         },
         {
+            "include": "#attributes"
+        },
+        {
             "include": "#labels"
         },
         {
@@ -35,6 +38,25 @@
                 {
                     "name": "invalid.illegal.backslash.mialu",
                     "match": "\\\\"
+                }
+            ]
+        },
+        "attributes": {
+            "name": "meta.attribute.mialu",
+            "comment": "An attribute list: a # and one or more attributes, each of them a name between parentheses, as in #(static). It ends at the first thing that is not another attribute. The names are scoped as attribute names, so a theme can give them a color of their own, and they are not taken for calls or reserved words.",
+            "begin": "#",
+            "beginCaptures": {
+                "0": { "name": "punctuation.definition.attribute.mialu" }
+            },
+            "end": "(?![ \\t]*\\()",
+            "patterns": [
+                {
+                    "match": "(\\()[ \\t]*([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(\\))",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.attribute.begin.mialu" },
+                        "2": { "name": "entity.other.attribute-name.mialu" },
+                        "3": { "name": "punctuation.definition.attribute.end.mialu" }
+                    }
                 }
             ]
         },

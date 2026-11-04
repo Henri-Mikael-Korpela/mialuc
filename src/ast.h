@@ -13,6 +13,7 @@ typedef enum {
     AST_NODE_TYPE_ADDITION,
     AST_NODE_TYPE_ADDITION_ASSIGNMENT,
     AST_NODE_TYPE_AND,
+    AST_NODE_TYPE_ATTRIBUTE,
     AST_NODE_TYPE_BLOCK,
     AST_NODE_TYPE_BOOL_LITERAL,
     AST_NODE_TYPE_BREAK_STATEMENT,
@@ -24,6 +25,7 @@ typedef enum {
     AST_NODE_TYPE_DIVISION,
     AST_NODE_TYPE_DIVISION_ASSIGNMENT,
     AST_NODE_TYPE_FOR_STATEMENT,
+    AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION,
     AST_NODE_TYPE_IDENTIFIER,
     AST_NODE_TYPE_IF_STATEMENT,
     AST_NODE_TYPE_INTEGER_LITERAL,
@@ -86,6 +88,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_AND`: two children, the left and the right operand, in that order. It is an
  *   expression of type `Bool` and the target requires both operands to be `Bool`. It binds
  *   tighter than `AST_NODE_TYPE_OR` and looser than `AST_NODE_TYPE_NOT`.
+ * - `AST_NODE_TYPE_ATTRIBUTE`: no children. One attribute of a definition, such as `static` in
+ *   `#(static)`, with the name between the parentheses in the payload. Which names are attributes
+ *   that the language has is for the analysis to tell, not the parser.
  * - `AST_NODE_TYPE_BLOCK`: one child per statement. It is the body of a branch of an
  *   `AST_NODE_TYPE_IF_STATEMENT`, of a loop or of a scope statement, and it has its own scope: a
  *   variable defined in it cannot be used below it. Its payload has the end of the block, see
@@ -121,6 +126,13 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   the iterator is in the payload. The iterator is a variable of type `Int` that exists only in
  *   the block, and it cannot be assigned to. The nodes of the range come before the block, so the
  *   iterator is not in scope in the range. It is a statement of a procedure body.
+ * - `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`: a global variable, which is defined at file scope.
+ *   Its children are one `AST_NODE_TYPE_ATTRIBUTE` for each attribute of its attribute list, in the
+ *   order of the source, then the type, an `AST_NODE_TYPE_TYPE_NAME`, when the definition gives
+ *   one, and last the initial value, which is an `AST_NODE_TYPE_INTEGER_LITERAL`, an
+ *   `AST_NODE_TYPE_BOOL_LITERAL` or an `AST_NODE_TYPE_STRING_LITERAL`, and never another
+ *   expression. The name is in the payload. It is a child of the `AST_NODE_TYPE_MODULE`, between
+ *   the constant definitions.
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_IF_STATEMENT`: a chain of `if`, any number of `else if` and an optional `else`,
  *   as the children in the order of the source: a condition, which is any expression (the target
@@ -139,7 +151,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   its child instead. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_LOOP_STATEMENT`: one child, the `AST_NODE_TYPE_BLOCK` that runs again and again
  *   until a `break` or a `return` leaves it. It is a statement of a procedure body.
- * - `AST_NODE_TYPE_MODULE`: one child per top-level definition. It is the root of the tree.
+ * - `AST_NODE_TYPE_MODULE`: one child per top-level definition, which is an
+ *   `AST_NODE_TYPE_CONSTANT_DEFINITION` or an `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`. It is the
+ *   root of the tree.
  * - `AST_NODE_TYPE_MULTIPLICATION`: two children, the left and the right operand, in that order.
  * - `AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that gets the product, and the factor that it is multiplied by, in that order. It
@@ -185,6 +199,14 @@ typedef struct {
             // Views the source text, so it is valid only as long as the source is.
             Str name;
         } constant_definition;
+        struct {
+            // The name between the parentheses, as a view of the source text, like the other names.
+            Str name;
+        } attribute;
+        struct {
+            // Views the source text, like the other names.
+            Str name;
+        } global_variable_definition;
         struct {
             // Views the source text, like the other names.
             Str name;
@@ -263,8 +285,14 @@ STATIC_ASSERT(sizeof(Ast_Node) == 32, ast_node_size_is_32_bytes);
 bool ast_node_type_is_assignment(Ast_Node_Type node_type);
 
 /**
+ * Returns the name of `definition`, which must be an `AST_NODE_TYPE_CONSTANT_DEFINITION` or an
+ * `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`: the children of the module, which share one scope.
+ */
+Str ast_definition_name(Ast_Node const *definition);
+
+/**
  * Returns the index after the last node of the procedure at index `procedure`, which is the index
- * of the next constant definition, or `node_count` for the last one. The nodes of a procedure,
+ * of the next definition of the module, or `node_count` for the last one. The nodes of a procedure,
  * including the ones of its nested blocks, are the ones after its own, because the parser makes
  * the nodes in the order of the source.
  */

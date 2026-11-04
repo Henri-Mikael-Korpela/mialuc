@@ -36,10 +36,11 @@ typedef struct {
 } Parser;
 
 static Ast_Node_Index parse_assignment          (Parser *parser);
+static bool           parse_attributes          (Parser *parser, Ast_Node_Index definition);
 static void           parse_block_close         (Parser *parser, Ast_Node_Index block);
 static Ast_Node_Index parse_block_open          (Parser *parser, Ast_Node_Index statement);
 static Ast_Node_Index parse_branch              (Parser *parser, Ast_Node_Index statement);
-static Ast_Node_Index parse_constant_definition (Parser *parser);
+static Ast_Node_Index parse_definition          (Parser *parser);
 static Ast_Node_Index parse_else_branch         (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_if_statement        (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_bool_literal        (Parser *parser);
@@ -54,6 +55,7 @@ static Ast_Node_Index parse_negation            (Parser *parser);
 static Ast_Node_Index parse_sum                 (Parser *parser);
 static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
 static Ast_Node_Index parse_for_statement       (Parser *parser, Ast_Node_Index parent);
+static Ast_Node_Index parse_global_variable_definition(Parser *parser);
 static Ast_Node_Index parse_jump_statement      (Parser *parser);
 static Ast_Node_Index parse_scope_statement     (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_identifier          (Parser *parser);
@@ -128,7 +130,7 @@ static Ast_Node_Index parse_module(Parser *parser) {
             break;
         }
 
-        Ast_Node_Index definition = parse_constant_definition(parser);
+        Ast_Node_Index definition = parse_definition(parser);
         if (definition == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
@@ -139,11 +141,11 @@ static Ast_Node_Index parse_module(Parser *parser) {
     return module;
 }
 
-static Ast_Node_Index parse_constant_definition(Parser *parser) {
+static Ast_Node_Index parse_definition(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->node_count <= parser->node_count_max);
 
-    // Expect constant definitions to be at the top level.
+    // Expect definitions to be at the top level.
     Token const *indentation = parse_token_current(parser);
     if (indentation->token_type != TOKEN_TYPE_INDENTATION) {
         return parse_fail(parser, STR("the start of a line"));
@@ -153,10 +155,23 @@ static Ast_Node_Index parse_constant_definition(Parser *parser) {
     }
     parse_token_advance(parser);
 
-    // Expect constant definition to start with an identifier.
+    // Expect a definition to start with an identifier.
     Token const *name = parse_token_current(parser);
     if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
         return parse_fail(parser, STR("a name"));
+    }
+
+    // A constant has `::` after its name, which is two separator tokens. Anything else is a global
+    // variable, which has an attribute list, a single `:` or both after its name. The last token is
+    // `END`, which is neither, so a name at the end of the file is not a constant, and the global
+    // variable it starts reports what it expected.
+    bool is_constant = parser->token_index + 2 < parser->token_count &&
+                       parser->tokens[parser->token_index + 1].token_type ==
+                           TOKEN_TYPE_TYPE_SEPARATOR &&
+                       parser->tokens[parser->token_index + 2].token_type ==
+                           TOKEN_TYPE_TYPE_SEPARATOR;
+    if (is_constant == false) {
+        return parse_global_variable_definition(parser);
     }
 
     Ast_Node_Index definition = parse_node_make(parser, AST_NODE_TYPE_CONSTANT_DEFINITION);
@@ -192,6 +207,125 @@ static Ast_Node_Index parse_constant_definition(Parser *parser) {
 
     assert(parser->nodes[definition].first_child == value);
     return definition;
+}
+
+/**
+ * Parses `name #(attribute)... : Type = value` or `name #(attribute)... := value`, a global
+ * variable. The attribute list may be left out. The current token is the name, which the caller
+ * checked. The node for the variable has the name in its payload. Its children are the attributes,
+ * the type when the definition has one, and then the value, which is a literal.
+ */
+static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_IDENTIFIER);
+
+    Token const *name = parse_token_current(parser);
+    Ast_Node_Index definition = parse_node_make(parser, AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION);
+    if (definition == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[definition].payload.global_variable_definition.name = name->payload.identifier.text;
+    parse_token_advance(parser);
+
+    if (parse_token_current(parser)->token_type == TOKEN_TYPE_HASH) {
+        if (parse_attributes(parser, definition) == false) {
+            return AST_NODE_INDEX_NONE;
+        }
+    }
+
+    if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("':' or '#'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    // `:=` has no type, which is then deduced from the value. Otherwise the type comes before `=`.
+    if (parse_token_current(parser)->token_type != TOKEN_TYPE_EQUALS) {
+        Token const *type = parse_token_current(parser);
+        if (type->token_type != TOKEN_TYPE_IDENTIFIER) {
+            return parse_fail(parser, STR("a type name or '='"));
+        }
+
+        Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
+        if (type_name == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[type_name].payload.type_name.name = type->payload.identifier.text;
+        parse_token_advance(parser);
+        parse_node_append_child(parser, definition, type_name);
+    }
+    if (parse_token_expect(parser, TOKEN_TYPE_EQUALS, STR("'='")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    // The value is stored once, before any code runs, so it is a literal and not an expression.
+    Ast_Node_Index value = AST_NODE_INDEX_NONE;
+    switch (parse_token_current(parser)->token_type) {
+    case TOKEN_TYPE_INTEGER_LITERAL:
+        value = parse_integer_literal(parser);
+        break;
+    case TOKEN_TYPE_KEYWORD_FALSE:
+    case TOKEN_TYPE_KEYWORD_TRUE:
+        value = parse_bool_literal(parser);
+        break;
+    case TOKEN_TYPE_STRING_LITERAL:
+        value = parse_string_literal(parser);
+        break;
+    default:
+        return parse_fail(parser, STR("a number, a string, 'true' or 'false'"));
+    }
+    if (value == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, definition, value);
+
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    assert(parser->nodes[definition].last_child == value);
+    return definition;
+}
+
+/**
+ * Parses an attribute list, `#(first)(second)`, and appends one attribute node to `definition` for
+ * each attribute in it. The current token is the `#`. There is at least one attribute, and each is
+ * a name between parentheses. Returns false after it recorded an error.
+ */
+static bool parse_attributes(Parser *parser, Ast_Node_Index definition) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_HASH);
+
+    parse_token_advance(parser);
+
+    // Every attribute consumes three tokens, so there are fewer attributes than tokens, which
+    // bounds the loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_LEFT, STR("'(' after '#'")) == false) {
+            return false;
+        }
+
+        Token const *name = parse_token_current(parser);
+        if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+            // The false return value reports the failure, so the node index is not needed.
+            (void)parse_fail(parser, STR("an attribute name"));
+            return false;
+        }
+        Ast_Node_Index attribute = parse_node_make(parser, AST_NODE_TYPE_ATTRIBUTE);
+        if (attribute == AST_NODE_INDEX_NONE) {
+            return false;
+        }
+        parser->nodes[attribute].payload.attribute.name = name->payload.identifier.text;
+        parse_token_advance(parser);
+        parse_node_append_child(parser, definition, attribute);
+
+        if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_RIGHT, STR("')'")) == false) {
+            return false;
+        }
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_PARENTHESIS_LEFT) {
+            break;
+        }
+    }
+
+    return true;
 }
 
 static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level) {

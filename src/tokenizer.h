@@ -13,6 +13,8 @@ typedef enum {
     TOKEN_TYPE_COMMA = ',',
     TOKEN_TYPE_EQUALS = '=',
     TOKEN_TYPE_GREATER = '>',
+    // Starts the attribute list of a definition, such as `#(static)`.
+    TOKEN_TYPE_HASH = '#',
     TOKEN_TYPE_LESS = '<',
     TOKEN_TYPE_MINUS = '-',
     TOKEN_TYPE_PARENTHESIS_LEFT = '(',

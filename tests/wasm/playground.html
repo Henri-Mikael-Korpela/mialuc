@@ -152,6 +152,7 @@
 
         .editor.is-stale pre { opacity: 0.4; }
 
+        .token-attribute { color: #4fc1ff; }
         .token-comment { color: #6a9955; }
         .token-definition { color: #dcdcaa; }
         .token-function { color: #dcdcaa; }
@@ -287,6 +288,7 @@
             "boolean logic": "boolean-logic",
             conditions: "conditions",
             "control flow": "control-flow",
+            "global variables": "global-variables",
             loops: "loops",
             procedures: "procedures",
             "scope resolution": "scope-resolution",
@@ -311,6 +313,7 @@
         const HIGHLIGHT_RULES = {
             mialu: [
                 ["string", /"[^"\\\n]*"/],
+                ["attribute", /#(?:[ \t]*\([ \t]*[A-Za-z_]\w*[ \t]*\))+/],
                 ["label", /@[A-Za-z_]\w*/],
                 ["keyword", /\b(?:proc|return|if|else|for|in|break|continue|true|false|and|or)\b|\bnot\b(?!=)/],
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
@@ -331,7 +334,7 @@
             wat: [
                 ["comment", /\(;[\s\S]*?;\)|;;.*/],
                 ["string", /"(?:[^"\\\n]|\\.)*"/],
-                ["keyword", /(?<=\()(?:module|type|func|param|result|local|export|import|memory|data)\b/],
+                ["keyword", /(?<=\()(?:module|type|func|param|result|local|export|import|memory|global|mut|data)\b/],
                 ["instruction", /\b[a-z][a-z0-9]*\.[a-z0-9_]+\b|\b(?:return|end|call|drop)\b/],
                 ["type", /\b(?:i32|i64|f32|f64)\b/],
                 ["number", /-?\b\d+\b/],

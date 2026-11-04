@@ -8,8 +8,8 @@
 #include <mialu/wasm.h>
 
 // The text follows the layout of `wasm2wat` from the WebAssembly Binary Toolkit, which is what
-// people who read WebAssembly text are used to: types first, then functions, memories, exports
-// and data, with the index of each in a `(;index;)` comment.
+// people who read WebAssembly text are used to: types first, then functions, memories, globals,
+// exports and data, with the index of each in a `(;index;)` comment.
 
 enum {
     // The longest decimal number that is written: `UINT64_MAX` has 20 digits.
@@ -50,6 +50,7 @@ typedef struct {
     Wasm_Text_Section data;
     Wasm_Text_Section export;
     Wasm_Text_Section function;
+    Wasm_Text_Section global;
     Wasm_Text_Section memory;
     Wasm_Text_Section type;
 } Wasm_Text_Sections;
@@ -92,6 +93,8 @@ static bool               wasm_text_format_functions                  (Wasm_Text
 static bool               wasm_text_format_functions_body             (Wasm_Text_Formatter *formatter);
 static bool               wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *formatter);
 static bool               wasm_text_format_functions_body_locals      (Wasm_Text_Formatter *formatter);
+static bool               wasm_text_format_globals                    (Wasm_Text_Formatter *formatter,
+                                                                       Wasm_Text_Section section);
 static bool               wasm_text_format_memories                   (Wasm_Text_Formatter *formatter,
                                                                        Wasm_Text_Section section);
 static bool               wasm_text_format_types                      (Wasm_Text_Formatter *formatter,
@@ -160,6 +163,9 @@ Wasm_Text_Result wasm_text_format(Array_Slice module, Array_Slice output_buffer)
         is_ok = wasm_text_format_memories(&formatter, sections.memory);
     }
     if (is_ok) {
+        is_ok = wasm_text_format_globals(&formatter, sections.global);
+    }
+    if (is_ok) {
         is_ok = wasm_text_format_exports(&formatter, sections.export);
     }
     if (is_ok) {
@@ -208,6 +214,7 @@ static Wasm_Text_Sections wasm_text_sections_find(Wasm_Text_Formatter *formatter
         .data = absent,
         .export = absent,
         .function = absent,
+        .global = absent,
         .memory = absent,
         .type = absent,
     };
@@ -263,6 +270,9 @@ static Wasm_Text_Sections wasm_text_sections_find(Wasm_Text_Formatter *formatter
             break;
         case WASM_SECTION_ID_FUNCTION:
             known = &sections.function;
+            break;
+        case WASM_SECTION_ID_GLOBAL:
+            known = &sections.global;
             break;
         case WASM_SECTION_ID_MEMORY:
             known = &sections.memory;
@@ -610,6 +620,18 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             // The text format closes the body with the parenthesis of the function instead.
             is_ended = true;
             break;
+        case WASM_OPCODE_GLOBAL_GET: {
+            uint32_t global_index = wasm_text_read_unsigned_32(formatter);
+            wasm_text_write_instruction(&formatter->writer, STR("global.get "));
+            wasm_text_write_unsigned(&formatter->writer, global_index);
+            break;
+        }
+        case WASM_OPCODE_GLOBAL_SET: {
+            uint32_t global_index = wasm_text_read_unsigned_32(formatter);
+            wasm_text_write_instruction(&formatter->writer, STR("global.set "));
+            wasm_text_write_unsigned(&formatter->writer, global_index);
+            break;
+        }
         case WASM_OPCODE_I32_AND:
             wasm_text_write_instruction(&formatter->writer, STR("i32.and"));
             break;
@@ -743,7 +765,8 @@ static bool wasm_text_format_exports(Wasm_Text_Formatter *formatter, Wasm_Text_S
             return false;
         }
 
-        // Only functions and memories are supported, because the module has no tables or globals.
+        // Only functions and memories are supported, because the module exports no tables or
+        // globals.
         Str kind_name = STR_EMPTY;
         if (kind == WASM_EXPORT_KIND_FUNCTION) {
             kind_name = STR(" (func ");
@@ -757,6 +780,62 @@ static bool wasm_text_format_exports(Wasm_Text_Formatter *formatter, Wasm_Text_S
         wasm_text_write_string(&formatter->writer, name, name_length);
         wasm_text_write(&formatter->writer, kind_name);
         wasm_text_write_unsigned(&formatter->writer, index);
+        wasm_text_write(&formatter->writer, STR("))"));
+    }
+
+    return wasm_text_section_end(formatter);
+}
+
+/**
+ * Writes one `(global ...)` per entry of the global section, with its type, which says that it is
+ * mutable when it is, and its initial value, which is a constant expression of one instruction.
+ */
+static bool wasm_text_format_globals(Wasm_Text_Formatter *formatter, Wasm_Text_Section section) {
+    assert(formatter->status == WASM_TEXT_STATUS_OK);
+    assert(section.start <= section.end);
+
+    uint32_t count = wasm_text_section_count_read(formatter, section);
+    // Bounded like the loop over the types: every entry takes at least one byte.
+    for (uint32_t i = 0; i < count && formatter->status == WASM_TEXT_STATUS_OK; i += 1) {
+        size_t type_offset = formatter->offset;
+        byte value_type = wasm_text_read_byte(formatter);
+        size_t mutability_offset = formatter->offset;
+        byte mutability = wasm_text_read_byte(formatter);
+        size_t initial_offset = formatter->offset;
+        byte initial_opcode = wasm_text_read_byte(formatter);
+        int64_t initial_value = wasm_text_read_signed_64(formatter);
+        byte end_opcode = wasm_text_read_byte(formatter);
+        if (formatter->status != WASM_TEXT_STATUS_OK) {
+            return false;
+        }
+
+        Str type_name = wasm_text_value_type_name(value_type);
+        if (type_name.bytes == NULL) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, type_offset);
+        }
+        // A global can also be fixed, which `wasm_build` never writes.
+        if (mutability != WASM_GLOBAL_MUTABLE) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED,
+                                  mutability_offset);
+        }
+        // Other initial values are computed, for example from another global.
+        Str initial_name = STR_EMPTY;
+        if (initial_opcode == WASM_OPCODE_I32_CONST) {
+            initial_name = STR("i32.const ");
+        } else if (initial_opcode == WASM_OPCODE_I64_CONST) {
+            initial_name = STR("i64.const ");
+        }
+        if (initial_name.bytes == NULL || end_opcode != WASM_OPCODE_END) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, initial_offset);
+        }
+
+        wasm_text_write(&formatter->writer, STR("\n  (global (;"));
+        wasm_text_write_unsigned(&formatter->writer, i);
+        wasm_text_write(&formatter->writer, STR(";) (mut "));
+        wasm_text_write(&formatter->writer, type_name);
+        wasm_text_write(&formatter->writer, STR(") ("));
+        wasm_text_write(&formatter->writer, initial_name);
+        wasm_text_write_signed(&formatter->writer, initial_value);
         wasm_text_write(&formatter->writer, STR("))"));
     }
 

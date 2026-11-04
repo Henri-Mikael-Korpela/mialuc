@@ -182,6 +182,42 @@ x : Int = 5
 
 A variable is defined once, with its initial value, and every variable has one. It can be used in the statements below its definition, but not above it and not in its own initial value. The variables of a procedure are not visible outside of it, so two procedures can have a variable of the same name.
 
+A variable that is defined outside of every procedure is a [global variable](#global-variables).
+
+## Attributes
+
+An attribute gives a definition a property that its syntax does not say. The attributes of a definition are written as an attribute list after its name, before the `:`. An attribute list begins with `#`, and each attribute in it is a name surrounded by parentheses:
+
+```
+counter #(static) := 0
+```
+
+A list can have more than one attribute, which are written one after the other, such as `#(first)(second)`, and the `#` is written once. The list is not an expression and it has no value. Spaces may be written between its tokens, but the convention is to write no space inside it and one space before the `#`, as above. A list has at least one attribute, so `#()` is an error, and so is a name that is not between parentheses, such as `#static`.
+
+The attributes are built into the language. The only one that Mialu has so far is `static`, which is an attribute of a variable, see [Global variables](#global-variables). Any other attribute is an error, and so is an attribute that is given twice in the same list. Attributes are accepted on the definition of a global variable only. A constant and a variable of a procedure take none yet, so they are errors there.
+
+## Global variables
+
+A global variable is a variable that is defined at file scope, outside of every procedure. It is written like a variable, with the attribute `static` before the `:`, and it starts in the first column like a constant:
+
+```
+counter #(static) := 0
+
+next :: proc() Int ->
+    counter += 1
+    return counter
+```
+
+A global variable has static storage duration, which is what the `static` attribute says: it exists for as long as the program runs, and not only for as long as a call of a procedure does. It is initialized once, before any procedure is called, and it keeps the value that the procedures assign to it, so the first call of `next` returns 1, the second returns 2, and so on. Every global variable must have the attribute `static`, because storage of this kind is the only one that global variables can have.
+
+The type of a global variable is deduced from its initial value, or written between the `:` and the `=`, as for any variable:
+
+```
+ready #(static) : Bool = false
+```
+
+The initial value is a literal: a number, `true` or `false`, or a string. It is stored when the program starts, before any code runs, so it cannot be an expression, a name or a call. A global variable can be used and assigned to in every procedure of the module, also in the ones that are written above its definition, because it is in the module scope, see [Scope resolution](#scope-resolution). Like a constant, it has a name of its own in that scope, so it cannot have the name of a constant or of another global variable, and a parameter or a variable of a procedure cannot have its name.
+
 ## Assignment
 
 An assignment changes the value of a variable that is defined already. It is a statement that has the name of the variable, an assignment operator and a value, which is an expression. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was:
@@ -220,7 +256,7 @@ foo :: proc() Int ->
     return x
 ```
 
-`foo` returns 5. Dividing by zero is an error at run time, see [WebAssembly](#webassembly). The value is evaluated first, with the value that the variable has before the assignment, so `x += x` doubles `x`, `x += 2 * 3` adds 6, `x -= 1 + 1` subtracts 2, `x *= 1 + 2` multiplies `x` by 3, and `x /= 1 + 1` divides `x` by 2. The name must be a variable of the procedure, defined above the assignment: a parameter or a constant cannot be assigned to. The variable and the value must be an `Int`, because addition, subtraction, multiplication and division are defined for `Int` only.
+`foo` returns 5. Dividing by zero is an error at run time, see [WebAssembly](#webassembly). The value is evaluated first, with the value that the variable has before the assignment, so `x += x` doubles `x`, `x += 2 * 3` adds 6, `x -= 1 + 1` subtracts 2, `x *= 1 + 2` multiplies `x` by 3, and `x /= 1 + 1` divides `x` by 2. The name must be a variable of the procedure, defined above the assignment, or a global variable: a parameter or a constant cannot be assigned to. The variable and the value must be an `Int`, because addition, subtraction, multiplication and division are defined for `Int` only.
 
 ## If statements
 
@@ -561,7 +597,7 @@ A `break` that is not inside a loop or a scope, and a `continue` that is not ins
 
 Every name that is used refers to something that is declared, and the compiler finds out what before the program is built for a target. This is called scope resolution. There are two scopes:
 
-- The module scope has the name of every constant that is defined in the file, such as the procedures and the strings.
+- The module scope has the name of every constant that is defined in the file, such as the procedures and the strings, and of every global variable.
 - The parameters and the variables of a procedure live in a local scope nested inside it. A variable is in scope below its definition only.
 - Every block of an if statement, a for statement, a loop or a scope statement is a scope nested inside the one that it is written in. A variable that is defined in a block is in scope below its definition until the block ends, so the blocks inside it can use it, and the statements after the block cannot. The iterator of a for statement is in scope in the block of the statement, but not in its range.
 
@@ -574,19 +610,20 @@ get_name :: proc() Str ->
     return NAME
 ```
 
-The order of the definitions does not matter, so a procedure can use a constant that is defined below it.
+The order of the definitions does not matter, so a procedure can use a constant or a global variable that is defined below it.
 
 There is no shadowing of names so a name cannot be declared twice in the same scope. A name cannot be declared again in a nested scope either, where the first declaration is visible. A name has one meaning wherever it can be used. The compiler rejects a program when:
 
-- two constants have the same name,
+- two definitions, constants or global variables, have the same name,
 - two parameters of a procedure have the same name,
-- a parameter has the name of a constant, including the constant that is the procedure itself,
-- a variable has the name of a constant, of a parameter, or of a variable that is in scope where it is defined, so a block cannot define a variable that the blocks around it have, but two blocks that are not inside each other can each define a variable of the same name,
-- a name in an expression is neither a variable that is in scope there, nor a parameter of the procedure, nor a constant,
-- the name in a call is not a constant that is a procedure, which is also the case when it is a variable or a parameter,
+- a parameter has the name of a constant, including the constant that is the procedure itself, or of a global variable,
+- a variable has the name of a constant, of a global variable, of a parameter, or of a variable that is in scope where it is defined, so a block cannot define a variable that the blocks around it have, but two blocks that are not inside each other can each define a variable of the same name,
+- a name in an expression is neither a variable that is in scope there, nor a parameter of the procedure, nor a constant, nor a global variable,
+- the name in a call is not a constant that is a procedure, which is also the case when it is a variable, a global variable or a parameter,
+- an attribute of a global variable is not `static`, or is given twice, or the global variable does not have the attribute `static`,
 - a `break` is not inside a loop or a scope, or a `continue` is not inside the block of a loop,
 - the label of a `break` or a `continue` is not the label of a statement that it is inside of, the label of a `continue` is not the one of a loop, or a statement has the label of a statement around it,
-- the name that an assignment assigns to is not a variable, but a parameter or a constant, or the iterator of a for statement.
+- the name that an assignment assigns to is not a variable or a global variable, but a parameter or a constant, or the iterator of a for statement.
 
 Scope resolution is about names only. Whether the value of a name has the right type is checked separately for the target, see below.
 
@@ -609,14 +646,17 @@ const [address, length] = instance.exports.get_name();
 new TextDecoder().decode(new Uint8Array(instance.exports.memory.buffer, address, length));
 ```
 
+A global variable is a mutable global of the module, or two when it is a `Str`, which are the address and the length of the string, in the order of the definitions in the source. They are not exported. The initial value is the constant expression of the global, which WebAssembly evaluates once when the module is instantiated, which is why it is a literal. The bytes of a string literal that is the value of a global variable are in the data section, as the bytes of the other string literals are. A use of a global variable is a `global.get` for each of its globals, and an assignment such as `x += 2` pushes it with `global.get`, then the value, adds them and stores the result with `global.set`. So a global variable keeps its value from one call of the exported functions to the next, for as long as the instance lives.
+
 The variables of a procedure are locals of its function, after the parameters, and a `Str` variable is two locals, like a `Str` parameter. The variables of the blocks of if statements and for statements are locals of the function too, each one a local of its own, after the ones above it, also when two variables have the same name in different blocks. The definition of a variable stores the initial value in them, and an assignment such as `x += 2` pushes the value of the variable, then the value, adds them and stores the result in the local of the variable. The assignment `x /= y` traps in the same cases as the division `x / y`.
 
-A module has a memory only when the program has a string literal. A procedure cannot be called `memory`, whether the program has a string literal or not, because that is the name of the export.
+A module has a memory only when the program has a string literal, which includes the value of a global variable. A procedure cannot be called `memory`, whether the program has a string literal or not, because that is the name of the export.
 
 The target rejects a program that the parser accepts when:
 
-- a type is not `Int`, `Bool` or `Str`,
+- a type, also the one of a global variable, is not `Int`, `Bool` or `Str`,
 - a name in an expression, or the initial value of a variable, is a procedure, which is not a value that the target can use yet,
+- the initial value of a global variable is not of the type that is written for the variable,
 - a definition is called `memory`,
 - a procedure with no return type has a `return` statement,
 - the value that a procedure returns is not of its return type,

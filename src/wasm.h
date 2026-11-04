@@ -19,6 +19,10 @@ enum {
     WASM_EXPORT_KIND_FUNCTION = 0x00,
     WASM_EXPORT_KIND_MEMORY = 0x02,
 
+    // The flag of a global that its instructions can change, as opposed to 0x00 for one that is
+    // fixed.
+    WASM_GLOBAL_MUTABLE = 0x01,
+
     // A 32-bit value takes 7 bits per byte, so at most 5 bytes in LEB128.
     WASM_LEB128_32_BYTES_MAX = 5,
     // A 64-bit value takes at most 10 bytes in LEB128.
@@ -39,6 +43,8 @@ enum {
     WASM_OPCODE_DROP = 0x1A,
     WASM_OPCODE_ELSE = 0x05,
     WASM_OPCODE_END = 0x0B,
+    WASM_OPCODE_GLOBAL_GET = 0x23,
+    WASM_OPCODE_GLOBAL_SET = 0x24,
     WASM_OPCODE_I32_CONST = 0x41,
     WASM_OPCODE_I32_AND = 0x71,
     WASM_OPCODE_I32_EQ = 0x46,
@@ -69,6 +75,7 @@ enum {
     WASM_SECTION_ID_DATA = 11,
     WASM_SECTION_ID_EXPORT = 7,
     WASM_SECTION_ID_FUNCTION = 3,
+    WASM_SECTION_ID_GLOBAL = 6,
     WASM_SECTION_ID_MEMORY = 5,
     WASM_SECTION_ID_TYPE = 1,
 
@@ -124,8 +131,12 @@ typedef struct {
  * so every name in the tree is known to stand for a parameter or a constant. The module is written
  * to `output_buffer`, which holds `byte` elements.
  *
- * Every definition becomes a function that the module exports under the name of the definition. A
- * variable of a procedure is a local of its function, or two locals when it is a `Str`, after the
+ * Every constant definition becomes a function that the module exports under the name of the
+ * definition. A global variable becomes a mutable global of the module, or two when it is a `Str`,
+ * in the order of the source, which is not exported. Its initial value is a literal, and it is set
+ * once when the module is instantiated, so the global keeps its value between calls. A use of one
+ * in a procedure is a `global.get`, and an assignment to one is a `global.set`. A variable of a
+ * procedure is a local of its function, or two locals when it is a `Str`, after the
  * parameters. The iterator of a for statement is a local too, followed by one more local that holds
  * the end of its range, which is read once before the loop. A definition whose value is a string
  * literal becomes a function without parameters that returns the string. A use of such a constant

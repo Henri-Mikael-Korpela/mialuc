@@ -23,6 +23,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
         return true;
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_AND:
+    case AST_NODE_TYPE_ATTRIBUTE:
     case AST_NODE_TYPE_BLOCK:
     case AST_NODE_TYPE_BOOL_LITERAL:
     case AST_NODE_TYPE_BREAK_STATEMENT:
@@ -33,6 +34,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_FOR_STATEMENT:
+    case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
     case AST_NODE_TYPE_IDENTIFIER:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_INTEGER_LITERAL:
@@ -69,11 +71,23 @@ Ast_Node_Index ast_procedure_end(Ast_Node const *nodes, size_t node_count,
     // The definition that the procedure is the value of is made before it, so the next one is the
     // first node that is not part of the procedure.
     size_t end = procedure + 1;
-    while (end < node_count && nodes[end].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION) {
+    while (end < node_count && nodes[end].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION &&
+           nodes[end].node_type != AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
         end += 1;
     }
 
     return (Ast_Node_Index)end;
+}
+
+Str ast_definition_name(Ast_Node const *definition) {
+    assert(definition != NULL);
+    assert(definition->node_type == AST_NODE_TYPE_CONSTANT_DEFINITION ||
+           definition->node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION);
+
+    if (definition->node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+        return definition->payload.global_variable_definition.name;
+    }
+    return definition->payload.constant_definition.name;
 }
 
 /**
@@ -129,6 +143,10 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_AND:
             printf("AND\n");
             break;
+        case AST_NODE_TYPE_ATTRIBUTE:
+            printf("ATTRIBUTE %.*s\n", (int)node.payload.attribute.name.length,
+                   node.payload.attribute.name.bytes);
+            break;
         case AST_NODE_TYPE_BLOCK:
             printf("BLOCK\n");
             break;
@@ -164,6 +182,11 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_FOR_STATEMENT:
             printf("FOR_STATEMENT %.*s\n", (int)node.payload.for_statement.name.length,
                    node.payload.for_statement.name.bytes);
+            break;
+        case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
+            printf("GLOBAL_VARIABLE_DEFINITION %.*s\n",
+                   (int)node.payload.global_variable_definition.name.length,
+                   node.payload.global_variable_definition.name.bytes);
             break;
         case AST_NODE_TYPE_IDENTIFIER:
             printf("IDENTIFIER %.*s\n", (int)node.payload.identifier.name.length,

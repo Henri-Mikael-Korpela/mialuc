@@ -32,6 +32,8 @@ typedef struct {
     bool is_if;
 } Semantic_Jump_Target;
 
+static bool             semantic_attributes_check   (Semantic_Analyzer *analyzer,
+                                                     Ast_Node_Index definition);
 static bool             semantic_call_resolve       (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index procedure,
                                                      Ast_Node_Index call);
@@ -104,9 +106,11 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
     Ast_Node_Index definition = node_elements[root].first_child;
     // Every definition is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < nodes.length && definition != AST_NODE_INDEX_NONE && is_ok; i += 1) {
-        Ast_Node_Index value = node_elements[definition].first_child;
-        if (node_elements[value].node_type == AST_NODE_TYPE_PROCEDURE) {
-            is_ok = semantic_procedure_resolve(&analyzer, definition);
+        if (node_elements[definition].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION) {
+            Ast_Node_Index value = node_elements[definition].first_child;
+            if (node_elements[value].node_type == AST_NODE_TYPE_PROCEDURE) {
+                is_ok = semantic_procedure_resolve(&analyzer, definition);
+            }
         }
         definition = node_elements[definition].next_sibling;
     }
@@ -126,27 +130,71 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
 }
 
 /**
- * Checks that no two definitions of the module have one name. Returns false after it recorded an
- * error.
+ * Checks that no two definitions of the module have one name, and that the attributes of the global
+ * variables are fine. Returns false after it recorded an error.
  */
 static bool semantic_definitions_check(Semantic_Analyzer *analyzer) {
     assert(analyzer->nodes[analyzer->module].node_type == AST_NODE_TYPE_MODULE);
 
     Ast_Node_Index definition = analyzer->nodes[analyzer->module].first_child;
     for (size_t i = 0; i < analyzer->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
-        Str name = analyzer->nodes[definition].payload.constant_definition.name;
+        Str name = ast_definition_name(&analyzer->nodes[definition]);
 
         // The search finds the first definition of the name, which is this one unless an earlier
         // definition has the name as well.
         Semantic_Binding first = semantic_definition_find(analyzer, name);
-        assert(first.kind == SEMANTIC_BINDING_KIND_CONSTANT);
+        assert(first.kind == SEMANTIC_BINDING_KIND_CONSTANT ||
+               first.kind == SEMANTIC_BINDING_KIND_GLOBAL);
         if (first.target != definition) {
             return semantic_fail(analyzer, SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE, name);
+        }
+
+        if (analyzer->nodes[definition].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION &&
+            semantic_attributes_check(analyzer, definition) == false) {
+            return false;
         }
 
         definition = analyzer->nodes[definition].next_sibling;
     }
 
+    return true;
+}
+
+/**
+ * Checks the attributes of the global variable `definition`: the language has the attribute
+ * `static` only, an attribute cannot be given twice, and a global variable must be `static`,
+ * because only variables with static storage duration are supported. The attributes are the first
+ * children of the definition. Returns false after it recorded an error.
+ */
+static bool semantic_attributes_check(Semantic_Analyzer *analyzer, Ast_Node_Index definition) {
+    assert(definition < analyzer->node_count);
+    assert(analyzer->nodes[definition].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION);
+
+    bool is_static = false;
+    Ast_Node_Index attribute = analyzer->nodes[definition].first_child;
+    // Every attribute is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < analyzer->node_count && attribute != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node const *attribute_node = &analyzer->nodes[attribute];
+        if (attribute_node->node_type != AST_NODE_TYPE_ATTRIBUTE) {
+            break;
+        }
+
+        Str name = attribute_node->payload.attribute.name;
+        if (str_equals(name, STR("static")) == false) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_ATTRIBUTE_UNKNOWN, name);
+        }
+        if (is_static) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_ATTRIBUTE_DUPLICATE, name);
+        }
+        is_static = true;
+
+        attribute = attribute_node->next_sibling;
+    }
+
+    if (is_static == false) {
+        return semantic_fail(analyzer, SEMANTIC_STATUS_GLOBAL_NOT_STATIC,
+                             analyzer->nodes[definition].payload.global_variable_definition.name);
+    }
     return true;
 }
 
@@ -340,7 +388,7 @@ static bool semantic_jump_resolve(Semantic_Analyzer *analyzer, Semantic_Jump_Tar
 
 /**
  * Checks that the name of `parameter` is new: no earlier parameter of the procedure has it, and no
- * constant has it. A parameter with the name of a constant would hide the constant in the body, and
+ * constant or global variable has it. A parameter with such a name would hide it in the body, and
  * the same name would mean two things in one program. Returns false after it recorded an error.
  */
 static bool semantic_parameter_check(Semantic_Analyzer *analyzer, Ast_Node_Index procedure,
@@ -358,8 +406,8 @@ static bool semantic_parameter_check(Semantic_Analyzer *analyzer, Ast_Node_Index
         return semantic_fail(analyzer, SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE, name);
     }
 
-    Semantic_Binding constant = semantic_definition_find(analyzer, name);
-    if (constant.kind != SEMANTIC_BINDING_KIND_NONE) {
+    Semantic_Binding definition = semantic_definition_find(analyzer, name);
+    if (definition.kind != SEMANTIC_BINDING_KIND_NONE) {
         return semantic_fail(analyzer, SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS, name);
     }
 
@@ -368,7 +416,8 @@ static bool semantic_parameter_check(Semantic_Analyzer *analyzer, Ast_Node_Index
 
 /**
  * Checks that the name of `variable`, a variable definition or the iterator of a for statement, is
- * new: no constant, parameter or earlier variable of the procedure has it. Like a parameter, a
+ * new: no constant, global variable, parameter or earlier variable of the procedure has it. Like a
+ * parameter, a
  * variable with such a name would hide it. Returns false after it recorded an error.
  */
 static bool semantic_variable_check(Semantic_Analyzer *analyzer, Ast_Node_Index procedure,
@@ -389,9 +438,9 @@ static bool semantic_variable_check(Semantic_Analyzer *analyzer, Ast_Node_Index 
     }
 
     Semantic_Binding parameter = semantic_parameter_find(analyzer, procedure, name);
-    Semantic_Binding constant = semantic_definition_find(analyzer, name);
+    Semantic_Binding definition = semantic_definition_find(analyzer, name);
     if (parameter.kind != SEMANTIC_BINDING_KIND_NONE ||
-        constant.kind != SEMANTIC_BINDING_KIND_NONE) {
+        definition.kind != SEMANTIC_BINDING_KIND_NONE) {
         return semantic_fail(analyzer, SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS, name);
     }
 
@@ -443,7 +492,8 @@ static bool semantic_identifier_resolve(Semantic_Analyzer *analyzer, Ast_Node_In
     bool is_target = statement != AST_NODE_INDEX_NONE &&
                      ast_node_type_is_assignment(analyzer->nodes[statement].node_type) &&
                      analyzer->nodes[statement].first_child == identifier;
-    if (is_target && binding.kind != SEMANTIC_BINDING_KIND_VARIABLE) {
+    if (is_target && binding.kind != SEMANTIC_BINDING_KIND_VARIABLE &&
+        binding.kind != SEMANTIC_BINDING_KIND_GLOBAL) {
         return semantic_fail(analyzer, SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE, name);
     }
     if (is_target && analyzer->nodes[binding.target].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
@@ -479,6 +529,10 @@ static bool semantic_call_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index pr
         return semantic_fail(analyzer, SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE, name);
     }
 
+    // A global variable is not a procedure, and its first child is not a value.
+    if (binding.kind != SEMANTIC_BINDING_KIND_CONSTANT) {
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE, name);
+    }
     Ast_Node_Index value = analyzer->nodes[binding.target].first_child;
     if (analyzer->nodes[value].node_type != AST_NODE_TYPE_PROCEDURE) {
         return semantic_fail(analyzer, SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE, name);
@@ -489,22 +543,40 @@ static bool semantic_call_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index pr
 }
 
 /**
- * Returns the first definition of the module that is called `name`, or a binding of the kind
- * `SEMANTIC_BINDING_KIND_NONE` when there is none.
+ * Returns the first definition of the module that is called `name`, which is a constant or a global
+ * variable, or a binding of the kind `SEMANTIC_BINDING_KIND_NONE` when there is none. The position
+ * of the binding counts the definitions of the same kind above it, so the constants and the global
+ * variables are numbered apart.
  */
 static Semantic_Binding semantic_definition_find(Semantic_Analyzer const *analyzer, Str name) {
     assert(name.bytes != NULL);
 
+    uint32_t constant_count = 0;
+    uint32_t global_count = 0;
     Ast_Node_Index definition = analyzer->nodes[analyzer->module].first_child;
     // Every definition is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < analyzer->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
-        if (str_equals(analyzer->nodes[definition].payload.constant_definition.name, name)) {
-            assert(i <= UINT32_MAX);
+        bool is_global =
+            analyzer->nodes[definition].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION;
+        if (str_equals(ast_definition_name(&analyzer->nodes[definition]), name)) {
+            if (is_global) {
+                return (Semantic_Binding){
+                    .target = definition,
+                    .position = global_count,
+                    .kind = SEMANTIC_BINDING_KIND_GLOBAL,
+                };
+            }
             return (Semantic_Binding){
                 .target = definition,
-                .position = (uint32_t)i,
+                .position = constant_count,
                 .kind = SEMANTIC_BINDING_KIND_CONSTANT,
             };
+        }
+
+        if (is_global) {
+            global_count += 1;
+        } else {
+            constant_count += 1;
         }
         definition = analyzer->nodes[definition].next_sibling;
     }

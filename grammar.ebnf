@@ -28,10 +28,15 @@
 
    What a grammar cannot say, and the compiler checks in addition:
      - An integer literal must fit in a signed 64-bit integer.
-     - A name that is used must be a variable or a parameter of its procedure or a constant of the
-       module, a variable can only be used below its definition, and no name may be declared twice,
-       for example a variable may not have the name of a parameter. This is scope resolution, which
-       the compiler does after parsing.
+     - A name that is used must be a variable or a parameter of its procedure or a constant or a
+       global variable of the module, a variable can only be used below its definition, and no name
+       may be declared twice, for example a variable may not have the name of a parameter. This is
+       scope resolution, which the compiler does after parsing.
+     - The only attribute is `static`, it cannot be given twice, and every global variable must
+       have it, because a global variable has static storage duration. A global variable can be
+       used in every procedure of the module, also above where it is defined, and it can be assigned
+       to like a variable. The type of a global variable must make sense for the target too, and
+       the literal that it is given must be of that type.
      - The types in a program must make sense for the target, for example `Str` has no addition,
        which the grammar cannot tell from `Int`, and the value of a variable must be of the type
        that the variable is given.
@@ -55,11 +60,33 @@
 
 module = { blank_line | definition } , end_of_input ;
 
+(* A definition at file scope: a constant, or a global variable. *)
+definition = constant_definition | global_variable_definition ;
+
 (* A constant definition. It starts in the first column, so a line that starts with a space or a
    tab does not match here. `::` is two separate ':' characters for the compiler, so spaces may
    be between them. The value is a procedure, or a string on one line. *)
-definition =
+constant_definition =
     name , ws , ":" , ws , ":" , ws , ( procedure | string_literal , ws , line_end ) ;
+
+(* A global variable, which is also defined in the first column. It has static storage duration:
+   it exists for as long as the program runs, and it is initialized once, before any procedure is
+   called. Its value is a literal, because nothing runs before it is set, and it keeps what the
+   procedures assign to it from one call to the next. The attribute list comes right after the
+   name, and `static` in it is required. Without a type the type of the variable is the type of the
+   literal. `counter #(static) := 0` is an `Int`, `ready #(static) : Bool = false` gives the type. *)
+global_variable_definition =
+    name , ws , [ attribute_list , ws ] , ":" , ws , [ type_name , ws ] , "=" , ws ,
+    global_value , ws , line_end ;
+
+global_value = integer_literal | bool_literal | string_literal ;
+
+(* An attribute list starts with `#`, and has one or more attributes, each of them between
+   parentheses: `#(static)`, or `#(first)(second)`. An attribute is a name. The compiler knows
+   `static` only, and rejects any other. *)
+attribute_list = "#" , ws , attribute , { ws , attribute } ;
+
+attribute = "(" , ws , name , ws , ")" ;
 
 (* A procedure and its body. The optional name before the arrow is the return type. *)
 procedure =
