@@ -4,6 +4,32 @@ This document describes the Mialu programming language, its syntax, semantics an
 
 Mialu is a procedural programming language with straight-foward and familiar syntax, built with simplicity and performance in mind. It is influenced by multiple languages including, but not limited to, C, C++, Go, Jai (currently unreleased), Odin and Python, fully embracing the fact that it comes after many of them, so it has learned from their mistakes and successes.
 
+## Table of contents
+
+- [Indentation](#indentation)
+- [Keywords](#keywords)
+- [Identifiers](#identifiers)
+- [Constants](#constants)
+- [Data types](#data-types)
+  - [Strings](#strings)
+  - [Booleans](#booleans)
+  - [Logical operators](#logical-operators)
+- [Operators](#operators)
+- [Variables](#variables)
+- [Assignment](#assignment)
+- [If statements](#if-statements)
+- [For statements](#for-statements)
+- [Procedures](#procedures)
+  - [Calling procedures](#calling-procedures)
+- [Loops without a range](#loops-without-a-range)
+- [Scopes](#scopes)
+- [Break and continue](#break-and-continue)
+- [Scope resolution](#scope-resolution)
+- [Attributes](#attributes)
+- [Global variables](#global-variables)
+- [Compilation targets](#compilation-targets)
+  - [WebAssembly](#webassembly)
+
 ## Indentation
 
 Indentation is made of spaces only. Tabs are not allowed in indentation. Each level of indentation is exactly 4 spaces, so the number of leading spaces on a line must be a multiple of 4. Blank lines, including lines of only spaces, are ignored.
