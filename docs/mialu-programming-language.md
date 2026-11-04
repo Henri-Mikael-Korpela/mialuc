@@ -1,6 +1,5 @@
 # Mialu Programming Language Specification
 
-
 ## Table of contents
 
 - [Introduction](#introduction)
@@ -32,8 +31,13 @@
 
 This document describes the Mialu programming language, its syntax, semantics and compilation targets.
 
+Mialu is a procedural programming language with straight-foward and familiar syntax, built with simplicity and performance in mind. It is influenced by multiple programming languages including, but not limited to, C, C++, Go, Odin and Python, fully embracing the fact that it comes after many of them, so it has learned from their mistakes and successes.
 
-Mialu is a procedural programming language with straight-foward and familiar syntax, built with simplicity and performance in mind. It is influenced by multiple languages including, but not limited to, C, C++, Go, Jai (currently unreleased), Odin and Python, fully embracing the fact that it comes after many of them, so it has learned from their mistakes and successes.
+Where does the name Mialu come from? It comes from the first syllables of my children's names, Miriam, Amira and Lukas. That's my personal touch to such a technical tool.
+
+## Source code representation
+
+Mialu source code is a sequence of Unicode characters, encoded in UTF-8. Source code files should have the `.mu` extension.
 
 ## Indentation
 
