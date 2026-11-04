@@ -19,14 +19,17 @@ typedef struct {
 } Semantic_Analyzer;
 
 /**
- * A loop or a scope that a `break` can leave: the node of the statement, the index after the last
- * node of its block, and its label, which has `bytes` NULL when it has none.
+ * A loop, a scope or a labeled if statement that a `break` can leave: the node of the statement,
+ * the index after the last node of its last block, and its label, which has `bytes` NULL when it
+ * has none. An if statement is only here when it has a label, and a `break` without a label
+ * passes it.
  */
 typedef struct {
     Ast_Node_Index node;
     Ast_Node_Index end;
     Str label;
     bool is_loop;
+    bool is_if;
 } Semantic_Jump_Target;
 
 static bool             semantic_call_resolve       (Semantic_Analyzer *analyzer,
@@ -167,18 +170,29 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
         while (target_count > 0 && targets[target_count - 1].end <= current) {
             target_count -= 1;
         }
+        // The label of an if, for or loop statement is on the labeled statement right before it.
+        bool is_labeled = current > procedure + 1 &&
+                          analyzer->nodes[current - 1].node_type == AST_NODE_TYPE_LABELED_STATEMENT;
         if (node_type == AST_NODE_TYPE_FOR_STATEMENT || node_type == AST_NODE_TYPE_LOOP_STATEMENT ||
-            node_type == AST_NODE_TYPE_SCOPE_STATEMENT) {
+            node_type == AST_NODE_TYPE_SCOPE_STATEMENT ||
+            (node_type == AST_NODE_TYPE_IF_STATEMENT && is_labeled)) {
             // The block is the last child, and a statement is inside a block of its own, so there
             // is room.
             assert(target_count < AST_BLOCK_DEPTH_MAX);
             Ast_Node_Index block = analyzer->nodes[current].last_child;
             Ast_Node_Index first = analyzer->nodes[current].first_child;
             Str label = STR_EMPTY;
+            bool has_label = false;
             if (node_type == AST_NODE_TYPE_SCOPE_STATEMENT &&
                 analyzer->nodes[first].node_type == AST_NODE_TYPE_LABEL) {
                 label = analyzer->nodes[first].payload.label.name;
-                // A label means one scope wherever it can be used.
+                has_label = true;
+            } else if (is_labeled) {
+                label = analyzer->nodes[current - 1].payload.label.name;
+                has_label = true;
+            }
+            if (has_label) {
+                // A label means one statement wherever it can be used.
                 for (size_t i = 0; i < target_count; i += 1) {
                     if (targets[i].label.bytes != NULL && str_equals(targets[i].label, label)) {
                         return semantic_fail(analyzer, SEMANTIC_STATUS_LABEL_DUPLICATE, label);
@@ -189,7 +203,9 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
                 .node = current,
                 .end = analyzer->nodes[block].payload.block.end,
                 .label = label,
-                .is_loop = node_type != AST_NODE_TYPE_SCOPE_STATEMENT,
+                .is_loop = node_type == AST_NODE_TYPE_FOR_STATEMENT ||
+                           node_type == AST_NODE_TYPE_LOOP_STATEMENT,
+                .is_if = node_type == AST_NODE_TYPE_IF_STATEMENT,
             };
             target_count += 1;
         }
@@ -238,7 +254,8 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
  * Binds the `break` or `continue` statement `jump` to the statement that it leaves or continues,
  * out of `targets`, which are the loops and scopes that it is in, the innermost last. A `break`
  * without a label leaves the innermost one, a `break` with a label leaves the scope with that
- * label, and a `continue` goes on with the innermost loop, also when scopes are inside it. Returns
+ * label, and a `continue` goes on with the innermost loop, also when scopes are inside it, or with
+ * the loop that has the label. Returns
  * false after it recorded an error.
  */
 static bool semantic_jump_resolve(Semantic_Analyzer *analyzer, Semantic_Jump_Target const *targets,
@@ -262,10 +279,15 @@ static bool semantic_jump_resolve(Semantic_Analyzer *analyzer, Semantic_Jump_Tar
         if (found == AST_NODE_INDEX_NONE) {
             return semantic_fail(analyzer, SEMANTIC_STATUS_LABEL_UNKNOWN, label);
         }
+        // A `continue` goes on with a loop, so a scope or an if statement is no use to it.
+        if (is_break == false && analyzer->nodes[found].node_type != AST_NODE_TYPE_FOR_STATEMENT &&
+            analyzer->nodes[found].node_type != AST_NODE_TYPE_LOOP_STATEMENT) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_LABEL_NOT_LOOP, label);
+        }
     } else {
         for (size_t i = target_count; i > 0 && found == AST_NODE_INDEX_NONE; i -= 1) {
             Semantic_Jump_Target const *target = &targets[i - 1];
-            if (is_break || target->is_loop) {
+            if (target->is_if == false && (is_break || target->is_loop)) {
                 found = target->node;
             }
         }

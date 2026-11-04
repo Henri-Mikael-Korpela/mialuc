@@ -434,7 +434,24 @@ find_first :: proc(limit: Int) Int ->
     return found
 ```
 
-The name of a label follows the rules of an [identifier](#identifiers), so a keyword cannot be one, and `@ outer` with a space is an error. Labels are a kind of name of their own: they cannot be used as variables, and a variable or a procedure with the same name does not clash with them. A scope cannot have the label of a scope that it is inside of, so a label has one meaning wherever it can be used, but scopes that are not inside each other can have the same label.
+The name of a label follows the rules of an [identifier](#identifiers), so a keyword cannot be one, and `@ outer` with a space is an error. Labels are a kind of name of their own: they cannot be used as variables, and a variable or a procedure with the same name does not clash with them. A statement cannot have the label of a statement that it is inside of, so a label has one meaning wherever it can be used, but statements that are not inside each other can have the same label.
+
+An if statement, a for statement and a [loop without a range](#loops-without-a-range) can have a label as well. It is written before the `if` or the `for` on the same line, with a space after it:
+
+```
+@check if n > 5 ->
+    ...
+else ->
+    ...
+
+@rows for row in 0..<n ->
+    ...
+
+@again for ->
+    ...
+```
+
+The label belongs to the whole statement. For an if statement that is the `if` with all of its `else if` and `else` branches, and only the first line has the label: `@check else ->` is an error. A label does not change what the statement does. It lets a [`break` or a `continue`](#break-and-continue) name it.
 
 ## Break and continue
 
@@ -471,7 +488,7 @@ count_pairs :: proc(n: Int) Int ->
     return pairs
 ```
 
-A [scope statement](#scopes) can be left with a `break` as well. A `break` without a label leaves the innermost loop or scope, whichever is nearer, so in a scope inside a loop it leaves the scope and the loop goes on. `continue` is only for loops: it goes on with the innermost loop, also when scopes are in between.
+A [scope statement](#scopes) can be left with a `break` as well, and so can a labeled if statement, see below. A `break` without a label leaves the innermost loop or scope, whichever is nearer, so in a scope inside a loop it leaves the scope and the loop goes on. `continue` is only for loops: it goes on with the innermost loop, also when scopes are in between.
 
 ```
 break_early :: proc() Int ->
@@ -485,7 +502,7 @@ break_early :: proc() Int ->
     return x
 ```
 
-`break_early()` returns 4. A `break` can name a scope to leave by the name of its label, written after `break` without the `@`. It leaves that scope, and the scopes and loops in between, so it can leave several at once:
+`break_early()` returns 4. A `break` can name a statement to leave by the name of its label, written after `break` without the `@`. It leaves that scope, loop or if statement, and everything in between, so it can leave several at once:
 
 ```
 break_early_with_label :: proc() Int ->
@@ -501,9 +518,44 @@ break_early_with_label :: proc() Int ->
     return x
 ```
 
-`break_early_with_label()` returns 6: `break my_block` leaves the labeled scope, and `x += 5` runs next. A `break` writes the label without the `@`, which is for the line that declares it only, and `break @my_block` is an error. The label must be one of a scope that the `break` is inside of. Only scopes have labels, so a loop is left with a `break` without a label, or with the label of a scope around it. `continue` has no label.
+`break_early_with_label()` returns 6: `break my_block` leaves the labeled scope, and `x += 5` runs next. A `break` writes the label without the `@`, which is for the line that declares it only, and `break @my_block` is an error. The label must be one of a statement that the `break` is inside of.
 
-A `break` that is not inside a loop or a scope, and a `continue` that is not inside a loop, are errors, and so is one in a procedure that has no loop, even if the procedure is only called from a loop. A `break` with a label that no scope around it has is an error as well. They are not expressions, so they have no value and nothing can follow them on the line, except the label of a `break`. The statements that come after them in the same block are never run.
+A `break` with a label can leave a [labeled if statement](#scopes) from any of its branches, also from a loop inside it, and then the statement after the if statement runs next. A `break` without a label passes an if statement, labeled or not, and leaves the loop or scope around it, because the block of an `if` is not a scope:
+
+```
+classify :: proc(n: Int) Int ->
+    x := 0
+    @check if n > 5 ->
+        x += 1
+        if n > 10 ->
+            break check
+        x += 10
+    else if n > 2 ->
+        x += 100
+    else ->
+        x += 1000
+    x += 10000
+    return x
+```
+
+`classify(11)` returns 10001, because `break check` skips `x += 10` and the other branches, and `classify(7)` returns 10011.
+
+A labeled loop is left with `break` and its label from anywhere inside it, also from an inner loop. `continue` and the label of a loop goes on with the next pass of that loop, ending the inner loops on the way, which is what a plain `continue` cannot do from an inner loop:
+
+```
+count_triangle :: proc(n: Int) Int ->
+    total := 0
+    @rows for row in 0..<n ->
+        for column in 0..<n ->
+            if column > row ->
+                continue rows
+            total += 1
+    return total
+```
+
+`count_triangle(3)` returns 6. The label of a `continue` must be the one of a for statement or a loop without a range that it is inside of. A scope or an if statement cannot be continued, so `continue` with the label of one is an error.
+
+A `break` that is not inside a loop or a scope, and a `continue` that is not inside a loop, are errors, and so is one in a procedure that has no loop, even if the procedure is only called from a loop. A `break` or a `continue` with a label that no statement around it has is an error as well. They are not expressions, so they have no value and nothing can follow them on the line, except a label. The statements that come after them in the same block are never run.
 
 ## Scope resolution
 
@@ -533,7 +585,7 @@ There is no shadowing of names so a name cannot be declared twice in the same sc
 - a name in an expression is neither a variable that is in scope there, nor a parameter of the procedure, nor a constant,
 - the name in a call is not a constant that is a procedure, which is also the case when it is a variable or a parameter,
 - a `break` is not inside a loop or a scope, or a `continue` is not inside the block of a loop,
-- the label of a `break` is not the label of a scope that it is inside of, or a scope has the label of a scope around it,
+- the label of a `break` or a `continue` is not the label of a statement that it is inside of, the label of a `continue` is not the one of a loop, or a statement has the label of a statement around it,
 - the name that an assignment assigns to is not a variable, but a parameter or a constant, or the iterator of a for statement.
 
 Scope resolution is about names only. Whether the value of a name has the right type is checked separately for the target, see below.
@@ -582,7 +634,7 @@ The target is built from the result of scope resolution, so it also rejects ever
 
 An if statement becomes the structured instructions of WebAssembly: the condition, which leaves 1 or 0 (for a comparison, its two operands and the signed comparison of them), then `if`, the block, `else` and the next branch, up to `end`. An `else if` is written as an `else` with another `if` in it, so the statement ends with an `end` for each of its conditions. When the last statement of a procedure that returns a value is not a `return`, for example an if statement that returns in all of its branches, the body ends with the `unreachable` instruction, because WebAssembly cannot tell that the end of it cannot be reached. A body that gets there anyway traps.
 
-A for statement becomes a `block` that holds a `loop`, and the statements of its block are in a second `block` inside the `loop`. The iterator is a local, and the end of the range is a local right after it, which is where the end is read once. First the start and the end are stored, then the loop begins with a test that leaves the `block` with `br_if` when the iterator is not below the end, or above it for an inclusive range. After the statements of the block, which the second `block` ends, the iterator is increased by one and `br` goes back to the start of the `loop`. A `continue` is a `br` to the end of the second `block`, so the increase is not skipped, and a `break` is a `br` to the end of the first. A loop without a range is the same three instructions without the test and the increase, with a `br` back to the start of the `loop`. A scope statement becomes a `block`, and a `break` that leaves it is a `br` to the end of it. The number in a `br` is the number of structured instructions between it and its target, which counts the `if` instructions of the if statements that the jump is in, one for each scope that it is in and has to leave on the way, and three for each loop, because a loop is a `block`, a `loop` and a `block`. A label has no instruction of its own: it only tells which `block` the `br` goes to. For an inclusive range the loop leaves the `block` before the increase when the iterator is equal to the end, so an inclusive range that ends at the largest `Int` stops instead of wrapping around.
+A for statement becomes a `block` that holds a `loop`, and the statements of its block are in a second `block` inside the `loop`. The iterator is a local, and the end of the range is a local right after it, which is where the end is read once. First the start and the end are stored, then the loop begins with a test that leaves the `block` with `br_if` when the iterator is not below the end, or above it for an inclusive range. After the statements of the block, which the second `block` ends, the iterator is increased by one and `br` goes back to the start of the `loop`. A `continue` is a `br` to the end of the second `block`, so the increase is not skipped, and a `break` is a `br` to the end of the first. A loop without a range is the same three instructions without the test and the increase, with a `br` back to the start of the `loop`. A scope statement becomes a `block`, and a `break` that leaves it is a `br` to the end of it. An if statement with a label is inside a `block` of its own, which a `break` with the label leaves, so the `block` ends after the last `end` of the statement. The number in a `br` is the number of structured instructions between it and its target, which counts the `if` instructions of the if statements that the jump is in, one for each scope or labeled if statement that it is in and has to leave on the way, and three for each loop, because a loop is a `block`, a `loop` and a `block`. A label of a loop or of a scope has no instruction of its own: it only tells which `block` the `br` goes to. For an inclusive range the loop leaves the `block` before the increase when the iterator is equal to the end, so an inclusive range that ends at the largest `Int` stops instead of wrapping around.
 
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 

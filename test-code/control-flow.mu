@@ -157,3 +157,96 @@ scope_in_branch_of_if :: proc(n: Int) Int ->
             x += 100
             break
     return x
+
+break_labeled_if :: proc(n: Int) Int ->
+    x := 0
+    @check if n > 5 ->
+        x += 1
+        if n > 10 ->
+            break check
+        x += 10
+    else if n > 2 ->
+        x += 100
+        break check
+        x += 5000
+    else ->
+        x += 1000
+    x += 10000
+    return x
+
+break_labeled_if_from_loop :: proc(n: Int) Int ->
+    total := 0
+    @guard if n > 0 ->
+        for i in 0..<n ->
+            if i == 3 ->
+                break guard
+            total += 1
+        total += 100
+    total += 1000
+    return total
+
+labeled_ifs_inside_each_other :: proc(a: Int, b: Int) Int ->
+    x := 0
+    @outer if a > 0 ->
+        x += 1
+        @inner if b > 0 ->
+            x += 10
+            if a > 5 ->
+                break outer
+            x += 100
+        x += 1000
+    x += 10000
+    return x
+
+plain_break_passes_labeled_if :: proc(n: Int) Int ->
+    total := 0
+    for i in 0..<n ->
+        @pick if i > 1 ->
+            total += 100
+            break
+        total += 1
+    return total
+
+continue_labeled_for :: proc(n: Int) Int ->
+    total := 0
+    @rows for row in 0..<n ->
+        for column in 0..<n ->
+            if column > row ->
+                continue rows
+            total += 1
+        total += 100
+    return total
+
+break_labeled_for :: proc(n: Int) Int ->
+    total := 0
+    @rows for row in 0..<n ->
+        for column in 0..<n ->
+            if row + column > 3 ->
+                break rows
+            total += 1
+    total += 1000
+    return total
+
+break_labeled_endless_loop :: proc(target: Int) Int ->
+    i := 0
+    @outer for ->
+        i += 1
+        for j in 1..<=i ->
+            if i + j == target ->
+                break outer
+        if i > 20 ->
+            break
+    return i
+
+continue_labeled_endless_loop :: proc(n: Int) Int ->
+    count := 0
+    total := 0
+    @again for ->
+        count += 1
+        for k in 0..<3 ->
+            if count / 2 * 2 == count ->
+                continue again
+        total += count
+        if count >= n ->
+            break
+    return total

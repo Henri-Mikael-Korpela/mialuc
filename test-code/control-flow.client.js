@@ -35,3 +35,27 @@ console.log("Continue and break in an endless loop, for 1, 3 and 7:",
 // A scope can be in the block of an if statement.
 console.log("Scopes in the branches of an if, for 0, 1 and 7:", scope_in_branch_of_if(0n),
     scope_in_branch_of_if(1n), scope_in_branch_of_if(7n));
+// A label can also be given to an if statement, `@name if condition ->`, and a `break` with the
+// label leaves the whole statement, with its `else if` and `else` branches. The label is on the `if`
+// line only. A `break` without a label passes a labeled if statement, as it passes any other.
+console.log("Break a labeled if, for 11, 7, 3 and 0:", break_labeled_if(11n), break_labeled_if(7n),
+    break_labeled_if(3n), break_labeled_if(0n));
+console.log("Break a labeled if from a loop in it, for 0, 2 and 5:", break_labeled_if_from_loop(0n),
+    break_labeled_if_from_loop(2n), break_labeled_if_from_loop(5n));
+console.log("Labeled ifs inside each other, for (0, 0), (1, 0), (1, 1) and (6, 1):",
+    labeled_ifs_inside_each_other(0n, 0n), labeled_ifs_inside_each_other(1n, 0n),
+    labeled_ifs_inside_each_other(1n, 1n), labeled_ifs_inside_each_other(6n, 1n));
+console.log("Plain break passes a labeled if, for 0, 1 and 5:", plain_break_passes_labeled_if(0n),
+    plain_break_passes_labeled_if(1n), plain_break_passes_labeled_if(5n));
+// A for statement or a loop without a range can have a label too, `@name for ...` and
+// `@name for ->`. A `break` leaves the labeled loop, also from an inner loop, and a `continue`
+// goes on with its next pass. Only a loop can be named by a `continue`.
+console.log("Continue the outer loop from the inner one, for 0, 1 and 3:", continue_labeled_for(0n),
+    continue_labeled_for(1n), continue_labeled_for(3n));
+console.log("Break the outer loop from the inner one, for 0, 2 and 3:", break_labeled_for(0n),
+    break_labeled_for(2n), break_labeled_for(3n));
+console.log("Break a labeled loop without a range, for 10, 100:", break_labeled_endless_loop(10n),
+    break_labeled_endless_loop(100n));
+console.log("Continue a labeled loop without a range, for 0, 4 and 7:",
+    continue_labeled_endless_loop(0n), continue_labeled_endless_loop(4n),
+    continue_labeled_endless_loop(7n));

@@ -723,7 +723,9 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 wasm_write_byte(&builder->writer, WASM_OPCODE_END);
             }
             if (frame->statement != AST_NODE_INDEX_NONE &&
-                builder->nodes[frame->statement].node_type == AST_NODE_TYPE_SCOPE_STATEMENT) {
+                (builder->nodes[frame->statement].node_type == AST_NODE_TYPE_SCOPE_STATEMENT ||
+                 builder->nodes[frame->statement].node_type == AST_NODE_TYPE_IF_STATEMENT)) {
+                // The `block` of a scope, or the one around a labeled if statement.
                 wasm_write_byte(&builder->writer, WASM_OPCODE_END);
             } else if (frame->statement != AST_NODE_INDEX_NONE) {
                 wasm_build_code_section_body_for_end(builder, definition, frame->statement);
@@ -735,6 +737,13 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
         Ast_Node_Index child = frame->next;
         Ast_Node const *child_node = &builder->nodes[child];
         frame->next = child_node->next_sibling;
+
+        // A label on an if, for or loop statement is a node around it that writes nothing.
+        bool is_labeled = child_node->node_type == AST_NODE_TYPE_LABELED_STATEMENT;
+        if (is_labeled) {
+            child = child_node->first_child;
+            child_node = &builder->nodes[child];
+        }
 
         if (frame_node->node_type == AST_NODE_TYPE_IF_STATEMENT) {
             bool is_first = child == frame_node->first_child;
@@ -787,12 +796,17 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 return false;
             }
         } else if (child_node->node_type == AST_NODE_TYPE_IF_STATEMENT) {
+            // A labeled if statement is inside a `block`, which a `break` with the label leaves.
+            if (is_labeled) {
+                wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
+                wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+            }
             assert(frame_count < WASM_STATEMENT_DEPTH_MAX);
             frames[frame_count] = (Wasm_Statement_Frame){
                 .node = child,
                 .next = child_node->first_child,
                 .if_count = 0,
-                .statement = AST_NODE_INDEX_NONE,
+                .statement = is_labeled ? child : AST_NODE_INDEX_NONE,
             };
             frame_count += 1;
         } else if (child_node->node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
@@ -1004,15 +1018,24 @@ static void wasm_build_code_section_body_jump(Wasm_Builder *builder,
     while (i > 0 && frames[i - 1].statement != target) {
         label += frames[i - 1].if_count;
         if (frames[i - 1].statement != AST_NODE_INDEX_NONE) {
-            bool is_scope = builder->nodes[frames[i - 1].statement].node_type ==
-                            AST_NODE_TYPE_SCOPE_STATEMENT;
-            label += is_scope ? 1 : 3;
+            // A scope and a labeled if statement are one `block`, and a loop is three.
+            Ast_Node_Type passed = builder->nodes[frames[i - 1].statement].node_type;
+            bool is_loop_passed = passed == AST_NODE_TYPE_FOR_STATEMENT ||
+                                  passed == AST_NODE_TYPE_LOOP_STATEMENT;
+            label += is_loop_passed ? 3 : 1;
         }
         i -= 1;
     }
     assert(i > 0);
 
-    bool is_loop = builder->nodes[target].node_type != AST_NODE_TYPE_SCOPE_STATEMENT;
+    // The frame of a labeled if statement counts its open `if` instructions, which are inside the
+    // `block` that is left.
+    if (builder->nodes[target].node_type == AST_NODE_TYPE_IF_STATEMENT) {
+        label += frames[i - 1].if_count;
+    }
+
+    bool is_loop = builder->nodes[target].node_type == AST_NODE_TYPE_FOR_STATEMENT ||
+                   builder->nodes[target].node_type == AST_NODE_TYPE_LOOP_STATEMENT;
     if (is_loop && builder->nodes[jump].node_type == AST_NODE_TYPE_BREAK_STATEMENT) {
         label += 2;
     }
@@ -1407,6 +1430,7 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_LABEL:
+    case AST_NODE_TYPE_LABELED_STATEMENT:
     case AST_NODE_TYPE_LOOP_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
@@ -1701,6 +1725,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_FOR_STATEMENT:
         case AST_NODE_TYPE_IF_STATEMENT:
         case AST_NODE_TYPE_LABEL:
+        case AST_NODE_TYPE_LABELED_STATEMENT:
         case AST_NODE_TYPE_LOOP_STATEMENT:
         case AST_NODE_TYPE_MODULE:
         case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:

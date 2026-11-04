@@ -37,6 +37,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_INTEGER_LITERAL:
     case AST_NODE_TYPE_LABEL:
+    case AST_NODE_TYPE_LABELED_STATEMENT:
     case AST_NODE_TYPE_LOOP_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION:
@@ -176,6 +177,10 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_LABEL:
             printf("LABEL %.*s\n", (int)node.payload.label.name.length,
+                   node.payload.label.name.bytes);
+            break;
+        case AST_NODE_TYPE_LABELED_STATEMENT:
+            printf("LABELED_STATEMENT %.*s\n", (int)node.payload.label.name.length,
                    node.payload.label.name.bytes);
             break;
         case AST_NODE_TYPE_LOOP_STATEMENT:

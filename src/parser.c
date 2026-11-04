@@ -500,13 +500,34 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
 /**
  * Parses the header line of a scope statement, `->` or `@label ->`, and appends the statement that
  * it starts to `parent`. The statement gets the label, if there is one, and an empty block, which is
- * returned so that the caller can fill it with the lines that follow.
+ * returned so that the caller can fill it with the lines that follow. A label that is followed by
+ * `if` or `for` instead of `->` is the label of that statement: it gets a labeled statement node
+ * that holds the label and the statement, and the block returned is the block of the statement.
  */
 static Ast_Node_Index parse_scope_statement(Parser *parser, Ast_Node_Index parent) {
     assert(parser->status == PARSE_STATUS_OK);
 
     Token const *label = parse_token_current(parser);
     assert(label->token_type == TOKEN_TYPE_ARROW || label->token_type == TOKEN_TYPE_LABEL);
+
+    if (label->token_type == TOKEN_TYPE_LABEL) {
+        // The label is not the last token, because the last one is `END`.
+        assert(parser->token_index + 1 < parser->token_count);
+        Token_Type after_label = parser->tokens[parser->token_index + 1].token_type;
+        if (after_label == TOKEN_TYPE_KEYWORD_IF || after_label == TOKEN_TYPE_KEYWORD_FOR) {
+            Ast_Node_Index labeled = parse_node_make(parser, AST_NODE_TYPE_LABELED_STATEMENT);
+            if (labeled == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            parser->nodes[labeled].payload.label.name = label->payload.identifier.text;
+            parse_node_append_child(parser, parent, labeled);
+            parse_token_advance(parser);
+            if (after_label == TOKEN_TYPE_KEYWORD_IF) {
+                return parse_if_statement(parser, labeled);
+            }
+            return parse_for_statement(parser, labeled);
+        }
+    }
 
     Ast_Node_Index statement = parse_node_make(parser, AST_NODE_TYPE_SCOPE_STATEMENT);
     if (statement == AST_NODE_INDEX_NONE) {
@@ -564,7 +585,7 @@ static Ast_Node_Index parse_jump_statement(Parser *parser) {
     parse_token_advance(parser);
 
     Token const *name = parse_token_current(parser);
-    if (node_type == AST_NODE_TYPE_BREAK_STATEMENT && name->token_type == TOKEN_TYPE_IDENTIFIER) {
+    if (name->token_type == TOKEN_TYPE_IDENTIFIER) {
         Ast_Node_Index label = parse_node_make(parser, AST_NODE_TYPE_LABEL);
         if (label == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
@@ -572,7 +593,7 @@ static Ast_Node_Index parse_jump_statement(Parser *parser) {
         parser->nodes[label].payload.label.name = name->payload.identifier.text;
         parse_node_append_child(parser, jump, label);
         parse_token_advance(parser);
-    } else if (node_type == AST_NODE_TYPE_BREAK_STATEMENT && name->token_type == TOKEN_TYPE_LABEL) {
+    } else if (name->token_type == TOKEN_TYPE_LABEL) {
         // The prefix is only for declaring a label.
         return parse_fail(parser, STR("the name of a label without '@'"));
     }
@@ -593,6 +614,11 @@ static Ast_Node_Index parse_else_branch(Parser *parser, Ast_Node_Index parent) {
     assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_ELSE);
 
     Ast_Node_Index statement = parser->nodes[parent].last_child;
+    // An if statement with a label is inside a labeled statement.
+    if (statement != AST_NODE_INDEX_NONE &&
+        parser->nodes[statement].node_type == AST_NODE_TYPE_LABELED_STATEMENT) {
+        statement = parser->nodes[statement].last_child;
+    }
     bool is_open = statement != AST_NODE_INDEX_NONE &&
                    parser->nodes[statement].node_type == AST_NODE_TYPE_IF_STATEMENT &&
                    parser->nodes[statement].payload.if_statement.has_else == false;

@@ -53,9 +53,11 @@ typedef enum {
     SEMANTIC_STATUS_BREAK_OUTSIDE_SCOPE,
     // A `continue` that is not in the block of a loop.
     SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP,
-    // A scope with the label of a scope around it.
+    // A statement with the label of a statement around it.
     SEMANTIC_STATUS_LABEL_DUPLICATE,
-    // A `break` with a label that no scope around it has.
+    // A `continue` with the label of a statement that is not a loop.
+    SEMANTIC_STATUS_LABEL_NOT_LOOP,
+    // A `break` or a `continue` with a label that no statement around it has.
     SEMANTIC_STATUS_LABEL_UNKNOWN,
     SEMANTIC_STATUS_OK,
     SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE,
@@ -100,10 +102,10 @@ typedef struct {
  *
  * A scope statement is a block of its own, and a `break` leaves the innermost loop or scope that it
  * is in, also when it is in the block of an if statement inside it, which is not one to leave. A
- * `break` with a label leaves the scope with that label, which must be around it. Labels are
- * separate from the other names, but a scope cannot have the label of a scope around it. A
- * `continue` must be in the block of a for statement or a loop, and goes on with the innermost
- * one, also when scopes are in between. The jump is bound to the statement that it leaves or goes
+ * `break` with a label leaves the scope, loop or if statement with that label, which must be around
+ * it. Labels are separate from the other names, but a statement cannot have the label of a
+ * statement around it. A `continue` must be in the block of a for statement or a loop, and goes on
+ * with the innermost one, also when scopes are in between, or with the loop that has its label. The jump is bound to the statement that it leaves or goes
  * on with, see `SEMANTIC_BINDING_KIND_JUMP_TARGET`.
  *
  * An assignment, such as `x += 1`, uses the name that it assigns to like any other use of a name,

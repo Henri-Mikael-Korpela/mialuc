@@ -75,12 +75,12 @@
             "patterns": [
                 {
                     "name": "entity.name.label.mialu",
-                    "comment": "The label of a scope: an @ directly followed by a name, as in @outer ->.",
+                    "comment": "The label of a statement: an @ directly followed by a name, as in @outer -> or @outer for.",
                     "match": "@[A-Za-z_][A-Za-z0-9_]*"
                 },
                 {
-                    "comment": "A break that names the scope to leave, which is written without the @, as in break outer.",
-                    "match": "\\b(break)[ \\t]+([A-Za-z_][A-Za-z0-9_]*)",
+                    "comment": "A break or a continue that names a statement, which is written without the @, as in break outer.",
+                    "match": "\\b(break|continue)[ \\t]+([A-Za-z_][A-Za-z0-9_]*)",
                     "captures": {
                         "1": { "name": "keyword.control.flow.mialu" },
                         "2": { "name": "entity.name.label.mialu" }

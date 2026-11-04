@@ -727,13 +727,19 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
                 position.line, position.column);
         break;
     case SEMANTIC_STATUS_LABEL_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: the label '%.*s' is already used by a scope around this "
-                "one.\n", path, position.line, position.column, subject_length,
+        fprintf(stderr, "%s:%zu:%zu: the label '%.*s' is already used by a statement around "
+                "this one.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_LABEL_NOT_LOOP:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not the label of a loop, so 'continue' cannot go on "
+                "with it.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     case SEMANTIC_STATUS_LABEL_UNKNOWN:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not the label of a scope around this 'break'.\n",
-                path, position.line, position.column, subject_length, result.subject.bytes);
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not the label of a statement around this "
+                "'break' or 'continue'.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case SEMANTIC_STATUS_OK:
         assert(false);
