@@ -10,6 +10,12 @@
 typedef enum {
     // Tokens consisting of a single character are represented by their ASCII value:
     TOKEN_TYPE_ASTERISK = '*',
+    // The braces around the elements of an array literal, and the brackets around the length of an
+    // array type and around the index of a subscript.
+    TOKEN_TYPE_BRACE_LEFT = '{',
+    TOKEN_TYPE_BRACE_RIGHT = '}',
+    TOKEN_TYPE_BRACKET_LEFT = '[',
+    TOKEN_TYPE_BRACKET_RIGHT = ']',
     TOKEN_TYPE_COMMA = ',',
     TOKEN_TYPE_EQUALS = '=',
     TOKEN_TYPE_GREATER = '>',
@@ -34,6 +40,7 @@ typedef enum {
     TOKEN_TYPE_INTEGER_LITERAL,
     TOKEN_TYPE_KEYWORD_AND,
     TOKEN_TYPE_KEYWORD_BREAK,
+    TOKEN_TYPE_KEYWORD_CONST,
     TOKEN_TYPE_KEYWORD_CONTINUE,
     TOKEN_TYPE_KEYWORD_ELSE,
     TOKEN_TYPE_KEYWORD_FALSE,

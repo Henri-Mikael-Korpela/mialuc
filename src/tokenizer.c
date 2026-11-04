@@ -161,6 +161,8 @@ static Token_Type tokenizer_keyword_type(Str text) {
         return TOKEN_TYPE_KEYWORD_PROC;
     } else if (str_equals(text, STR("break"))) {
         return TOKEN_TYPE_KEYWORD_BREAK;
+    } else if (str_equals(text, STR("const"))) {
+        return TOKEN_TYPE_KEYWORD_CONST;
     } else if (str_equals(text, STR("continue"))) {
         return TOKEN_TYPE_KEYWORD_CONTINUE;
     } else if (str_equals(text, STR("for"))) {
@@ -466,6 +468,18 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         else if (character == (char)TOKEN_TYPE_HASH) {
             token_elements[result.tokens.length] = (Token){
                 .token_type = TOKEN_TYPE_HASH,
+                .source_offset = (uint32_t)offset,
+            };
+            result.tokens.length += 1;
+            offset += 1;
+        }
+        // The brackets and the braces are single tokens that mean the same everywhere.
+        else if (character == (char)TOKEN_TYPE_BRACE_LEFT ||
+                 character == (char)TOKEN_TYPE_BRACE_RIGHT ||
+                 character == (char)TOKEN_TYPE_BRACKET_LEFT ||
+                 character == (char)TOKEN_TYPE_BRACKET_RIGHT) {
+            token_elements[result.tokens.length] = (Token){
+                .token_type = (Token_Type)character,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;

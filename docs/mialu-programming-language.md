@@ -17,6 +17,10 @@
 - [Assignment](#assignment)
 - [If statements](#if-statements)
 - [For statements](#for-statements)
+- [Arrays](#arrays)
+  - [Array literals](#array-literals)
+  - [Elements](#elements)
+  - [Array slices](#array-slices)
 - [Procedures](#procedures)
   - [Calling procedures](#calling-procedures)
 - [Loops without a range](#loops-without-a-range)
@@ -79,6 +83,7 @@ Keywords are words that have a meaning of their own in the language, so they are
 ```
 and
 break
+const
 continue
 else
 false
@@ -128,6 +133,8 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 | `Bool` | A boolean value, which is `true` or `false`. See [Booleans](#booleans). |
 | `Int` | A signed 64-bit integer. Written as a decimal number, such as `42`. |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
+| `[5]Int` | An array: a fixed number of values, here five `Int` values, that are one after the other. See [Arrays](#arrays). |
+| `[]Int` | An array slice: a view of some of the elements of an array, whose number is not known until the program runs. See [Array slices](#array-slices). |
 
 ### Strings
 
@@ -211,6 +218,8 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `-`      | Subtraction. | 5 | `x := 5 - 1` makes `x` 4 |
 | `*`      | Multiplication. | 6 | `x := 2 + 3 * 4` makes `x` 14 |
 | `/`      | Division. The result is truncated toward zero. | 6 | `x := 20 - 12 / 4` makes `x` 17 |
+| `[ ]`    | Subscript. The index of an element between brackets. It is written after the name of an array or of an array slice, and binds tighter than every operator. See [Elements](#elements). | 7 | `a[2]` is the element at index 2 of `a` |
+| `[ : ]`  | Slice. The two bounds of an array slice between brackets, separated by a colon. It includes the low bound and excludes the high bound. See [Array slices](#array-slices). | 7 | `a[1:4]` has the elements 1 through 3 |
 | `+=`     | Addition assignment. It adds the value to a variable that is defined already. | 0 | `x += 2` adds 2 to `x` |
 | `-=`     | Subtraction assignment. It subtracts the value from a variable. | 0 | `x -= 2` makes `x` 2 less |
 | `*=`     | Multiplication assignment. It multiplies a variable by the value. | 0 | `x *= 3` triples `x` |
@@ -218,9 +227,9 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `:`      | Type separator. It separates a name from its type. | 0 | `x : Int = 5` |
 | `::`     | Defines a constant. It is two subsequent `:`. | 0 | `NAME :: "Bob"` |
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
-| `=`      | Sets the initial value of a variable whose type is written. | 0 | `x : Int = 5` |
+| `=`      | Sets the initial value of a variable whose type is written. It also assigns to an element, or copies to a range of elements, which are the only things that it assigns to. | 0 | `x : Int = 5`, `a[0] = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names or [calls](#calling-procedures), or the results of operators of a higher precedence. `not` is a unary operator, written before its operand. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values for `==` and `not=`, and its result is a `Bool`.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. `not` is a unary operator, written before its operand. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values for `==` and `not=`, and its result is a `Bool`.
 
 Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2, and so do `*` and `/`, so `8 / 2 * 3` is 12 and not 1. A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, so `a + 1 > b * 2` means `(a + 1) > (b * 2)`. A comparison is an expression of type `Bool`, but its operands are not comparisons, so it cannot be an operand of another operator, and `a < b < c` and `a == b == c` are errors. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2.
 
@@ -286,7 +295,7 @@ foo :: proc() Int ->
     return x
 ```
 
-`foo` returns 5. Dividing by zero is an error at run time, see [WebAssembly](#webassembly). The value is evaluated first, with the value that the variable has before the assignment, so `x += x` doubles `x`, `x += 2 * 3` adds 6, `x -= 1 + 1` subtracts 2, `x *= 1 + 2` multiplies `x` by 3, and `x /= 1 + 1` divides `x` by 2. The name must be a variable of the procedure, defined above the assignment, or a global variable: a parameter or a constant cannot be assigned to. The variable and the value must be an `Int`, because addition, subtraction, multiplication and division are defined for `Int` only.
+`foo` returns 5. An element of an array can be assigned to as well, such as `a[0] += 2`, see [Elements](#elements). Dividing by zero is an error at run time, see [WebAssembly](#webassembly). The value is evaluated first, with the value that the variable has before the assignment, so `x += x` doubles `x`, `x += 2 * 3` adds 6, `x -= 1 + 1` subtracts 2, `x *= 1 + 2` multiplies `x` by 3, and `x /= 1 + 1` divides `x` by 2. The name must be a variable of the procedure, defined above the assignment, or a global variable: a parameter or a constant cannot be assigned to. The variable and the value must be an `Int`, because addition, subtraction, multiplication and division are defined for `Int` only.
 
 ## If statements
 
@@ -390,6 +399,123 @@ count_pairs :: proc(n: Int) Int ->
                 count += 1
     return count
 ```
+
+The elements of an array or of an array slice can be gone through as well. Instead of a range, the expression after `in` is the array or the slice, and the block runs once for each element, in order from the first. The iterator is the value of the element, an `Int`:
+
+```
+sum_of_elements :: proc() Int ->
+    a := [const]Int { 1, 2, 3, 4, 5 }
+    total := 0
+    for x in a ->
+        total += x
+    return total
+```
+
+`sum_of_elements` returns 15. A for statement is told to go through a range by the `..<` or `..<=` in it, so one without such an operator must have an array or a slice after `in`, and `for x in 5 ->` is an error. The address and the length of what is gone through are read once, before the loop, but the elements are read as the loop goes on, so a change to an element that has not been reached yet in the block is seen by it. The iterator is a copy of an element, so it cannot be used to change one, and the same rules as for the iterator of a range hold: it cannot be assigned to, it is not in scope in the expression, and `break` and `continue` work as in any loop. An array with no elements runs the block no times. To change the elements, write the index of each:
+
+```
+fill :: proc() Int ->
+    a := [const]Int { 0, 0, 0, 0, 0 }
+    for i in 0..<5 ->
+        a[i] = i * i
+    return a[4]
+```
+
+## Arrays
+
+An array is a fixed number of values of one type, which are called its elements. The elements are one after the other, and the number of them is the length of the array. The length is known when the program is compiled, and it never changes. An array lives on the stack of the procedure that defines it: it takes no allocation, and it is gone when the procedure returns. The type of an array is its length between square brackets, followed by the type of its elements, so `[5]Int` is an array of five `Int` values. Elements are numbered from zero, so the elements of `[5]Int` have the indexes 0, 1, 2, 3 and 4. The compiler supports `Int` as the type of the elements and nothing else yet.
+
+### Array literals
+
+An array literal gives the elements of an array. It is the type of the array followed by the elements between braces, which are separated by commas:
+
+```
+a := [5]Int { 1, 2, 3, 4, 5 }
+```
+
+When the length of the type is the keyword `const` instead of a number, the length is the number of elements in the literal. This is the way to write a literal without counting the elements:
+
+```
+a := [const]Int { 1, 2, 3, 4, 5 }
+```
+
+`a` above is of type `[5]Int`, which is deduced from the value like the type of any variable. A literal that has a number as its length must have exactly that many elements, so `[3]Int { 1, 2 }` is an error. A literal must have a number or `const` as its length, so `[]Int { 1, 2 }` is an error: that is the type of an array slice, which has no elements of its own, see [Array slices](#array-slices). The elements are expressions of type `Int`, and there may be none, so `[const]Int { }` is an array of length zero. The whole literal is written on one line.
+
+A variable of an array type is defined with an array literal, and not with another array or a call: `b := a` is an error, because an array is not copied by a definition. The type can be written as well, as long as the literal has the number of elements that it says:
+
+```
+a : [3]Int = [const]Int { 7, 8, 9 }
+```
+
+An array literal is an expression, so it can also be used without a variable, for example as an argument of a call. Each time that a literal is evaluated it puts its elements in their place again, so a literal in the block of a loop makes a new array in every pass.
+
+An array cannot be the type of a parameter, of a global variable or of a returned value, because its elements are in the frame of the procedure that defines it: a parameter would have to be a copy, and the elements of a returned array would be gone when the procedure returns. A procedure that works on the elements of an array takes an [array slice](#array-slices) of them.
+
+### Elements
+
+The element at an index is written with the index between square brackets after the array, which is called a subscript. The index is an expression of type `Int`:
+
+```
+array_element_access :: proc() Int ->
+    a := [const]Int { 1, 2, 3, 4, 5 }
+    return a[0] + a[a[0] + 1]
+```
+
+`array_element_access` returns 4, which is `1 + a[2]`. An index that is not in the array, which is one that is negative or not below the length, is an error at run time: the program traps, see [WebAssembly](#webassembly).
+
+An element is a place that can be assigned to. The plain assignment `=` is for elements only, because a variable is given its value when it is defined, and `x = 5` is an error. The assignment operators `+=`, `-=`, `*=` and `/=` work on an element like they do on a variable:
+
+```
+array_element_assignment :: proc() Int ->
+    a := [const]Int { 1, 2, 3, 4, 5 }
+    a[0] = 10
+    a[1] += 5
+    return a[0] + a[1]
+```
+
+`array_element_assignment` returns 17. The index and the array are evaluated before the value, and the value is an `Int`.
+
+### Array slices
+
+An array slice is a view of some of the elements of an array. Its type is `[]` followed by the type of the elements, so `[]Int` is an array slice of `Int` values. It does not own the elements: it only knows where the first one is and how many there are, which is not known until the program runs. So a change to an element of a slice is a change to the element of the array that it views.
+
+A slice is made of an array, or of another slice, by writing two indexes, the low bound and the high bound, separated by a colon, between the square brackets. It is a half-open range: it includes the element at the low bound and excludes the one at the high bound. So the slice `a[1:4]` has the elements 1 through 3 of `a`, and its length is 3, which is the high bound minus the low bound:
+
+```
+sum_of_middle :: proc() Int ->
+    a := [const]Int { 1, 2, 3, 4, 5 }
+    return sum(a[1:4])
+```
+
+`sum_of_middle` returns 9, which is 2 + 3 + 4. Both bounds are written, and they are expressions of type `Int`. The low bound must not be above the high bound, and the high bound must not be above the length of what is sliced, or else the program traps. So `a[2:2]` is a slice with no elements, and `a[0:5]` has all five elements of `a`. The indexes of a slice start at zero again, so `a[1:4][0]` is `a[1]`, and a slice of a slice is relative to the first one. A slice can be the value of a variable, and then its type is deduced, or it can be written:
+
+```
+middle := a[1:4]
+everything : []Int = a
+```
+
+An array can be given where a slice is wanted: the slice then has all the elements of the array. That is the case for an argument of a call and for the value of a variable with a slice type. This is how a procedure takes some elements, whatever the length of the array they come from is. When the length of the array between the brackets of a parameter is left out, the parameter is a slice, not an array:
+
+```
+sum :: proc(elements: []Int) Int ->
+    total := 0
+    for x in elements ->
+        total += x
+    return total
+```
+
+`sum(a)` adds all the elements of `a`, and `sum(a[0:3])` the first three. A slice can be passed on to another procedure, and it can be sliced again. Because a slice views the elements of the frame of the procedure that defines the array, it cannot outlive it, so a slice cannot be the type of a global variable or of a returned value either. A `for` statement can go through the elements of a slice, see [For statements](#for-statements).
+
+A range of elements is assigned to with `=` and a slice on the left. The value on the right is an array or a slice, and it must have as many elements as the range, or else the program traps. The elements are copied, and the copy is right also when the two ranges overlap:
+
+```
+array_element_range_assignment :: proc() Int ->
+    a := [const]Int { 1, 2, 3, 4, 5 }
+    a[0:3] = [const]Int { 10, 20, 30 }
+    return sum(a)
+```
+
+`array_element_range_assignment` returns 69. The assignment operators such as `+=` are for one element, so `a[0:3] += 1` is an error.
 
 ## Procedures
 
@@ -697,7 +823,7 @@ The compiler has two modes: `run` prints the tokens and the syntax tree of a pro
 
 ### WebAssembly
 
-The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool` and `Str` are the only types that the target supports.
+The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool` and `Str` are the only types that the target supports, and the arrays and array slices of `Int`.
 
 `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition, subtraction and multiplication wrap around on overflow. Division truncates toward zero, so `(0 - 7) / 2` is -3. It traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
 
@@ -714,11 +840,29 @@ A global variable is a mutable global of the module, or two when it is a `Str`, 
 
 The variables of a procedure are locals of its function, after the parameters, and a `Str` variable is two locals, like a `Str` parameter. The variables of the blocks of if statements and for statements are locals of the function too, each one a local of its own, after the ones above it, also when two variables have the same name in different blocks. The definition of a variable stores the initial value in them, and an assignment such as `x += 2` pushes the value of the variable, then the value, adds them and stores the result in the local of the variable. The assignment `x /= y` traps in the same cases as the division `x / y`.
 
-A module has a memory only when the program has a string literal, which includes the value of a global variable. A procedure cannot be called `memory`, whether the program has a string literal or not, because that is the name of the export.
+An array is stored in the memory of the module, on a stack that grows down from the end of the memory, and not in locals, because an array slice refers to elements by their address. A procedure that has array literals makes room for the elements of all of them when it starts, by moving a stack pointer, which is a mutable global of the module that comes after the globals of the program, and moves it back before it returns. The elements are `Int` values of 8 bytes. A variable of an array type is a local that holds the address of its first element, and its length is part of the program: the code that needs it, such as a bounds check, has it as a constant. An array literal stores each of its elements at its place with `i64.store`, and leaves the address of the first one, which is the stack pointer of the procedure plus the offset of the literal. The stack is 1 MiB. A call that would need more traps, by comparing the new stack pointer with the end of the stack. After a trap the stack pointer is not moved back, since nothing runs to do it, so an instance that has trapped has less stack left, and a program should make a new one.
+
+An array slice is two 32-bit integers (`i32`), like a `Str`: the address of its first element and its number of elements, and a parameter of that type is two WebAssembly parameters. A caller from JavaScript writes the elements as `Int` values, which are `BigInt64Array` elements, to the memory that the module exports as `memory`, and passes the address and the length:
+
+```js
+new BigInt64Array(memory.buffer, 0, 3).set([10n, 20n, 30n]);
+sum(0, 3);
+```
+
+An array is made into a slice where one is wanted by writing its length after its address, which is `i32.const` and the length. A subscript traps unless the index is below the length, which is one unsigned 64-bit comparison, so a negative index and one that does not fit in 32 bits trap as well. Then the address of the element is the address of the first plus the index times 8, and the element is loaded with `i64.load` or stored with `i64.store`. A slice with two bounds traps unless the low bound is not above the high bound, and the high bound is not above the length, and its address is moved up by the low bound, and its length is the difference between the bounds. The assignment to a range of elements is a `memory.copy`, after a comparison of the two lengths, so the module needs an engine that supports bulk memory operations, which all current browsers and Node.js do. The code of subscripts, slices and assignments to elements keeps values between instructions in locals after the variables of the procedure, which a procedure that has any of them gets: two 64-bit locals and three 32-bit ones, the last of which holds the address of the frame.
+
+A for statement that goes through the elements of an array or a slice is the same three structured instructions as one with a range, with two 32-bit locals after the iterator: the address of the next element and the address after the last one. Before the loop the end is stored, which is the address plus the length times 8. The loop begins with a test that leaves the `block` with `br_if` when the next address is not below the end. The iterator is loaded from the next address, and the address moves up by 8 before the statements of the block, so what comes after the second `block`, where `continue` goes, is only the `br` back to the start of the `loop`.
+
+A module has a memory only when the program has a string literal, which includes the value of a global variable, or an array type, which includes the array literals and the array slices. The strings are at the start of the memory, and the stack of the arrays is after them. A procedure cannot be called `memory`, whether the module has one or not, because that is the name of the export.
 
 The target rejects a program that the parser accepts when:
 
-- a type, also the one of a global variable, is not `Int`, `Bool` or `Str`,
+- a type, also the one of a global variable, is not `Int`, `Bool` or `Str`, or an array or an array slice of `Int`,
+- the type of a parameter is an array, or the type of a global variable is an array or an array slice,
+- an array literal has another number of elements than the length of its type, or a variable of an array type with a length has another number than that,
+- a variable of an array type is not given an array literal,
+- an element of an array literal, or the value that is assigned to an element, is not an `Int`,
+- what is subscripted, sliced or gone through by a for statement, or what is copied to a range of elements, is not an array or an array slice, or an index or a bound is not an `Int`,
 - a name in an expression, or the initial value of a variable, is a procedure, which is not a value that the target can use yet,
 - the initial value of a global variable is not of the type that is written for the variable,
 - a definition is called `memory`,
@@ -738,7 +882,7 @@ The target is built from the result of scope resolution, so it also rejects ever
 
 An if statement becomes the structured instructions of WebAssembly: the condition, which leaves 1 or 0 (for a comparison, its two operands and the signed comparison of them), then `if`, the block, `else` and the next branch, up to `end`. An `else if` is written as an `else` with another `if` in it, so the statement ends with an `end` for each of its conditions. When the last statement of a procedure that returns a value is not a `return`, for example an if statement that returns in all of its branches, the body ends with the `unreachable` instruction, because WebAssembly cannot tell that the end of it cannot be reached. A body that gets there anyway traps.
 
-A for statement becomes a `block` that holds a `loop`, and the statements of its block are in a second `block` inside the `loop`. The iterator is a local, and the end of the range is a local right after it, which is where the end is read once. First the start and the end are stored, then the loop begins with a test that leaves the `block` with `br_if` when the iterator is not below the end, or above it for an inclusive range. After the statements of the block, which the second `block` ends, the iterator is increased by one and `br` goes back to the start of the `loop`. A `continue` is a `br` to the end of the second `block`, so the increase is not skipped, and a `break` is a `br` to the end of the first. A loop without a range is the same three instructions without the test and the increase, with a `br` back to the start of the `loop`. A scope statement becomes a `block`, and a `break` that leaves it is a `br` to the end of it. An if statement with a label is inside a `block` of its own, which a `break` with the label leaves, so the `block` ends after the last `end` of the statement. The number in a `br` is the number of structured instructions between it and its target, which counts the `if` instructions of the if statements that the jump is in, one for each scope or labeled if statement that it is in and has to leave on the way, and three for each loop, because a loop is a `block`, a `loop` and a `block`. A label of a loop or of a scope has no instruction of its own: it only tells which `block` the `br` goes to. For an inclusive range the loop leaves the `block` before the increase when the iterator is equal to the end, so an inclusive range that ends at the largest `Int` stops instead of wrapping around.
+A for statement with a range becomes a `block` that holds a `loop`, and the statements of its block are in a second `block` inside the `loop`. The iterator is a local, and the end of the range is a local right after it, which is where the end is read once. First the start and the end are stored, then the loop begins with a test that leaves the `block` with `br_if` when the iterator is not below the end, or above it for an inclusive range. After the statements of the block, which the second `block` ends, the iterator is increased by one and `br` goes back to the start of the `loop`. A `continue` is a `br` to the end of the second `block`, so the increase is not skipped, and a `break` is a `br` to the end of the first. A loop without a range is the same three instructions without the test and the increase, with a `br` back to the start of the `loop`. A scope statement becomes a `block`, and a `break` that leaves it is a `br` to the end of it. An if statement with a label is inside a `block` of its own, which a `break` with the label leaves, so the `block` ends after the last `end` of the statement. The number in a `br` is the number of structured instructions between it and its target, which counts the `if` instructions of the if statements that the jump is in, one for each scope or labeled if statement that it is in and has to leave on the way, and three for each loop, because a loop is a `block`, a `loop` and a `block`. A label of a loop or of a scope has no instruction of its own: it only tells which `block` the `br` goes to. For an inclusive range the loop leaves the `block` before the increase when the iterator is equal to the end, so an inclusive range that ends at the largest `Int` stops instead of wrapping around.
 
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 

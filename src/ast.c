@@ -17,12 +17,15 @@ enum {
 bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     switch (node_type) {
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+    case AST_NODE_TYPE_ASSIGNMENT:
     case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
     case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
         return true;
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_AND:
+    case AST_NODE_TYPE_ARRAY_LITERAL:
+    case AST_NODE_TYPE_ARRAY_TYPE:
     case AST_NODE_TYPE_ATTRIBUTE:
     case AST_NODE_TYPE_BLOCK:
     case AST_NODE_TYPE_BOOL_LITERAL:
@@ -50,7 +53,9 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_RANGE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
     case AST_NODE_TYPE_SCOPE_STATEMENT:
+    case AST_NODE_TYPE_SLICE:
     case AST_NODE_TYPE_STRING_LITERAL:
+    case AST_NODE_TYPE_SUBSCRIPT:
     case AST_NODE_TYPE_SUBTRACTION:
     case AST_NODE_TYPE_TYPE_NAME:
     case AST_NODE_TYPE_VARIABLE_DEFINITION:
@@ -142,6 +147,25 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_AND:
             printf("AND\n");
+            break;
+        case AST_NODE_TYPE_ARRAY_LITERAL:
+            printf("ARRAY_LITERAL\n");
+            break;
+        case AST_NODE_TYPE_ARRAY_TYPE:
+            switch (node.payload.array_type.length_kind) {
+            case AST_ARRAY_LENGTH_FIXED:
+                printf("ARRAY_TYPE %" PRId64 "\n", node.payload.array_type.length);
+                break;
+            case AST_ARRAY_LENGTH_INFERRED:
+                printf("ARRAY_TYPE const\n");
+                break;
+            case AST_ARRAY_LENGTH_OMITTED:
+                printf("ARRAY_TYPE slice\n");
+                break;
+            }
+            break;
+        case AST_NODE_TYPE_ASSIGNMENT:
+            printf("ASSIGNMENT\n");
             break;
         case AST_NODE_TYPE_ATTRIBUTE:
             printf("ATTRIBUTE %.*s\n", (int)node.payload.attribute.name.length,
@@ -245,9 +269,15 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_SCOPE_STATEMENT:
             printf("SCOPE_STATEMENT\n");
             break;
+        case AST_NODE_TYPE_SLICE:
+            printf("SLICE\n");
+            break;
         case AST_NODE_TYPE_STRING_LITERAL:
             printf("STRING_LITERAL \"%.*s\"\n", (int)node.payload.string_literal.text.length,
                    node.payload.string_literal.text.bytes);
+            break;
+        case AST_NODE_TYPE_SUBSCRIPT:
+            printf("SUBSCRIPT\n");
             break;
         case AST_NODE_TYPE_SUBTRACTION:
             printf("SUBTRACTION\n");

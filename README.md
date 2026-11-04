@@ -42,7 +42,7 @@ The first run builds the image, which takes a minute. Open http://localhost:8008
 
 Run the JavaScript with Ctrl+Enter; the console output is on the right, with two tabs below it: "Parsed code", the syntax tree as a hierarchy that can be folded, and "WebAssembly text". The examples in the list at the top are the programs in [test-code](test-code): each is a Mialu file and the JavaScript next to it that calls it, such as `sum.mu` and `sum.client.js`.
 
-A `Str` is two numbers, the address and the length of its bytes in the memory of the module, so a procedure that returns one gives an array. The playground has a function `Str` that reads it as a JavaScript string: `Str(get_name())`.
+A `Str` is two numbers, the address and the length of its bytes in the memory of the module, so a procedure that returns one gives an array. The playground has a function `Str` that reads it as a JavaScript string: `Str(get_name())`. An array slice, such as the `[]Int` parameter of `sum` in the `arrays` example, is two numbers as well: the address of its first element and the number of elements. The playground has a variable `memory`, the memory of the module when it has one, so JavaScript can write the elements there: `new BigInt64Array(memory.buffer, 0, 3).set([1n, 2n, 3n])` and then `sum(0, 3)`.
 
 The image contains a copy of the sources, so run `docker compose up --build` again after changing the compiler, the playground or the examples. Without Docker, build the compiler as described above and run `python tests/wasm/serve.py`; see [tests/wasm](tests/wasm).
 

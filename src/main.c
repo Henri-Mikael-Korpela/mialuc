@@ -397,6 +397,18 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_ASTERISK_EQUALS:
             printf("ASTERISK_EQUALS\n");
             break;
+        case TOKEN_TYPE_BRACE_LEFT:
+            printf("BRACE_LEFT\n");
+            break;
+        case TOKEN_TYPE_BRACE_RIGHT:
+            printf("BRACE_RIGHT\n");
+            break;
+        case TOKEN_TYPE_BRACKET_LEFT:
+            printf("BRACKET_LEFT\n");
+            break;
+        case TOKEN_TYPE_BRACKET_RIGHT:
+            printf("BRACKET_RIGHT\n");
+            break;
         case TOKEN_TYPE_COMMA:
             printf("COMMA\n");
             break;
@@ -431,6 +443,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
             break;
         case TOKEN_TYPE_KEYWORD_BREAK:
             printf("KEYWORD_BREAK\n");
+            break;
+        case TOKEN_TYPE_KEYWORD_CONST:
+            printf("KEYWORD_CONST\n");
             break;
         case TOKEN_TYPE_KEYWORD_CONTINUE:
             printf("KEYWORD_CONTINUE\n");
@@ -621,6 +636,30 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be used in arithmetic.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, and the elements of an array are.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_ARRAY_EXPECTED:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an array or an array slice.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_ARRAY_INITIALIZER_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: variable '%.*s' is an array, so it must be given an array "
+                "literal, such as [const]Int { 1, 2 }.\n", path, position.line, position.column,
+                subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_ARRAY_LENGTH_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the array of '%.*s' has a different number of elements than "
+                "the length in its type.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_ARRAY_TYPE_MISPLACED:
+        fprintf(stderr, "%s:%zu:%zu: an array of '%.*s' cannot be the type here. A parameter can "
+                "be an array slice, as in []%.*s, and a global variable can be neither.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes,
+                subject_length, result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: the call of '%.*s' has a different number of arguments than "
                 "the procedure has parameters.\n", path, position.line, position.column,
@@ -658,6 +697,10 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     case WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP:
         fprintf(stderr, "%s:%zu:%zu: an expression in '%.*s' has too many nested operators.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_INDEX_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be an index.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is a procedure, which the wasm target cannot use as a "

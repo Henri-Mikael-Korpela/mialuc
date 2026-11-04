@@ -18,6 +18,14 @@ enum {
     // written: the body, and for each nested if statement the statement itself and its current
     // block. The parser does not accept deeper nesting, see `AST_BLOCK_DEPTH_MAX`.
     WASM_STATEMENT_DEPTH_MAX = 2 * AST_BLOCK_DEPTH_MAX + 2,
+    // The size of the stack in memory that the arrays of the running procedures are on. Arrays are
+    // not in locals, because an array slice refers to elements by address. A recursion that
+    // needs more traps, see `wasm_frame_enter`.
+    WASM_STACK_SIZE_BYTES = 1024 * 1024,
+    // An element is an `Int`, which is 8 bytes. The shift multiplies an index by that size, and is
+    // also the alignment of a load or a store of an element, as a power of two.
+    WASM_ELEMENT_SIZE_BYTES = 8,
+    WASM_ELEMENT_SIZE_SHIFT = 3,
 };
 
 byte const WASM_MODULE_HEADER[8] = {0x00, 'a', 's', 'm', 0x01, 0x00, 0x00, 0x00};
@@ -35,13 +43,32 @@ typedef struct {
 } Wasm_Writer;
 
 // Alphabetical, because nothing depends on the order. `WASM_VALUE_TYPE_NONE` is the result of a
-// name that is not a type that the target has.
+// name that is not a type that the target has. An array is one 32-bit local that holds the address
+// of its first element, and its length is known from the program, see `wasm_array_length`. An
+// array slice is two 32-bit values, the address of its first element and its length, like `Str`.
+// The elements are always `Int`.
 typedef enum {
+    WASM_VALUE_TYPE_ARRAY,
     WASM_VALUE_TYPE_BOOL,
     WASM_VALUE_TYPE_INT,
     WASM_VALUE_TYPE_NONE,
+    WASM_VALUE_TYPE_SLICE,
     WASM_VALUE_TYPE_STR,
 } Wasm_Value_Type;
+
+// The locals that a procedure with arrays has after its parameters and variables, for the code that
+// is written for subscripts, slices and the like to hold values in. The order is the order of the
+// locals: the first two are 64-bit, and the others 32-bit. A scratch local is only used between
+// two instructions that follow each other, never while an expression is evaluated in between, so
+// that one is enough for any nesting of expressions.
+typedef enum {
+    WASM_SCRATCH_LOW,
+    WASM_SCRATCH_HIGH,
+    WASM_SCRATCH_FIRST,
+    WASM_SCRATCH_SECOND,
+    // The address of the array literals of the procedure, see `wasm_frame_enter`.
+    WASM_SCRATCH_FRAME,
+} Wasm_Scratch;
 
 /**
  * The state shared by the building functions. A building function returns false after it recorded
@@ -66,10 +93,20 @@ typedef struct {
     Ast_Node_Index module;
     size_t data_size_bytes;
     size_t data_cursor_bytes;
+    // Where the stack of the arrays ends at the low side, which is after the data, and where it
+    // starts. The stack grows down from the top, which is the end of the memory.
+    size_t stack_limit_bytes;
+    size_t stack_top_bytes;
     Ast_Node_Index data_last_literal;
     Wasm_Build_Status status;
-    // Whether the module has a memory, which it has when there is a string literal to put in it.
+    // Whether the module has a memory, which it has when there is a string literal to put in it, or
+    // an array type, because arrays and array slices are in memory.
     bool has_memory;
+    // Whether there is a data section, which there is when there is a string literal.
+    bool has_data;
+    // Whether the module has a stack in its memory, and a global that points to it, which it has
+    // when there is an array literal.
+    bool has_stack;
 } Wasm_Builder;
 
 /**
@@ -219,6 +256,74 @@ static void            wasm_write_unsigned                    (Wasm_Writer *writ
                                                                uint64_t number);
 static void            wasm_write_value_type                  (Wasm_Writer *writer,
                                                                Wasm_Value_Type value_type);
+static size_t          wasm_array_length                      (Wasm_Builder const *builder,
+                                                               Ast_Node_Index expression);
+static void            wasm_array_decay                       (Wasm_Builder *builder,
+                                                               Ast_Node_Index expression);
+static bool            wasm_build_code_section_body_array_literal(Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index literal);
+static bool            wasm_build_code_section_body_child     (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index parent,
+                                                               Ast_Node_Index child);
+static bool            wasm_build_code_section_body_element_assignment(Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index assignment);
+static bool            wasm_build_code_section_body_for_each  (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index statement);
+static bool            wasm_build_code_section_body_slice     (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index slice);
+static bool            wasm_build_code_section_body_subscript (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index subscript);
+static byte            wasm_assignment_opcode                 (Ast_Node_Type node_type);
+static void            wasm_element_address_write             (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
+static Ast_Node_Index  wasm_expression_child_first            (Wasm_Builder const *builder,
+                                                               Ast_Node_Index expression);
+static void            wasm_frame_enter                       (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
+static bool            wasm_frame_has_literal                 (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure);
+static void            wasm_frame_leave                       (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
+static size_t          wasm_frame_literal_offset              (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Ast_Node_Index literal);
+static size_t          wasm_frame_size_bytes                  (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure);
+static bool            wasm_for_is_each                       (Wasm_Builder const *builder,
+                                                               Ast_Node_Index statement);
+static Ast_Node_Index  wasm_global_type_node                  (Wasm_Builder const *builder,
+                                                               Ast_Node_Index global);
+static bool            wasm_node_is_type                      (Wasm_Builder const *builder,
+                                                               Ast_Node_Index node);
+static bool            wasm_procedure_uses_arrays             (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure);
+static size_t          wasm_scratch_local_index               (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Wasm_Scratch scratch);
+static void            wasm_slice_write                       (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
+static size_t          wasm_stack_global_index                (Wasm_Builder const *builder);
+static void            wasm_structured_trap                   (Wasm_Builder *builder);
+static Str             wasm_type_subject                      (Wasm_Builder const *builder,
+                                                               Ast_Node_Index type);
+static bool            wasm_type_accepts                      (Wasm_Value_Type target,
+                                                               Wasm_Value_Type value);
+static bool            wasm_type_is_sequence                  (Wasm_Value_Type value_type);
+static Wasm_Value_Type wasm_value_type_of_node                (Wasm_Builder const *builder,
+                                                               Ast_Node_Index type);
+static size_t          wasm_variable_locals_end               (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure);
+static void            wasm_write_i32_const                   (Wasm_Writer *writer, int64_t number);
+static void            wasm_write_local_instruction           (Wasm_Writer *writer, byte opcode,
+                                                               size_t local_index);
+static void            wasm_write_memory_instruction          (Wasm_Writer *writer, byte opcode,
+                                                               uint64_t offset_bytes);
 
 Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,
                              Array_Slice output_buffer) {
@@ -248,9 +353,13 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
         .module = root,
         .data_size_bytes = 0,
         .data_cursor_bytes = 0,
+        .stack_limit_bytes = 0,
+        .stack_top_bytes = 0,
         .data_last_literal = AST_NODE_INDEX_NONE,
         .status = WASM_BUILD_STATUS_OK,
         .has_memory = false,
+        .has_data = false,
+        .has_stack = false,
     };
 
     // Only the constant definitions are functions. A global variable is a global of the module.
@@ -276,7 +385,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
         if (builder.has_memory) {
             wasm_build_memory_section(&builder);
         }
-        if (wasm_global_slot_count(&builder) > 0) {
+        if (wasm_global_slot_count(&builder) > 0 || builder.has_stack) {
             wasm_build_global_section(&builder);
         }
         is_ok = wasm_build_export_section(&builder, root, definition_count);
@@ -284,7 +393,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
     if (is_ok) {
         is_ok = wasm_build_code_section(&builder, root, definition_count);
     }
-    if (is_ok && builder.has_memory) {
+    if (is_ok && builder.has_data) {
         // The code gave every literal its address, except for the ones of global variables, which
         // are after the last one that the code wrote, and the data must be what those addresses
         // were counted from.
@@ -317,8 +426,10 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
 }
 
 /**
- * Measures the bytes of all the string literals, and decides from them whether the module has a
- * memory. Returns false after it recorded an error when they do not fit in the memory.
+ * Measures the bytes of all the string literals, and decides from them and from the arrays whether
+ * the module has a memory, and how big it is. The data is at the start of the memory, and the stack
+ * of the arrays is after it, where it grows down from the end of the memory. Returns false after it
+ * recorded an error when they do not fit in the memory.
  */
 static bool wasm_data_measure(Wasm_Builder *builder) {
     assert(builder->data_size_bytes == 0);
@@ -326,24 +437,41 @@ static bool wasm_data_measure(Wasm_Builder *builder) {
 
     size_t size_bytes = 0;
     bool has_literal = false;
+    bool has_array_type = false;
+    bool has_array_literal = false;
     for (size_t i = 0; i < builder->node_count; i += 1) {
         if (builder->nodes[i].node_type == AST_NODE_TYPE_STRING_LITERAL) {
             has_literal = true;
             // Each literal is shorter than 4 GiB and there are fewer than 4 Gi of them, so the
             // sum fits in 64 bits.
             size_bytes += builder->nodes[i].payload.string_literal.text.length;
+        } else if (builder->nodes[i].node_type == AST_NODE_TYPE_ARRAY_TYPE) {
+            has_array_type = true;
+        } else if (builder->nodes[i].node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
+            has_array_literal = true;
         }
     }
 
     // Addresses and lengths are written as `i32.const`, whose immediate is signed, so they stay
     // below 2 GiB. A module that big would not fit in the output anyway, so the same status says
-    // it.
-    if (size_bytes > INT32_MAX) {
+    // it. The stack and the rounding up to a whole page are counted too.
+    size_t stack_limit_bytes = (size_bytes + WASM_ELEMENT_SIZE_BYTES - 1) /
+                               WASM_ELEMENT_SIZE_BYTES * WASM_ELEMENT_SIZE_BYTES;
+    size_t stack_top_bytes = stack_limit_bytes + WASM_STACK_SIZE_BYTES;
+    stack_top_bytes = (stack_top_bytes + WASM_MEMORY_PAGE_SIZE_BYTES - 1) /
+                      WASM_MEMORY_PAGE_SIZE_BYTES * WASM_MEMORY_PAGE_SIZE_BYTES;
+    if (size_bytes > INT32_MAX || stack_top_bytes > INT32_MAX) {
         return wasm_fail(builder, WASM_BUILD_STATUS_OUTPUT_TOO_LARGE, STR_EMPTY);
     }
 
     builder->data_size_bytes = size_bytes;
-    builder->has_memory = has_literal;
+    builder->has_data = has_literal;
+    // The elements of an array slice are read from memory, so a module that has a type for one
+    // needs a memory, also when it has no array of its own.
+    builder->has_memory = has_literal || has_array_type;
+    builder->has_stack = has_array_literal;
+    builder->stack_limit_bytes = stack_limit_bytes;
+    builder->stack_top_bytes = stack_top_bytes;
     return true;
 }
 
@@ -371,9 +499,17 @@ static bool wasm_check_signatures(Wasm_Builder *builder, Ast_Node_Index module,
                 Ast_Node const *parameter_node = &builder->nodes[parameter];
                 assert(parameter_node->node_type == AST_NODE_TYPE_PARAMETER);
 
-                Str type_name = builder->nodes[parameter_node->first_child].payload.type_name.name;
-                if (wasm_value_type_of_name(type_name) == WASM_VALUE_TYPE_NONE) {
-                    return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED, type_name);
+                Ast_Node_Index type = parameter_node->first_child;
+                Wasm_Value_Type parameter_type = wasm_value_type_of_node(builder, type);
+                if (parameter_type == WASM_VALUE_TYPE_NONE) {
+                    return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
+                                     wasm_type_subject(builder, type));
+                }
+                // The elements of an array are in the frame of the procedure that has it, and a
+                // parameter would have to be a copy of them, so an array slice is passed instead.
+                if (parameter_type == WASM_VALUE_TYPE_ARRAY) {
+                    return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
+                                     wasm_type_subject(builder, type));
                 }
 
                 parameter = parameter_node->next_sibling;
@@ -449,6 +585,22 @@ static Wasm_Value_Type wasm_global_type(Wasm_Builder const *builder, Ast_Node_In
     assert(global < builder->node_count);
     assert(builder->nodes[global].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION);
 
+    Ast_Node_Index type = wasm_global_type_node(builder, global);
+    if (type != AST_NODE_INDEX_NONE) {
+        return wasm_value_type_of_node(builder, type);
+    }
+    // Without a type the only child left is the value, which is a literal.
+    return wasm_expression_type(builder, wasm_global_value(builder, global));
+}
+
+/**
+ * Returns the type that the definition of the global variable `global` gives, which is the child
+ * after the attributes, or `AST_NODE_INDEX_NONE` when it gives none.
+ */
+static Ast_Node_Index wasm_global_type_node(Wasm_Builder const *builder, Ast_Node_Index global) {
+    assert(global < builder->node_count);
+    assert(builder->nodes[global].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION);
+
     Ast_Node_Index child = builder->nodes[global].first_child;
     // Every child is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < builder->node_count; i += 1) {
@@ -459,11 +611,10 @@ static Wasm_Value_Type wasm_global_type(Wasm_Builder const *builder, Ast_Node_In
         child = builder->nodes[child].next_sibling;
     }
 
-    if (builder->nodes[child].node_type == AST_NODE_TYPE_TYPE_NAME) {
-        return wasm_value_type_of_name(builder->nodes[child].payload.type_name.name);
+    if (wasm_node_is_type(builder, child)) {
+        return child;
     }
-    // Without a type the only child left is the value, which is a literal.
-    return wasm_expression_type(builder, child);
+    return AST_NODE_INDEX_NONE;
 }
 
 /**
@@ -481,15 +632,17 @@ static bool wasm_check_globals(Wasm_Builder *builder) {
             if (global_type == WASM_VALUE_TYPE_NONE) {
                 // The only way to have no type is a type name that the target does not have, and
                 // it is the child before the value.
-                Ast_Node_Index child = builder->nodes[global].first_child;
-                for (size_t j = 0; j < builder->node_count; j += 1) {
-                    if (builder->nodes[child].node_type == AST_NODE_TYPE_TYPE_NAME) {
-                        break;
-                    }
-                    child = builder->nodes[child].next_sibling;
-                }
+                Ast_Node_Index type = wasm_global_type_node(builder, global);
+                assert(type != AST_NODE_INDEX_NONE);
                 return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
-                                 builder->nodes[child].payload.type_name.name);
+                                 wasm_type_subject(builder, type));
+            }
+            // A global is set once, from a literal, and no literal makes an array or a slice.
+            if (global_type == WASM_VALUE_TYPE_ARRAY || global_type == WASM_VALUE_TYPE_SLICE) {
+                Ast_Node_Index type = wasm_global_type_node(builder, global);
+                assert(type != AST_NODE_INDEX_NONE);
+                return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
+                                 wasm_type_subject(builder, type));
             }
             if (wasm_expression_type(builder, value) != global_type) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
@@ -550,11 +703,16 @@ static size_t wasm_global_slot_count(Wasm_Builder const *builder) {
  * expression, which is evaluated once when the module is instantiated. That is why the value of a
  * global variable is a literal. The address of a string is where its bytes are in the data section,
  * which is the length of the strings whose nodes come before it. The types must have been checked
- * by `wasm_check_globals`.
+ * by `wasm_check_globals`. When the program has array literals, the stack pointer comes after the
+ * globals of the program.
  */
 static void wasm_build_global_section(Wasm_Builder *builder) {
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_GLOBAL);
-    wasm_write_unsigned(&builder->writer, wasm_global_slot_count(builder));
+    size_t stack_global_count = 0;
+    if (builder->has_stack) {
+        stack_global_count = 1;
+    }
+    wasm_write_unsigned(&builder->writer, wasm_global_slot_count(builder) + stack_global_count);
 
     // The length of the strings in the nodes before `scanned_end`.
     size_t address = 0;
@@ -602,7 +760,27 @@ static void wasm_build_global_section(Wasm_Builder *builder) {
         global = builder->nodes[global].next_sibling;
     }
 
+    // The last global is the stack pointer, which starts at the top of the stack, because the stack
+    // grows down. It is after the globals of the program, see `wasm_stack_global_index`.
+    if (builder->has_stack) {
+        wasm_write_byte(&builder->writer, WASM_TYPE_I32);
+        wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
+        wasm_write_signed(&builder->writer, (int64_t)builder->stack_top_bytes);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+    }
+
     wasm_block_end(&builder->writer, section);
+}
+
+/**
+ * Returns the index of the global that is the stack pointer, which is the one after the globals of
+ * the program. The module has it when `has_stack` is set.
+ */
+static size_t wasm_stack_global_index(Wasm_Builder const *builder) {
+    assert(builder->has_stack);
+
+    return wasm_global_slot_count(builder);
 }
 
 /**
@@ -661,8 +839,9 @@ static void wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module
                 assert(parameter != AST_NODE_INDEX_NONE);
                 Ast_Node const *parameter_node = &builder->nodes[parameter];
 
-                Str type_name = builder->nodes[parameter_node->first_child].payload.type_name.name;
-                wasm_write_value_type(&builder->writer, wasm_value_type_of_name(type_name));
+                wasm_write_value_type(
+                    &builder->writer,
+                    wasm_value_type_of_node(builder, parameter_node->first_child));
                 parameter = parameter_node->next_sibling;
             }
 
@@ -707,12 +886,13 @@ static Wasm_Value_Type wasm_value_type_of_name(Str type_name) {
  * integer, so that every integer literal, which the tokenizer accepts up to the largest signed
  * 64-bit value, fits. `Bool` is one 32-bit integer, which is 0 for `false` and 1 for `true`, like
  * the result of a WebAssembly comparison. `Str` is the address and the length of its bytes, both
- * 32-bit, because addresses are.
+ * 32-bit, because addresses are. An array is the address of its first element, and an array slice
+ * the address of its first element and its length in elements.
  */
 static size_t wasm_value_type_slot_count(Wasm_Value_Type value_type) {
     assert(value_type != WASM_VALUE_TYPE_NONE);
 
-    if (value_type == WASM_VALUE_TYPE_STR) {
+    if (value_type == WASM_VALUE_TYPE_STR || value_type == WASM_VALUE_TYPE_SLICE) {
         return 2;
     }
     return 1;
@@ -725,10 +905,10 @@ static size_t wasm_value_type_slot_count(Wasm_Value_Type value_type) {
 static void wasm_write_value_type(Wasm_Writer *writer, Wasm_Value_Type value_type) {
     assert(value_type != WASM_VALUE_TYPE_NONE);
 
-    if (value_type == WASM_VALUE_TYPE_STR) {
+    if (value_type == WASM_VALUE_TYPE_STR || value_type == WASM_VALUE_TYPE_SLICE) {
         wasm_write_byte(writer, WASM_TYPE_I32);
         wasm_write_byte(writer, WASM_TYPE_I32);
-    } else if (value_type == WASM_VALUE_TYPE_BOOL) {
+    } else if (value_type == WASM_VALUE_TYPE_BOOL || value_type == WASM_VALUE_TYPE_ARRAY) {
         wasm_write_byte(writer, WASM_TYPE_I32);
     } else {
         wasm_write_byte(writer, WASM_TYPE_I64);
@@ -737,7 +917,8 @@ static void wasm_write_value_type(Wasm_Writer *writer, Wasm_Value_Type value_typ
 
 /**
  * Writes the memory section, which declares the one memory of the module. It is just big enough
- * for the data, and at least one page, so that the memory exists with nothing in it as well.
+ * for the data, and the stack of the arrays when there is one, and at least one page, so that the
+ * memory exists with nothing in it as well.
  */
 static void wasm_build_memory_section(Wasm_Builder *builder) {
     assert(builder->has_memory);
@@ -745,6 +926,11 @@ static void wasm_build_memory_section(Wasm_Builder *builder) {
 
     size_t page_count = (builder->data_size_bytes + WASM_MEMORY_PAGE_SIZE_BYTES - 1) /
                         WASM_MEMORY_PAGE_SIZE_BYTES;
+    // With a stack the memory ends where the stack starts, which is a whole number of pages.
+    if (builder->has_stack) {
+        assert(builder->stack_top_bytes % WASM_MEMORY_PAGE_SIZE_BYTES == 0);
+        page_count = builder->stack_top_bytes / WASM_MEMORY_PAGE_SIZE_BYTES;
+    }
     if (page_count == 0) {
         page_count = 1;
     }
@@ -898,6 +1084,7 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
             return false;
         }
         wasm_variables_write_locals(builder, value);
+        wasm_frame_enter(builder, value);
         if (wasm_build_code_section_body_procedure(builder, definition) == false) {
             return false;
         }
@@ -911,6 +1098,11 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
         Ast_Node const *procedure_node = &builder->nodes[value];
         bool has_result = procedure_node->payload.procedure.return_type.bytes != NULL;
         Ast_Node_Type last_type = builder->nodes[procedure_node->last_child].node_type;
+        // A `return` gives the frame back before it returns, so only the end of the body, which
+        // is reached when the last statement is something else, has to do it.
+        if (last_type != AST_NODE_TYPE_RETURN_STATEMENT) {
+            wasm_frame_leave(builder, value);
+        }
         if (has_result && last_type != AST_NODE_TYPE_RETURN_STATEMENT) {
             wasm_write_byte(&builder->writer, WASM_OPCODE_UNREACHABLE);
         }
@@ -1133,6 +1325,11 @@ static bool wasm_build_code_section_body_for(Wasm_Builder *builder, Ast_Node_Ind
     assert(statement < builder->node_count);
     assert(builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT);
 
+    // The other kind of for statement goes through the elements of an array.
+    if (wasm_for_is_each(builder, statement)) {
+        return wasm_build_code_section_body_for_each(builder, definition, statement);
+    }
+
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
     Ast_Node_Index range = builder->nodes[statement].first_child;
     assert(builder->nodes[range].node_type == AST_NODE_TYPE_RANGE);
@@ -1192,7 +1389,10 @@ static void wasm_build_code_section_body_for_end(Wasm_Builder *builder, Ast_Node
     // The `block` that `continue` leaves.
     wasm_write_byte(&builder->writer, WASM_OPCODE_END);
 
-    if (builder->nodes[statement].node_type == AST_NODE_TYPE_LOOP_STATEMENT) {
+    // A for statement over the elements of an array has stepped before its block, see
+    // `wasm_build_code_section_body_for_each`, so like a loop statement it has nothing to step.
+    if (builder->nodes[statement].node_type == AST_NODE_TYPE_LOOP_STATEMENT ||
+        wasm_for_is_each(builder, statement)) {
         // Nothing to step: the block starts over, and only a `break` or a `return` ends it.
         wasm_write_byte(&builder->writer, WASM_OPCODE_BR);
         wasm_write_unsigned(&builder->writer, 0);
@@ -1232,12 +1432,17 @@ static void wasm_build_code_section_body_for_end(Wasm_Builder *builder, Ast_Node
 
 /**
  * Returns the number of locals that `variable` takes: the ones of its type for a variable
- * definition, and two for the iterator of a for statement, which also keeps the end of its range.
+ * definition, and for the iterator of a for statement two, which also keeps the end of its range,
+ * or three when it goes through the elements of an array, which keeps where it is and where it
+ * ends.
  */
 static size_t wasm_variable_slot_count(Wasm_Builder const *builder, Ast_Node_Index variable) {
     assert(variable < builder->node_count);
 
     if (builder->nodes[variable].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+        if (wasm_for_is_each(builder, variable)) {
+            return 3;
+        }
         return 2;
     }
     return wasm_value_type_slot_count(wasm_variable_type(builder, variable));
@@ -1345,9 +1550,9 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
         assert(argument != AST_NODE_INDEX_NONE && parameter != AST_NODE_INDEX_NONE);
 
         Ast_Node_Index type = builder->nodes[parameter].first_child;
-        Wasm_Value_Type parameter_type =
-            wasm_value_type_of_name(builder->nodes[type].payload.type_name.name);
-        if (wasm_expression_type(builder, argument) != parameter_type) {
+        Wasm_Value_Type parameter_type = wasm_value_type_of_node(builder, type);
+        // An array is passed as an array slice, see `wasm_array_decay`.
+        if (wasm_type_accepts(parameter_type, wasm_expression_type(builder, argument)) == false) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         }
         argument = builder->nodes[argument].next_sibling;
@@ -1391,6 +1596,8 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
         return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
     }
 
+    // The value is on the stack already, and giving the frame back does not touch it.
+    wasm_frame_leave(builder, procedure);
     wasm_write_byte(&builder->writer, WASM_OPCODE_RETURN);
     return true;
 }
@@ -1411,6 +1618,11 @@ static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
     Ast_Node_Index target = builder->nodes[assignment].first_child;
     Ast_Node_Index value = builder->nodes[assignment].last_child;
+
+    // An element, or a range of elements, is in memory, and is not stored like a variable.
+    if (builder->nodes[target].node_type != AST_NODE_TYPE_IDENTIFIER) {
+        return wasm_build_code_section_body_element_assignment(builder, definition, assignment);
+    }
 
     // The analysis checked that the name stands for a variable or a global variable. A global is
     // read and stored with the global instructions, and a variable with the local ones.
@@ -1443,15 +1655,7 @@ static bool wasm_build_code_section_body_assignment(Wasm_Builder *builder,
     }
 
     // The operator of the assignment is applied to the variable and the value.
-    byte opcode = WASM_OPCODE_I64_ADD;
-    if (builder->nodes[assignment].node_type == AST_NODE_TYPE_DIVISION_ASSIGNMENT) {
-        opcode = WASM_OPCODE_I64_DIV_S;
-    } else if (builder->nodes[assignment].node_type == AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT) {
-        opcode = WASM_OPCODE_I64_MUL;
-    } else if (builder->nodes[assignment].node_type == AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT) {
-        opcode = WASM_OPCODE_I64_SUB;
-    }
-    wasm_write_byte(&builder->writer, opcode);
+    wasm_write_byte(&builder->writer, wasm_assignment_opcode(builder->nodes[assignment].node_type));
     if (is_global) {
         wasm_write_byte(&builder->writer, WASM_OPCODE_GLOBAL_SET);
     } else {
@@ -1482,9 +1686,25 @@ static bool wasm_build_code_section_body_variable(Wasm_Builder *builder,
     // The value was written, so every name in it is known. It must be of the type of the variable,
     // which is the type that was written when the definition has one, and deduced otherwise.
     Wasm_Value_Type variable_type = wasm_variable_type(builder, variable);
-    if (wasm_expression_type(builder, value) != variable_type) {
+    if (wasm_type_accepts(variable_type, wasm_expression_type(builder, value)) == false) {
         Str name = builder->nodes[variable].payload.variable_definition.name;
         return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, name);
+    }
+
+    // An array whose type gives the length must have exactly that many elements.
+    Ast_Node_Index declared = builder->nodes[variable].first_child;
+    if (variable_type == WASM_VALUE_TYPE_ARRAY &&
+        builder->nodes[declared].node_type == AST_NODE_TYPE_ARRAY_TYPE &&
+        builder->nodes[declared].payload.array_type.length_kind == AST_ARRAY_LENGTH_FIXED &&
+        (size_t)builder->nodes[declared].payload.array_type.length !=
+            wasm_array_length(builder, value)) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_LENGTH_MISMATCH,
+                         wasm_type_subject(builder, declared));
+    }
+
+    // A slice is given an array by viewing all of its elements.
+    if (variable_type == WASM_VALUE_TYPE_SLICE) {
+        wasm_array_decay(builder, value);
     }
 
     size_t local_index = wasm_variable_local_index(builder, procedure, variable);
@@ -1513,11 +1733,11 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index procedure
 
         if (statement_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             Ast_Node const *first = &builder->nodes[statement_node->first_child];
-            if (first->node_type == AST_NODE_TYPE_TYPE_NAME) {
-                if (wasm_value_type_of_name(first->payload.type_name.name) ==
+            if (wasm_node_is_type(builder, statement_node->first_child)) {
+                if (wasm_value_type_of_node(builder, statement_node->first_child) ==
                     WASM_VALUE_TYPE_NONE) {
                     return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
-                                     first->payload.type_name.name);
+                                     wasm_type_subject(builder, statement_node->first_child));
                 }
             } else if (wasm_variable_type(builder, statement) == WASM_VALUE_TYPE_NONE) {
                 // The only values without a type are a name that is a procedure, and a call of a
@@ -1530,7 +1750,22 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index procedure
                 return wasm_fail(builder, WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE,
                                  first->payload.identifier.name);
             }
+
+            // The elements of an array are put in the frame of the procedure by the array literal
+            // that makes them, so an array variable is made by one, and is not a copy of another.
+            Ast_Node_Index value = statement_node->last_child;
+            if (wasm_variable_type(builder, statement) == WASM_VALUE_TYPE_ARRAY &&
+                builder->nodes[value].node_type != AST_NODE_TYPE_ARRAY_LITERAL) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_INITIALIZER_INVALID,
+                                 statement_node->payload.variable_definition.name);
+            }
         }
+    }
+
+    // Every array literal has its place in the frame, which must fit in the stack. Each element is
+    // a node, so this takes a source that is far larger than the buffers of the compiler allow.
+    if (wasm_frame_size_bytes(builder, procedure) > WASM_STACK_SIZE_BYTES) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_OUTPUT_TOO_LARGE, STR_EMPTY);
     }
 
     return true;
@@ -1541,37 +1776,65 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index procedure
  * groups, and for each variable the number of locals it takes and their type. The variables of the
  * blocks are included, in the order of the source: a variable has its own local, also when
  * another variable in another block has the same name. The types must have been checked by
- * `wasm_variables_check`.
+ * `wasm_variables_check`. A procedure that uses arrays has the locals of `Wasm_Scratch` after the
+ * variables.
  */
 static void wasm_variables_write_locals(Wasm_Builder *builder, Ast_Node_Index procedure) {
     assert(procedure < builder->node_count);
 
     Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
 
-    size_t variable_count = 0;
+    // A for statement over the elements of an array has locals of two types, so it is two groups.
+    bool uses_arrays = wasm_procedure_uses_arrays(builder, procedure);
+    size_t group_count = 0;
     for (Ast_Node_Index statement = procedure + 1; statement < end; statement += 1) {
-        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
-            builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
-            variable_count += 1;
+        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            group_count += 1;
+        } else if (builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            group_count += 1;
+            if (wasm_for_is_each(builder, statement)) {
+                group_count += 1;
+            }
         }
     }
-    wasm_write_unsigned(&builder->writer, variable_count);
+    if (uses_arrays) {
+        group_count += 2;
+    }
+    wasm_write_unsigned(&builder->writer, group_count);
 
     for (Ast_Node_Index statement = procedure + 1; statement < end; statement += 1) {
         if (builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
-            // The iterator and the end of the range, which are both `Int`.
-            wasm_write_unsigned(&builder->writer, wasm_variable_slot_count(builder, statement));
-            wasm_write_byte(&builder->writer, WASM_TYPE_I64);
+            if (wasm_for_is_each(builder, statement)) {
+                // The iterator is an `Int`, and the address of the next element and the address
+                // after the last one are 32-bit.
+                wasm_write_unsigned(&builder->writer, 1);
+                wasm_write_byte(&builder->writer, WASM_TYPE_I64);
+                wasm_write_unsigned(&builder->writer, 2);
+                wasm_write_byte(&builder->writer, WASM_TYPE_I32);
+            } else {
+                // The iterator and the end of the range, which are both `Int`.
+                wasm_write_unsigned(&builder->writer, wasm_variable_slot_count(builder, statement));
+                wasm_write_byte(&builder->writer, WASM_TYPE_I64);
+            }
         } else if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             Wasm_Value_Type value_type = wasm_variable_type(builder, statement);
             wasm_write_unsigned(&builder->writer, wasm_value_type_slot_count(value_type));
             // A `Str` is two locals of one type, so one group holds all the locals of a variable.
-            if (value_type == WASM_VALUE_TYPE_STR || value_type == WASM_VALUE_TYPE_BOOL) {
+            if (value_type == WASM_VALUE_TYPE_STR || value_type == WASM_VALUE_TYPE_BOOL ||
+                value_type == WASM_VALUE_TYPE_ARRAY || value_type == WASM_VALUE_TYPE_SLICE) {
                 wasm_write_byte(&builder->writer, WASM_TYPE_I32);
             } else {
                 wasm_write_byte(&builder->writer, WASM_TYPE_I64);
             }
         }
+    }
+
+    // The order of `Wasm_Scratch`: two 64-bit locals, and then three 32-bit ones.
+    if (uses_arrays) {
+        wasm_write_unsigned(&builder->writer, 2);
+        wasm_write_byte(&builder->writer, WASM_TYPE_I64);
+        wasm_write_unsigned(&builder->writer, 3);
+        wasm_write_byte(&builder->writer, WASM_TYPE_I32);
     }
 }
 
@@ -1595,9 +1858,8 @@ static Wasm_Value_Type wasm_variable_type(Wasm_Builder const *builder, Ast_Node_
             // The iterator counts numbers.
             return WASM_VALUE_TYPE_INT;
         }
-        Ast_Node const *first = &builder->nodes[current_node->first_child];
-        if (first->node_type == AST_NODE_TYPE_TYPE_NAME) {
-            return wasm_value_type_of_name(first->payload.type_name.name);
+        if (wasm_node_is_type(builder, current_node->first_child)) {
+            return wasm_value_type_of_node(builder, current_node->first_child);
         }
 
         Ast_Node_Index value = current_node->last_child;
@@ -1685,7 +1947,15 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     }
     case AST_NODE_TYPE_STRING_LITERAL:
         return WASM_VALUE_TYPE_STR;
+    case AST_NODE_TYPE_ARRAY_LITERAL:
+        return WASM_VALUE_TYPE_ARRAY;
+    case AST_NODE_TYPE_SLICE:
+        return WASM_VALUE_TYPE_SLICE;
+    case AST_NODE_TYPE_SUBSCRIPT:
+        return WASM_VALUE_TYPE_INT;
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+    case AST_NODE_TYPE_ARRAY_TYPE:
+    case AST_NODE_TYPE_ASSIGNMENT:
     case AST_NODE_TYPE_ATTRIBUTE:
     case AST_NODE_TYPE_BLOCK:
     case AST_NODE_TYPE_CALL_STATEMENT:
@@ -1731,11 +2001,12 @@ static Str wasm_expression_subject(Wasm_Builder const *builder, Ast_Node_Index d
     Ast_Node_Index current = expression;
     // Each step goes down one level, so there are fewer steps than nodes.
     for (size_t i = 0; i < builder->node_count; i += 1) {
-        if (builder->nodes[current].first_child == AST_NODE_INDEX_NONE ||
+        Ast_Node_Index child = wasm_expression_child_first(builder, current);
+        if (child == AST_NODE_INDEX_NONE ||
             builder->nodes[current].node_type == AST_NODE_TYPE_CALL) {
             break;
         }
-        current = builder->nodes[current].first_child;
+        current = child;
     }
 
     Ast_Node const *leaf = &builder->nodes[current];
@@ -1875,7 +2146,18 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         Ast_Node const *node = &builder->nodes[current];
 
         if (is_descending) {
-            if (node->first_child != AST_NODE_INDEX_NONE) {
+            // An element of an array literal is stored where the literal is in the frame, so the
+            // address goes on the stack before the value of the element does, and the store comes
+            // after it, see `wasm_build_code_section_body_child`.
+            if (path_count > 0 &&
+                builder->nodes[path[path_count - 1]].node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
+                wasm_write_local_instruction(
+                    &builder->writer, WASM_OPCODE_LOCAL_GET,
+                    wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FRAME));
+            }
+
+            Ast_Node_Index first_child = wasm_expression_child_first(builder, current);
+            if (first_child != AST_NODE_INDEX_NONE) {
                 if (path_count == WASM_EXPRESSION_DEPTH_MAX) {
                     // The tree has no source positions, so the definition is the closest place.
                     Str name = builder->nodes[definition].payload.constant_definition.name;
@@ -1883,7 +2165,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
                 }
                 path[path_count] = current;
                 path_count += 1;
-                current = node->first_child;
+                current = first_child;
                 continue;
             }
         }
@@ -1984,7 +2266,25 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_STRING_LITERAL:
             wasm_build_code_section_body_string(builder, current);
             break;
+        case AST_NODE_TYPE_ARRAY_LITERAL:
+            if (wasm_build_code_section_body_array_literal(builder, definition, current) ==
+                false) {
+                return false;
+            }
+            break;
+        case AST_NODE_TYPE_SLICE:
+            if (wasm_build_code_section_body_slice(builder, definition, current) == false) {
+                return false;
+            }
+            break;
+        case AST_NODE_TYPE_SUBSCRIPT:
+            if (wasm_build_code_section_body_subscript(builder, definition, current) == false) {
+                return false;
+            }
+            break;
         case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+        case AST_NODE_TYPE_ARRAY_TYPE:
+        case AST_NODE_TYPE_ASSIGNMENT:
         case AST_NODE_TYPE_ATTRIBUTE:
         case AST_NODE_TYPE_BLOCK:
         case AST_NODE_TYPE_CALL_STATEMENT:
@@ -2010,6 +2310,13 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             // Same as above: none of these is part of an expression.
             assert(false);
             break;
+        }
+
+        // What the parent needs of its children, which is not part of the child itself.
+        if (path_count > 0 &&
+            wasm_build_code_section_body_child(builder, definition, path[path_count - 1],
+                                               current) == false) {
+            return false;
         }
 
         if (path_count == 0) {
@@ -2115,7 +2422,7 @@ static Wasm_Value_Type wasm_binding_value_type(Wasm_Builder const *builder,
         break;
     case SEMANTIC_BINDING_KIND_PARAMETER: {
         Ast_Node_Index type = builder->nodes[binding.target].first_child;
-        return wasm_value_type_of_name(builder->nodes[type].payload.type_name.name);
+        return wasm_value_type_of_node(builder, type);
     }
     case SEMANTIC_BINDING_KIND_VARIABLE:
         return wasm_variable_type(builder, binding.target);
@@ -2193,8 +2500,8 @@ static size_t wasm_parameter_slot_count(Wasm_Builder const *builder, Ast_Node_In
         assert(parameter != AST_NODE_INDEX_NONE);
         Ast_Node const *parameter_node = &builder->nodes[parameter];
 
-        Str type_name = builder->nodes[parameter_node->first_child].payload.type_name.name;
-        slot_count += wasm_value_type_slot_count(wasm_value_type_of_name(type_name));
+        slot_count += wasm_value_type_slot_count(
+            wasm_value_type_of_node(builder, parameter_node->first_child));
         parameter = parameter_node->next_sibling;
     }
 
@@ -2218,12 +2525,756 @@ static size_t wasm_parameter_local_index(Wasm_Builder const *builder, Ast_Node_I
         assert(parameter != AST_NODE_INDEX_NONE);
         Ast_Node const *parameter_node = &builder->nodes[parameter];
 
-        Str type_name = builder->nodes[parameter_node->first_child].payload.type_name.name;
-        local_index += wasm_value_type_slot_count(wasm_value_type_of_name(type_name));
+        local_index += wasm_value_type_slot_count(
+            wasm_value_type_of_node(builder, parameter_node->first_child));
         parameter = parameter_node->next_sibling;
     }
 
     return local_index;
+}
+
+/**
+ * Returns whether `node` is a type: the name of one, such as `Int`, or an array type, such as
+ * `[3]Int`.
+ */
+static bool wasm_node_is_type(Wasm_Builder const *builder, Ast_Node_Index node) {
+    assert(node < builder->node_count);
+
+    return builder->nodes[node].node_type == AST_NODE_TYPE_TYPE_NAME ||
+           builder->nodes[node].node_type == AST_NODE_TYPE_ARRAY_TYPE;
+}
+
+/**
+ * Returns the type that the type `type` stands for, or `WASM_VALUE_TYPE_NONE` if the target does
+ * not have it. The elements of an array and of an array slice can only be `Int` values, because
+ * the code that reads and writes them knows only the size of that. An array type is an array
+ * slice when it has no length.
+ */
+static Wasm_Value_Type wasm_value_type_of_node(Wasm_Builder const *builder, Ast_Node_Index type) {
+    assert(wasm_node_is_type(builder, type));
+
+    Ast_Node const *type_node = &builder->nodes[type];
+    if (type_node->node_type == AST_NODE_TYPE_TYPE_NAME) {
+        return wasm_value_type_of_name(type_node->payload.type_name.name);
+    }
+
+    Ast_Node_Index element = type_node->first_child;
+    assert(element != AST_NODE_INDEX_NONE);
+    assert(builder->nodes[element].node_type == AST_NODE_TYPE_TYPE_NAME);
+    if (wasm_value_type_of_name(builder->nodes[element].payload.type_name.name) !=
+        WASM_VALUE_TYPE_INT) {
+        return WASM_VALUE_TYPE_NONE;
+    }
+    if (type_node->payload.array_type.length_kind == AST_ARRAY_LENGTH_OMITTED) {
+        return WASM_VALUE_TYPE_SLICE;
+    }
+    return WASM_VALUE_TYPE_ARRAY;
+}
+
+/**
+ * Returns the text in the source that an error about the type `type` points at: the name of the
+ * type, or the name of the type of the elements for an array type.
+ */
+static Str wasm_type_subject(Wasm_Builder const *builder, Ast_Node_Index type) {
+    assert(wasm_node_is_type(builder, type));
+
+    if (builder->nodes[type].node_type == AST_NODE_TYPE_ARRAY_TYPE) {
+        Ast_Node_Index element = builder->nodes[type].first_child;
+        return builder->nodes[element].payload.type_name.name;
+    }
+    return builder->nodes[type].payload.type_name.name;
+}
+
+/**
+ * Returns whether a value of the type `value` can be given where `target` is wanted: the same
+ * type, or an array where an array slice is, because the slice then views all of its elements.
+ */
+static bool wasm_type_accepts(Wasm_Value_Type target, Wasm_Value_Type value) {
+    return target == value ||
+           (target == WASM_VALUE_TYPE_SLICE && value == WASM_VALUE_TYPE_ARRAY);
+}
+
+/**
+ * Returns whether a value of `value_type` has elements that can be indexed, which an array and an
+ * array slice do.
+ */
+static bool wasm_type_is_sequence(Wasm_Value_Type value_type) {
+    return value_type == WASM_VALUE_TYPE_ARRAY || value_type == WASM_VALUE_TYPE_SLICE;
+}
+
+/**
+ * Returns whether the for statement `statement` goes through the elements of an array or an array
+ * slice, instead of through the numbers of a range.
+ */
+static bool wasm_for_is_each(Wasm_Builder const *builder, Ast_Node_Index statement) {
+    assert(statement < builder->node_count);
+    assert(builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT);
+
+    Ast_Node_Index first = builder->nodes[statement].first_child;
+    return builder->nodes[first].node_type != AST_NODE_TYPE_RANGE;
+}
+
+/**
+ * Returns the instruction that applies the operator of the assignment `node_type`, such as `-=`, to
+ * two `Int` values.
+ */
+static byte wasm_assignment_opcode(Ast_Node_Type node_type) {
+    assert(node_type != AST_NODE_TYPE_ASSIGNMENT);
+
+    if (node_type == AST_NODE_TYPE_DIVISION_ASSIGNMENT) {
+        return WASM_OPCODE_I64_DIV_S;
+    }
+    if (node_type == AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT) {
+        return WASM_OPCODE_I64_MUL;
+    }
+    if (node_type == AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT) {
+        return WASM_OPCODE_I64_SUB;
+    }
+    assert(node_type == AST_NODE_TYPE_ADDITION_ASSIGNMENT);
+    return WASM_OPCODE_I64_ADD;
+}
+
+/**
+ * Writes an instruction with a local as its immediate, such as `local.get`.
+ */
+static void wasm_write_local_instruction(Wasm_Writer *writer, byte opcode, size_t local_index) {
+    assert(opcode == WASM_OPCODE_LOCAL_GET || opcode == WASM_OPCODE_LOCAL_SET ||
+           opcode == WASM_OPCODE_LOCAL_TEE);
+
+    wasm_write_byte(writer, opcode);
+    wasm_write_unsigned(writer, local_index);
+}
+
+/**
+ * Writes `i32.const` and its number.
+ */
+static void wasm_write_i32_const(Wasm_Writer *writer, int64_t number) {
+    assert(number >= INT32_MIN);
+    assert(number <= INT32_MAX);
+
+    wasm_write_byte(writer, WASM_OPCODE_I32_CONST);
+    wasm_write_signed(writer, number);
+}
+
+/**
+ * Writes the load or the store of an `Int`, which is 8 bytes, at the address on the stack plus
+ * `offset_bytes`. The alignment is the size, as it always is, because the stack and the elements
+ * are aligned.
+ */
+static void wasm_write_memory_instruction(Wasm_Writer *writer, byte opcode,
+                                          uint64_t offset_bytes) {
+    assert(opcode == WASM_OPCODE_I64_LOAD || opcode == WASM_OPCODE_I64_STORE);
+
+    wasm_write_byte(writer, opcode);
+    wasm_write_unsigned(writer, WASM_ELEMENT_SIZE_SHIFT);
+    wasm_write_unsigned(writer, offset_bytes);
+}
+
+/**
+ * Writes an `if` that traps, so that the instructions before it, which leave a 32-bit integer
+ * that is not zero when something is wrong, stop the program instead of going on.
+ */
+static void wasm_structured_trap(Wasm_Builder *builder) {
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_UNREACHABLE);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+}
+
+/**
+ * Returns the first child of `expression` that is part of its value, which is its first child
+ * unless it is an array literal. The first child of an array literal is its type, which is
+ * not code.
+ */
+static Ast_Node_Index wasm_expression_child_first(Wasm_Builder const *builder,
+                                                  Ast_Node_Index expression) {
+    assert(expression < builder->node_count);
+
+    Ast_Node const *node = &builder->nodes[expression];
+    if (node->node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
+        assert(node->first_child != AST_NODE_INDEX_NONE);
+        return builder->nodes[node->first_child].next_sibling;
+    }
+    return node->first_child;
+}
+
+/**
+ * Returns whether the procedure has anything that uses the locals of `Wasm_Scratch`: an array
+ * literal, a subscript, a slice, or a for statement over the elements of an array.
+ */
+static bool wasm_procedure_uses_arrays(Wasm_Builder const *builder, Ast_Node_Index procedure) {
+    assert(procedure < builder->node_count);
+
+    Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
+    for (Ast_Node_Index node = procedure + 1; node < end; node += 1) {
+        Ast_Node_Type node_type = builder->nodes[node].node_type;
+        if (node_type == AST_NODE_TYPE_ARRAY_LITERAL || node_type == AST_NODE_TYPE_SLICE ||
+            node_type == AST_NODE_TYPE_SUBSCRIPT) {
+            return true;
+        }
+        if (node_type == AST_NODE_TYPE_FOR_STATEMENT && wasm_for_is_each(builder, node)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Returns the number of locals that the parameters and the variables of `procedure` take, which
+ * is the index of the first local after them. The types of both must be known.
+ */
+static size_t wasm_variable_locals_end(Wasm_Builder const *builder, Ast_Node_Index procedure) {
+    assert(procedure < builder->node_count);
+
+    size_t local_index = wasm_parameter_slot_count(builder, procedure);
+    Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
+    for (Ast_Node_Index statement = procedure + 1; statement < end; statement += 1) {
+        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
+            builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            local_index += wasm_variable_slot_count(builder, statement);
+        }
+    }
+
+    return local_index;
+}
+
+/**
+ * Returns the index of the local `scratch` of `procedure`, which comes after its parameters and
+ * its variables. The procedure must use arrays.
+ */
+static size_t wasm_scratch_local_index(Wasm_Builder const *builder, Ast_Node_Index procedure,
+                                       Wasm_Scratch scratch) {
+    assert(wasm_procedure_uses_arrays(builder, procedure));
+
+    return wasm_variable_locals_end(builder, procedure) + (size_t)scratch;
+}
+
+/**
+ * Returns whether the procedure has an array literal, which means that it has a frame.
+ */
+static bool wasm_frame_has_literal(Wasm_Builder const *builder, Ast_Node_Index procedure) {
+    assert(procedure < builder->node_count);
+
+    Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
+    for (Ast_Node_Index node = procedure + 1; node < end; node += 1) {
+        if (builder->nodes[node].node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Returns the size in bytes of the elements of the array literals of `procedure` together, which
+ * is the size of its frame. Each literal has room for its elements, whether it is a variable or
+ * only a value that is used once, and a literal that is evaluated again, for example in a loop,
+ * is put in the same place again.
+ */
+static size_t wasm_frame_size_bytes(Wasm_Builder const *builder, Ast_Node_Index procedure) {
+    assert(procedure < builder->node_count);
+
+    Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
+    return wasm_frame_literal_offset(builder, procedure, end);
+}
+
+/**
+ * Returns the offset from the start of the frame of `procedure` of the elements of the array
+ * literal `literal`, which is the size of the array literals before it. `literal` can be the end of
+ * the procedure, which is the size of all of them.
+ */
+static size_t wasm_frame_literal_offset(Wasm_Builder const *builder, Ast_Node_Index procedure,
+                                        Ast_Node_Index literal) {
+    assert(procedure < builder->node_count);
+    assert(literal > procedure);
+    assert(literal <= builder->node_count);
+
+    size_t offset_bytes = 0;
+    for (Ast_Node_Index node = procedure + 1; node < literal; node += 1) {
+        if (builder->nodes[node].node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
+            // The first child is the type, which is not an element.
+            size_t element_count = wasm_children_count(builder, node) - 1;
+            offset_bytes += element_count * WASM_ELEMENT_SIZE_BYTES;
+        }
+    }
+
+    return offset_bytes;
+}
+
+/**
+ * Writes the start of a procedure that has array literals: it makes room for the elements of all
+ * of them by moving the stack pointer down, and keeps where they are in a local, so that the
+ * address of an array literal is that plus its offset. A recursion that goes too deep would move
+ * the pointer into the data, so the new pointer is compared with the end of the stack, as a signed
+ * number because a frame larger than the pointer gives a negative one, and traps if it is lower.
+ * The pointer goes back when the procedure returns, see `wasm_frame_leave`. A procedure without
+ * array literals writes nothing.
+ */
+static void wasm_frame_enter(Wasm_Builder *builder, Ast_Node_Index procedure) {
+    assert(procedure < builder->node_count);
+
+    if (wasm_frame_has_literal(builder, procedure) == false) {
+        return;
+    }
+    assert(builder->has_stack);
+
+    size_t frame_size_bytes = wasm_frame_size_bytes(builder, procedure);
+    assert(frame_size_bytes <= WASM_STACK_SIZE_BYTES);
+    size_t frame_local = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FRAME);
+
+    wasm_write_byte(&builder->writer, WASM_OPCODE_GLOBAL_GET);
+    wasm_write_unsigned(&builder->writer, wasm_stack_global_index(builder));
+    wasm_write_i32_const(&builder->writer, (int64_t)frame_size_bytes);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_SUB);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_TEE, frame_local);
+    wasm_write_i32_const(&builder->writer, (int64_t)builder->stack_limit_bytes);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_LT_S);
+    wasm_structured_trap(builder);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, frame_local);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_GLOBAL_SET);
+    wasm_write_unsigned(&builder->writer, wasm_stack_global_index(builder));
+}
+
+/**
+ * Writes the instructions that give the frame of `procedure` back, by moving the stack pointer up
+ * to where it was. They leave the stack of values as it is, so they can come after the value of a
+ * `return`. A procedure without array literals writes nothing.
+ */
+static void wasm_frame_leave(Wasm_Builder *builder, Ast_Node_Index procedure) {
+    assert(procedure < builder->node_count);
+
+    if (wasm_frame_has_literal(builder, procedure) == false) {
+        return;
+    }
+    assert(builder->has_stack);
+
+    size_t frame_local = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FRAME);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, frame_local);
+    wasm_write_i32_const(&builder->writer, (int64_t)wasm_frame_size_bytes(builder, procedure));
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_ADD);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_GLOBAL_SET);
+    wasm_write_unsigned(&builder->writer, wasm_stack_global_index(builder));
+}
+
+/**
+ * Returns the number of elements of the array that `expression` is, which is an array literal or a
+ * name that stands for a variable that was given one. The length of an array is not part of its
+ * value at run time, only of the program, so the code that needs it, for example for a bounds
+ * check, writes it as a constant. The variable was checked by `wasm_variables_check`.
+ */
+static size_t wasm_array_length(Wasm_Builder const *builder, Ast_Node_Index expression) {
+    assert(expression < builder->node_count);
+
+    Ast_Node_Index current = expression;
+    // Each step follows a name to the value of its variable, which is above it, so there are fewer
+    // steps than nodes.
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        if (builder->nodes[current].node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
+            // The first child is the type, which is not an element.
+            return wasm_children_count(builder, current) - 1;
+        }
+
+        assert(builder->nodes[current].node_type == AST_NODE_TYPE_IDENTIFIER);
+        Semantic_Binding binding = builder->bindings[current];
+        assert(binding.kind == SEMANTIC_BINDING_KIND_VARIABLE);
+        assert(builder->nodes[binding.target].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
+        current = builder->nodes[binding.target].last_child;
+    }
+
+    // Unreachable: a chain of variables is shorter than the number of nodes.
+    assert(false);
+    return 0;
+}
+
+/**
+ * Writes the length of `expression` if it is an array, after its address, so that the two are an
+ * array slice of all of its elements. Everything that works on the elements takes an array slice,
+ * so an array is made into one where it is given to something that does.
+ */
+static void wasm_array_decay(Wasm_Builder *builder, Ast_Node_Index expression) {
+    assert(expression < builder->node_count);
+
+    if (wasm_expression_type(builder, expression) == WASM_VALUE_TYPE_ARRAY) {
+        wasm_write_i32_const(&builder->writer, (int64_t)wasm_array_length(builder, expression));
+    }
+}
+
+/**
+ * Writes the instructions that leave the address of an element, from the array slice and the index
+ * that are on the stack: the address of the first element, its length as a 32-bit integer, and
+ * the index as a 64-bit one. An index that is not below the length, which is also any negative
+ * index, traps. The comparison is unsigned and 64-bit, so that an index that does not fit in 32
+ * bits is not cut down to one that does.
+ */
+static void wasm_element_address_write(Wasm_Builder *builder, Ast_Node_Index procedure) {
+    size_t low = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_LOW);
+
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, low);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_U);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, low);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I64_LE_U);
+    wasm_structured_trap(builder);
+
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, low);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_WRAP_I64);
+    wasm_write_i32_const(&builder->writer, WASM_ELEMENT_SIZE_SHIFT);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_SHL);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_ADD);
+}
+
+/**
+ * Writes the instructions that make a new array slice from the one and the two indexes that are
+ * on the stack: the address of the first element, its length, the first index and the end index,
+ * which is not included. The new one starts at the first index and ends before the end index.
+ * It traps unless the first index is not above the end index, and the end index is not above the
+ * length. Both comparisons are unsigned, which also makes a negative index too large.
+ */
+static void wasm_slice_write(Wasm_Builder *builder, Ast_Node_Index procedure) {
+    size_t low = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_LOW);
+    size_t high = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_HIGH);
+    size_t length = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, high);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, low);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, length);
+
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, low);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, high);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I64_GT_U);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, high);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, length);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_U);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I64_GT_U);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_OR);
+    wasm_structured_trap(builder);
+
+    // The address moves up by the first index, and the length is the distance between the indexes.
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, low);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_WRAP_I64);
+    wasm_write_i32_const(&builder->writer, WASM_ELEMENT_SIZE_SHIFT);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_SHL);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, high);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, low);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I64_SUB);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_WRAP_I64);
+}
+
+/**
+ * Writes the instructions for the array literal `literal`, whose elements were written already,
+ * each stored at its place in the frame by `wasm_build_code_section_body_child`. What is left is
+ * the address of the first element, which is the frame plus the offset of the literal. The number
+ * of elements must be the length of the type when it gives one, and the elements of the type
+ * must be `Int` values. Returns false after it recorded an error.
+ */
+static bool wasm_build_code_section_body_array_literal(Wasm_Builder *builder,
+                                                       Ast_Node_Index definition,
+                                                       Ast_Node_Index literal) {
+    assert(literal < builder->node_count);
+    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_ARRAY_LITERAL);
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index type = builder->nodes[literal].first_child;
+    assert(builder->nodes[type].node_type == AST_NODE_TYPE_ARRAY_TYPE);
+    assert(builder->nodes[type].payload.array_type.length_kind != AST_ARRAY_LENGTH_OMITTED);
+
+    if (wasm_value_type_of_node(builder, type) == WASM_VALUE_TYPE_NONE) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
+                         wasm_type_subject(builder, type));
+    }
+
+    size_t element_count = wasm_children_count(builder, literal) - 1;
+    Ast_Array_Length_Kind length_kind = builder->nodes[type].payload.array_type.length_kind;
+    if (length_kind == AST_ARRAY_LENGTH_FIXED &&
+        (size_t)builder->nodes[type].payload.array_type.length != element_count) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_LENGTH_MISMATCH,
+                         wasm_type_subject(builder, type));
+    }
+
+    size_t offset_bytes = wasm_frame_literal_offset(builder, procedure, literal);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET,
+                                 wasm_scratch_local_index(builder, procedure,
+                                                          WASM_SCRATCH_FRAME));
+    wasm_write_i32_const(&builder->writer, (int64_t)offset_bytes);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_ADD);
+    return true;
+}
+
+/**
+ * Writes what the parent of an expression needs after the expression `child` was written. For an
+ * array literal that is storing the element at its place, whose address is on the stack below it.
+ * For the arguments of a call and the operands of a subscript or a slice it is making an array
+ * into an array slice, see `wasm_array_decay`, because those take array slices. Returns false
+ * after it recorded an error.
+ */
+static bool wasm_build_code_section_body_child(Wasm_Builder *builder, Ast_Node_Index definition,
+                                               Ast_Node_Index parent, Ast_Node_Index child) {
+    assert(parent < builder->node_count);
+    assert(child < builder->node_count);
+
+    Ast_Node_Type parent_type = builder->nodes[parent].node_type;
+    if (parent_type == AST_NODE_TYPE_ARRAY_LITERAL) {
+        if (wasm_expression_type(builder, child) != WASM_VALUE_TYPE_INT) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
+                             wasm_expression_subject(builder, definition, child));
+        }
+
+        // The position among the children, where the first is the type.
+        size_t position = 0;
+        Ast_Node_Index sibling = builder->nodes[parent].first_child;
+        for (size_t i = 0; i < builder->node_count && sibling != child; i += 1) {
+            position += 1;
+            sibling = builder->nodes[sibling].next_sibling;
+        }
+        assert(sibling == child);
+        assert(position >= 1);
+
+        Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+        size_t offset_bytes = wasm_frame_literal_offset(builder, procedure, parent) +
+                              (position - 1) * WASM_ELEMENT_SIZE_BYTES;
+        wasm_write_memory_instruction(&builder->writer, WASM_OPCODE_I64_STORE, offset_bytes);
+        return true;
+    }
+
+    if (parent_type == AST_NODE_TYPE_CALL || parent_type == AST_NODE_TYPE_SLICE ||
+        parent_type == AST_NODE_TYPE_SUBSCRIPT) {
+        wasm_array_decay(builder, child);
+    }
+    return true;
+}
+
+/**
+ * Writes the instructions for the subscript `subscript`, such as `a[i]`, whose array and index
+ * were written already: the address of the element, and the load of it. Returns false after it
+ * recorded an error.
+ */
+static bool wasm_build_code_section_body_subscript(Wasm_Builder *builder,
+                                                   Ast_Node_Index definition,
+                                                   Ast_Node_Index subscript) {
+    assert(subscript < builder->node_count);
+    assert(builder->nodes[subscript].node_type == AST_NODE_TYPE_SUBSCRIPT);
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index base = builder->nodes[subscript].first_child;
+    Ast_Node_Index index = builder->nodes[subscript].last_child;
+
+    if (wasm_type_is_sequence(wasm_expression_type(builder, base)) == false) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
+                         wasm_expression_subject(builder, definition, base));
+    }
+    if (wasm_expression_type(builder, index) != WASM_VALUE_TYPE_INT) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
+                         wasm_expression_subject(builder, definition, index));
+    }
+
+    wasm_element_address_write(builder, procedure);
+    wasm_write_memory_instruction(&builder->writer, WASM_OPCODE_I64_LOAD, 0);
+    return true;
+}
+
+/**
+ * Writes the instructions for the slice `slice`, such as `a[1:4]`, whose array, first index and end
+ * index were written already: the array slice that they make. Returns false after it recorded an
+ * error.
+ */
+static bool wasm_build_code_section_body_slice(Wasm_Builder *builder, Ast_Node_Index definition,
+                                               Ast_Node_Index slice) {
+    assert(slice < builder->node_count);
+    assert(builder->nodes[slice].node_type == AST_NODE_TYPE_SLICE);
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index base = builder->nodes[slice].first_child;
+    Ast_Node_Index first = builder->nodes[base].next_sibling;
+    Ast_Node_Index end = builder->nodes[slice].last_child;
+    assert(first != end);
+
+    if (wasm_type_is_sequence(wasm_expression_type(builder, base)) == false) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
+                         wasm_expression_subject(builder, definition, base));
+    }
+    Ast_Node_Index indexes[2] = {first, end};
+    for (size_t i = 0; i < 2; i += 1) {
+        if (wasm_expression_type(builder, indexes[i]) != WASM_VALUE_TYPE_INT) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, indexes[i]));
+        }
+    }
+
+    wasm_slice_write(builder, procedure);
+    return true;
+}
+
+/**
+ * Writes the instructions of an assignment whose target is an element, such as `a[i] = 1` or
+ * `a[i] += 1`, or a range of elements, such as `a[1:3] = b`. An element is stored at its address,
+ * and for an operator such as `+=` it is first loaded from there, so the address is kept on the
+ * stack below the loaded value and the result. A range of elements is copied from the array or the
+ * array slice on the right, which must have as many elements, or the program traps. The copy is
+ * a `memory.copy`, which is right when the two overlap. Returns false after it recorded an error.
+ */
+static bool wasm_build_code_section_body_element_assignment(Wasm_Builder *builder,
+                                                            Ast_Node_Index definition,
+                                                            Ast_Node_Index assignment) {
+    assert(assignment < builder->node_count);
+    assert(ast_node_type_is_assignment(builder->nodes[assignment].node_type));
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index target = builder->nodes[assignment].first_child;
+    Ast_Node_Index value = builder->nodes[assignment].last_child;
+    bool is_plain = builder->nodes[assignment].node_type == AST_NODE_TYPE_ASSIGNMENT;
+
+    if (builder->nodes[target].node_type == AST_NODE_TYPE_SLICE) {
+        // Only the plain assignment copies. An operator such as `+=` is for one `Int`.
+        if (is_plain == false) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, target));
+        }
+
+        if (wasm_build_code_section_body_expression(builder, definition, target, false) == false) {
+            return false;
+        }
+        if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
+            return false;
+        }
+        if (wasm_type_is_sequence(wasm_expression_type(builder, value)) == false) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
+                             wasm_expression_subject(builder, definition, value));
+        }
+        wasm_array_decay(builder, value);
+
+        // The stack has the address and the length of the target, and of the value. The lengths
+        // must be the same. Then the elements are copied, as many bytes as they take.
+        size_t source_length = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+        size_t source_address = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_SECOND);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, source_length);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, source_address);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, source_length);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_I32_NE);
+        wasm_structured_trap(builder);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, source_address);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, source_length);
+        wasm_write_i32_const(&builder->writer, WASM_ELEMENT_SIZE_SHIFT);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_I32_SHL);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_PREFIX_MISC);
+        wasm_write_unsigned(&builder->writer, WASM_OPCODE_MISC_MEMORY_COPY);
+        // Both memory operands, the destination and the source, are memory 0.
+        wasm_write_byte(&builder->writer, 0x00);
+        wasm_write_byte(&builder->writer, 0x00);
+        return true;
+    }
+
+    assert(builder->nodes[target].node_type == AST_NODE_TYPE_SUBSCRIPT);
+    Ast_Node_Index base = builder->nodes[target].first_child;
+    Ast_Node_Index index = builder->nodes[target].last_child;
+
+    if (wasm_build_code_section_body_expression(builder, definition, base, false) == false) {
+        return false;
+    }
+    if (wasm_type_is_sequence(wasm_expression_type(builder, base)) == false) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
+                         wasm_expression_subject(builder, definition, base));
+    }
+    wasm_array_decay(builder, base);
+
+    if (wasm_build_code_section_body_expression(builder, definition, index, false) == false) {
+        return false;
+    }
+    if (wasm_expression_type(builder, index) != WASM_VALUE_TYPE_INT) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
+                         wasm_expression_subject(builder, definition, index));
+    }
+    wasm_element_address_write(builder, procedure);
+
+    if (is_plain == false) {
+        // The address is used twice, by the load and by the store. It is kept in a local only
+        // between the two instructions that follow, and not while the value is evaluated.
+        size_t address = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_TEE, address);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, address);
+        wasm_write_memory_instruction(&builder->writer, WASM_OPCODE_I64_LOAD, 0);
+    }
+
+    if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
+        return false;
+    }
+    if (wasm_expression_type(builder, value) != WASM_VALUE_TYPE_INT) {
+        Str subject = wasm_expression_subject(builder, definition, value);
+        if (is_plain) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH, subject);
+        }
+        return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, subject);
+    }
+
+    if (is_plain == false) {
+        wasm_write_byte(&builder->writer,
+                        wasm_assignment_opcode(builder->nodes[assignment].node_type));
+    }
+    wasm_write_memory_instruction(&builder->writer, WASM_OPCODE_I64_STORE, 0);
+    return true;
+}
+
+/**
+ * Writes the start of a for statement that goes through the elements of an array or an array
+ * slice: the elements are written, and the address of the first element and the address after the
+ * last one are stored in the locals after the iterator. Then come a `block` that a finished loop
+ * leaves and a `loop` that is repeated, as for a range, and the test that leaves the block when the
+ * address of the next element is the end. The iterator is loaded from that address, and the
+ * address moves on to the next element before the statements of the block, which are in a `block`
+ * of their own that `continue` leaves. The loop is closed by
+ * `wasm_build_code_section_body_for_end`, which has nothing to step. Returns false after it
+ * recorded an error.
+ */
+static bool wasm_build_code_section_body_for_each(Wasm_Builder *builder, Ast_Node_Index definition,
+                                                  Ast_Node_Index statement) {
+    assert(statement < builder->node_count);
+    assert(wasm_for_is_each(builder, statement));
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index elements = builder->nodes[statement].first_child;
+    size_t iterator = wasm_variable_local_index(builder, procedure, statement);
+    size_t cursor = iterator + 1;
+    size_t end = iterator + 2;
+
+    if (wasm_build_code_section_body_expression(builder, definition, elements, false) == false) {
+        return false;
+    }
+    if (wasm_type_is_sequence(wasm_expression_type(builder, elements)) == false) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
+                         wasm_expression_subject(builder, definition, elements));
+    }
+    wasm_array_decay(builder, elements);
+
+    // The stack has the address and the length. The end is the address plus the size of the
+    // elements.
+    wasm_write_i32_const(&builder->writer, WASM_ELEMENT_SIZE_SHIFT);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_SHL);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, end);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_TEE, cursor);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, end);
+
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, cursor);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_GE_U);
+    // Label 0 is the loop, and label 1 is the block around it, which is left.
+    wasm_write_byte(&builder->writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(&builder->writer, 1);
+
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, cursor);
+    wasm_write_memory_instruction(&builder->writer, WASM_OPCODE_I64_LOAD, 0);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, iterator);
+
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, cursor);
+    wasm_write_i32_const(&builder->writer, WASM_ELEMENT_SIZE_BYTES);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, cursor);
+
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    return true;
 }
 
 /**

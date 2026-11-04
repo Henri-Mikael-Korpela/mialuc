@@ -35,6 +35,7 @@ typedef struct {
     Parse_Status status;
 } Parser;
 
+static Ast_Node_Index parse_array_literal       (Parser *parser);
 static Ast_Node_Index parse_assignment          (Parser *parser);
 static bool           parse_attributes          (Parser *parser, Ast_Node_Index definition);
 static void           parse_block_close         (Parser *parser, Ast_Node_Index block);
@@ -55,6 +56,7 @@ static Ast_Node_Index parse_negation            (Parser *parser);
 static Ast_Node_Index parse_sum                 (Parser *parser);
 static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
 static Ast_Node_Index parse_for_statement       (Parser *parser, Ast_Node_Index parent);
+static bool           parse_for_statement_has_range(Parser const *parser);
 static Ast_Node_Index parse_global_variable_definition(Parser *parser);
 static Ast_Node_Index parse_jump_statement      (Parser *parser);
 static Ast_Node_Index parse_scope_statement     (Parser *parser, Ast_Node_Index parent);
@@ -73,11 +75,13 @@ static bool           parse_procedure_parameters(Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_return_statement    (Parser *parser);
 static Ast_Node_Index parse_statement           (Parser *parser);
 static Ast_Node_Index parse_string_literal      (Parser *parser);
+static Ast_Node_Index parse_subscripts          (Parser *parser, Ast_Node_Index operand);
 static Ast_Node_Index parse_term                (Parser *parser);
 static void           parse_token_advance       (Parser *parser);
 static Token const *  parse_token_current       (Parser const *parser);
 static bool           parse_token_expect        (Parser *parser, Token_Type token_type,
                                                  Str expected);
+static Ast_Node_Index parse_type                (Parser *parser, Str expected);
 static Ast_Node_Index parse_variable_definition (Parser *parser);
 
 Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
@@ -239,18 +243,11 @@ static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
 
     // `:=` has no type, which is then deduced from the value. Otherwise the type comes before `=`.
     if (parse_token_current(parser)->token_type != TOKEN_TYPE_EQUALS) {
-        Token const *type = parse_token_current(parser);
-        if (type->token_type != TOKEN_TYPE_IDENTIFIER) {
-            return parse_fail(parser, STR("a type name or '='"));
-        }
-
-        Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
-        if (type_name == AST_NODE_INDEX_NONE) {
+        Ast_Node_Index type = parse_type(parser, STR("a type name or '='"));
+        if (type == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
-        parser->nodes[type_name].payload.type_name.name = type->payload.identifier.text;
-        parse_token_advance(parser);
-        parse_node_append_child(parser, definition, type_name);
+        parse_node_append_child(parser, definition, type);
     }
     if (parse_token_expect(parser, TOKEN_TYPE_EQUALS, STR("'='")) == false) {
         return AST_NODE_INDEX_NONE;
@@ -567,10 +564,11 @@ static Ast_Node_Index parse_if_statement(Parser *parser, Ast_Node_Index parent) 
 
 /**
  * Parses the header line `for ->` of a loop without an end, or `for name in first..<end ->`, or
- * `first..<=end` for a range that includes its end, and appends the statement that it starts to
- * `parent`. The statement gets a range and an empty block, which is returned so that the caller can
- * fill it with the lines that follow. The nodes are made in the order of the source, so the
- * iterator is not in scope in the range, only in the block.
+ * `first..<=end` for a range that includes its end, or `for name in elements ->` for the elements
+ * of an array or an array slice, and appends the statement that it starts to `parent`. The
+ * statement gets a range, or the expression of the elements, and an empty block, which is returned
+ * so that the caller can fill it with the lines that follow. The nodes are made in the order of the
+ * source, so the iterator is not in scope in the range, only in the block.
  */
 static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -605,6 +603,16 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
         return AST_NODE_INDEX_NONE;
     }
 
+    // Without a range operator in the header, the expression is the elements to go through.
+    if (parse_for_statement_has_range(parser) == false) {
+        Ast_Node_Index elements = parse_expression(parser);
+        if (elements == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, statement, elements);
+        return parse_block_open(parser, statement);
+    }
+
     Ast_Node_Index range = parse_node_make(parser, AST_NODE_TYPE_RANGE);
     if (range == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
@@ -632,6 +640,32 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
     parse_node_append_child(parser, range, end);
 
     return parse_block_open(parser, statement);
+}
+
+/**
+ * Returns whether the header line of a for statement has a range operator, `..<` or `..<=`, from
+ * the current token to the `->` that ends the header. The two kinds of for statement start the
+ * same way, and the range has to be made before the expression that is its first number, so it has
+ * to be known before that expression is parsed.
+ */
+static bool parse_for_statement_has_range(Parser const *parser) {
+    assert(parser->token_index < parser->token_count);
+
+    // The last token is `END`, which ends the line as well, so the loop stops at it.
+    for (size_t i = parser->token_index; i < parser->token_count; i += 1) {
+        Token_Type token_type = parser->tokens[i].token_type;
+        if (token_type == TOKEN_TYPE_RANGE_EXCLUSIVE || token_type == TOKEN_TYPE_RANGE_INCLUSIVE) {
+            return true;
+        }
+        if (token_type == TOKEN_TYPE_ARROW || token_type == TOKEN_TYPE_INDENTATION ||
+            token_type == TOKEN_TYPE_END) {
+            return false;
+        }
+    }
+
+    // Unreachable: the last token is `END`.
+    assert(false);
+    return false;
 }
 
 /**
@@ -952,7 +986,7 @@ static Ast_Node_Index parse_comparison(Parser *parser) {
 
 /**
  * Parses `name: Type`. The node for the parameter has the name in its payload and one child, the
- * type.
+ * type, which is a type name or an array type.
  */
 static Ast_Node_Index parse_parameter(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -974,20 +1008,13 @@ static Ast_Node_Index parse_parameter(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
-    Token const *type = parse_token_current(parser);
-    if (type->token_type != TOKEN_TYPE_IDENTIFIER) {
-        return parse_fail(parser, STR("a type name"));
-    }
-
-    Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
-    if (type_name == AST_NODE_INDEX_NONE) {
+    Ast_Node_Index type = parse_type(parser, STR("a type name"));
+    if (type == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    parser->nodes[type_name].payload.type_name.name = type->payload.identifier.text;
-    parse_token_advance(parser);
-    parse_node_append_child(parser, parameter, type_name);
+    parse_node_append_child(parser, parameter, type);
 
-    assert(parser->nodes[parameter].first_child == type_name);
+    assert(parser->nodes[parameter].first_child == type);
     return parameter;
 }
 
@@ -1023,33 +1050,21 @@ static Ast_Node_Index parse_statement(Parser *parser) {
 }
 
 /**
- * Parses `name += value`, or the same with another assignment operator. The node for the
- * assignment has two children: the name, as an identifier, and the value. The node is made before
- * the name, like the node of every statement, so that the nodes of a statement come after it in
- * the order of the source, which the analysis relies on. A name that is followed by anything else
- * than `:` or an assignment operator is the error here.
+ * Parses `name += value`, or the same with another assignment operator, or `name[index] = value`.
+ * The node for the assignment has two children: the target and the value. The target is the name,
+ * as an identifier, or an element of an array, which has subscripts after the name. The plain `=`
+ * is only for elements, as variables are given their value when they are defined. The node is made
+ * before the name, like the node of every statement, so that the nodes of a statement come after it
+ * in the order of the source, which the analysis relies on. A target that is followed by anything
+ * else than an assignment operator is the error here.
  */
 static Ast_Node_Index parse_assignment(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index + 1 < parser->token_count);
 
-    // The operator is the token after the name, which is not the last one, because the last is
-    // `END`.
-    Token_Type operator = parser->tokens[parser->token_index + 1].token_type;
-    Ast_Node_Type node_type = AST_NODE_TYPE_ADDITION_ASSIGNMENT;
-    if (operator == TOKEN_TYPE_SLASH_EQUALS) {
-        node_type = AST_NODE_TYPE_DIVISION_ASSIGNMENT;
-    } else if (operator == TOKEN_TYPE_ASTERISK_EQUALS) {
-        node_type = AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT;
-    } else if (operator == TOKEN_TYPE_MINUS_EQUALS) {
-        node_type = AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT;
-    } else if (operator != TOKEN_TYPE_PLUS_EQUALS) {
-        // The error is at the token after the name.
-        parse_token_advance(parser);
-        return parse_fail(parser, STR("':' or an assignment operator"));
-    }
-
-    Ast_Node_Index assignment = parse_node_make(parser, node_type);
+    // The kind of assignment depends on the operator after the target, which is only known once
+    // the target is parsed, so the node gets its type below.
+    Ast_Node_Index assignment = parse_node_make(parser, AST_NODE_TYPE_ADDITION_ASSIGNMENT);
     if (assignment == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -1058,7 +1073,28 @@ static Ast_Node_Index parse_assignment(Parser *parser) {
     if (target == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
+    target = parse_subscripts(parser, target);
+    if (target == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
     parse_node_append_child(parser, assignment, target);
+
+    // The error for anything else is at the token after the target.
+    Token_Type operator = parse_token_current(parser)->token_type;
+    bool is_element = parser->nodes[target].node_type != AST_NODE_TYPE_IDENTIFIER;
+    Ast_Node_Type node_type = AST_NODE_TYPE_ADDITION_ASSIGNMENT;
+    if (operator == TOKEN_TYPE_SLASH_EQUALS) {
+        node_type = AST_NODE_TYPE_DIVISION_ASSIGNMENT;
+    } else if (operator == TOKEN_TYPE_ASTERISK_EQUALS) {
+        node_type = AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT;
+    } else if (operator == TOKEN_TYPE_MINUS_EQUALS) {
+        node_type = AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT;
+    } else if (operator == TOKEN_TYPE_EQUALS && is_element) {
+        node_type = AST_NODE_TYPE_ASSIGNMENT;
+    } else if (operator != TOKEN_TYPE_PLUS_EQUALS) {
+        return parse_fail(parser, STR("':' or an assignment operator"));
+    }
+    parser->nodes[assignment].node_type = node_type;
     parse_token_advance(parser);
 
     Ast_Node_Index value = parse_expression(parser);
@@ -1102,18 +1138,11 @@ static Ast_Node_Index parse_variable_definition(Parser *parser) {
 
     // `:=` has no type, which is then deduced from the value. Otherwise the type comes before `=`.
     if (parse_token_current(parser)->token_type != TOKEN_TYPE_EQUALS) {
-        Token const *type = parse_token_current(parser);
-        if (type->token_type != TOKEN_TYPE_IDENTIFIER) {
-            return parse_fail(parser, STR("a type name or '='"));
-        }
-
-        Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
-        if (type_name == AST_NODE_INDEX_NONE) {
+        Ast_Node_Index type = parse_type(parser, STR("a type name or '='"));
+        if (type == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
-        parser->nodes[type_name].payload.type_name.name = type->payload.identifier.text;
-        parse_token_advance(parser);
-        parse_node_append_child(parser, definition, type_name);
+        parse_node_append_child(parser, definition, type);
     }
     if (parse_token_expect(parser, TOKEN_TYPE_EQUALS, STR("'='")) == false) {
         return AST_NODE_INDEX_NONE;
@@ -1341,7 +1370,8 @@ static Ast_Node_Index parse_call_statement(Parser *parser) {
 
 /**
  * Parses a value: an integer literal, a string literal, `true` or `false`, the name of
- * something, such as a parameter, or a call of a procedure.
+ * something, such as a parameter, or a call of a procedure, or an array literal. The name and the
+ * array literal can have subscripts after them.
  */
 static Ast_Node_Index parse_operand(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -1357,7 +1387,18 @@ static Ast_Node_Index parse_operand(Parser *parser) {
         if (parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_PARENTHESIS_LEFT) {
             return parse_call(parser);
         }
-        return parse_identifier(parser);
+        Ast_Node_Index identifier = parse_identifier(parser);
+        if (identifier == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        return parse_subscripts(parser, identifier);
+    }
+    if (next == TOKEN_TYPE_BRACKET_LEFT) {
+        Ast_Node_Index literal = parse_array_literal(parser);
+        if (literal == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        return parse_subscripts(parser, literal);
     }
     if (next == TOKEN_TYPE_STRING_LITERAL) {
         return parse_string_literal(parser);
@@ -1366,8 +1407,191 @@ static Ast_Node_Index parse_operand(Parser *parser) {
         return parse_bool_literal(parser);
     }
 
-    return parse_fail(parser, STR("an integer literal, a string literal, 'true', 'false', a name "
-                                  "or a call"));
+    return parse_fail(parser, STR("an integer literal, a string literal, 'true', 'false', a name, "
+                                  "a call or an array literal"));
+}
+
+/**
+ * Parses the subscripts that follow `operand`, which is the node of a name or of an array literal:
+ * `[index]` is the element at an index, and `[first:end]` is the array slice of the elements from
+ * the first index up to, and not including, the end. They can follow each other, and each one
+ * takes everything before it as its first child. Like the operator of an arithmetic operation,
+ * the node of a subscript is made after the nodes of its operands. Returns the node of the last
+ * subscript, or `operand` when there is none.
+ */
+static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(operand < parser->node_count);
+
+    Ast_Node_Index base = operand;
+    // Every subscript consumes a token, so there are fewer subscripts than tokens, which bounds
+    // the loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_BRACKET_LEFT) {
+            break;
+        }
+        parse_token_advance(parser);
+
+        Ast_Node_Index first = parse_expression(parser);
+        if (first == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+
+        Ast_Node_Index end = AST_NODE_INDEX_NONE;
+        if (parse_token_current(parser)->token_type == TOKEN_TYPE_TYPE_SEPARATOR) {
+            parse_token_advance(parser);
+            end = parse_expression(parser);
+            if (end == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            if (parse_token_expect(parser, TOKEN_TYPE_BRACKET_RIGHT, STR("']'")) == false) {
+                return AST_NODE_INDEX_NONE;
+            }
+        } else if (parse_token_expect(parser, TOKEN_TYPE_BRACKET_RIGHT, STR("':' or ']'")) ==
+                   false) {
+            return AST_NODE_INDEX_NONE;
+        }
+
+        Ast_Node_Type node_type = AST_NODE_TYPE_SUBSCRIPT;
+        if (end != AST_NODE_INDEX_NONE) {
+            node_type = AST_NODE_TYPE_SLICE;
+        }
+        Ast_Node_Index subscript = parse_node_make(parser, node_type);
+        if (subscript == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, subscript, base);
+        parse_node_append_child(parser, subscript, first);
+        if (end != AST_NODE_INDEX_NONE) {
+            parse_node_append_child(parser, subscript, end);
+        }
+        base = subscript;
+    }
+
+    return base;
+}
+
+/**
+ * Parses an array literal, `[const]Int { 1, 2, 3 }` or `[3]Int { 1, 2, 3 }`: the type of the array
+ * and the elements between braces, which are expressions separated by commas, and there may be
+ * none. The type must have a length or `const`, because an array slice has no elements of its own.
+ * The node is made before the nodes of its type and elements, which are its children.
+ */
+static Ast_Node_Index parse_array_literal(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_BRACKET_LEFT);
+
+    // The bracket is not the last token, because the last one is `END`. The error is at the
+    // closing bracket, where the length is missing.
+    assert(parser->token_index + 1 < parser->token_count);
+    if (parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_BRACKET_RIGHT) {
+        parse_token_advance(parser);
+        return parse_fail(parser, STR("an array length or 'const'"));
+    }
+
+    Ast_Node_Index literal = parse_node_make(parser, AST_NODE_TYPE_ARRAY_LITERAL);
+    if (literal == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index type = parse_type(parser, STR("an array type"));
+    if (type == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, literal, type);
+
+    if (parse_token_expect(parser, TOKEN_TYPE_BRACE_LEFT, STR("'{'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    if (parse_token_current(parser)->token_type != TOKEN_TYPE_BRACE_RIGHT) {
+        // Every element consumes a token, so there are fewer elements than tokens, which bounds
+        // the loop. A comma means that another element has to follow.
+        for (size_t i = 0; i < parser->token_count; i += 1) {
+            Ast_Node_Index element = parse_expression(parser);
+            if (element == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            parse_node_append_child(parser, literal, element);
+
+            if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
+                break;
+            }
+            parse_token_advance(parser);
+        }
+    }
+
+    if (parse_token_expect(parser, TOKEN_TYPE_BRACE_RIGHT, STR("',' or '}'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    return literal;
+}
+
+/**
+ * Parses a type: a name, such as `Int`, or an array type, which is the name of the type of the
+ * elements after brackets: `[3]Int` is an array of three, `[const]Int` is an array whose length is
+ * the number of elements in the literal that it starts, and `[]Int` is an array slice. The
+ * element type is only a name. `expected` says what the caller wants, for the error that is
+ * recorded when the current token starts no type.
+ */
+static Ast_Node_Index parse_type(Parser *parser, Str expected) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(expected.length > 0);
+
+    Token const *start = parse_token_current(parser);
+    if (start->token_type == TOKEN_TYPE_IDENTIFIER) {
+        Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
+        if (type_name == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[type_name].payload.type_name.name = start->payload.identifier.text;
+        parse_token_advance(parser);
+        return type_name;
+    }
+    if (start->token_type != TOKEN_TYPE_BRACKET_LEFT) {
+        return parse_fail(parser, expected);
+    }
+
+    Ast_Node_Index array_type = parse_node_make(parser, AST_NODE_TYPE_ARRAY_TYPE);
+    if (array_type == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_token_advance(parser);
+
+    Token const *length = parse_token_current(parser);
+    Ast_Array_Length_Kind length_kind = AST_ARRAY_LENGTH_OMITTED;
+    int64_t length_value = 0;
+    if (length->token_type == TOKEN_TYPE_INTEGER_LITERAL) {
+        length_kind = AST_ARRAY_LENGTH_FIXED;
+        length_value = length->payload.integer_literal.value;
+        parse_token_advance(parser);
+    } else if (length->token_type == TOKEN_TYPE_KEYWORD_CONST) {
+        length_kind = AST_ARRAY_LENGTH_INFERRED;
+        parse_token_advance(parser);
+    } else if (length->token_type != TOKEN_TYPE_BRACKET_RIGHT) {
+        return parse_fail(parser, STR("an array length, 'const' or ']'"));
+    }
+    parser->nodes[array_type].payload.array_type.length = length_value;
+    parser->nodes[array_type].payload.array_type.length_kind = length_kind;
+
+    if (parse_token_expect(parser, TOKEN_TYPE_BRACKET_RIGHT, STR("']'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Token const *element = parse_token_current(parser);
+    if (element->token_type != TOKEN_TYPE_IDENTIFIER) {
+        return parse_fail(parser, STR("the type of the elements"));
+    }
+    Ast_Node_Index element_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
+    if (element_name == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[element_name].payload.type_name.name = element->payload.identifier.text;
+    parse_token_advance(parser);
+    parse_node_append_child(parser, array_type, element_name);
+
+    return array_type;
 }
 
 static Ast_Node_Index parse_bool_literal(Parser *parser) {

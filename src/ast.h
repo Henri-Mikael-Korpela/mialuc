@@ -13,6 +13,9 @@ typedef enum {
     AST_NODE_TYPE_ADDITION,
     AST_NODE_TYPE_ADDITION_ASSIGNMENT,
     AST_NODE_TYPE_AND,
+    AST_NODE_TYPE_ARRAY_LITERAL,
+    AST_NODE_TYPE_ARRAY_TYPE,
+    AST_NODE_TYPE_ASSIGNMENT,
     AST_NODE_TYPE_ATTRIBUTE,
     AST_NODE_TYPE_BLOCK,
     AST_NODE_TYPE_BOOL_LITERAL,
@@ -42,7 +45,9 @@ typedef enum {
     AST_NODE_TYPE_RANGE,
     AST_NODE_TYPE_RETURN_STATEMENT,
     AST_NODE_TYPE_SCOPE_STATEMENT,
+    AST_NODE_TYPE_SLICE,
     AST_NODE_TYPE_STRING_LITERAL,
+    AST_NODE_TYPE_SUBSCRIPT,
     AST_NODE_TYPE_SUBTRACTION,
     AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT,
     AST_NODE_TYPE_TYPE_NAME,
@@ -58,6 +63,18 @@ typedef enum {
     AST_COMPARISON_OPERATOR_LESS_EQUAL,
     AST_COMPARISON_OPERATOR_NOT_EQUAL,
 } Ast_Comparison_Operator;
+
+// How the length of an array type is given. Alphabetical, because nothing depends on the order.
+typedef enum {
+    // An integer literal between the brackets, as in `[5]Int`. It is in the payload.
+    AST_ARRAY_LENGTH_FIXED,
+    // The keyword `const` between the brackets, as in `[const]Int`: the length is the number of
+    // elements of the array literal that the type is the start of.
+    AST_ARRAY_LENGTH_INFERRED,
+    // Nothing between the brackets, as in `[]Int`. That is not an array but an array slice, which
+    // views the elements of an array and knows its length only when the program runs.
+    AST_ARRAY_LENGTH_OMITTED,
+} Ast_Array_Length_Kind;
 
 enum {
     // The most blocks that can be inside each other in a procedure, not counting the body of the
@@ -83,11 +100,25 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *
  * - `AST_NODE_TYPE_ADDITION`: two children, the left and the right operand, in that order.
  * - `AST_NODE_TYPE_ADDITION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
- *   variable that gets the sum, and the value that is added to it, in that order. It is a
- *   statement of a procedure body.
+ *   variable that gets the sum, or the `AST_NODE_TYPE_SUBSCRIPT` of the element that gets it, and
+ *   the value that is added to it, in that order. It is a statement of a procedure body. The other
+ *   assignments that are made with an operator, such as `-=`, have the same two children.
  * - `AST_NODE_TYPE_AND`: two children, the left and the right operand, in that order. It is an
  *   expression of type `Bool` and the target requires both operands to be `Bool`. It binds
  *   tighter than `AST_NODE_TYPE_OR` and looser than `AST_NODE_TYPE_NOT`.
+ * - `AST_NODE_TYPE_ARRAY_LITERAL`: first the `AST_NODE_TYPE_ARRAY_TYPE` that starts the literal,
+ *   whose length is not omitted, and then one child per element, in the order of the source, each
+ *   one an expression. `[const]Int { 1, 2, 3 }` and `[3]Int { 1, 2, 3 }` are array literals. The
+ *   nodes of the elements come after the node of the type, so the nodes are in the order of the
+ *   source. It is an expression, and it can be followed by subscripts.
+ * - `AST_NODE_TYPE_ARRAY_TYPE`: one child, the `AST_NODE_TYPE_TYPE_NAME` of the type of the
+ *   elements. It is a type like `AST_NODE_TYPE_TYPE_NAME`, and is found wherever a type is: it is
+ *   the type of a parameter or of a variable, or it starts an array literal. How the length is
+ *   given, and the length when it is a fixed one, is in the payload.
+ * - `AST_NODE_TYPE_ASSIGNMENT`: two children, the target and the value, in that order. It is a
+ *   plain `=`, which only an element can be assigned with, so the target is an
+ *   `AST_NODE_TYPE_SUBSCRIPT` or, for a range of elements, an `AST_NODE_TYPE_SLICE`. It is a
+ *   statement of a procedure body.
  * - `AST_NODE_TYPE_ATTRIBUTE`: no children. One attribute of a definition, such as `static` in
  *   `#(static)`, with the name between the parentheses in the payload. Which names are attributes
  *   that the language has is for the analysis to tell, not the parser.
@@ -122,17 +153,19 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   variable that is divided and gets the quotient, and the divisor, in that order. It is a
  *   statement of a procedure body.
  * - `AST_NODE_TYPE_FOR_STATEMENT`: two children, an `AST_NODE_TYPE_RANGE` and the
- *   `AST_NODE_TYPE_BLOCK` that runs once for each number of the range, in that order. The name of
- *   the iterator is in the payload. The iterator is a variable of type `Int` that exists only in
- *   the block, and it cannot be assigned to. The nodes of the range come before the block, so the
- *   iterator is not in scope in the range. It is a statement of a procedure body.
+ *   `AST_NODE_TYPE_BLOCK` that runs once for each number of the range, in that order. Instead of
+ *   the range the first child can be an expression, the array or array slice that the block runs
+ *   once for each element of. The name of the iterator is in the payload. The iterator is a
+ *   variable of type `Int` that exists only in the block, and it cannot be assigned to. The nodes
+ *   of the range come before the block, so the iterator is not in scope in the range. It is a
+ *   statement of a procedure body.
  * - `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`: a global variable, which is defined at file scope.
  *   Its children are one `AST_NODE_TYPE_ATTRIBUTE` for each attribute of its attribute list, in the
- *   order of the source, then the type, an `AST_NODE_TYPE_TYPE_NAME`, when the definition gives
- *   one, and last the initial value, which is an `AST_NODE_TYPE_INTEGER_LITERAL`, an
- *   `AST_NODE_TYPE_BOOL_LITERAL` or an `AST_NODE_TYPE_STRING_LITERAL`, and never another
- *   expression. The name is in the payload. It is a child of the `AST_NODE_TYPE_MODULE`, between
- *   the constant definitions.
+ *   order of the source, then the type, an `AST_NODE_TYPE_TYPE_NAME` or an
+ *   `AST_NODE_TYPE_ARRAY_TYPE`, when the definition gives one, and last the initial value, which is
+ *   an `AST_NODE_TYPE_INTEGER_LITERAL`, an `AST_NODE_TYPE_BOOL_LITERAL` or an
+ *   `AST_NODE_TYPE_STRING_LITERAL`, and never another expression. The name is in the payload. It is
+ *   a child of the `AST_NODE_TYPE_MODULE`, between the constant definitions.
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_IF_STATEMENT`: a chain of `if`, any number of `else if` and an optional `else`,
  *   as the children in the order of the source: a condition, which is any expression (the target
@@ -164,7 +197,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_OR`: two children, the left and the right operand, in that order. It is an
  *   expression of type `Bool` with the lowest precedence of the operators, and the target
  *   requires both operands to be `Bool`.
- * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`.
+ * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME` or an
+ *   `AST_NODE_TYPE_ARRAY_TYPE`.
  * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
  *   body, which are variable definitions, assignments, if statements, loops, jumps and return
  *   statements. The
@@ -177,15 +211,23 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_SCOPE_STATEMENT`: an optional `AST_NODE_TYPE_LABEL`, and then the
  *   `AST_NODE_TYPE_BLOCK` that runs once, in a scope of its own. A `break` inside it leaves it.
  *   It is a statement of a procedure body.
+ * - `AST_NODE_TYPE_SLICE`: three children, the array or array slice that is sliced, the first index
+ *   and the end index, in that order, each one an expression. `a[1:4]` has the elements of `a` from
+ *   the one at index 1 up to the one at index 3. It is an expression, and it can be the target of
+ *   an `AST_NODE_TYPE_ASSIGNMENT`.
  * - `AST_NODE_TYPE_STRING_LITERAL`: no children.
+ * - `AST_NODE_TYPE_SUBSCRIPT`: two children, the array or array slice and the index of the element,
+ *   in that order, each one an expression. `a[2]` is the element at index 2 of `a`. It is an
+ *   expression, and it can be the target of an assignment.
  * - `AST_NODE_TYPE_SUBTRACTION`: two children, the minuend and the subtrahend, in that order.
  * - `AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that gets the difference, and the value that is subtracted from it, in that order.
  *   It is a statement of a procedure body.
  * - `AST_NODE_TYPE_TYPE_NAME`: no children.
  * - `AST_NODE_TYPE_VARIABLE_DEFINITION`: the initial value, preceded by the type, an
- *   `AST_NODE_TYPE_TYPE_NAME`, when the definition gives one. Without it the type is deduced from
- *   the value, so the value is the only child. The name is in the payload.
+ *   `AST_NODE_TYPE_TYPE_NAME` or an `AST_NODE_TYPE_ARRAY_TYPE`, when the definition gives one.
+ *   Without it the type is deduced from the value, so the value is the only child. The name is in
+ *   the payload.
  */
 typedef struct {
     Ast_Node_Type node_type;
@@ -195,6 +237,11 @@ typedef struct {
     // This union is named, because unnamed unions are C11 and the project uses C99.
     // Only the member that matches `node_type` is meaningful.
     union {
+        struct {
+            // Only the member of the kind `AST_ARRAY_LENGTH_FIXED` is a length.
+            int64_t length;
+            Ast_Array_Length_Kind length_kind;
+        } array_type;
         struct {
             // Views the source text, so it is valid only as long as the source is.
             Str name;

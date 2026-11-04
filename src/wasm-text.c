@@ -14,6 +14,8 @@
 enum {
     // The longest decimal number that is written: `UINT64_MAX` has 20 digits.
     WASM_TEXT_DECIMAL_DIGITS_MAX = 20,
+    // The natural alignment of a 64-bit load or store, as a power of two: 8 bytes.
+    WASM_TEXT_ALIGNMENT_I64 = 3,
 };
 
 /**
@@ -715,6 +717,82 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             uint32_t local_index = wasm_text_read_unsigned_32(formatter);
             wasm_text_write_instruction(&formatter->writer, STR("local.set "));
             wasm_text_write_unsigned(&formatter->writer, local_index);
+            break;
+        }
+        case WASM_OPCODE_I32_ADD:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.add"));
+            break;
+        case WASM_OPCODE_I32_GE_U:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.ge_u"));
+            break;
+        case WASM_OPCODE_I32_LT_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.lt_s"));
+            break;
+        case WASM_OPCODE_I32_SHL:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.shl"));
+            break;
+        case WASM_OPCODE_I32_SUB:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.sub"));
+            break;
+        case WASM_OPCODE_I32_WRAP_I64:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.wrap_i64"));
+            break;
+        case WASM_OPCODE_I64_EXTEND_I32_U:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.extend_i32_u"));
+            break;
+        case WASM_OPCODE_I64_GT_U:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.gt_u"));
+            break;
+        case WASM_OPCODE_I64_LE_U:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.le_u"));
+            break;
+        case WASM_OPCODE_I64_LOAD:
+        case WASM_OPCODE_I64_STORE: {
+            // The immediates are the alignment, as a power of two, and the offset. Like
+            // `wasm2wat`, the text leaves out the offset when it is zero and the alignment when it
+            // is the size of the value, which is 8 bytes.
+            uint32_t alignment = wasm_text_read_unsigned_32(formatter);
+            uint32_t offset_bytes = wasm_text_read_unsigned_32(formatter);
+            if (opcode == WASM_OPCODE_I64_LOAD) {
+                wasm_text_write_instruction(&formatter->writer, STR("i64.load"));
+            } else {
+                wasm_text_write_instruction(&formatter->writer, STR("i64.store"));
+            }
+            if (offset_bytes != 0) {
+                wasm_text_write(&formatter->writer, STR(" offset="));
+                wasm_text_write_unsigned(&formatter->writer, offset_bytes);
+            }
+            if (alignment != WASM_TEXT_ALIGNMENT_I64) {
+                // An alignment above the size of the value is not valid.
+                if (alignment > WASM_TEXT_ALIGNMENT_I64) {
+                    return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_MALFORMED,
+                                          opcode_offset);
+                }
+                wasm_text_write(&formatter->writer, STR(" align="));
+                wasm_text_write_unsigned(&formatter->writer, (uint64_t)1 << alignment);
+            }
+            break;
+        }
+        case WASM_OPCODE_LOCAL_TEE: {
+            uint32_t local_index = wasm_text_read_unsigned_32(formatter);
+            wasm_text_write_instruction(&formatter->writer, STR("local.tee "));
+            wasm_text_write_unsigned(&formatter->writer, local_index);
+            break;
+        }
+        case WASM_OPCODE_PREFIX_MISC: {
+            // Only `memory.copy` is written, from memory 0 to memory 0.
+            size_t sub_opcode_offset = formatter->offset;
+            uint32_t sub_opcode = wasm_text_read_unsigned_32(formatter);
+            byte destination = wasm_text_read_byte(formatter);
+            byte source = wasm_text_read_byte(formatter);
+            if (formatter->status != WASM_TEXT_STATUS_OK) {
+                return false;
+            }
+            if (sub_opcode != WASM_OPCODE_MISC_MEMORY_COPY || destination != 0 || source != 0) {
+                return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED,
+                                      sub_opcode_offset);
+            }
+            wasm_text_write_instruction(&formatter->writer, STR("memory.copy"));
             break;
         }
         case WASM_OPCODE_RETURN:

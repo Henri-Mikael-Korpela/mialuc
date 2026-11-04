@@ -45,27 +45,44 @@ enum {
     WASM_OPCODE_END = 0x0B,
     WASM_OPCODE_GLOBAL_GET = 0x23,
     WASM_OPCODE_GLOBAL_SET = 0x24,
+    WASM_OPCODE_I32_ADD = 0x6A,
     WASM_OPCODE_I32_CONST = 0x41,
     WASM_OPCODE_I32_AND = 0x71,
     WASM_OPCODE_I32_EQ = 0x46,
     WASM_OPCODE_I32_EQZ = 0x45,
+    WASM_OPCODE_I32_GE_U = 0x4F,
+    WASM_OPCODE_I32_LT_S = 0x48,
     WASM_OPCODE_I32_NE = 0x47,
     WASM_OPCODE_I32_OR = 0x72,
+    WASM_OPCODE_I32_SHL = 0x74,
+    WASM_OPCODE_I32_SUB = 0x6B,
+    WASM_OPCODE_I32_WRAP_I64 = 0xA7,
     WASM_OPCODE_I64_ADD = 0x7C,
     WASM_OPCODE_I64_CONST = 0x42,
     WASM_OPCODE_I64_DIV_S = 0x7F,
     WASM_OPCODE_I64_EQ = 0x51,
+    WASM_OPCODE_I64_EXTEND_I32_U = 0xAD,
     WASM_OPCODE_I64_GE_S = 0x59,
     WASM_OPCODE_I64_GT_S = 0x55,
+    WASM_OPCODE_I64_GT_U = 0x56,
     WASM_OPCODE_I64_LE_S = 0x57,
+    WASM_OPCODE_I64_LE_U = 0x58,
+    WASM_OPCODE_I64_LOAD = 0x29,
     WASM_OPCODE_I64_LT_S = 0x53,
     WASM_OPCODE_I64_MUL = 0x7E,
     WASM_OPCODE_I64_NE = 0x52,
+    WASM_OPCODE_I64_STORE = 0x37,
     WASM_OPCODE_I64_SUB = 0x7D,
     WASM_OPCODE_IF = 0x04,
     WASM_OPCODE_LOCAL_GET = 0x20,
     WASM_OPCODE_LOCAL_SET = 0x21,
+    WASM_OPCODE_LOCAL_TEE = 0x22,
     WASM_OPCODE_LOOP = 0x03,
+    // The prefix of the instructions that came after the first version of the format, and the
+    // second byte of `memory.copy`, the only one of them that the compiler writes. Both of the
+    // memory operands that follow it are memory 0.
+    WASM_OPCODE_PREFIX_MISC = 0xFC,
+    WASM_OPCODE_MISC_MEMORY_COPY = 0x0A,
     WASM_OPCODE_RETURN = 0x0F,
     WASM_OPCODE_UNREACHABLE = 0x00,
 
@@ -93,6 +110,18 @@ extern byte const WASM_MODULE_HEADER[8];
 // Alphabetical, because nothing depends on the order.
 typedef enum {
     WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
+    // An element of an array, or a value that is assigned to one, that is not an `Int`.
+    WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
+    // A value that has to be an array or an array slice, and is not: what is indexed, sliced, gone
+    // through by a for statement, or copied to a range of elements.
+    WASM_BUILD_STATUS_ARRAY_EXPECTED,
+    // A variable of an array type that is not given an array literal.
+    WASM_BUILD_STATUS_ARRAY_INITIALIZER_INVALID,
+    // An array literal with another number of elements than the length of its type.
+    WASM_BUILD_STATUS_ARRAY_LENGTH_MISMATCH,
+    // An array as the type of a parameter, or an array or an array slice as the type of a global
+    // variable. The subject is the type of the elements.
+    WASM_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
     WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH,
     WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH,
     WASM_BUILD_STATUS_CALL_RESULT_MISSING,
@@ -101,6 +130,8 @@ typedef enum {
     WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED,
     WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP,
     WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE,
+    // An index, or the end of a slice, that is not an `Int`.
+    WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
     WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
     WASM_BUILD_STATUS_OK,
     WASM_BUILD_STATUS_OUTPUT_TOO_LARGE,
@@ -149,7 +180,21 @@ typedef struct {
  * result of that type is two WebAssembly results, which JavaScript receives as an array. The bytes
  * of the string literals are in the first bytes of the memory, which the module exports as
  * `memory`. The module has no memory, and so no export of that name, when the program has no
- * string literal. A definition cannot be called `memory`, because the name is taken.
+ * string literal and no array type. A definition cannot be called `memory`, because the name is
+ * taken.
+ *
+ * An array slice is two 32-bit integers as well: the address of its first element and its length
+ * in elements, which are `Int` values of 8 bytes. So a parameter that is an array slice is two
+ * WebAssembly parameters, and a caller from JavaScript passes the address of elements that it
+ * wrote to the memory of the module, and their number.
+ *
+ * An array is on a stack in the memory of the module: a procedure that has an array literal makes
+ * room for all of its array literals when it starts, and gives it back when it returns. Only the
+ * elements are there, and a variable of an array type is a local that holds the address of the
+ * elements, so an array cannot be returned from the procedure, but a slice of it can be passed to
+ * the procedures that it calls. The stack is 1 MiB, and a procedure that would go past its end
+ * traps. Reading or writing an element outside an array or an array slice traps as well, and so
+ * does copying to a range of elements from a range of another length.
  *
  * The syntax tree can be valid for the parser but not for the target, for example when it uses a
  * procedure as a value. Such trees are rejected with a status other than

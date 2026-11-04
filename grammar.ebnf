@@ -56,6 +56,13 @@
      - The condition of an if statement must be a `Bool`, so a number or a string is not one, and
        the operands of a comparison must both be `Int`, or both `Bool` for `==` and `not=`. A
        variable defined in a block can only be used in that block. All are checked after parsing.
+     - The elements of an array and of an array slice must be `Int`, an array literal must have as
+       many elements as the length of its type when that is a number, and a variable of an array
+       type must be given an array literal. What is subscripted, sliced or gone through by a for
+       statement must be an array or an array slice, and an index must be an `Int`. An array can
+       be a variable, but not a parameter, a global variable or a returned value. The grammar
+       cannot tell a name that is an array from any other. A for statement with a range and one
+       with elements both have an expression after `in`, and the range operator tells them apart.
 *)
 
 module = { blank_line | definition } , end_of_input ;
@@ -76,7 +83,7 @@ constant_definition =
    name, and `static` in it is required. Without a type the type of the variable is the type of the
    literal. `counter #(static) := 0` is an `Int`, `ready #(static) : Bool = false` gives the type. *)
 global_variable_definition =
-    name , ws , [ attribute_list , ws ] , ":" , ws , [ type_name , ws ] , "=" , ws ,
+    name , ws , [ attribute_list , ws ] , ":" , ws , [ type , ws ] , "=" , ws ,
     global_value , ws , line_end ;
 
 global_value = integer_literal | bool_literal | string_literal ;
@@ -97,9 +104,19 @@ procedure =
 parameters = parameter , { ws , "," , ws , parameter } ;
 
 (* The name of the parameter, and its type. *)
-parameter = name , ws , ":" , ws , type_name ;
+parameter = name , ws , ":" , ws , type ;
+
+(* A type is a name, such as `Int`, or an array type. An array type is written with brackets before
+   the name of the type of the elements: `[5]Int` is an array of five elements, `[const]Int` an
+   array whose length is the number of elements of the array literal that it starts, which only
+   makes sense there, and `[]Int` an array slice, which views the elements of an array. *)
+type = type_name | array_type ;
 
 type_name = name ;
+
+array_type = "[" , ws , [ array_length , ws ] , "]" , ws , type_name ;
+
+array_length = integer_literal | "const" ;
 
 return_type = name ;
 
@@ -132,7 +149,7 @@ if_statement_1 =
 for_statement_1 =
     indentation_1 , [ label , required_space ] , "for" , required_space , name ,
     required_space , "in" , required_space ,
-    range , branch_end , block_2 ;
+    iteration , branch_end , block_2 ;
 loop_statement_1 =
     indentation_1 , [ label , required_space ] , "for" , branch_end , block_2 ;
 scope_statement_1 = indentation_1 , [ label ] , branch_end , block_2 ;
@@ -154,7 +171,7 @@ if_statement_2 =
 for_statement_2 =
     indentation_2 , [ label , required_space ] , "for" , required_space , name ,
     required_space , "in" , required_space ,
-    range , branch_end , block_3 ;
+    iteration , branch_end , block_3 ;
 loop_statement_2 =
     indentation_2 , [ label , required_space ] , "for" , branch_end , block_3 ;
 scope_statement_2 = indentation_2 , [ label ] , branch_end , block_3 ;
@@ -176,7 +193,7 @@ if_statement_3 =
 for_statement_3 =
     indentation_3 , [ label , required_space ] , "for" , required_space , name ,
     required_space , "in" , required_space ,
-    range , branch_end , block_4 ;
+    iteration , branch_end , block_4 ;
 loop_statement_3 =
     indentation_3 , [ label , required_space ] , "for" , branch_end , block_4 ;
 scope_statement_3 = indentation_3 , [ label ] , branch_end , block_4 ;
@@ -199,11 +216,15 @@ simple_statement_4 =
    `continue` names the label with the name only, without the `@`. *)
 label = "@" , name ;
 
-(* A for statement runs its block once for each number of a range. The name is the iterator, which is
-   an `Int` that exists only in the block. The range has a first number and an end, and `..<` leaves
-   the end out of the range, while `..<=` keeps it. Both are expressions that the compiler requires
-   to be `Int`, and they cannot use the iterator. The `->` ends the line, and what is indented below
+(* A for statement runs its block once for each number of a range, or once for each element of an
+   array or an array slice. The name is the iterator, which is an `Int` that exists only in the
+   block. The range has a first number and an end, and `..<` leaves the end out of the range, while
+   `..<=` keeps it. Both are expressions that the compiler requires to be `Int`, and they cannot use
+   the iterator. What is not a range is an expression that the compiler requires to be an array or
+   an array slice, as in `for x in elements ->`. The `->` ends the line, and what is indented below
    it is the block. *)
+iteration = range | expression ;
+
 range = expression , ws , ( "..<=" | "..<" ) , ws , expression ;
 
 (* `break` leaves the innermost loop or scope, or the statement that has the label after it, and
@@ -232,13 +253,18 @@ indentation_4 = "                " ;
 (* A variable and its initial value. `:=` is a ':' and a '=' for the compiler, so spaces may be
    between them, as for `::`. Without a type the type of the variable is the type of the value.
    `x : Int = 5` gives the type. *)
-variable_definition = name , ws , ":" , ws , [ type_name , ws ] , "=" , ws , expression ;
+variable_definition = name , ws , ":" , ws , [ type , ws ] , "=" , ws , expression ;
 
 (* An assignment to a variable that is already defined: `x += 2` adds 2 to `x`, `x -= 2`
    subtracts 2 from it, `x *= 2` multiplies it by 2, and `x /= 2` divides it by 2. The operator
    is a single token, so no space may be written inside it. The name must be a variable, not a
-   parameter or a constant, which the grammar cannot tell. *)
-assignment = name , ws , ( "+=" | "-=" | "*=" | "/=" ) , ws , expression ;
+   parameter or a constant, which the grammar cannot tell. The same operators change an element of
+   an array: `a[1] += 2`. A plain `=` assigns to an element, as in `a[1] = 2`, or copies to a range
+   of elements, as in `a[0:3] = b`, but a variable has its value from its definition only, so
+   `x = 2` is not an assignment. *)
+assignment =
+    name , { ws , subscript } , ws , ( "+=" | "-=" | "*=" | "/=" ) , ws , expression |
+    name , ws , subscript , { ws , subscript } , ws , "=" , ws , expression ;
 
 (* `return` and its value must be separated, or `return0` would be one identifier. *)
 return_statement = "return" , required_space , expression ;
@@ -270,9 +296,25 @@ sum = term , { ws , ( "+" | "-" ) , ws , term } ;
 term = operand , { ws , ( "*" | "/" ) , ws , operand } ;
 
 (* An integer literal, a string literal, `true` or `false`, a call of a procedure, or the use of a
-   name, such as a parameter or a constant. A call starts with a name too, and is told from the use
-   of a name by the opening parenthesis after it. *)
-operand = integer_literal | string_literal | bool_literal | call | name ;
+   name, such as a parameter or a constant, or an array literal. A call starts with a name too, and
+   is told from the use of a name by the opening parenthesis after it. A name and an array literal
+   can have subscripts after them. *)
+operand =
+    integer_literal | string_literal | bool_literal | call | ( name | array_literal ) ,
+    { ws , subscript } ;
+
+(* A subscript is the index of an element between brackets, `a[2]`, or the two indices of an array
+   slice, `a[1:4]`, which has the elements from the first index up to, and not including, the
+   second. All of the indices are expressions that the compiler requires to be `Int`. *)
+subscript = "[" , ws , expression , ws , [ ":" , ws , expression , ws ] , "]" ;
+
+(* An array literal is the type of an array, which has a length or `const`, followed by its
+   elements between braces. The elements are expressions separated by commas, and there may be none.
+   They are on one line. *)
+array_literal =
+    "[" , ws , array_length , ws , "]" , ws , type_name , ws , "{" , ws , [ elements , ws ] , "}" ;
+
+elements = expression , { ws , "," , ws , expression } ;
 
 (* The name of a procedure, and the values to give to its parameters between parentheses, which
    are separated by commas and can be none. A call is an expression, and a line that is only a call
@@ -299,8 +341,8 @@ any_character = ? any character ? ;
 name = identifier - reserved_word ;
 
 reserved_word =
-    "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "continue" | "true" | "false" |
-    "not" | "and" | "or" ;
+    "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "true" |
+    "false" | "not" | "and" | "or" ;
 
 identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 

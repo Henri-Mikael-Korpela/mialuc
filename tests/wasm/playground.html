@@ -285,6 +285,7 @@
          */
         const EXAMPLES = {
             arithmetic: "arithmetic",
+            arrays: "arrays",
             "boolean logic": "boolean-logic",
             conditions: "conditions",
             "control flow": "control-flow",
@@ -315,7 +316,7 @@
                 ["string", /"[^"\\\n]*"/],
                 ["attribute", /#(?:[ \t]*\([ \t]*[A-Za-z_]\w*[ \t]*\))+/],
                 ["label", /@[A-Za-z_]\w*/],
-                ["keyword", /\b(?:proc|return|if|else|for|in|break|continue|true|false|and|or)\b|\bnot\b(?!=)/],
+                ["keyword", /\b(?:proc|return|if|else|for|in|break|const|continue|true|false|and|or)\b|\bnot\b(?!=)/],
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
                 ["function", /\b[A-Za-z_]\w*(?=\()/],
                 ["type", /\b[A-Z]\w*\b/],
@@ -627,11 +628,13 @@
             }
 
             // Makes the function that reads a `Str`, which is the address of its bytes in the
-            // memory, and their count. A program has a memory only when it has a string.
+            // memory, and their count. A program has a memory only when it has a string or an
+            // array type.
             function makeStrReader(memory) {
                 return function Str(pair) {
                     if (memory === undefined) {
-                        throw new Error("The program has no strings, so it has no memory.");
+                        throw new Error("The program has no strings or arrays, so it has no "
+                            + "memory.");
                     }
                     if (Array.isArray(pair) === false || pair.length !== 2) {
                         throw new TypeError("Str takes the [address, length] of a string.");
@@ -717,11 +720,13 @@
                         }
                     }
 
-                    // The names of the program come after `Str`, so that they win if it has one.
+                    // The names of the program come after `Str` and `memory`, so that they win if
+                    // it has them. A program cannot have a procedure called `memory`.
                     const names = Object.keys(exports).filter(isParameterName);
                     // Only what the code passes to `console` is shown, like in a program.
-                    const run = new AsyncFunction("Str", ...names, "console", "exports", code);
-                    await run(makeStrReader(instance.exports.memory),
+                    const run = new AsyncFunction("Str", "memory", ...names, "console", "exports",
+                        code);
+                    await run(makeStrReader(instance.exports.memory), instance.exports.memory,
                         ...names.map((name) => exports[name]), playgroundConsole, exports);
                 } catch (error) {
                     send("error", [error]);

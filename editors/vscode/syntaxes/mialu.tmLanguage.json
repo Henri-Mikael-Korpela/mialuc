@@ -89,7 +89,13 @@
                 },
                 {
                     "name": "keyword.operator.type.mialu",
+                    "comment": "The colon of a type separator, and of the two bounds of an array slice, as in a[1:4].",
                     "match": ":"
+                },
+                {
+                    "name": "punctuation.section.brackets.mialu",
+                    "comment": "The brackets of an array type, of a subscript and of a slice, and the braces of an array literal.",
+                    "match": "[\\[\\]{}]"
                 }
             ]
         },
@@ -140,6 +146,11 @@
                 {
                     "name": "keyword.control.flow.mialu",
                     "match": "\\b(break|continue)\\b"
+                },
+                {
+                    "name": "storage.modifier.const.mialu",
+                    "comment": "The length of an array type that is the number of elements of the array literal that it starts, as in [const]Int { 1, 2 }.",
+                    "match": "\\bconst\\b"
                 },
                 {
                     "name": "keyword.operator.word.mialu",
