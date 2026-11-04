@@ -27,12 +27,15 @@ import base64
 import functools
 import http.server
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 PORT_DEFAULT = 8008
+# Localhost only, unless the environment variable MIALU_HOST says otherwise, as the Docker image does.
+HOST = os.environ.get("MIALU_HOST", "127.0.0.1")
 
 ROOT_DIRECTORY = Path(__file__).resolve().parents[2]
 EXAMPLES_DIRECTORY = ROOT_DIRECTORY / "test-code"
@@ -152,7 +155,7 @@ def main():
     directory = Path(__file__).resolve().parent
     handler = functools.partial(Handler, directory=str(directory))
 
-    with http.server.ThreadingHTTPServer(("127.0.0.1", port), handler) as server:
+    with http.server.ThreadingHTTPServer((HOST, port), handler) as server:
         print(f"Serving {directory} at http://localhost:{port}/ (Ctrl+C to stop)")
         print(f"Playground: http://localhost:{port}/playground.html")
         try:

@@ -1,0 +1,7 @@
+services:
+  playground:
+    build: .
+    ports:
+      # Only this computer can reach the playground.
+      - "127.0.0.1:8008:8008"
+    restart: unless-stopped

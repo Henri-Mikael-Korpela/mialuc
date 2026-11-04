@@ -1,0 +1,5 @@
+build/
+history/
+.git/
+.vscode/
+__pycache__/
