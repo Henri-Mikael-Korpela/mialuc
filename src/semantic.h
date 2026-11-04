@@ -22,16 +22,16 @@ typedef enum {
 
 /**
  * What a use of a name stands for. `target` is the node that declares the name: an
- * `AST_NODE_TYPE_CONSTANT_DEFINITION` for a constant, an `AST_NODE_TYPE_PARAMETER` for a
- * parameter, or an `AST_NODE_TYPE_VARIABLE_DEFINITION` for a variable, or an
- * `AST_NODE_TYPE_FOR_STATEMENT` for its iterator, which is a variable too. `position` is the place of
- * the target among its kind of siblings, counted from zero: the index of the definition among the
- * definitions of the module, of the parameter among the parameters of its procedure, or of the
- * variable among the variables of its procedure, which are counted in the order of the source,
- * where the iterator of a for statement counts as one, also the ones in blocks, because each variable has a place of its own. A target and its position
- * are both kept, because a target alone would have to be searched for again by whoever needs the
- * position. For `kind`
- * `SEMANTIC_BINDING_KIND_NONE` the `target` is `AST_NODE_INDEX_NONE` and the `position` is zero.
+ * `AST_NODE_TYPE_CONSTANT_DEFINITION` for a constant, an `AST_NODE_TYPE_PARAMETER` for a parameter,
+ * or an `AST_NODE_TYPE_VARIABLE_DEFINITION` for a variable, or an `AST_NODE_TYPE_FOR_STATEMENT` for
+ * its iterator, which is a variable too. `position` is the place of the target among its kind of
+ * siblings, counted from zero: the index of the definition among the definitions of the module, of
+ * the parameter among the parameters of its procedure, or of the variable among the variables of
+ * its procedure, which are counted in the order of the source, where the iterator of a for
+ * statement counts as one, also the ones in blocks, because each variable has a place of its own. A
+ * target and its position are both kept, because a target alone would have to be searched for again
+ * by whoever needs the position. For `kind` `SEMANTIC_BINDING_KIND_NONE` the `target` is
+ * `AST_NODE_INDEX_NONE` and the `position` is zero.
  */
 typedef struct {
     Ast_Node_Index target;
@@ -43,7 +43,8 @@ typedef struct {
 typedef enum {
     // The name that an assignment assigns to is not a variable, but a parameter or a constant.
     SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE,
-    // The name that an assignment assigns to is the iterator of a for statement, which is read-only.
+    // The name that an assignment assigns to is the iterator of a for statement, which is
+    // read-only.
     SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR,
     // The name that is called is not a procedure: a variable, a parameter or a constant string.
     SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE,
@@ -68,12 +69,12 @@ typedef enum {
 
 /**
  * On `SEMANTIC_STATUS_OK`, `bindings` is the filled start of the binding buffer, as
- * `Semantic_Binding` elements, with one element per syntax tree node: the element at the index of
- * a node is what that node stands for, if it is an `AST_NODE_TYPE_IDENTIFIER`, or the procedure
- * that it calls, if it is an `AST_NODE_TYPE_CALL`, which is a binding of the kind
- * `SEMANTIC_BINDING_KIND_CONSTANT` whose target is the definition of the procedure. Any other node has the kind
- * `SEMANTIC_BINDING_KIND_NONE` for any other node. Otherwise `bindings.length` is zero and
- * `subject` is the name that the error is about, as a view into the source that the syntax tree
+ * `Semantic_Binding` elements, with one element per syntax tree node: the element at the index of a
+ * node is what that node stands for, if it is an `AST_NODE_TYPE_IDENTIFIER`, or the procedure that
+ * it calls, if it is an `AST_NODE_TYPE_CALL`, which is a binding of the kind
+ * `SEMANTIC_BINDING_KIND_CONSTANT` whose target is the definition of the procedure. Any other node
+ * has the kind `SEMANTIC_BINDING_KIND_NONE` for any other node. Otherwise `bindings.length` is zero
+ * and `subject` is the name that the error is about, as a view into the source that the syntax tree
  * was parsed from, so the caller can work out the position.
  */
 typedef struct {
@@ -93,9 +94,9 @@ typedef struct {
  * variable can be used only below its definition, and not in its own initial value. The blocks of
  * an if statement are scopes inside the scope of the procedure: a variable that is defined in a
  * block can be used only in the rest of that block, including the blocks inside it, and not after
- * the block ends. The iterator of a for statement is a variable that is in scope in the block of the
- * statement only, not in its range, and it cannot be assigned to. A name is looked up in the innermost scope that uses it first, and then in the
- * scopes around it, up to the module scope.
+ * the block ends. The iterator of a for statement is a variable that is in scope in the block of
+ * the statement only, not in its range, and it cannot be assigned to. A name is looked up in the
+ * innermost scope that uses it first, and then in the scopes around it, up to the module scope.
  *
  * The name in a call, such as `f(1)`, must stand for a constant that is a procedure. It is looked
  * up among the constants only, because no other name can be the same as one of them.
@@ -105,8 +106,9 @@ typedef struct {
  * `break` with a label leaves the scope, loop or if statement with that label, which must be around
  * it. Labels are separate from the other names, but a statement cannot have the label of a
  * statement around it. A `continue` must be in the block of a for statement or a loop, and goes on
- * with the innermost one, also when scopes are in between, or with the loop that has its label. The jump is bound to the statement that it leaves or goes
- * on with, see `SEMANTIC_BINDING_KIND_JUMP_TARGET`.
+ * with the innermost one, also when scopes are in between, or with the loop that has its label. The
+ * jump is bound to the statement that it leaves or goes on with, see
+ * `SEMANTIC_BINDING_KIND_JUMP_TARGET`.
  *
  * An assignment, such as `x += 1`, uses the name that it assigns to like any other use of a name,
  * and the name must stand for a variable: a parameter or a constant cannot be assigned to.

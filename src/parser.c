@@ -37,6 +37,7 @@ typedef struct {
 
 static Ast_Node_Index parse_assignment          (Parser *parser);
 static void           parse_block_close         (Parser *parser, Ast_Node_Index block);
+static Ast_Node_Index parse_block_open          (Parser *parser, Ast_Node_Index statement);
 static Ast_Node_Index parse_branch              (Parser *parser, Ast_Node_Index statement);
 static Ast_Node_Index parse_constant_definition (Parser *parser);
 static Ast_Node_Index parse_else_branch         (Parser *parser, Ast_Node_Index parent);
@@ -386,6 +387,30 @@ static void parse_block_close(Parser *parser, Ast_Node_Index block) {
 }
 
 /**
+ * Parses the `->` that ends the header line of `statement`, and the end of the line, and appends a
+ * new empty block to the statement. Returns the block, so that the caller can fill it with the
+ * lines that follow.
+ */
+static Ast_Node_Index parse_block_open(Parser *parser, Ast_Node_Index statement) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(statement < parser->node_count);
+
+    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
+    if (block == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, statement, block);
+    return block;
+}
+
+/**
  * Parses the header line `if condition ->`, and appends the statement that it starts to `parent`.
  * The statement gets the condition and an empty block, which is returned so that the caller can
  * fill it with the lines that follow. The `else if` and `else` lines that follow are added to the
@@ -407,11 +432,11 @@ static Ast_Node_Index parse_if_statement(Parser *parser, Ast_Node_Index parent) 
 }
 
 /**
- * Parses the header line `for ->` of a loop without an end, or `for name in first..<end ->`, or `first..<=end` for a range that
- * includes its end, and appends the statement that it starts to `parent`. The statement gets a
- * range and an empty block, which is returned so that the caller can fill it with the lines that
- * follow. The nodes are made in the order of the source, so the iterator is not in scope in the
- * range, only in the block.
+ * Parses the header line `for ->` of a loop without an end, or `for name in first..<end ->`, or
+ * `first..<=end` for a range that includes its end, and appends the statement that it starts to
+ * `parent`. The statement gets a range and an empty block, which is returned so that the caller can
+ * fill it with the lines that follow. The nodes are made in the order of the source, so the
+ * iterator is not in scope in the range, only in the block.
  */
 static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -426,17 +451,7 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
             return AST_NODE_INDEX_NONE;
         }
         parse_node_append_child(parser, parent, loop);
-        parse_token_advance(parser);
-        if (parse_line_end_expect(parser) == false) {
-            return AST_NODE_INDEX_NONE;
-        }
-
-        Ast_Node_Index loop_block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
-        if (loop_block == AST_NODE_INDEX_NONE) {
-            return AST_NODE_INDEX_NONE;
-        }
-        parse_node_append_child(parser, loop, loop_block);
-        return loop_block;
+        return parse_block_open(parser, loop);
     }
 
     Token const *iterator = parse_token_current(parser);
@@ -482,26 +497,14 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
     }
     parse_node_append_child(parser, range, end);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
-        return AST_NODE_INDEX_NONE;
-    }
-    if (parse_line_end_expect(parser) == false) {
-        return AST_NODE_INDEX_NONE;
-    }
-
-    Ast_Node_Index block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
-    if (block == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
-    }
-    parse_node_append_child(parser, statement, block);
-    return block;
+    return parse_block_open(parser, statement);
 }
 
 /**
  * Parses the header line of a scope statement, `->` or `@label ->`, and appends the statement that
- * it starts to `parent`. The statement gets the label, if there is one, and an empty block, which is
- * returned so that the caller can fill it with the lines that follow. A label that is followed by
- * `if` or `for` instead of `->` is the label of that statement: it gets a labeled statement node
+ * it starts to `parent`. The statement gets the label, if there is one, and an empty block, which
+ * is returned so that the caller can fill it with the lines that follow. A label that is followed
+ * by `if` or `for` instead of `->` is the label of that statement: it gets a labeled statement node
  * that holds the label and the statement, and the block returned is the block of the statement.
  */
 static Ast_Node_Index parse_scope_statement(Parser *parser, Ast_Node_Index parent) {
@@ -545,19 +548,7 @@ static Ast_Node_Index parse_scope_statement(Parser *parser, Ast_Node_Index paren
         parse_token_advance(parser);
     }
 
-    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
-        return AST_NODE_INDEX_NONE;
-    }
-    if (parse_line_end_expect(parser) == false) {
-        return AST_NODE_INDEX_NONE;
-    }
-
-    Ast_Node_Index block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
-    if (block == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
-    }
-    parse_node_append_child(parser, statement, block);
-    return block;
+    return parse_block_open(parser, statement);
 }
 
 /**
@@ -605,9 +596,9 @@ static Ast_Node_Index parse_jump_statement(Parser *parser) {
 }
 
 /**
- * Parses the header line that starts with `else`, which is `else ->` or `else if condition ->`,
- * and adds the branch to the if statement that is the last statement of `parent`. That statement
- * must not have an `else` already. Returns the empty block of the branch, like `parse_if_statement`.
+ * Parses the header line that starts with `else`, which is `else ->` or `else if condition ->`, and
+ * adds the branch to the if statement that is the last statement of `parent`. That statement must
+ * not have an `else` already. Returns the empty block of the branch, like `parse_if_statement`.
  */
 static Ast_Node_Index parse_else_branch(Parser *parser, Ast_Node_Index parent) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -633,19 +624,7 @@ static Ast_Node_Index parse_else_branch(Parser *parser, Ast_Node_Index parent) {
     }
 
     parser->nodes[statement].payload.if_statement.has_else = true;
-    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
-        return AST_NODE_INDEX_NONE;
-    }
-    if (parse_line_end_expect(parser) == false) {
-        return AST_NODE_INDEX_NONE;
-    }
-
-    Ast_Node_Index block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
-    if (block == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
-    }
-    parse_node_append_child(parser, statement, block);
-    return block;
+    return parse_block_open(parser, statement);
 }
 
 /**
@@ -662,19 +641,7 @@ static Ast_Node_Index parse_branch(Parser *parser, Ast_Node_Index statement) {
     }
     parse_node_append_child(parser, statement, condition);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
-        return AST_NODE_INDEX_NONE;
-    }
-    if (parse_line_end_expect(parser) == false) {
-        return AST_NODE_INDEX_NONE;
-    }
-
-    Ast_Node_Index block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
-    if (block == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
-    }
-    parse_node_append_child(parser, statement, block);
-    return block;
+    return parse_block_open(parser, statement);
 }
 
 /**
@@ -1265,8 +1232,8 @@ static Ast_Node_Index parse_operand(Parser *parser) {
         return parse_bool_literal(parser);
     }
 
-    return parse_fail(parser,
-                      STR("an integer literal, a string literal, 'true', 'false', a name or a call"));
+    return parse_fail(parser, STR("an integer literal, a string literal, 'true', 'false', a name "
+                                  "or a call"));
 }
 
 static Ast_Node_Index parse_bool_literal(Parser *parser) {

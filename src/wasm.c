@@ -71,10 +71,10 @@ typedef struct {
 
 /**
  * A node whose children are being written, and the child that is next. It is the procedure for the
- * body, a block for the statements of the block, and an if statement for its conditions and
- * blocks. `if_count` is how many `if` instructions of an if statement are open, which is one for
- * the `if` and one for each `else if`, and which the end of the statement closes. A block that is
- * the body of a for statement, a loop statement or a scope statement has the statement in `statement`.
+ * body, a block for the statements of the block, and an if statement for its conditions and blocks.
+ * `if_count` is how many `if` instructions of an if statement are open, which is one for the `if`
+ * and one for each `else if`, and which the end of the statement closes. A block that is the body
+ * of a for statement, a loop statement or a scope statement has the statement in `statement`.
  */
 typedef struct {
     Ast_Node_Index node;
@@ -96,6 +96,12 @@ static bool            wasm_build_code_section                (Wasm_Builder *bui
                                                                size_t definition_count);
 static bool            wasm_build_code_section_body           (Wasm_Builder *builder,
                                                                Ast_Node_Index definition);
+static void            wasm_frame_push                        (Wasm_Builder const *builder,
+                                                               Wasm_Statement_Frame *frames,
+                                                               size_t *frame_count,
+                                                               Ast_Node_Index node,
+                                                               Ast_Node_Index statement);
+static void            wasm_structured_begin                  (Wasm_Builder *builder, byte opcode);
 static bool            wasm_build_code_section_body_call      (Wasm_Builder *builder,
                                                                Ast_Node_Index call,
                                                                bool is_result_unused);
@@ -644,8 +650,8 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
     if (builder->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE) {
         Ast_Node const *procedure_node = &builder->nodes[value];
         bool has_result = procedure_node->payload.procedure.return_type.bytes != NULL;
-        if (has_result &&
-            builder->nodes[procedure_node->last_child].node_type != AST_NODE_TYPE_RETURN_STATEMENT) {
+        Ast_Node_Type last_type = builder->nodes[procedure_node->last_child].node_type;
+        if (has_result && last_type != AST_NODE_TYPE_RETURN_STATEMENT) {
             wasm_write_byte(&builder->writer, WASM_OPCODE_UNREACHABLE);
         }
     }
@@ -683,6 +689,34 @@ static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_
 }
 
 /**
+ * Writes the structured instruction `opcode`, which is a `block`, a `loop` or an `if`, with the
+ * block type that takes and leaves no values.
+ */
+static void wasm_structured_begin(Wasm_Builder *builder, byte opcode) {
+    wasm_write_byte(&builder->writer, opcode);
+    wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+}
+
+/**
+ * Opens the list of the children of `node` as the innermost one in `frames`, which has
+ * `*frame_count` open lists. `statement` is the statement whose block `node` is, or
+ * `AST_NODE_INDEX_NONE`, see `Wasm_Statement_Frame`.
+ */
+static void wasm_frame_push(Wasm_Builder const *builder, Wasm_Statement_Frame *frames,
+                            size_t *frame_count, Ast_Node_Index node, Ast_Node_Index statement) {
+    assert(node < builder->node_count);
+    assert(*frame_count < WASM_STATEMENT_DEPTH_MAX);
+
+    frames[*frame_count] = (Wasm_Statement_Frame){
+        .node = node,
+        .next = builder->nodes[node].first_child,
+        .if_count = 0,
+        .statement = statement,
+    };
+    *frame_count += 1;
+}
+
+/**
  * Writes the statements of a procedure. A variable definition becomes its value stored in the
  * locals of the variable, an assignment becomes the new value of the variable stored in the same
  * way, and a `return` becomes the value followed by the `return` instruction.
@@ -704,13 +738,8 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
 
     Wasm_Statement_Frame frames[WASM_STATEMENT_DEPTH_MAX];
-    frames[0] = (Wasm_Statement_Frame){
-        .node = procedure,
-        .next = builder->nodes[procedure].first_child,
-        .if_count = 0,
-        .statement = AST_NODE_INDEX_NONE,
-    };
-    size_t frame_count = 1;
+    size_t frame_count = 0;
+    wasm_frame_push(builder, frames, &frame_count, procedure, AST_NODE_INDEX_NONE);
 
     // Every step takes a child of a list or closes a list, and each node is a child once and each
     // list is closed once, so twice the number of nodes steps are enough.
@@ -753,7 +782,8 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 if (is_first == false) {
                     wasm_write_byte(&builder->writer, WASM_OPCODE_ELSE);
                 }
-                if (wasm_build_code_section_body_expression(builder, definition, child, false) == false) {
+                if (wasm_build_code_section_body_expression(builder, definition, child,
+                                                            false) == false) {
                     return false;
                 }
                 // There is no conversion to a `Bool`, so an `Int` or a `Str` is not a condition.
@@ -761,8 +791,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                     Str subject = wasm_expression_subject(builder, definition, child);
                     return wasm_fail(builder, WASM_BUILD_STATUS_CONDITION_TYPE_INVALID, subject);
                 }
-                wasm_write_byte(&builder->writer, WASM_OPCODE_IF);
-                wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+                wasm_structured_begin(builder, WASM_OPCODE_IF);
                 frame->if_count += 1;
             } else {
                 assert(child_node->node_type == AST_NODE_TYPE_BLOCK);
@@ -770,14 +799,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 if (child == frame_node->last_child && frame_node->payload.if_statement.has_else) {
                     wasm_write_byte(&builder->writer, WASM_OPCODE_ELSE);
                 }
-                assert(frame_count < WASM_STATEMENT_DEPTH_MAX);
-                frames[frame_count] = (Wasm_Statement_Frame){
-                    .node = child,
-                    .next = child_node->first_child,
-                    .if_count = 0,
-                    .statement = AST_NODE_INDEX_NONE,
-                };
-                frame_count += 1;
+                wasm_frame_push(builder, frames, &frame_count, child, AST_NODE_INDEX_NONE);
             }
         } else if (child_node->node_type == AST_NODE_TYPE_RETURN_STATEMENT) {
             if (wasm_build_code_section_body_return(builder, definition, child) == false) {
@@ -798,63 +820,31 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
         } else if (child_node->node_type == AST_NODE_TYPE_IF_STATEMENT) {
             // A labeled if statement is inside a `block`, which a `break` with the label leaves.
             if (is_labeled) {
-                wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
-                wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+                wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
             }
-            assert(frame_count < WASM_STATEMENT_DEPTH_MAX);
-            frames[frame_count] = (Wasm_Statement_Frame){
-                .node = child,
-                .next = child_node->first_child,
-                .if_count = 0,
-                .statement = is_labeled ? child : AST_NODE_INDEX_NONE,
-            };
-            frame_count += 1;
+            Ast_Node_Index label_owner = is_labeled ? child : AST_NODE_INDEX_NONE;
+            wasm_frame_push(builder, frames, &frame_count, child, label_owner);
         } else if (child_node->node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
                    child_node->node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
             wasm_build_code_section_body_jump(builder, frames, frame_count, child);
         } else if (child_node->node_type == AST_NODE_TYPE_SCOPE_STATEMENT) {
             // A scope is a `block` that `break` leaves with a `br`.
-            wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
-            wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+            wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
             Ast_Node_Index block = child_node->last_child;
-            assert(frame_count < WASM_STATEMENT_DEPTH_MAX);
-            frames[frame_count] = (Wasm_Statement_Frame){
-                .node = block,
-                .next = builder->nodes[block].first_child,
-                .if_count = 0,
-                .statement = child,
-            };
-            frame_count += 1;
+            wasm_frame_push(builder, frames, &frame_count, block, child);
         } else if (child_node->node_type == AST_NODE_TYPE_LOOP_STATEMENT) {
             // The same three structured instructions as a for statement has, without a test.
-            wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
-            wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
-            wasm_write_byte(&builder->writer, WASM_OPCODE_LOOP);
-            wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
-            wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
-            wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+            wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+            wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+            wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
             Ast_Node_Index block = child_node->last_child;
-            assert(frame_count < WASM_STATEMENT_DEPTH_MAX);
-            frames[frame_count] = (Wasm_Statement_Frame){
-                .node = block,
-                .next = builder->nodes[block].first_child,
-                .if_count = 0,
-                .statement = child,
-            };
-            frame_count += 1;
+            wasm_frame_push(builder, frames, &frame_count, block, child);
         } else if (child_node->node_type == AST_NODE_TYPE_FOR_STATEMENT) {
             if (wasm_build_code_section_body_for(builder, definition, child) == false) {
                 return false;
             }
             Ast_Node_Index block = child_node->last_child;
-            assert(frame_count < WASM_STATEMENT_DEPTH_MAX);
-            frames[frame_count] = (Wasm_Statement_Frame){
-                .node = block,
-                .next = builder->nodes[block].first_child,
-                .if_count = 0,
-                .statement = child,
-            };
-            frame_count += 1;
+            wasm_frame_push(builder, frames, &frame_count, block, child);
         } else {
             // Parameters come first and are not code.
             assert(child_node->node_type == AST_NODE_TYPE_PARAMETER);
@@ -871,8 +861,8 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
  * block cannot change it. Then come a `block` that a finished loop leaves, a `loop` that is
  * repeated, and the test that leaves the block when the iterator is past the end, which is when it
  * is not below the end of an exclusive range or above the end of an inclusive one. The statements
- * of the block follow, in a `block` of their own, and then `wasm_build_code_section_body_for_end`. Returns false after it
- * recorded an error.
+ * of the block follow, in a `block` of their own, and then `wasm_build_code_section_body_for_end`.
+ * Returns false after it recorded an error.
  */
 static bool wasm_build_code_section_body_for(Wasm_Builder *builder, Ast_Node_Index definition,
                                              Ast_Node_Index statement) {
@@ -901,10 +891,8 @@ static bool wasm_build_code_section_body_for(Wasm_Builder *builder, Ast_Node_Ind
         wasm_write_unsigned(&builder->writer, local_index + i);
     }
 
-    wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
-    wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
-    wasm_write_byte(&builder->writer, WASM_OPCODE_LOOP);
-    wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    wasm_structured_begin(builder, WASM_OPCODE_LOOP);
 
     wasm_write_byte(&builder->writer, WASM_OPCODE_LOCAL_GET);
     wasm_write_unsigned(&builder->writer, local_index);
@@ -920,17 +908,16 @@ static bool wasm_build_code_section_body_for(Wasm_Builder *builder, Ast_Node_Ind
     wasm_write_unsigned(&builder->writer, 1);
 
     // The statements of the block are in a `block` of their own, which `continue` leaves.
-    wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
-    wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
 
     return true;
 }
 
 /**
  * Writes the end of the for statement or loop statement `statement`, after the statements of its
- * block. A loop statement starts over. For a for statement the iterator goes to the next number and the loop starts over. An inclusive range leaves the loop
- * before the step when the iterator is at the end, so that the step cannot overflow when the end is
- * the largest `Int`.
+ * block. A loop statement starts over. For a for statement the iterator goes to the next number and
+ * the loop starts over. An inclusive range leaves the loop before the step when the iterator is at
+ * the end, so that the step cannot overflow when the end is the largest `Int`.
  */
 static void wasm_build_code_section_body_for_end(Wasm_Builder *builder, Ast_Node_Index definition,
                                                  Ast_Node_Index statement) {
@@ -1452,9 +1439,9 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
 
 /**
  * Returns the text in the source that an error about `expression` points at: the first name or
- * string in it, which is the leftmost leaf of its tree, or the name of a call. An expression that starts with a number or
- * with `true` or `false` has no such text, so the name of the definition is the closest place that
- * the tree knows.
+ * string in it, which is the leftmost leaf of its tree, or the name of a call. An expression that
+ * starts with a number or with `true` or `false` has no such text, so the name of the definition is
+ * the closest place that the tree knows.
  */
 static Str wasm_expression_subject(Wasm_Builder const *builder, Ast_Node_Index definition,
                                    Ast_Node_Index expression) {
@@ -1580,11 +1567,12 @@ static byte wasm_comparison_opcode(Ast_Comparison_Operator operator) {
 }
 
 /**
- * Writes the instructions of the expression below `expression`, which leave its value on the
- * stack. A call of a procedure that returns nothing leaves no value, so it is accepted only as the
- * whole expression, and only when `is_result_unused` says that the caller does not need a value. WebAssembly is a stack machine, so an operator comes after its operands: the nodes are
- * written depth first, each node after all of its children. The walk keeps the path from the
- * root of the expression in an array instead of calling itself.
+ * Writes the instructions of the expression below `expression`, which leave its value on the stack.
+ * A call of a procedure that returns nothing leaves no value, so it is accepted only as the whole
+ * expression, and only when `is_result_unused` says that the caller does not need a value.
+ * WebAssembly is a stack machine, so an operator comes after its operands: the nodes are written
+ * depth first, each node after all of its children. The walk keeps the path from the root of the
+ * expression in an array instead of calling itself.
  */
 static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
                                                     Ast_Node_Index definition,
@@ -1620,8 +1608,8 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             }
         }
 
-        // The operands of an operator have been written when the operator is reached, so their types
-        // are known and are checked here.
+        // The operands of an operator have been written when the operator is reached, so their
+        // types are known and are checked here.
         switch (node->node_type) {
         case AST_NODE_TYPE_ADDITION:
         case AST_NODE_TYPE_DIVISION:

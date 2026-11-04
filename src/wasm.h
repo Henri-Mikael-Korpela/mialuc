@@ -127,12 +127,13 @@ typedef struct {
  * so every name in the tree is known to stand for a parameter or a constant. The module is written
  * to `output_buffer`, which holds `byte` elements.
  *
- * Every definition becomes a function that the module exports under the name of the definition.
- * A variable of a procedure is a local of its function, or two locals when it is a `Str`, after the
+ * Every definition becomes a function that the module exports under the name of the definition. A
+ * variable of a procedure is a local of its function, or two locals when it is a `Str`, after the
  * parameters. The iterator of a for statement is a local too, followed by one more local that holds
- * the end of its range, which is read once before the loop. A definition whose value is a string literal becomes a function without parameters
- * that returns the string. A use of such a constant in a procedure is a call of that function, so the constant
- * can be used above its definition as well.
+ * the end of its range, which is read once before the loop. A definition whose value is a string
+ * literal becomes a function without parameters that returns the string. A use of such a constant
+ * in a procedure is a call of that function, so the constant can be used above its definition as
+ * well.
  *
  * `Int` is a 64-bit integer (`i64`), so callers from JavaScript pass and receive `BigInt`.
  * `Str` is two 32-bit integers (`i32`), the address of its first byte in memory and its length

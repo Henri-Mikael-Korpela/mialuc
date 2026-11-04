@@ -43,6 +43,13 @@ static bool             semantic_identifier_resolve (Semantic_Analyzer *analyzer
                                                      Ast_Node_Index procedure,
                                                      Ast_Node_Index statement,
                                                      Ast_Node_Index identifier);
+static bool             semantic_jump_target_is_statement(Semantic_Analyzer const *analyzer,
+                                                     Ast_Node_Index procedure,
+                                                     Ast_Node_Index statement);
+static bool             semantic_jump_target_push   (Semantic_Analyzer *analyzer,
+                                                     Semantic_Jump_Target *targets,
+                                                     size_t *target_count,
+                                                     Ast_Node_Index statement);
 static bool             semantic_jump_resolve       (Semantic_Analyzer *analyzer,
                                                      Semantic_Jump_Target const *targets,
                                                      size_t target_count, Ast_Node_Index jump);
@@ -170,51 +177,16 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
         while (target_count > 0 && targets[target_count - 1].end <= current) {
             target_count -= 1;
         }
-        // The label of an if, for or loop statement is on the labeled statement right before it.
-        bool is_labeled = current > procedure + 1 &&
-                          analyzer->nodes[current - 1].node_type == AST_NODE_TYPE_LABELED_STATEMENT;
-        if (node_type == AST_NODE_TYPE_FOR_STATEMENT || node_type == AST_NODE_TYPE_LOOP_STATEMENT ||
-            node_type == AST_NODE_TYPE_SCOPE_STATEMENT ||
-            (node_type == AST_NODE_TYPE_IF_STATEMENT && is_labeled)) {
-            // The block is the last child, and a statement is inside a block of its own, so there
-            // is room.
-            assert(target_count < AST_BLOCK_DEPTH_MAX);
-            Ast_Node_Index block = analyzer->nodes[current].last_child;
-            Ast_Node_Index first = analyzer->nodes[current].first_child;
-            Str label = STR_EMPTY;
-            bool has_label = false;
-            if (node_type == AST_NODE_TYPE_SCOPE_STATEMENT &&
-                analyzer->nodes[first].node_type == AST_NODE_TYPE_LABEL) {
-                label = analyzer->nodes[first].payload.label.name;
-                has_label = true;
-            } else if (is_labeled) {
-                label = analyzer->nodes[current - 1].payload.label.name;
-                has_label = true;
+        if (semantic_jump_target_is_statement(analyzer, procedure, current)) {
+            if (semantic_jump_target_push(analyzer, targets, &target_count, current) == false) {
+                return false;
             }
-            if (has_label) {
-                // A label means one statement wherever it can be used.
-                for (size_t i = 0; i < target_count; i += 1) {
-                    if (targets[i].label.bytes != NULL && str_equals(targets[i].label, label)) {
-                        return semantic_fail(analyzer, SEMANTIC_STATUS_LABEL_DUPLICATE, label);
-                    }
-                }
-            }
-            targets[target_count] = (Semantic_Jump_Target){
-                .node = current,
-                .end = analyzer->nodes[block].payload.block.end,
-                .label = label,
-                .is_loop = node_type == AST_NODE_TYPE_FOR_STATEMENT ||
-                           node_type == AST_NODE_TYPE_LOOP_STATEMENT,
-                .is_if = node_type == AST_NODE_TYPE_IF_STATEMENT,
-            };
-            target_count += 1;
         }
         if (node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
             node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
             if (semantic_jump_resolve(analyzer, targets, target_count, current) == false) {
                 return false;
             }
-            statement = current;
         }
 
         if (node_type == AST_NODE_TYPE_PARAMETER) {
@@ -247,6 +219,63 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
         }
     }
 
+    return true;
+}
+
+/**
+ * Returns whether the node `statement` of `procedure` is a statement that a `break` can leave: a
+ * for statement, a loop statement or a scope statement, or an if statement that has a label. The
+ * label of an if, for or loop statement is on the labeled statement right before it.
+ */
+static bool semantic_jump_target_is_statement(Semantic_Analyzer const *analyzer,
+                                              Ast_Node_Index procedure, Ast_Node_Index statement) {
+    assert(statement < analyzer->node_count);
+
+    Ast_Node_Type node_type = analyzer->nodes[statement].node_type;
+    if (node_type == AST_NODE_TYPE_IF_STATEMENT) {
+        return statement > procedure + 1 &&
+               analyzer->nodes[statement - 1].node_type == AST_NODE_TYPE_LABELED_STATEMENT;
+    }
+    return node_type == AST_NODE_TYPE_FOR_STATEMENT || node_type == AST_NODE_TYPE_LOOP_STATEMENT ||
+           node_type == AST_NODE_TYPE_SCOPE_STATEMENT;
+}
+
+/**
+ * Adds `statement`, for which `semantic_jump_target_is_statement` is true, to the loops and scopes
+ * `targets` that the pass is in, which has `*target_count` of them. A label cannot be the label of
+ * a statement that is around it. Returns false after it recorded an error.
+ */
+static bool semantic_jump_target_push(Semantic_Analyzer *analyzer, Semantic_Jump_Target *targets,
+                                      size_t *target_count, Ast_Node_Index statement) {
+    assert(*target_count < AST_BLOCK_DEPTH_MAX);
+
+    Ast_Node const *node = &analyzer->nodes[statement];
+    Str label = STR_EMPTY;
+    if (node->node_type == AST_NODE_TYPE_SCOPE_STATEMENT &&
+        analyzer->nodes[node->first_child].node_type == AST_NODE_TYPE_LABEL) {
+        label = analyzer->nodes[node->first_child].payload.label.name;
+    } else if (analyzer->nodes[statement - 1].node_type == AST_NODE_TYPE_LABELED_STATEMENT) {
+        label = analyzer->nodes[statement - 1].payload.label.name;
+    }
+    if (label.bytes != NULL) {
+        for (size_t i = 0; i < *target_count; i += 1) {
+            if (targets[i].label.bytes != NULL && str_equals(targets[i].label, label)) {
+                return semantic_fail(analyzer, SEMANTIC_STATUS_LABEL_DUPLICATE, label);
+            }
+        }
+    }
+
+    // The block is the last child, and a statement is inside a block of its own, so there is room.
+    Ast_Node_Index block = node->last_child;
+    targets[*target_count] = (Semantic_Jump_Target){
+        .node = statement,
+        .end = analyzer->nodes[block].payload.block.end,
+        .label = label,
+        .is_loop = node->node_type == AST_NODE_TYPE_FOR_STATEMENT ||
+                   node->node_type == AST_NODE_TYPE_LOOP_STATEMENT,
+        .is_if = node->node_type == AST_NODE_TYPE_IF_STATEMENT,
+    };
+    *target_count += 1;
     return true;
 }
 
@@ -338,9 +367,9 @@ static bool semantic_parameter_check(Semantic_Analyzer *analyzer, Ast_Node_Index
 }
 
 /**
- * Checks that the name of `variable`, a variable definition or the iterator of a for statement, is new: no constant, parameter or earlier variable of the
- * procedure has it. Like a parameter, a variable with such a name would hide it. Returns false
- * after it recorded an error.
+ * Checks that the name of `variable`, a variable definition or the iterator of a for statement, is
+ * new: no constant, parameter or earlier variable of the procedure has it. Like a parameter, a
+ * variable with such a name would hide it. Returns false after it recorded an error.
  */
 static bool semantic_variable_check(Semantic_Analyzer *analyzer, Ast_Node_Index procedure,
                                     Ast_Node_Index variable) {
@@ -583,7 +612,8 @@ static Semantic_Binding semantic_variable_find(Semantic_Analyzer const *analyzer
         } else if (node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             // The variable is in scope at `before` when the block that it is in goes on after it.
             bool is_in_scope = block_count == 0 || block_ends[block_count - 1] > before;
-            if (is_in_scope && current != excluded && str_equals(node->payload.variable_definition.name, name)) {
+            if (is_in_scope && current != excluded &&
+                str_equals(node->payload.variable_definition.name, name)) {
                 found = (Semantic_Binding){
                     .target = current,
                     .position = position,

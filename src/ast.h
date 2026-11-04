@@ -87,16 +87,16 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   expression of type `Bool` and the target requires both operands to be `Bool`. It binds
  *   tighter than `AST_NODE_TYPE_OR` and looser than `AST_NODE_TYPE_NOT`.
  * - `AST_NODE_TYPE_BLOCK`: one child per statement. It is the body of a branch of an
- *   `AST_NODE_TYPE_IF_STATEMENT`, of a loop or of a scope statement, and it has its own scope: a variable defined in it cannot be
- *   used below it. Its payload has the end of the block, see below.
+ *   `AST_NODE_TYPE_IF_STATEMENT`, of a loop or of a scope statement, and it has its own scope: a
+ *   variable defined in it cannot be used below it. Its payload has the end of the block, see
+ *   below.
  * - `AST_NODE_TYPE_BOOL_LITERAL`: no children. It is `true` or `false`, which is in the payload.
  * - `AST_NODE_TYPE_BREAK_STATEMENT`: no children, or one `AST_NODE_TYPE_LABEL` when the statement
- *   names the scope to leave. Without a label it leaves the innermost loop or scope that it is in,
- *   which is an `AST_NODE_TYPE_FOR_STATEMENT`, an `AST_NODE_TYPE_LOOP_STATEMENT` or an
+ *   names the statement to leave. Without a label it leaves the innermost loop or scope that it
+ *   is in, which is an `AST_NODE_TYPE_FOR_STATEMENT`, an `AST_NODE_TYPE_LOOP_STATEMENT` or an
  *   `AST_NODE_TYPE_SCOPE_STATEMENT`, and the blocks of if statements are not among them. With a
  *   label it leaves the labeled statement with that label, which is a scope, a loop or an if
- *   statement. The word is in the payload. It is a statement of a
- *   procedure body.
+ *   statement. The word is in the payload. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_CALL`: one child per argument, in the order of the source, each one an
  *   expression. It is a call of the procedure that the name in the payload stands for, and an
  *   expression like the others. The node is made before its arguments. Whether it has a value
@@ -110,8 +110,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   an `AST_NODE_TYPE_PROCEDURE` or an `AST_NODE_TYPE_STRING_LITERAL`.
  * - `AST_NODE_TYPE_CONTINUE_STATEMENT`: no children, or one `AST_NODE_TYPE_LABEL` when the
  *   statement names the loop to go on with. It ends the current pass of the innermost loop that it
- *   is in, or of the labeled loop, and goes on with the next one. The word is in the payload. It is a statement of a
- *   procedure body.
+ *   is in, or of the labeled loop, and goes on with the next one. The word is in the payload. It is
+ *   a statement of a procedure body.
  * - `AST_NODE_TYPE_DIVISION`: two children, the dividend and the divisor, in that order.
  * - `AST_NODE_TYPE_DIVISION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that is divided and gets the quotient, and the divisor, in that order. It is a
@@ -122,11 +122,11 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   the block, and it cannot be assigned to. The nodes of the range come before the block, so the
  *   iterator is not in scope in the range. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
- * - `AST_NODE_TYPE_IF_STATEMENT`: a chain of `if`, any number of `else if` and an optional
- *   `else`, as the children in the order of the source: a condition, which is any expression
- *   (the target requires it to be a `Bool`), and the `AST_NODE_TYPE_BLOCK` that runs when it holds, for the `if`
- *   and for every `else if`, and then, when `has_else` is set in the payload, the last child is the
- *   `AST_NODE_TYPE_BLOCK` of the `else`.
+ * - `AST_NODE_TYPE_IF_STATEMENT`: a chain of `if`, any number of `else if` and an optional `else`,
+ *   as the children in the order of the source: a condition, which is any expression (the target
+ *   requires it to be a `Bool`), and the `AST_NODE_TYPE_BLOCK` that runs when it holds, for the
+ *   `if` and for every `else if`, and then, when `has_else` is set in the payload, the last child
+ *   is the `AST_NODE_TYPE_BLOCK` of the `else`.
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.
  * - `AST_NODE_TYPE_LABEL`: no children. The name of a label, without the `@` that it is written
  *   with, in the payload. It is the first child of an `AST_NODE_TYPE_SCOPE_STATEMENT` that has a

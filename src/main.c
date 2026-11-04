@@ -254,7 +254,8 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
         return 1;
     }
 
-    // The tree is printed before it is analyzed, so that a program with a bad name can be looked at.
+    // The tree is printed before it is analyzed, so that a program with a bad name can be looked
+    // at.
     if (command.mode == COMMAND_MODE_RUN) {
         printf("\n");
         ast_print(parse_result.nodes, parse_result.root);
@@ -614,8 +615,8 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     int subject_length = (int)result.subject.length;
     switch (result.status) {
     case WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be used in arithmetic.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes);
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be used in arithmetic.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: the call of '%.*s' has a different number of arguments than "
@@ -624,7 +625,8 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         break;
     case WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: an argument of the call of '%.*s' is not of the type of its "
-                "parameter.\n", path, position.line, position.column, subject_length, result.subject.bytes);
+                "parameter.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_CALL_RESULT_MISSING:
         fprintf(stderr, "%s:%zu:%zu: the procedure '%.*s' returns no value, so its call cannot be "
@@ -664,8 +666,8 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         assert(false);
         break;
     case WASM_BUILD_STATUS_RANGE_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be the start or the end of a "
-                "range.\n", path, position.line, position.column, subject_length,
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be the start or the "
+                "end of a range.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH:
@@ -701,8 +703,8 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
                 path, position.line, position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is the iterator of a for loop, so it cannot be assigned "
-                "to.\n", path, position.line, position.column, subject_length,
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is the iterator of a for loop, so it cannot be "
+                "assigned to.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     case SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE:
@@ -719,8 +721,8 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
                 result.subject.bytes);
         break;
     case SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not inside a loop.\n", path, position.line, position.column,
-                subject_length, result.subject.bytes);
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not inside a loop.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_BREAK_OUTSIDE_SCOPE:
         fprintf(stderr, "%s:%zu:%zu: 'break' is not inside a loop or a scope.\n", path,
