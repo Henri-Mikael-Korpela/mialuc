@@ -2,7 +2,6 @@
 #define MIALU_PARSER_H
 
 #include <stddef.h>
-#include <stdint.h>
 
 #include <mialu/array_slice.h>
 #include <mialu/ast.h>

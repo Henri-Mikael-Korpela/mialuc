@@ -1,7 +1,6 @@
 #ifndef MIALU_SEMANTIC_H
 #define MIALU_SEMANTIC_H
 
-#include <stddef.h>
 #include <stdint.h>
 
 #include <mialu/array_slice.h>

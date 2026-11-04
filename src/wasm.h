@@ -1,12 +1,9 @@
 #ifndef MIALU_WASM_H
 #define MIALU_WASM_H
 
-#include <stddef.h>
-
 #include <mialu/array_slice.h>
 #include <mialu/ast.h>
 #include <mialu/common_types.h>
-#include <mialu/semantic.h>
 #include <mialu/str.h>
 
 // Constants of the WebAssembly binary format, see https://webassembly.github.io/spec/core/binary/.
