@@ -24,3 +24,24 @@ console.log("First number with a square above 50:", first_multiple(50n), first_m
 console.log("Variable defined in the loop block, for 5:", variable_in_loop_block(5n));
 console.log("Loops one after another, for 3:", loops_one_after_another(3n));
 console.log("Call in the loop, sum of factorials up to 5:", call_in_loop(5n));
+// A loop without a range is written `for ->`. It runs its block again and again, until a `break`
+// or a `return` leaves it.
+console.log("Loop with break, count up to 5:", count_up_to(5n), count_up_to(0n));
+console.log("Loop with return, first n with n * n above 50:", first_square_above(50n));
+console.log("Steps of the Collatz sequence from 6, 7 and 27:", collatz_steps(6n), collatz_steps(7n),
+    collatz_steps(27n));
+// `continue` skips the rest of the block and goes on with the next number of a for-in loop, and
+// `break` leaves the loop. They are allowed in loops with a range as well.
+console.log("Continue skips even numbers, sum of odd numbers up to 9:", sum_of_odd_numbers(9n));
+console.log("Break stops at the limit, sum of 1, 2, 3 and so on while it stays within 10 and 100:", sum_until_limit(10n),
+    sum_until_limit(100n));
+console.log("Count numbers up to 10 that are not multiples of 3:", count_before_multiple(10n, 3n));
+// The iterator still steps after a `continue`, also at the end of an inclusive range.
+console.log("Continue in inclusive ranges:", continue_in_inclusive_range());
+// A jump belongs to the innermost loop only.
+console.log("Break leaves the inner loop only, for 4:", break_inner_loop_only(4n));
+console.log("Continue skips a pass of the outer loop, for 3:", continue_outer_pass(3n));
+console.log("Break in an else branch, for 10:", break_in_else_branch(10n));
+console.log("Smallest divisor of 15, 17 and 49:", find_divisor(15n), find_divisor(17n), find_divisor(49n));
+console.log("Continue in a loop without a range, for 10:", loop_with_continue(10n));
+console.log("Break after an inner loop:", break_after_nested_loops());

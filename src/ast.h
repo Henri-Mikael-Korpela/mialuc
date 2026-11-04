@@ -15,16 +15,19 @@ typedef enum {
     AST_NODE_TYPE_AND,
     AST_NODE_TYPE_BLOCK,
     AST_NODE_TYPE_BOOL_LITERAL,
+    AST_NODE_TYPE_BREAK_STATEMENT,
     AST_NODE_TYPE_CALL,
     AST_NODE_TYPE_CALL_STATEMENT,
     AST_NODE_TYPE_COMPARISON,
     AST_NODE_TYPE_CONSTANT_DEFINITION,
+    AST_NODE_TYPE_CONTINUE_STATEMENT,
     AST_NODE_TYPE_DIVISION,
     AST_NODE_TYPE_DIVISION_ASSIGNMENT,
     AST_NODE_TYPE_FOR_STATEMENT,
     AST_NODE_TYPE_IDENTIFIER,
     AST_NODE_TYPE_IF_STATEMENT,
     AST_NODE_TYPE_INTEGER_LITERAL,
+    AST_NODE_TYPE_LOOP_STATEMENT,
     AST_NODE_TYPE_MODULE,
     AST_NODE_TYPE_MULTIPLICATION,
     AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT,
@@ -84,6 +87,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   `AST_NODE_TYPE_IF_STATEMENT`, and it has its own scope: a variable defined in it cannot be
  *   used below it. Its payload has the end of the block, see below.
  * - `AST_NODE_TYPE_BOOL_LITERAL`: no children. It is `true` or `false`, which is in the payload.
+ * - `AST_NODE_TYPE_BREAK_STATEMENT`: no children. It leaves the innermost loop that it is in, which
+ *   is an `AST_NODE_TYPE_FOR_STATEMENT` or an `AST_NODE_TYPE_LOOP_STATEMENT`. The word is in the
+ *   payload. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_CALL`: one child per argument, in the order of the source, each one an
  *   expression. It is a call of the procedure that the name in the payload stands for, and an
  *   expression like the others. The node is made before its arguments. Whether it has a value
@@ -95,6 +101,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   not comparisons. The operator is in the payload.
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: one child, the value that is bound to the name. It is
  *   an `AST_NODE_TYPE_PROCEDURE` or an `AST_NODE_TYPE_STRING_LITERAL`.
+ * - `AST_NODE_TYPE_CONTINUE_STATEMENT`: no children. It ends the current pass of the innermost loop
+ *   that it is in and goes on with the next one. The word is in the payload. It is a statement of a
+ *   procedure body.
  * - `AST_NODE_TYPE_DIVISION`: two children, the dividend and the divisor, in that order.
  * - `AST_NODE_TYPE_DIVISION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that is divided and gets the quotient, and the divisor, in that order. It is a
@@ -111,6 +120,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   and for every `else if`, and then, when `has_else` is set in the payload, the last child is the
  *   `AST_NODE_TYPE_BLOCK` of the `else`.
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.
+ * - `AST_NODE_TYPE_LOOP_STATEMENT`: one child, the `AST_NODE_TYPE_BLOCK` that runs again and again
+ *   until a `break` or a `return` leaves it. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition. It is the root of the tree.
  * - `AST_NODE_TYPE_MULTIPLICATION`: two children, the left and the right operand, in that order.
  * - `AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
@@ -124,7 +135,7 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   requires both operands to be `Bool`.
  * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`.
  * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
- *   body, which are variable definitions, assignments, if statements, for statements and return
+ *   body, which are variable definitions, assignments, if statements, loops, jumps and return
  *   statements. The
  *   return type is in the payload.
  * - `AST_NODE_TYPE_RANGE`: two children, the first number and the end of the range, in that order,
@@ -178,6 +189,11 @@ typedef struct {
             // Views the source text, like the other names.
             Str name;
         } for_statement;
+        struct {
+            // The word `break` or `continue`, as a view of the source text, so that an error can
+            // point at it.
+            Str keyword;
+        } jump;
         struct {
             bool has_else;
         } if_statement;

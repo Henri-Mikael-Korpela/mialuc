@@ -330,6 +330,10 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             Token_Type token_type = TOKEN_TYPE_IDENTIFIER;
             if (str_equals(text, STR("proc"))) {
                 token_type = TOKEN_TYPE_KEYWORD_PROC;
+            } else if (str_equals(text, STR("break"))) {
+                token_type = TOKEN_TYPE_KEYWORD_BREAK;
+            } else if (str_equals(text, STR("continue"))) {
+                token_type = TOKEN_TYPE_KEYWORD_CONTINUE;
             } else if (str_equals(text, STR("for"))) {
                 token_type = TOKEN_TYPE_KEYWORD_FOR;
             } else if (str_equals(text, STR("in"))) {

@@ -130,3 +130,122 @@ call_in_loop :: proc(n: Int) Int ->
     for i in 1..<=n ->
         total += factorial(i)
     return total
+
+count_up_to :: proc(limit: Int) Int ->
+    count := 0
+    for ->
+        if count >= limit ->
+            break
+        count += 1
+    return count
+
+first_square_above :: proc(limit: Int) Int ->
+    n := 0
+    for ->
+        n += 1
+        if n * n > limit ->
+            return n
+
+collatz_steps :: proc(start: Int) Int ->
+    n := start
+    steps := 0
+    for ->
+        if n == 1 ->
+            break
+        if n / 2 * 2 == n ->
+            n /= 2
+        else ->
+            n *= 3
+            n += 1
+        steps += 1
+    return steps
+
+sum_of_odd_numbers :: proc(n: Int) Int ->
+    total := 0
+    for i in 1..<=n ->
+        if i / 2 * 2 == i ->
+            continue
+        total += i
+    return total
+
+sum_until_limit :: proc(limit: Int) Int ->
+    total := 0
+    for i in 1..<100 ->
+        if total + i > limit ->
+            break
+        total += i
+    return total
+
+count_before_multiple :: proc(n: Int, factor: Int) Int ->
+    count := 0
+    for i in 1..<=n ->
+        if i / factor * factor == i ->
+            continue
+        count += 1
+    return count
+
+continue_in_inclusive_range :: proc() Int ->
+    total := 0
+    for i in 9223372036854775800..<=9223372036854775807 ->
+        continue
+    for i in 1..<=3 ->
+        if i == 2 ->
+            continue
+        total += i
+    return total
+
+break_inner_loop_only :: proc(n: Int) Int ->
+    pairs := 0
+    for row in 0..<n ->
+        for column in 0..<n ->
+            if column > row ->
+                break
+            pairs += 1
+    return pairs
+
+continue_outer_pass :: proc(n: Int) Int ->
+    total := 0
+    for row in 0..<n ->
+        if row == 1 ->
+            continue
+        for column in 0..<n ->
+            total += 1
+    return total
+
+break_in_else_branch :: proc(n: Int) Int ->
+    total := 0
+    for i in 0..<n ->
+        if i < 2 ->
+            total += 1
+        else if i < 4 ->
+            total += 10
+        else ->
+            break
+    return total
+
+find_divisor :: proc(n: Int) Int ->
+    for d in 2..<n ->
+        if n / d * d == n ->
+            return d
+    return n
+
+loop_with_continue :: proc(n: Int) Int ->
+    i := 0
+    total := 0
+    for ->
+        i += 1
+        if i > n ->
+            break
+        if i / 3 * 3 == i ->
+            continue
+        total += i
+    return total
+
+break_after_nested_loops :: proc() Int ->
+    count := 0
+    for ->
+        for i in 0..<3 ->
+            count += 1
+        count += 100
+        break
+    return count

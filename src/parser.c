@@ -53,6 +53,7 @@ static Ast_Node_Index parse_negation            (Parser *parser);
 static Ast_Node_Index parse_sum                 (Parser *parser);
 static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
 static Ast_Node_Index parse_for_statement       (Parser *parser, Ast_Node_Index parent);
+static Ast_Node_Index parse_jump_statement      (Parser *parser);
 static Ast_Node_Index parse_identifier          (Parser *parser);
 static Ast_Node_Index parse_integer_literal     (Parser *parser);
 static bool           parse_line_end_expect     (Parser *parser);
@@ -402,7 +403,7 @@ static Ast_Node_Index parse_if_statement(Parser *parser, Ast_Node_Index parent) 
 }
 
 /**
- * Parses the header line `for name in first..<end ->`, or `first..<=end` for a range that
+ * Parses the header line `for ->` of a loop without an end, or `for name in first..<end ->`, or `first..<=end` for a range that
  * includes its end, and appends the statement that it starts to `parent`. The statement gets a
  * range and an empty block, which is returned so that the caller can fill it with the lines that
  * follow. The nodes are made in the order of the source, so the iterator is not in scope in the
@@ -413,6 +414,26 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
     assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_FOR);
 
     parse_token_advance(parser);
+
+    // `for ->` has no iterator and no range: the block runs until it is left.
+    if (parse_token_current(parser)->token_type == TOKEN_TYPE_ARROW) {
+        Ast_Node_Index loop = parse_node_make(parser, AST_NODE_TYPE_LOOP_STATEMENT);
+        if (loop == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, parent, loop);
+        parse_token_advance(parser);
+        if (parse_line_end_expect(parser) == false) {
+            return AST_NODE_INDEX_NONE;
+        }
+
+        Ast_Node_Index loop_block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
+        if (loop_block == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, loop, loop_block);
+        return loop_block;
+    }
 
     Token const *iterator = parse_token_current(parser);
     if (iterator->token_type != TOKEN_TYPE_IDENTIFIER) {
@@ -470,6 +491,34 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
     }
     parse_node_append_child(parser, statement, block);
     return block;
+}
+
+/**
+ * Parses `break` or `continue` and the end of the line. The node has no children, and keeps the
+ * word so that the analysis can point at it. Whether it is inside a loop is for the analysis.
+ */
+static Ast_Node_Index parse_jump_statement(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+
+    Token const *keyword = parse_token_current(parser);
+    assert(keyword->token_type == TOKEN_TYPE_KEYWORD_BREAK ||
+           keyword->token_type == TOKEN_TYPE_KEYWORD_CONTINUE);
+
+    Ast_Node_Type node_type = AST_NODE_TYPE_BREAK_STATEMENT;
+    if (keyword->token_type == TOKEN_TYPE_KEYWORD_CONTINUE) {
+        node_type = AST_NODE_TYPE_CONTINUE_STATEMENT;
+    }
+    Ast_Node_Index jump = parse_node_make(parser, node_type);
+    if (jump == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[jump].payload.jump.keyword = keyword->payload.identifier.text;
+    parse_token_advance(parser);
+
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return jump;
 }
 
 /**
@@ -764,6 +813,9 @@ static Ast_Node_Index parse_statement(Parser *parser) {
     Token_Type next = parse_token_current(parser)->token_type;
     if (next == TOKEN_TYPE_KEYWORD_RETURN) {
         return parse_return_statement(parser);
+    }
+    if (next == TOKEN_TYPE_KEYWORD_BREAK || next == TOKEN_TYPE_KEYWORD_CONTINUE) {
+        return parse_jump_statement(parser);
     }
     if (next == TOKEN_TYPE_IDENTIFIER) {
         // The name is not the last token, because the last one is `END`.

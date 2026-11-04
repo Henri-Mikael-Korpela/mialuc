@@ -425,6 +425,12 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_INTEGER_LITERAL:
             printf("INTEGER_LITERAL %" PRId64 "\n", token.payload.integer_literal.value);
             break;
+        case TOKEN_TYPE_KEYWORD_BREAK:
+            printf("KEYWORD_BREAK\n");
+            break;
+        case TOKEN_TYPE_KEYWORD_CONTINUE:
+            printf("KEYWORD_CONTINUE\n");
+            break;
         case TOKEN_TYPE_KEYWORD_ELSE:
             printf("KEYWORD_ELSE\n");
             break;
@@ -703,6 +709,10 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a variable or parameter of the procedure or a "
                 "constant.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not inside a loop.\n", path, position.line, position.column,
+                subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_OK:
         assert(false);

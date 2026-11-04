@@ -80,8 +80,8 @@ typedef struct {
     Ast_Node_Index node;
     Ast_Node_Index next;
     size_t if_count;
-    // The for statement whose block this is, or `AST_NODE_INDEX_NONE`. The end of the block writes
-    // what the loop does after each pass, and closes the loop.
+    // The for statement or loop statement whose block this is, or `AST_NODE_INDEX_NONE`. The end of
+    // the block writes what the loop does after each pass, and closes the loop.
     Ast_Node_Index for_statement;
 } Wasm_Statement_Frame;
 
@@ -98,6 +98,10 @@ static bool            wasm_build_code_section_body           (Wasm_Builder *bui
 static bool            wasm_build_code_section_body_call      (Wasm_Builder *builder,
                                                                Ast_Node_Index call,
                                                                bool is_result_unused);
+static void            wasm_build_code_section_body_jump       (Wasm_Builder *builder,
+                                                               Wasm_Statement_Frame const *frames,
+                                                               size_t frame_count,
+                                                               Ast_Node_Index jump);
 static bool            wasm_build_code_section_body_for        (Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index statement);
@@ -682,7 +686,9 @@ static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_
  * locals of the variable, an assignment becomes the new value of the variable stored in the same
  * way, and a `return` becomes the value followed by the `return` instruction.
  *
- * A for statement becomes a `block` that holds a `loop`, see `wasm_build_code_section_body_for`.
+ * A for statement becomes a `block` that holds a `loop` that holds a `block`, see
+ * `wasm_build_code_section_body_for`, and so does a loop statement, without the test. `break` and
+ * `continue` are a `br`, see `wasm_build_code_section_body_jump`.
  *
  * An if statement becomes the structured instructions of WebAssembly: the condition, `if`, the
  * statements of its block, and `else` followed by what the next branch is, up to `end`. An
@@ -785,6 +791,26 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 .for_statement = AST_NODE_INDEX_NONE,
             };
             frame_count += 1;
+        } else if (child_node->node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
+                   child_node->node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
+            wasm_build_code_section_body_jump(builder, frames, frame_count, child);
+        } else if (child_node->node_type == AST_NODE_TYPE_LOOP_STATEMENT) {
+            // The same three structured instructions as a for statement has, without a test.
+            wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
+            wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+            wasm_write_byte(&builder->writer, WASM_OPCODE_LOOP);
+            wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+            wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
+            wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+            Ast_Node_Index block = child_node->last_child;
+            assert(frame_count < WASM_STATEMENT_DEPTH_MAX);
+            frames[frame_count] = (Wasm_Statement_Frame){
+                .node = block,
+                .next = builder->nodes[block].first_child,
+                .if_count = 0,
+                .for_statement = child,
+            };
+            frame_count += 1;
         } else if (child_node->node_type == AST_NODE_TYPE_FOR_STATEMENT) {
             if (wasm_build_code_section_body_for(builder, definition, child) == false) {
                 return false;
@@ -814,7 +840,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
  * block cannot change it. Then come a `block` that a finished loop leaves, a `loop` that is
  * repeated, and the test that leaves the block when the iterator is past the end, which is when it
  * is not below the end of an exclusive range or above the end of an inclusive one. The statements
- * of the block follow, and then `wasm_build_code_section_body_for_end`. Returns false after it
+ * of the block follow, in a `block` of their own, and then `wasm_build_code_section_body_for_end`. Returns false after it
  * recorded an error.
  */
 static bool wasm_build_code_section_body_for(Wasm_Builder *builder, Ast_Node_Index definition,
@@ -862,19 +888,36 @@ static bool wasm_build_code_section_body_for(Wasm_Builder *builder, Ast_Node_Ind
     wasm_write_byte(&builder->writer, WASM_OPCODE_BR_IF);
     wasm_write_unsigned(&builder->writer, 1);
 
+    // The statements of the block are in a `block` of their own, which `continue` leaves.
+    wasm_write_byte(&builder->writer, WASM_OPCODE_BLOCK);
+    wasm_write_byte(&builder->writer, WASM_BLOCK_TYPE_EMPTY);
+
     return true;
 }
 
 /**
- * Writes the end of the for statement `statement`, after the statements of its block: the
- * iterator goes to the next number and the loop starts over. An inclusive range leaves the loop
+ * Writes the end of the for statement or loop statement `statement`, after the statements of its
+ * block. A loop statement starts over. For a for statement the iterator goes to the next number and the loop starts over. An inclusive range leaves the loop
  * before the step when the iterator is at the end, so that the step cannot overflow when the end is
  * the largest `Int`.
  */
 static void wasm_build_code_section_body_for_end(Wasm_Builder *builder, Ast_Node_Index definition,
                                                  Ast_Node_Index statement) {
     assert(statement < builder->node_count);
-    assert(builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT);
+    assert(builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT ||
+           builder->nodes[statement].node_type == AST_NODE_TYPE_LOOP_STATEMENT);
+
+    // The `block` that `continue` leaves.
+    wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+
+    if (builder->nodes[statement].node_type == AST_NODE_TYPE_LOOP_STATEMENT) {
+        // Nothing to step: the block starts over, and only a `break` or a `return` ends it.
+        wasm_write_byte(&builder->writer, WASM_OPCODE_BR);
+        wasm_write_unsigned(&builder->writer, 0);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+        return;
+    }
 
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
     Ast_Node_Index range = builder->nodes[statement].first_child;
@@ -916,6 +959,40 @@ static size_t wasm_variable_slot_count(Wasm_Builder const *builder, Ast_Node_Ind
         return 2;
     }
     return wasm_value_type_slot_count(wasm_variable_type(builder, variable));
+}
+
+/**
+ * Writes the `br` of the `break` or `continue` statement `jump`. A loop is written as a `block`
+ * that holds a `loop` that holds a second `block`, around the statements of its block. `continue`
+ * leaves the inner `block`, which is followed by what the loop does after every pass, and `break`
+ * leaves the outer one. The label is the number of structured instructions between the jump and
+ * the target: the `if` instructions that are open inside the loop, which are counted by the frames
+ * above the one of the innermost loop, and then the inner `block` for a `break`, and the `loop`
+ * itself.
+ */
+static void wasm_build_code_section_body_jump(Wasm_Builder *builder,
+                                              Wasm_Statement_Frame const *frames,
+                                              size_t frame_count, Ast_Node_Index jump) {
+    assert(frame_count > 0);
+    assert(builder->nodes[jump].node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
+           builder->nodes[jump].node_type == AST_NODE_TYPE_CONTINUE_STATEMENT);
+
+    // Each frame above the loop is a block of an if statement, or the if statement itself.
+    size_t open_ifs = 0;
+    size_t i = frame_count;
+    while (i > 0 && frames[i - 1].for_statement == AST_NODE_INDEX_NONE) {
+        open_ifs += frames[i - 1].if_count;
+        i -= 1;
+    }
+    // The analysis checked that the jump is in a loop.
+    assert(i > 0);
+
+    size_t label = open_ifs;
+    if (builder->nodes[jump].node_type == AST_NODE_TYPE_BREAK_STATEMENT) {
+        label += 2;
+    }
+    wasm_write_byte(&builder->writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(&builder->writer, label);
 }
 
 /**
@@ -1300,8 +1377,11 @@ static Wasm_Value_Type wasm_expression_type(Wasm_Builder const *builder,
     case AST_NODE_TYPE_CALL_STATEMENT:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+    case AST_NODE_TYPE_BREAK_STATEMENT:
+    case AST_NODE_TYPE_CONTINUE_STATEMENT:
     case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_IF_STATEMENT:
+    case AST_NODE_TYPE_LOOP_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
     case AST_NODE_TYPE_PARAMETER:
@@ -1589,8 +1669,11 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_BLOCK:
         case AST_NODE_TYPE_CALL_STATEMENT:
         case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+        case AST_NODE_TYPE_BREAK_STATEMENT:
+        case AST_NODE_TYPE_CONTINUE_STATEMENT:
         case AST_NODE_TYPE_FOR_STATEMENT:
         case AST_NODE_TYPE_IF_STATEMENT:
+        case AST_NODE_TYPE_LOOP_STATEMENT:
         case AST_NODE_TYPE_MODULE:
         case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
         case AST_NODE_TYPE_PARAMETER:

@@ -143,8 +143,30 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
 
     Ast_Node_Index end = ast_procedure_end(analyzer->nodes, analyzer->node_count, procedure);
     Ast_Node_Index statement = AST_NODE_INDEX_NONE;
+    // The ends of the blocks of the loops that the pass is in, the innermost last.
+    Ast_Node_Index loop_ends[AST_BLOCK_DEPTH_MAX] = {0};
+    size_t loop_count = 0;
     for (Ast_Node_Index current = procedure + 1; current < end; current += 1) {
         Ast_Node_Type node_type = analyzer->nodes[current].node_type;
+
+        while (loop_count > 0 && loop_ends[loop_count - 1] <= current) {
+            loop_count -= 1;
+        }
+        if (node_type == AST_NODE_TYPE_FOR_STATEMENT || node_type == AST_NODE_TYPE_LOOP_STATEMENT) {
+            // The block is the last child, and a loop is inside a block of its own, so there is room.
+            assert(loop_count < AST_BLOCK_DEPTH_MAX);
+            Ast_Node_Index block = analyzer->nodes[current].last_child;
+            loop_ends[loop_count] = analyzer->nodes[block].payload.block.end;
+            loop_count += 1;
+        }
+        if (node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
+            node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
+            if (loop_count == 0) {
+                return semantic_fail(analyzer, SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP,
+                                     analyzer->nodes[current].payload.jump.keyword);
+            }
+            statement = current;
+        }
 
         if (node_type == AST_NODE_TYPE_PARAMETER) {
             // The parameters come first, so by the time that a statement is reached all of them

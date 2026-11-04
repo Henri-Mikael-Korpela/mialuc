@@ -96,6 +96,10 @@
                     "match": "\\b(for|in)\\b"
                 },
                 {
+                    "name": "keyword.control.flow.mialu",
+                    "match": "\\b(break|continue)\\b"
+                },
+                {
                     "name": "keyword.operator.word.mialu",
                     "comment": "The logical operators and, or and not. Not is skipped when it is the start of the operator not=, which is highlighted as an operator.",
                     "match": "\\b(?:and|or)\\b|\\bnot\\b(?!=)"

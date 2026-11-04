@@ -25,15 +25,18 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_BLOCK:
     case AST_NODE_TYPE_BOOL_LITERAL:
+    case AST_NODE_TYPE_BREAK_STATEMENT:
     case AST_NODE_TYPE_CALL:
     case AST_NODE_TYPE_CALL_STATEMENT:
     case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
+    case AST_NODE_TYPE_CONTINUE_STATEMENT:
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_IDENTIFIER:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_INTEGER_LITERAL:
+    case AST_NODE_TYPE_LOOP_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION:
     case AST_NODE_TYPE_NOT:
@@ -129,6 +132,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_BOOL_LITERAL:
             printf("BOOL_LITERAL %s\n", node.payload.bool_literal.value ? "true" : "false");
             break;
+        case AST_NODE_TYPE_BREAK_STATEMENT:
+            printf("BREAK_STATEMENT\n");
+            break;
         case AST_NODE_TYPE_CALL:
             printf("CALL %.*s\n", (int)node.payload.call.name.length, node.payload.call.name.bytes);
             break;
@@ -142,6 +148,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_CONSTANT_DEFINITION:
             printf("CONSTANT_DEFINITION %.*s\n", (int)node.payload.constant_definition.name.length,
                    node.payload.constant_definition.name.bytes);
+            break;
+        case AST_NODE_TYPE_CONTINUE_STATEMENT:
+            printf("CONTINUE_STATEMENT\n");
             break;
         case AST_NODE_TYPE_DIVISION:
             printf("DIVISION\n");
@@ -162,6 +171,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_INTEGER_LITERAL:
             printf("INTEGER_LITERAL %" PRId64 "\n", node.payload.integer_literal.value);
+            break;
+        case AST_NODE_TYPE_LOOP_STATEMENT:
+            printf("LOOP_STATEMENT\n");
             break;
         case AST_NODE_TYPE_MODULE:
             printf("MODULE\n");
