@@ -1,11 +1,9 @@
 # Mialu Programming Language Specification
 
-This document describes the Mialu programming language, its syntax, semantics and compilation targets.
-
-Mialu is a procedural programming language with straight-foward and familiar syntax, built with simplicity and performance in mind. It is influenced by multiple languages including, but not limited to, C, C++, Go, Jai (currently unreleased), Odin and Python, fully embracing the fact that it comes after many of them, so it has learned from their mistakes and successes.
 
 ## Table of contents
 
+- [Introduction](#introduction)
 - [Indentation](#indentation)
 - [Keywords](#keywords)
 - [Identifiers](#identifiers)
@@ -29,6 +27,13 @@ Mialu is a procedural programming language with straight-foward and familiar syn
 - [Global variables](#global-variables)
 - [Compilation targets](#compilation-targets)
   - [WebAssembly](#webassembly)
+
+## Introduction
+
+This document describes the Mialu programming language, its syntax, semantics and compilation targets.
+
+
+Mialu is a procedural programming language with straight-foward and familiar syntax, built with simplicity and performance in mind. It is influenced by multiple languages including, but not limited to, C, C++, Go, Jai (currently unreleased), Odin and Python, fully embracing the fact that it comes after many of them, so it has learned from their mistakes and successes.
 
 ## Indentation
 
