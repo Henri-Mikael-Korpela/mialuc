@@ -184,40 +184,6 @@ A variable is defined once, with its initial value, and every variable has one. 
 
 A variable that is defined outside of every procedure is a [global variable](#global-variables).
 
-## Attributes
-
-An attribute gives a definition a property that its syntax does not say. The attributes of a definition are written as an attribute list after its name, before the `:`. An attribute list begins with `#`, and each attribute in it is a name surrounded by parentheses:
-
-```
-counter #(static) := 0
-```
-
-A list can have more than one attribute, which are written one after the other, such as `#(first)(second)`, and the `#` is written once. The list is not an expression and it has no value. Spaces may be written between its tokens, but the convention is to write no space inside it and one space before the `#`, as above. A list has at least one attribute, so `#()` is an error, and so is a name that is not between parentheses, such as `#static`.
-
-The attributes are built into the language. The only one that Mialu has so far is `static`, which is an attribute of a variable, see [Global variables](#global-variables). Any other attribute is an error, and so is an attribute that is given twice in the same list. Attributes are accepted on the definition of a global variable only. A constant and a variable of a procedure take none yet, so they are errors there.
-
-## Global variables
-
-A global variable is a variable that is defined at file scope, outside of every procedure. It is written like a variable, with the attribute `static` before the `:`, and it starts in the first column like a constant:
-
-```
-counter #(static) := 0
-
-next :: proc() Int ->
-    counter += 1
-    return counter
-```
-
-A global variable has static storage duration, which is what the `static` attribute says: it exists for as long as the program runs, and not only for as long as a call of a procedure does. It is initialized once, before any procedure is called, and it keeps the value that the procedures assign to it, so the first call of `next` returns 1, the second returns 2, and so on. Every global variable must have the attribute `static`, because storage of this kind is the only one that global variables can have.
-
-The type of a global variable is deduced from its initial value, or written between the `:` and the `=`, as for any variable:
-
-```
-ready #(static) : Bool = false
-```
-
-The initial value is a literal: a number, `true` or `false`, or a string. It is stored when the program starts, before any code runs, so it cannot be an expression, a name or a call. A global variable can be used and assigned to in every procedure of the module, also in the ones that are written above its definition, because it is in the module scope, see [Scope resolution](#scope-resolution). Like a constant, it has a name of its own in that scope, so it cannot have the name of a constant or of another global variable, and a parameter or a variable of a procedure cannot have its name.
-
 ## Assignment
 
 An assignment changes the value of a variable that is defined already. It is a statement that has the name of the variable, an assignment operator and a value, which is an expression. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was:
@@ -626,6 +592,40 @@ There is no shadowing of names so a name cannot be declared twice in the same sc
 - the name that an assignment assigns to is not a variable or a global variable, but a parameter or a constant, or the iterator of a for statement.
 
 Scope resolution is about names only. Whether the value of a name has the right type is checked separately for the target, see below.
+
+## Attributes
+
+An attribute gives a definition a property that its syntax does not say. The attributes of a definition are written as an attribute list after its name, before the `:`. An attribute list begins with `#`, and each attribute in it is a name surrounded by parentheses:
+
+```
+counter #(static) := 0
+```
+
+A list can have more than one attribute, which are written one after the other, such as `#(first)(second)`, and the `#` is written once. The list is not an expression and it has no value. Spaces may be written between its tokens, but the convention is to write no space inside it and one space before the `#`, as above. A list has at least one attribute, so `#()` is an error, and so is a name that is not between parentheses, such as `#static`.
+
+The attributes are built into the language. The only one that Mialu has so far is `static`, which is an attribute of a variable, see [Global variables](#global-variables). Any other attribute is an error, and so is an attribute that is given twice in the same list. Attributes are accepted on the definition of a global variable only. A constant and a variable of a procedure take none yet, so they are errors there.
+
+## Global variables
+
+A global variable is a variable that is defined at file scope, outside of every procedure. It is written like a variable, with the attribute `static` before the `:`, and it starts in the first column like a constant:
+
+```
+counter #(static) := 0
+
+next :: proc() Int ->
+    counter += 1
+    return counter
+```
+
+A global variable has static storage duration, which is what the `static` attribute says: it exists for as long as the program runs, and not only for as long as a call of a procedure does. It is initialized once, before any procedure is called, and it keeps the value that the procedures assign to it, so the first call of `next` returns 1, the second returns 2, and so on. Every global variable must have the attribute `static`, because storage of this kind is the only one that global variables can have.
+
+The type of a global variable is deduced from its initial value, or written between the `:` and the `=`, as for any variable:
+
+```
+ready #(static) : Bool = false
+```
+
+The initial value is a literal: a number, `true` or `false`, or a string. It is stored when the program starts, before any code runs, so it cannot be an expression, a name or a call. A global variable can be used and assigned to in every procedure of the module, also in the ones that are written above its definition, because it is in the module scope, see [Scope resolution](#scope-resolution). Like a constant, it has a name of its own in that scope, so it cannot have the name of a constant or of another global variable, and a parameter or a variable of a procedure cannot have its name.
 
 ## Compilation targets
 
