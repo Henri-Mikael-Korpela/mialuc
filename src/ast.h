@@ -12,6 +12,7 @@
 typedef enum {
     AST_NODE_TYPE_ADDITION,
     AST_NODE_TYPE_ADDITION_ASSIGNMENT,
+    AST_NODE_TYPE_ADDRESS_OF,
     AST_NODE_TYPE_AND,
     AST_NODE_TYPE_ARRAY_LITERAL,
     AST_NODE_TYPE_ARRAY_TYPE,
@@ -25,6 +26,7 @@ typedef enum {
     AST_NODE_TYPE_COMPARISON,
     AST_NODE_TYPE_CONSTANT_DEFINITION,
     AST_NODE_TYPE_CONTINUE_STATEMENT,
+    AST_NODE_TYPE_DEREFERENCE,
     AST_NODE_TYPE_DIVISION,
     AST_NODE_TYPE_DIVISION_ASSIGNMENT,
     AST_NODE_TYPE_FIELD,
@@ -46,6 +48,7 @@ typedef enum {
     AST_NODE_TYPE_NOT,
     AST_NODE_TYPE_OR,
     AST_NODE_TYPE_PARAMETER,
+    AST_NODE_TYPE_POINTER_TYPE,
     AST_NODE_TYPE_PROCEDURE,
     AST_NODE_TYPE_RANGE,
     AST_NODE_TYPE_RETURN_STATEMENT,
@@ -110,6 +113,10 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   variable that gets the sum, or the `AST_NODE_TYPE_SUBSCRIPT` of the element that gets it, and
  *   the value that is added to it, in that order. It is a statement of a procedure body. The other
  *   assignments that are made with an operator, such as `-=`, have the same two children.
+ * - `AST_NODE_TYPE_ADDRESS_OF`: one child, the operand whose address is taken, such as `x` in
+ *   `%x`. It is an expression, whose value is a pointer to the operand. Like a subscript it is made
+ *   after its child. Which operands have an address is for the target to tell: a variable, a field,
+ *   an element of an array and what a pointer points to do.
  * - `AST_NODE_TYPE_AND`: two children, the left and the right operand, in that order. It is an
  *   expression of type `Bool` and the target requires both operands to be `Bool`. It binds
  *   tighter than `AST_NODE_TYPE_OR` and looser than `AST_NODE_TYPE_NOT`.
@@ -118,14 +125,15 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   one an expression. `[const]Int { 1, 2, 3 }` and `[3]Int { 1, 2, 3 }` are array literals. The
  *   nodes of the elements come after the node of the type, so the nodes are in the order of the
  *   source. It is an expression, and it can be followed by subscripts.
- * - `AST_NODE_TYPE_ARRAY_TYPE`: one child, the `AST_NODE_TYPE_TYPE_NAME` of the type of the
- *   elements. It is a type like `AST_NODE_TYPE_TYPE_NAME`, and is found wherever a type is: it is
+ * - `AST_NODE_TYPE_ARRAY_TYPE`: one child, the type of the elements, which is an
+ *   `AST_NODE_TYPE_TYPE_NAME` or an `AST_NODE_TYPE_POINTER_TYPE`. It is a type like
+ *   `AST_NODE_TYPE_TYPE_NAME`, and is found wherever a type is: it is
  *   the type of a parameter or of a variable, or it starts an array literal. How the length is
  *   given, and the length when it is a fixed one, is in the payload.
  * - `AST_NODE_TYPE_ASSIGNMENT`: two children, the target and the value, in that order. It is a
  *   plain `=`. The target is an `AST_NODE_TYPE_IDENTIFIER`, an `AST_NODE_TYPE_FIELD_ACCESS`, an
- *   `AST_NODE_TYPE_SUBSCRIPT` or, for a range of elements, an `AST_NODE_TYPE_SLICE`. It is a
- *   statement of a procedure body.
+ *   `AST_NODE_TYPE_SUBSCRIPT`, an `AST_NODE_TYPE_DEREFERENCE` or, for a range of elements, an
+ *   `AST_NODE_TYPE_SLICE`. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_ATTRIBUTE`: no children. One attribute of a definition, such as `static` in
  *   `#(static)`, with the name between the parentheses in the payload. Which names are attributes
  *   that the language has is for the analysis to tell, not the parser.
@@ -156,16 +164,20 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   statement names the loop to go on with. It ends the current pass of the innermost loop that it
  *   is in, or of the labeled loop, and goes on with the next one. The word is in the payload. It is
  *   a statement of a procedure body.
+ * - `AST_NODE_TYPE_DEREFERENCE`: one child, the expression whose value is a pointer, such as `p`
+ *   in `p^`. It is an expression, whose value is what the pointer points to, and it can be the
+ *   target of an assignment. Like a subscript it is made after its child.
  * - `AST_NODE_TYPE_DIVISION`: two children, the dividend and the divisor, in that order.
  * - `AST_NODE_TYPE_DIVISION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that is divided and gets the quotient, and the divisor, in that order. It is a
  *   statement of a procedure body.
- * - `AST_NODE_TYPE_FIELD`: one child, the type of the field, which is an `AST_NODE_TYPE_TYPE_NAME`
- *   or, for a field that is a struct of its own, an `AST_NODE_TYPE_STRUCT_TYPE`. The name of the
+ * - `AST_NODE_TYPE_FIELD`: one child, the type of the field, which is an `AST_NODE_TYPE_TYPE_NAME`,
+ *   an `AST_NODE_TYPE_POINTER_TYPE` or, for a field that is a struct of its own, an
+ *   `AST_NODE_TYPE_STRUCT_TYPE`. The name of the
  *   field is in the payload. It is a child of an `AST_NODE_TYPE_STRUCT_TYPE`.
  * - `AST_NODE_TYPE_FIELD_ACCESS`: one child, the expression whose field is read, such as `p` in
- *   `p.age`. The name of the field is in the payload. It is an expression, and it can be the
- *   target of an assignment. Like a subscript it is made after its child.
+ *   `p.age`, or `p^` in `p^.age`. The name of the field is in the payload. It is an expression,
+ *   and it can be the target of an assignment. Like a subscript it is made after its child.
  * - `AST_NODE_TYPE_FIELD_INITIALIZER`: one child, the value of the field, which is an expression
  *   or, for a field that is a struct, an `AST_NODE_TYPE_STRUCT_LITERAL` without a name. The name of
  *   the field is in the payload. It is a child of an `AST_NODE_TYPE_STRUCT_LITERAL`.
@@ -225,8 +237,12 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_OR`: two children, the left and the right operand, in that order. It is an
  *   expression of type `Bool` with the lowest precedence of the operators, and the target
  *   requires both operands to be `Bool`.
- * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME` or an
- *   `AST_NODE_TYPE_ARRAY_TYPE`.
+ * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`, an
+ *   `AST_NODE_TYPE_POINTER_TYPE` or an `AST_NODE_TYPE_ARRAY_TYPE`.
+ * - `AST_NODE_TYPE_POINTER_TYPE`: one child, the type that is pointed to, which is an
+ *   `AST_NODE_TYPE_TYPE_NAME` or another `AST_NODE_TYPE_POINTER_TYPE`, so `^^Int` is a pointer type
+ *   in a pointer type. It is a type like `AST_NODE_TYPE_TYPE_NAME`, found wherever a type is, and
+ *   the type of the elements of an `AST_NODE_TYPE_ARRAY_TYPE` can be one.
  * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
  *   body, which are variable definitions, assignments, if statements, loops, jumps and return
  *   statements. A foreign procedure has one `AST_NODE_TYPE_FOREIGN_BODY` instead of statements. The
@@ -261,7 +277,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   It is a statement of a procedure body.
  * - `AST_NODE_TYPE_TYPE_NAME`: no children.
  * - `AST_NODE_TYPE_VARIABLE_DEFINITION`: the initial value, preceded by the type, an
- *   `AST_NODE_TYPE_TYPE_NAME` or an `AST_NODE_TYPE_ARRAY_TYPE`, when the definition gives one. A
+ *   `AST_NODE_TYPE_TYPE_NAME`, an `AST_NODE_TYPE_POINTER_TYPE` or an `AST_NODE_TYPE_ARRAY_TYPE`,
+ *   when the definition gives one. A
  *   definition that gives a type can leave the value out, and then the type is its only child and
  *   the variable gets the default value of the type.
  *   Without it the type is deduced from the value, so the value is the only child. The name is in
@@ -351,9 +368,11 @@ typedef struct {
             bool is_inclusive;
         } range;
         struct {
-            // The name of the return type, as a view of the source text. Empty, with `bytes` NULL,
-            // when the procedure does not declare one. Types are only names for now, so a name is
-            // enough; when types get more structure, this should become a child node.
+            // The return type, as a view of the source text from its first token to its last: a
+            // name, or a name with the carets of a pointer type before it, such as `^Int`. Empty,
+            // with `bytes` NULL, when the procedure does not declare one. A return type is never
+            // an array or an array slice, so it is a name with carets before it; when types get
+            // more structure, this should become a child node.
             Str return_type;
         } procedure;
         struct {

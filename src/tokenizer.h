@@ -16,6 +16,9 @@ typedef enum {
     TOKEN_TYPE_BRACE_RIGHT = '}',
     TOKEN_TYPE_BRACKET_LEFT = '[',
     TOKEN_TYPE_BRACKET_RIGHT = ']',
+    // Written after a type to make it a pointer type, as in `^Int`, and after an expression to
+    // follow the pointer that it is, as in `p^`.
+    TOKEN_TYPE_CARET = '^',
     TOKEN_TYPE_COMMA = ',',
     // The dot of a field access, as in `p.age`. `..<` and `..<=` are the tokens of a range.
     TOKEN_TYPE_DOT = '.',
@@ -27,6 +30,8 @@ typedef enum {
     TOKEN_TYPE_MINUS = '-',
     TOKEN_TYPE_PARENTHESIS_LEFT = '(',
     TOKEN_TYPE_PARENTHESIS_RIGHT = ')',
+    // Written before an expression to take its address, as in `%x`.
+    TOKEN_TYPE_PERCENT = '%',
     TOKEN_TYPE_PLUS = '+',
     TOKEN_TYPE_SLASH = '/',
     TOKEN_TYPE_TYPE_SEPARATOR = ':',

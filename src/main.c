@@ -409,6 +409,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_BRACKET_RIGHT:
             printf("BRACKET_RIGHT\n");
             break;
+        case TOKEN_TYPE_CARET:
+            printf("CARET\n");
+            break;
         case TOKEN_TYPE_COMMA:
             printf("COMMA\n");
             break;
@@ -522,6 +525,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
             break;
         case TOKEN_TYPE_PARENTHESIS_RIGHT:
             printf("PARENTHESIS_RIGHT\n");
+            break;
+        case TOKEN_TYPE_PERCENT:
+            printf("PERCENT\n");
             break;
         case TOKEN_TYPE_PLUS:
             printf("PLUS\n");
@@ -647,6 +653,13 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     // The cast is needed because `%.*s` takes an `int` precision.
     int subject_length = (int)result.subject.length;
     switch (result.status) {
+    case WASM_BUILD_STATUS_ADDRESS_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: cannot take the address of '%.*s'. Only a variable of a "
+                "procedure, a field or an element of one, and what a pointer points to have an "
+                "address, and not a parameter, an iterator, a global variable, a value, an array "
+                "or an array slice.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be used in arithmetic.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
@@ -752,6 +765,15 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     case WASM_BUILD_STATUS_OK:
     case WASM_BUILD_STATUS_OUTPUT_TOO_LARGE:
         assert(false);
+        break;
+    case WASM_BUILD_STATUS_POINTER_EXPECTED:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a pointer, so '^' cannot follow it.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_POINTER_TARGET_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the value assigned through '%.*s' is not of the type that it "
+                "points to.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_RANGE_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be the start or the "

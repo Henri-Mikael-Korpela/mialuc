@@ -88,6 +88,16 @@
                     "match": "\\+|-|\\*|/"
                 },
                 {
+                    "name": "keyword.operator.address.mialu",
+                    "comment": "The % before an expression, which takes its address, as in %x.",
+                    "match": "%"
+                },
+                {
+                    "name": "keyword.operator.pointer.mialu",
+                    "comment": "The ^ of a pointer type, as in ^Int, and the ^ after a pointer that gives what it points to, as in p^. Both are the same token for the compiler.",
+                    "match": "\\^"
+                },
+                {
                     "name": "keyword.operator.type.mialu",
                     "comment": "The colon of a type separator, and of the two bounds of an array slice, as in a[1:4].",
                     "match": ":"

@@ -479,11 +479,14 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset += 1;
         }
-        // The brackets and the braces are single tokens that mean the same everywhere.
+        // The brackets, the braces, the caret and the percent sign are single tokens that mean the
+        // same everywhere: `^` and `%` are never the start of a longer token.
         else if (character == (char)TOKEN_TYPE_BRACE_LEFT ||
                  character == (char)TOKEN_TYPE_BRACE_RIGHT ||
                  character == (char)TOKEN_TYPE_BRACKET_LEFT ||
-                 character == (char)TOKEN_TYPE_BRACKET_RIGHT) {
+                 character == (char)TOKEN_TYPE_BRACKET_RIGHT ||
+                 character == (char)TOKEN_TYPE_CARET ||
+                 character == (char)TOKEN_TYPE_PERCENT) {
             token_elements[result.tokens.length] = (Token){
                 .token_type = (Token_Type)character,
                 .source_offset = (uint32_t)offset,

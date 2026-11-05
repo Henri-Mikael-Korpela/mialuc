@@ -53,6 +53,7 @@ static Ast_Node_Index parse_else_branch         (Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_if_statement        (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_bool_literal        (Parser *parser);
 static Ast_Node_Index parse_operand             (Parser *parser);
+static Ast_Node_Index parse_operand_value       (Parser *parser);
 static Ast_Node_Index parse_call                (Parser *parser);
 static Ast_Node_Index parse_call_statement      (Parser *parser);
 static Ast_Node_Index parse_comparison          (Parser *parser);
@@ -79,6 +80,7 @@ static Ast_Node_Index parse_procedure           (Parser *parser, uint32_t indent
                                          bool is_foreign);
 static bool           parse_procedure_body      (Parser *parser, Ast_Node_Index procedure,
                                                  uint32_t indentation_level);
+static bool           parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure);
 static bool           parse_procedure_parameters(Parser *parser, Ast_Node_Index procedure);
 static Ast_Node_Index parse_return_statement    (Parser *parser);
 static Ast_Node_Index parse_statement           (Parser *parser);
@@ -93,6 +95,7 @@ static Token const *  parse_token_current       (Parser const *parser);
 static bool           parse_token_expect        (Parser *parser, Token_Type token_type,
                                                  Str expected);
 static Ast_Node_Index parse_type                (Parser *parser, Str expected);
+static Ast_Node_Index parse_type_name           (Parser *parser, Str expected);
 static Ast_Node_Index parse_variable_definition (Parser *parser);
 
 Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
@@ -527,11 +530,8 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
         return AST_NODE_INDEX_NONE;
     }
 
-    // The return type is optional. It is only a name for now, so an identifier here is it.
-    Token const *type = parse_token_current(parser);
-    if (type->token_type == TOKEN_TYPE_IDENTIFIER) {
-        parser->nodes[procedure].payload.procedure.return_type = type->payload.identifier.text;
-        parse_token_advance(parser);
+    if (parse_procedure_return_type(parser, procedure) == false) {
+        return AST_NODE_INDEX_NONE;
     }
 
     if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
@@ -556,6 +556,50 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
     }
 
     return procedure;
+}
+
+/**
+ * Parses the return type, which is optional: a name, or the carets of a pointer type and then a
+ * name, as in `Int` and `^Int`. The type is only the source text for now, from its first token to
+ * its last, which is why the name is not a node of its own: an array cannot be returned, so a
+ * return type is never more than carets before a name. The current token is the one after the
+ * `)`. Returns false after it recorded an error.
+ */
+static bool parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(procedure < parser->node_count);
+
+    Token const *first = parse_token_current(parser);
+    if (first->token_type != TOKEN_TYPE_IDENTIFIER && first->token_type != TOKEN_TYPE_CARET) {
+        return true;
+    }
+
+    // Every caret consumes a token, so there are fewer carets than tokens, which bounds the loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_CARET) {
+            break;
+        }
+        parse_token_advance(parser);
+    }
+
+    Token const *name = parse_token_current(parser);
+    if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        // The false return value reports the failure, so the node index is not needed.
+        (void)parse_fail(parser, STR("the name of the return type after '^'"));
+        return false;
+    }
+    parse_token_advance(parser);
+
+    // The tokens do not point at the source, but the name does, and its offset says where the
+    // source starts. The text runs from the first token to the end of the name.
+    Str name_text = name->payload.identifier.text;
+    char const *source_bytes = name_text.bytes - name->source_offset;
+    char const *type_bytes = source_bytes + first->source_offset;
+    char const *type_end = name_text.bytes + name_text.length;
+    assert(type_end > type_bytes);
+    parser->nodes[procedure].payload.procedure.return_type =
+        str_make(type_bytes, (size_t)(type_end - type_bytes));
+    return true;
 }
 
 /**
@@ -1574,11 +1618,49 @@ static Ast_Node_Index parse_call_statement(Parser *parser) {
 }
 
 /**
+ * Parses an operand with any number of `%` before it, which take its address. `%` binds tighter
+ * than every operator, but looser than what follows a name, so `%p.x` is the address of the field
+ * `p.x` and `%a[2]` the address of the element `a[2]`. Like `not`, the `%` are counted and the
+ * nodes are made after the operand, so that the parser does not call itself. Whether the operand
+ * has an address, which `%%x` and `%f(x)` do not, is for the target to tell.
+ */
+static Ast_Node_Index parse_operand(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    size_t address_count = 0;
+    // Every `%` consumes a token, so there are fewer of them than tokens, which bounds the loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_PERCENT) {
+            break;
+        }
+        parse_token_advance(parser);
+        address_count += 1;
+    }
+
+    Ast_Node_Index operand = parse_operand_value(parser);
+    if (operand == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    for (size_t i = 0; i < address_count; i += 1) {
+        Ast_Node_Index address = parse_node_make(parser, AST_NODE_TYPE_ADDRESS_OF);
+        if (address == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, address, operand);
+        operand = address;
+    }
+
+    return operand;
+}
+
+/**
  * Parses a value: an integer literal, a string literal, `true` or `false`, the name of
  * something, such as a parameter, or a call of a procedure, or an array literal. The name and the
  * array literal can have subscripts after them.
  */
-static Ast_Node_Index parse_operand(Parser *parser) {
+static Ast_Node_Index parse_operand_value(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
@@ -1627,8 +1709,9 @@ static Ast_Node_Index parse_operand(Parser *parser) {
 /**
  * Parses the subscripts that follow `operand`, which is the node of a name or of a literal:
  * `[index]` is the element at an index, `[first:end]` is the array slice of the elements from the
- * first index up to, and not including, the end, and `.name` is a field of a struct. They can
- * follow each other, and each one takes everything before it as its first child. Like the
+ * first index up to, and not including, the end, `.name` is a field of a struct, and `^` is what a
+ * pointer points to. They can follow each other, and each one takes everything before it as its
+ * first child. Like the
  * operator of an arithmetic operation, the node of a subscript is made after the nodes of its
  * operands. Returns the node of the last subscript, or `operand` when there is none.
  */
@@ -1641,6 +1724,17 @@ static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
     // the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
         Token_Type next = parse_token_current(parser)->token_type;
+        if (next == TOKEN_TYPE_CARET) {
+            // `p^` follows the pointer `p`. It can follow itself, as in `pp^^`.
+            Ast_Node_Index dereference = parse_node_make(parser, AST_NODE_TYPE_DEREFERENCE);
+            if (dereference == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            parse_token_advance(parser);
+            parse_node_append_child(parser, dereference, base);
+            base = dereference;
+            continue;
+        }
         if (next == TOKEN_TYPE_DOT) {
             parse_token_advance(parser);
             Token const *field_name = parse_token_current(parser);
@@ -1973,28 +2067,21 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
 }
 
 /**
- * Parses a type: a name, such as `Int`, or an array type, which is the name of the type of the
- * elements after brackets: `[3]Int` is an array of three, `[const]Int` is an array whose length is
- * the number of elements in the literal that it starts, and `[]Int` is an array slice. The
- * element type is only a name. `expected` says what the caller wants, for the error that is
- * recorded when the current token starts no type.
+ * Parses a type: a name, such as `Int`, a pointer type, such as `^Int`, or an array type, which is
+ * the type of the elements after brackets: `[3]Int` is an array of three, `[const]Int` is an array
+ * whose length is the number of elements in the literal that it starts, and `[]Int` is an array
+ * slice. The type of the elements is a name or a pointer type, and so is the type that a pointer
+ * points to: `[]^Int` is an array slice of pointers, while a pointer to an array is not a type.
+ * `expected` says what the caller wants, for the error that is recorded when the current token
+ * starts no type.
  */
 static Ast_Node_Index parse_type(Parser *parser, Str expected) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(expected.length > 0);
 
     Token const *start = parse_token_current(parser);
-    if (start->token_type == TOKEN_TYPE_IDENTIFIER) {
-        Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
-        if (type_name == AST_NODE_INDEX_NONE) {
-            return AST_NODE_INDEX_NONE;
-        }
-        parser->nodes[type_name].payload.type_name.name = start->payload.identifier.text;
-        parse_token_advance(parser);
-        return type_name;
-    }
     if (start->token_type != TOKEN_TYPE_BRACKET_LEFT) {
-        return parse_fail(parser, expected);
+        return parse_type_name(parser, expected);
     }
 
     Ast_Node_Index array_type = parse_node_make(parser, AST_NODE_TYPE_ARRAY_TYPE);
@@ -2023,19 +2110,65 @@ static Ast_Node_Index parse_type(Parser *parser, Str expected) {
         return AST_NODE_INDEX_NONE;
     }
 
-    Token const *element = parse_token_current(parser);
-    if (element->token_type != TOKEN_TYPE_IDENTIFIER) {
-        return parse_fail(parser, STR("the type of the elements"));
-    }
-    Ast_Node_Index element_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
-    if (element_name == AST_NODE_INDEX_NONE) {
+    Ast_Node_Index element = parse_type_name(parser, STR("the type of the elements"));
+    if (element == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    parser->nodes[element_name].payload.type_name.name = element->payload.identifier.text;
-    parse_token_advance(parser);
-    parse_node_append_child(parser, array_type, element_name);
+    parse_node_append_child(parser, array_type, element);
 
     return array_type;
+}
+
+/**
+ * Parses a type that is not an array: a name, such as `Int`, or the carets of a pointer type and
+ * then a name, such as `^Int` or `^^Int`. Each caret makes a node that has the rest of the type as
+ * its child, and the nodes are made in the order of the source. `expected` is what the caller wants
+ * when the current token starts no type; after a caret the name is what is missing.
+ */
+static Ast_Node_Index parse_type_name(Parser *parser, Str expected) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(expected.length > 0);
+
+    Ast_Node_Index outermost = AST_NODE_INDEX_NONE;
+    Ast_Node_Index innermost = AST_NODE_INDEX_NONE;
+    // Every caret consumes a token, so there are fewer carets than tokens, which bounds the loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        if (parse_token_current(parser)->token_type != TOKEN_TYPE_CARET) {
+            break;
+        }
+
+        Ast_Node_Index pointer = parse_node_make(parser, AST_NODE_TYPE_POINTER_TYPE);
+        if (pointer == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_token_advance(parser);
+        if (outermost == AST_NODE_INDEX_NONE) {
+            outermost = pointer;
+        } else {
+            parse_node_append_child(parser, innermost, pointer);
+        }
+        innermost = pointer;
+    }
+
+    Token const *name = parse_token_current(parser);
+    if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        if (outermost != AST_NODE_INDEX_NONE) {
+            return parse_fail(parser, STR("a type name after '^'"));
+        }
+        return parse_fail(parser, expected);
+    }
+    Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
+    if (type_name == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[type_name].payload.type_name.name = name->payload.identifier.text;
+    parse_token_advance(parser);
+
+    if (outermost == AST_NODE_INDEX_NONE) {
+        return type_name;
+    }
+    parse_node_append_child(parser, innermost, type_name);
+    return outermost;
 }
 
 static Ast_Node_Index parse_bool_literal(Parser *parser) {

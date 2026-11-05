@@ -116,6 +116,11 @@ extern byte const WASM_MODULE_HEADER[8];
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
+    // The operand of `%` has no address that can be taken: a value such as a number or a call, a
+    // parameter, the iterator of a for statement, a global variable, or an array or an array
+    // slice, which cannot be pointed to. A variable of such a type whose address is taken is this
+    // too. The subject is the name in the operand.
+    WASM_BUILD_STATUS_ADDRESS_INVALID,
     WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
     // An element of an array, or a value that is assigned to one, that is not an `Int`.
     WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
@@ -145,6 +150,11 @@ typedef enum {
     WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
     WASM_BUILD_STATUS_OK,
     WASM_BUILD_STATUS_OUTPUT_TOO_LARGE,
+    // A value that is followed with `^`, or assigned through, and is not a pointer.
+    WASM_BUILD_STATUS_POINTER_EXPECTED,
+    // A value that is assigned through a pointer, as in `p^ = x`, and is not of the type that the
+    // pointer points to. The subject is the name of the pointer.
+    WASM_BUILD_STATUS_POINTER_TARGET_TYPE_MISMATCH,
     WASM_BUILD_STATUS_RANGE_TYPE_INVALID,
     WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH,
     WASM_BUILD_STATUS_RETURN_TYPE_MISSING,
@@ -213,8 +223,18 @@ typedef struct {
  * is as many WebAssembly values as its fields take together, where a field that is a struct takes
  * its own fields in its place. A parameter that is a struct is that many parameters, and a result
  * is that many results, which JavaScript receives as an array. A variable of a struct type is that
- * many locals. A struct is never stored in memory as a whole, except as an element of an array:
- * every value of it takes 8 bytes there, whether it is a 32-bit or a 64-bit one.
+ * many locals. A struct is never stored in memory as a whole, except as an element of an array or
+ * where a pointer points to it: every value of it takes 8 bytes there, whether it is a 32-bit or a
+ * 64-bit one.
+ *
+ * A pointer, written `^Int`, is one 32-bit integer: the address in the memory of the module of what
+ * it points to, which takes 8 bytes for each of its values, like an element of an array. So a
+ * parameter that is a pointer is one WebAssembly parameter, and a caller from JavaScript passes the
+ * address of what it wrote to the memory. `%x` is the address of a variable `x`, which is kept in
+ * the frame of its procedure, on the stack of the arrays, instead of in locals when its address is
+ * taken somewhere. `p^` loads from the address that `p` is, and traps when it is zero, which is
+ * what a pointer that was not given a value is. A pointer to a variable is good until the
+ * procedure that has the variable returns.
  *
  * An array is on a stack in the memory of the module: a procedure that has an array literal makes
  * room for all of its array literals when it starts, and gives it back when it returns. Only the

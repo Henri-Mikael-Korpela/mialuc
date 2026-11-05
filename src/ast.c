@@ -23,6 +23,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
         return true;
     case AST_NODE_TYPE_ADDITION:
+    case AST_NODE_TYPE_ADDRESS_OF:
     case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_ARRAY_LITERAL:
     case AST_NODE_TYPE_ARRAY_TYPE:
@@ -35,6 +36,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
+    case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_FIELD:
     case AST_NODE_TYPE_FIELD_ACCESS:
@@ -54,6 +56,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_NOT:
     case AST_NODE_TYPE_OR:
     case AST_NODE_TYPE_PARAMETER:
+    case AST_NODE_TYPE_POINTER_TYPE:
     case AST_NODE_TYPE_PROCEDURE:
     case AST_NODE_TYPE_RANGE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
@@ -162,6 +165,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
             printf("ADDITION_ASSIGNMENT\n");
             break;
+        case AST_NODE_TYPE_ADDRESS_OF:
+            printf("ADDRESS_OF\n");
+            break;
         case AST_NODE_TYPE_AND:
             printf("AND\n");
             break;
@@ -213,6 +219,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_CONTINUE_STATEMENT:
             printf("CONTINUE_STATEMENT\n");
+            break;
+        case AST_NODE_TYPE_DEREFERENCE:
+            printf("DEREFERENCE\n");
             break;
         case AST_NODE_TYPE_DIVISION:
             printf("DIVISION\n");
@@ -288,6 +297,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_PARAMETER:
             printf("PARAMETER %.*s\n", (int)node.payload.parameter.name.length,
                    node.payload.parameter.name.bytes);
+            break;
+        case AST_NODE_TYPE_POINTER_TYPE:
+            printf("POINTER_TYPE\n");
             break;
         case AST_NODE_TYPE_PROCEDURE:
             if (node.payload.procedure.return_type.bytes == NULL) {

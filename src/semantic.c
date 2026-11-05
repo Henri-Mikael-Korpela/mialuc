@@ -32,6 +32,8 @@ typedef struct {
     bool is_if;
 } Semantic_Jump_Target;
 
+static void             semantic_address_of_resolve (Semantic_Analyzer *analyzer,
+                                                     Ast_Node_Index address_of);
 static bool             semantic_attributes_check   (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index definition);
 static bool             semantic_call_resolve       (Semantic_Analyzer *analyzer,
@@ -88,6 +90,7 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
             .target = AST_NODE_INDEX_NONE,
             .position = 0,
             .kind = SEMANTIC_BINDING_KIND_NONE,
+            .is_address_taken = false,
         };
     }
 
@@ -313,6 +316,9 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
             if (semantic_call_resolve(analyzer, procedure, current) == false) {
                 return false;
             }
+        } else if (node_type == AST_NODE_TYPE_ADDRESS_OF) {
+            // The node comes after its operand, so the names in it are resolved already.
+            semantic_address_of_resolve(analyzer, current);
         } else if (node_type == AST_NODE_TYPE_RETURN_STATEMENT ||
                    node_type == AST_NODE_TYPE_CALL_STATEMENT ||
                    node_type == AST_NODE_TYPE_IF_STATEMENT ||
@@ -322,6 +328,35 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
     }
 
     return true;
+}
+
+/**
+ * Marks the variable that the operand of `address_of`, an `AST_NODE_TYPE_ADDRESS_OF`, is a part of
+ * as having its address taken. The operand is a name or a field of one, such as `x` or `x.a.b`,
+ * and the name is followed down through the fields. Any other operand is an element of an array,
+ * what a pointer points to or no place at all, none of which is a variable of the procedure, so
+ * there is nothing to mark; whether such an operand has an address is for the target to tell. A
+ * name that is not a variable, such as a parameter, is not marked either, for the same reason.
+ */
+static void semantic_address_of_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index address_of) {
+    assert(address_of < analyzer->node_count);
+    assert(analyzer->nodes[address_of].node_type == AST_NODE_TYPE_ADDRESS_OF);
+
+    Ast_Node_Index operand = analyzer->nodes[address_of].first_child;
+    // Each step goes down one level, so there are fewer steps than nodes.
+    for (size_t i = 0; i < analyzer->node_count &&
+                       analyzer->nodes[operand].node_type == AST_NODE_TYPE_FIELD_ACCESS;
+         i += 1) {
+        operand = analyzer->nodes[operand].first_child;
+    }
+    if (analyzer->nodes[operand].node_type != AST_NODE_TYPE_IDENTIFIER) {
+        return;
+    }
+
+    Semantic_Binding binding = analyzer->bindings[operand];
+    if (binding.kind == SEMANTIC_BINDING_KIND_VARIABLE) {
+        analyzer->bindings[binding.target].is_address_taken = true;
+    }
 }
 
 /**

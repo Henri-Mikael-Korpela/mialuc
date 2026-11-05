@@ -1,6 +1,7 @@
 #ifndef MIALU_SEMANTIC_H
 #define MIALU_SEMANTIC_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include <mialu/array_slice.h>
@@ -35,11 +36,18 @@ typedef enum {
  * target and its position are both kept, because a target alone would have to be searched for again
  * by whoever needs the position. For `kind` `SEMANTIC_BINDING_KIND_NONE` the `target` is
  * `AST_NODE_INDEX_NONE` and the `position` is zero.
+ *
+ * `is_address_taken` is not about a use of a name but about a definition: it is set on the binding
+ * of an `AST_NODE_TYPE_VARIABLE_DEFINITION` or an `AST_NODE_TYPE_FOR_STATEMENT` whose variable has
+ * its address taken somewhere, as in `%x`, `%x.field` or `%x.a.b`. It is false for every other
+ * node. A target that keeps variables in places that have no address, such as WebAssembly locals,
+ * needs to know which variables are not among them, and the analysis already meets every use.
  */
 typedef struct {
     Ast_Node_Index target;
     uint32_t position;
     Semantic_Binding_Kind kind;
+    bool is_address_taken;
 } Semantic_Binding;
 
 // Alphabetical, because nothing depends on the order.
@@ -145,6 +153,9 @@ typedef struct {
  * An assignment, such as `x += 1`, uses the name that it assigns to like any other use of a name,
  * and the name must stand for a variable or a global variable: a parameter or a constant cannot be
  * assigned to. The same goes for the name that a field is assigned to through, as in `p.age = 1`.
+ * Assigning through a pointer, as in `p^ = 1` or `p^.age = 1`, changes what `p` points to and not
+ * `p`, so `p` can be a parameter. An operand of `%` that is a variable, or a field of one, marks
+ * the variable as having its address taken, see `Semantic_Binding`.
  *
  * A name cannot be declared again where it is already visible, so a name has one meaning
  * everywhere it can be used, and there is no shadowing. Two definitions cannot have one name, two

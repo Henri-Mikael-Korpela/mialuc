@@ -68,14 +68,23 @@
        cannot tell a name that is an array from any other. A for statement with a range and one
        with elements both have an expression after `in`, and the range operator tells them apart.
      - The name of the type of a variable, a parameter or a field, and the name of a struct literal,
-       must be `Int`, `Bool`, `Str` or a struct that is defined. A field of a struct cannot be an
-       array, and a struct cannot contain itself, directly or through other structs. The fields of
+       must be `Int`, `Bool`, `Str` or a struct that is defined, also after the carets of a pointer
+       type. A field of a struct cannot be an array, and a struct cannot contain itself, directly or
+       through other structs, but it can have a pointer to its own struct. The fields of
        a struct have different names. In a struct literal every field must be a field of the
        struct, must be given a value at most once, and must be given a value of its type, and the
        literal `{ ... }` without a name is for a field that is a struct. A field is accessed
-       through a variable, a parameter or an element of an array, and not through the result of a
-       call. The grammar allows the lines of a literal between braces to be indented by any
-       number of spaces, but the compiler requires a multiple of 4, as everywhere.
+       through a variable, a parameter, an element of an array or what a pointer points to, and not
+       through the result of a call. The grammar allows the lines of a literal between braces to be
+       indented by any number of spaces, but the compiler requires a multiple of 4, as everywhere.
+     - `p^` must follow a pointer, and the value that is assigned through it must be of the type
+       that the pointer points to. `%` must be followed by something that has an address: a
+       variable of a procedure, a field or an element of one, or what a pointer points to, and not a
+       parameter, the iterator of a for statement, a global variable, a value such as a number or a
+       call, an array or an array slice. There is no pointer to an array or to an array slice, so
+       the caret of a pointer type is followed by a name or by another caret. A return type is
+       never an array or an array slice either, and a global variable is never a pointer, because
+       its value is a literal and no literal is a pointer. All of this the grammar cannot tell.
 *)
 
 module = { blank_line | definition | foreign_import | foreign_block } , end_of_input ;
@@ -166,19 +175,26 @@ parameters = parameter , { ws , "," , ws , parameter } ;
 (* The name of the parameter, and its type. *)
 parameter = name , ws , ":" , ws , type ;
 
-(* A type is a name, such as `Int`, or an array type. An array type is written with brackets before
-   the name of the type of the elements: `[5]Int` is an array of five elements, `[const]Int` an
-   array whose length is the number of elements of the array literal that it starts, which only
-   makes sense there, and `[]Int` an array slice, which views the elements of an array. *)
-type = type_name | array_type ;
+(* A type is a name, such as `Int`, a pointer type, or an array type. A pointer type is a caret and
+   the type that is pointed to, which is a name or another pointer type: `^Int` is a pointer to an
+   `Int`, and `^^Int` a pointer to a pointer to an `Int`. An array type is written with brackets
+   before the type of the elements, which is a name or a pointer type: `[5]Int` is an array of five
+   elements, `[const]Int` an array whose length is the number of elements of the array literal that
+   it starts, which only makes sense there, `[]Int` an array slice, which views the elements of an
+   array, and `[]^Int` an array slice of pointers. *)
+type = element_type | array_type ;
+
+element_type = type_name | pointer_type ;
 
 type_name = name ;
 
-array_type = "[" , ws , [ array_length , ws ] , "]" , ws , type_name ;
+pointer_type = "^" , ws , element_type ;
+
+array_type = "[" , ws , [ array_length , ws ] , "]" , ws , element_type ;
 
 array_length = integer_literal | "const" ;
 
-return_type = name ;
+return_type = element_type ;
 
 (* At least one statement. Blank lines are allowed before, between and after statements, and are
    not statements. The body is indented exactly one level, 4 spaces. A tab, or any other number of
@@ -327,7 +343,8 @@ variable_definition =
    parameter or a constant, which the grammar cannot tell. The same operators change an element of
    an array: `a[1] += 2`, and a field of a struct: `p.age += 1`. A plain `=` gives a variable a
    new value, as in `x = 2` or `p = Person { }`, assigns to an element or a field, as in
-   `a[1] = 2` and `p.age = 2`, or copies to a range of elements, as in `a[0:3] = b`. *)
+   `a[1] = 2` and `p.age = 2`, or copies to a range of elements, as in `a[0:3] = b`. The same
+   operators and `=` change what a pointer points to: `p^ += 1`, `p^ = 2` and `p^.age = 2`. *)
 assignment = name , { ws , postfix } , ws , ( "+=" | "-=" | "*=" | "/=" | "=" ) , ws , expression ;
 
 (* `return` and its value must be separated, or `return0` would be one identifier. *)
@@ -359,20 +376,29 @@ sum = term , { ws , ( "+" | "-" ) , ws , term } ;
    the compiler reads `a + b * c` as `a + (b * c)`, which the grammar does not show either. *)
 term = operand , { ws , ( "*" | "/" ) , ws , operand } ;
 
+(* An operand, with any number of `%` before it, each of which takes the address of what follows. It
+   binds tighter than every operator, but looser than the postfixes after a name, so `%p.x` is the
+   address of the field `p.x`, and `%a[2]` the address of the element `a[2]`. The compiler requires
+   the operand of `%` to have an address, which the grammar cannot tell. *)
+operand = { "%" , ws } , operand_value ;
+
 (* An integer literal, a string literal, `true` or `false`, a call of a procedure, or the use of a
    name, such as a parameter or a constant, or an array literal or a struct literal. A call starts
    with a name too, and is told from the use of a name by the opening parenthesis after it, and a
-   struct literal by the brace. A name and the literals can have subscripts and fields after
-   them. *)
-operand =
+   struct literal by the brace. A name and the literals can have subscripts, fields and carets
+   after them. *)
+operand_value =
     integer_literal | string_literal | bool_literal | call |
     ( name | array_literal | struct_literal ) , { ws , postfix } ;
 
-(* What can follow a name or a literal: a subscript, or a field, such as `p.age`. They can follow
-   each other, as in `lines[1].end.y`. *)
-postfix = subscript | field_access ;
+(* What can follow a name or a literal: a subscript, a field, such as `p.age`, or a caret, which
+   follows a pointer to give what it points to, as in `p^`. They can follow each other, as in
+   `lines[1].end.y` and `node.next^.value`. *)
+postfix = subscript | field_access | dereference ;
 
 field_access = "." , ws , name ;
+
+dereference = "^" ;
 
 (* A subscript is the index of an element between brackets, `a[2]`, or the two indices of an array
    slice, `a[1:4]`, which has the elements from the first index up to, and not including, the
@@ -383,7 +409,7 @@ subscript = "[" , ws , expression , ws , [ ":" , ws , expression , ws ] , "]" ;
    elements between braces. The elements are expressions separated by commas, and there may be none.
    They can be on lines of their own, and a comma can come after the last one. *)
 array_literal =
-    "[" , ws , array_length , ws , "]" , ws , type_name , ws , "{" , gap , [ elements , gap ] , "}" ;
+    "[" , ws , array_length , ws , "]" , ws , element_type , ws , "{" , gap , [ elements , gap ] , "}" ;
 
 elements = expression , { gap , "," , gap , expression } , [ gap , "," ] ;
 
