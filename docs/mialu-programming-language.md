@@ -284,7 +284,28 @@ A variable that is defined outside of every procedure is a [global variable](#gl
 
 ## Assignment
 
-An assignment changes the value of a variable that is defined already. It is a statement that has the name of the variable, an assignment operator and a value, which is an expression. The plain assignment `=` gives the variable a new value of its type, whatever the type is: `x = 5` for an `Int`, and `p = Person { age = 30 }` for a struct object, which replaces all of its fields. The value must be of the type of the variable, so `x = true` is an error for an `Int`. An array is not assigned to as a whole. The other assignments work on an `Int` only. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was:
+An assignment changes the value of a variable that is defined already. It is a statement that has the name of the variable, an assignment operator and a value, which is an expression. The plain assignment `=` gives the variable a new value of its type, whatever the type is: `x = 5` for an `Int`, and `p = Person { age = 30 }` for a struct object, which replaces all of its fields. The value must be of the type of the variable, so `x = true` is an error for an `Int`. An array is not assigned to as a whole.
+
+```
+foo :: proc() Int ->
+    x := 4
+    x = 5
+    return x
+```
+
+`foo` returns 5. The value is evaluated first, with the value that the variable has before the assignment, so `x = x * 2 + 1` doubles `x` and adds 1. It is a statement and not an expression, so a value cannot be assigned to two variables in a row, and each assignment keeps the value that the variable has until the next one: a variable that is assigned to twice has the last value. A variable can be given the value of another one, and two variables are swapped with the help of a third:
+
+```
+swap :: proc() Int ->
+    a := 3
+    b := 7
+    temp := a
+    a = b
+    b = temp
+    return a * 10 + b
+```
+
+`swap` returns 73. An assignment can be in a block of an if or a for statement, and the variable that it assigns to can be defined above the block. A variable that is defined with a type and no value, such as `x : Int`, is given its value with `=` as well. The name must stand for a variable, so `n = 2` is an error for a parameter `n`, and so is assigning to a constant or to the iterator of a for statement. The other assignments work on an `Int` only. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was:
 
 ```
 foo :: proc() Int ->
