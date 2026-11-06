@@ -69,3 +69,8 @@ console.log("Length of a slice that JavaScript wrote at address 0, 5 and 2:", le
 console.log("Average of 4 8 15 16 23, and of nothing:", average(0, 5), average(0, 0));
 console.log("The last element of the five, and of the last two:", last_element(0, 5),
     last_element(24, 2));
+
+// length_of works on slices of the members, and on any other array or slice too.
+console.log("Length of a literal of four, 2 and 4:", length_of_literal());
+new BigInt64Array(memory.buffer, 0, 7).set([1n, 2n, 3n, 4n, 5n, 6n, 7n]);
+console.log("Length of a slice that JavaScript wrote at address 0, 7:", slice_length(0, 7));

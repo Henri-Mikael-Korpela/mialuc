@@ -54,9 +54,3 @@ name_of_last_member :: proc() Str ->
 
 middle_slice_length :: proc() Int ->
     return length_of(Color_Members[1:3])
-
-slice_length :: proc(elements: []Int) Int ->
-    return length_of(elements)
-
-length_of_literal :: proc() Int ->
-    return length_of([const]Int { 4, 5, 6, 7 })

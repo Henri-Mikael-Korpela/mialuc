@@ -220,3 +220,9 @@ fill_with_length :: proc() Int ->
 
 last_element :: proc(elements: []Int) Int ->
     return elements[length_of(elements) - 1]
+
+length_of_literal :: proc() Int ->
+    return length_of([const]Int { 4, 5, 6, 7 })
+
+slice_length :: proc(elements: []Int) Int ->
+    return length_of(elements)
