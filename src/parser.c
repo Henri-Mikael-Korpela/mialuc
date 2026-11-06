@@ -18,6 +18,35 @@ typedef struct {
     uint32_t level;
 } Parse_Block;
 
+// Alphabetical, because nothing depends on the order.
+typedef enum {
+    // The fields below a `case` of a union match. They become fields of the struct that the union
+    // match is in.
+    PARSE_STRUCT_FRAME_KIND_CASE,
+    // The fields of a struct, and its union matches.
+    PARSE_STRUCT_FRAME_KIND_STRUCT,
+    // The cases below `union match kind ->`.
+    PARSE_STRUCT_FRAME_KIND_UNION,
+} Parse_Struct_Frame_Kind;
+
+/**
+ * A part of a struct definition that is open while its lines are parsed, which is a struct, a union
+ * match or a case of one. The lines of a frame are indented to its `level`. `node` is the struct
+ * that the fields are appended to: for a union match and for its cases that is the struct that the
+ * union match is in, because the fields of the cases are fields of that struct. `discriminant` and
+ * `member` are the name of the field that is matched and the member of the case, for the frames
+ * that are inside a union match. `item_count` is how many fields (or cases, for a union match)
+ * the frame has had, because each one needs at least one.
+ */
+typedef struct {
+    Str discriminant;
+    Str member;
+    Ast_Node_Index node;
+    size_t item_count;
+    uint32_t level;
+    Parse_Struct_Frame_Kind kind;
+} Parse_Struct_Frame;
+
 /**
  * The state shared by the parsing functions. A parsing function returns the index of the node it
  * made, or `AST_NODE_INDEX_NONE` after it recorded an error here, and its caller then returns
@@ -94,6 +123,11 @@ static Ast_Node_Index parse_string_literal      (Parser *parser);
 static void           parse_skip_indentation    (Parser *parser);
 static Ast_Node_Index parse_struct_literal      (Parser *parser);
 static Ast_Node_Index parse_struct_type         (Parser *parser, uint32_t indentation_level);
+static Str            parse_struct_type_frame_expected(Parse_Struct_Frame_Kind kind);
+static Parse_Struct_Frame parse_struct_type_union_line(Parser *parser,
+                                                 Parse_Struct_Frame const *parent);
+static bool           parse_struct_type_union_tag(Parser *parser, Ast_Node_Index field,
+                                                 Parse_Struct_Frame const *frame);
 static Ast_Node_Index parse_subscripts          (Parser *parser, Ast_Node_Index operand);
 static Ast_Node_Index parse_term                (Parser *parser);
 static Ast_Node_Index parse_type_info_of        (Parser *parser);
@@ -2202,10 +2236,14 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
  * Parses the definition of a struct after `::`: the word `struct`, `->`, and the fields, which are
  * the lines that are indented one level deeper than the line of the definition, each of them
  * `name: Type`. A field can be a struct of its own, written `name: struct ->`, whose fields are
- * the lines below it, indented one level deeper still. The structs that are open are kept in an
- * array, like the blocks of a procedure, and a line that is indented less than the innermost one
- * closes it, and as many outer ones as it is indented less than. Every struct must have a field.
- * The current token is `struct`, and `indentation_level` is the level of the line it is on.
+ * the lines below it, indented one level deeper still. A line can also be a union match,
+ * `union match kind ->`, with its cases one level deeper, each of them `case .MEMBER ->` and
+ * the fields of the case one level deeper still. The fields of a case are fields of the struct
+ * that the union match is in, and each one has an `AST_NODE_TYPE_UNION_MATCH` after its type. The
+ * parts that are open are kept in an array, like the blocks of a procedure, and a line that is
+ * indented less than the innermost one closes it, and as many outer ones as it is indented less
+ * than. Every struct must have a field, every union match a case and every case a field. The
+ * current token is `struct`, and `indentation_level` is the level of the line it is on.
  */
 static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_level) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -2223,11 +2261,18 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
     }
 
     // The first one is the struct itself, and the others are inside each other.
-    Parse_Block structs[AST_BLOCK_DEPTH_MAX + 1];
-    structs[0] = (Parse_Block){.node = root, .level = indentation_level + 1};
-    size_t struct_count = 1;
+    Parse_Struct_Frame frames[AST_BLOCK_DEPTH_MAX + 1];
+    frames[0] = (Parse_Struct_Frame){
+        .discriminant = STR_EMPTY,
+        .member = STR_EMPTY,
+        .node = root,
+        .item_count = 0,
+        .level = indentation_level + 1,
+        .kind = PARSE_STRUCT_FRAME_KIND_STRUCT,
+    };
+    size_t frame_count = 1;
 
-    // Each field consumes at least its indentation token, so there are fewer fields than tokens,
+    // Each line consumes at least its indentation token, so there are fewer lines than tokens,
     // which bounds the loop. It stops at the first line that is not part of the struct.
     for (size_t i = 0; i < parser->token_count; i += 1) {
         Token const *line_start = parse_token_current(parser);
@@ -2236,19 +2281,40 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
         }
 
         uint32_t level = line_start->payload.indentation.level;
-        while (level < structs[struct_count - 1].level && struct_count > 1) {
-            if (parser->nodes[structs[struct_count - 1].node].first_child == AST_NODE_INDEX_NONE) {
-                return parse_fail(parser, STR("a field"));
+        while (level < frames[frame_count - 1].level && frame_count > 1) {
+            if (frames[frame_count - 1].item_count == 0) {
+                return parse_fail(parser,
+                                  parse_struct_type_frame_expected(frames[frame_count - 1].kind));
             }
-            struct_count -= 1;
+            frame_count -= 1;
         }
-        if (level < structs[struct_count - 1].level) {
+        if (level < frames[frame_count - 1].level) {
             break;
         }
-        if (level > structs[struct_count - 1].level) {
+        if (level > frames[frame_count - 1].level) {
             return parse_fail(parser, STR("a line that is not indented deeper"));
         }
         parse_token_advance(parser);
+
+        Parse_Struct_Frame *frame = &frames[frame_count - 1];
+        frame->item_count += 1;
+
+        // A line of a union match is a case, and a line of a struct is a field or a union match.
+        // The case and the union match open a part that is inside the one they are in.
+        bool is_union = frame->kind == PARSE_STRUCT_FRAME_KIND_STRUCT &&
+                        parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_UNION;
+        if (frame->kind == PARSE_STRUCT_FRAME_KIND_UNION || is_union) {
+            if (frame_count == AST_BLOCK_DEPTH_MAX + 1) {
+                return parse_fail(parser, STR("fewer nested structs"));
+            }
+            Parse_Struct_Frame opened = parse_struct_type_union_line(parser, frame);
+            if (opened.node == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            frames[frame_count] = opened;
+            frame_count += 1;
+            continue;
+        }
 
         Token const *field_name = parse_token_current(parser);
         if (field_name->token_kind != TOKEN_KIND_IDENTIFIER) {
@@ -2260,14 +2326,14 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
         }
         parser->nodes[field].payload.field.name = field_name->payload.identifier.text;
         parse_token_advance(parser);
-        parse_node_append_child(parser, structs[struct_count - 1].node, field);
+        parse_node_append_child(parser, frame->node, field);
 
         if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'")) == false) {
             return AST_NODE_INDEX_NONE;
         }
 
         if (parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_STRUCT) {
-            if (struct_count == AST_BLOCK_DEPTH_MAX + 1) {
+            if (frame_count == AST_BLOCK_DEPTH_MAX + 1) {
                 return parse_fail(parser, STR("fewer nested structs"));
             }
             parse_token_advance(parser);
@@ -2276,32 +2342,161 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
                 return AST_NODE_INDEX_NONE;
             }
             parse_node_append_child(parser, field, nested);
+            if (parse_struct_type_union_tag(parser, field, frame) == false) {
+                return AST_NODE_INDEX_NONE;
+            }
             if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false ||
                 parse_line_end_expect(parser) == false) {
                 return AST_NODE_INDEX_NONE;
             }
-            structs[struct_count] = (Parse_Block){.node = nested, .level = level + 1};
-            struct_count += 1;
+            frames[frame_count] = (Parse_Struct_Frame){
+                .discriminant = STR_EMPTY,
+                .member = STR_EMPTY,
+                .node = nested,
+                .item_count = 0,
+                .level = level + 1,
+                .kind = PARSE_STRUCT_FRAME_KIND_STRUCT,
+            };
+            frame_count += 1;
         } else {
             Ast_Node_Index type = parse_type(parser, STR("a type name or 'struct'"));
             if (type == AST_NODE_INDEX_NONE) {
                 return AST_NODE_INDEX_NONE;
             }
             parse_node_append_child(parser, field, type);
+            if (parse_struct_type_union_tag(parser, field, frame) == false) {
+                return AST_NODE_INDEX_NONE;
+            }
             if (parse_line_end_expect(parser) == false) {
                 return AST_NODE_INDEX_NONE;
             }
         }
     }
 
-    // The structs that are still open end here, and each one needs a field.
-    for (size_t open = struct_count; open > 0; open -= 1) {
-        if (parser->nodes[structs[open - 1].node].first_child == AST_NODE_INDEX_NONE) {
-            return parse_fail(parser, STR("a field"));
+    // The parts that are still open end here, and each one needs a field or a case.
+    for (size_t open = frame_count; open > 0; open -= 1) {
+        if (frames[open - 1].item_count == 0) {
+            return parse_fail(parser, parse_struct_type_frame_expected(frames[open - 1].kind));
         }
     }
 
     return root;
+}
+
+/**
+ * Returns what is missing in a part of a struct that has nothing in it, for the error.
+ */
+static Str parse_struct_type_frame_expected(Parse_Struct_Frame_Kind kind) {
+    switch (kind) {
+    case PARSE_STRUCT_FRAME_KIND_CASE:
+    case PARSE_STRUCT_FRAME_KIND_STRUCT:
+        return STR("a field");
+    case PARSE_STRUCT_FRAME_KIND_UNION:
+        return STR("a 'case'");
+    }
+
+    // Unreachable: every kind is handled above.
+    assert(false);
+    return STR("a field");
+}
+
+/**
+ * Parses the rest of a line that opens a part of a union match, after the indentation: either
+ * `union match kind ->` in the struct `parent` (the current token is `union`), or
+ * `case .MEMBER ->` in the union match `parent` (the current token is `case`). Returns the part
+ * that it opens, one level deeper than `parent`, or a frame whose `node` is
+ * `AST_NODE_INDEX_NONE` after it recorded an error. The line is consumed up to the line end, and
+ * the indentation of the next line is not.
+ */
+static Parse_Struct_Frame parse_struct_type_union_line(Parser *parser,
+                                                       Parse_Struct_Frame const *parent) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parent->kind != PARSE_STRUCT_FRAME_KIND_CASE);
+
+    Parse_Struct_Frame failed = {
+        .discriminant = STR_EMPTY,
+        .member = STR_EMPTY,
+        .node = AST_NODE_INDEX_NONE,
+        .item_count = 0,
+        .level = 0,
+        .kind = PARSE_STRUCT_FRAME_KIND_UNION,
+    };
+    Parse_Struct_Frame opened = {
+        .discriminant = parent->discriminant,
+        .member = STR_EMPTY,
+        .node = parent->node,
+        .item_count = 0,
+        .level = parent->level + 1,
+        .kind = PARSE_STRUCT_FRAME_KIND_UNION,
+    };
+
+    if (parent->kind == PARSE_STRUCT_FRAME_KIND_STRUCT) {
+        assert(parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_UNION);
+        parse_token_advance(parser);
+        if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_MATCH, STR("'match'")) == false) {
+            return failed;
+        }
+        Token const *discriminant = parse_token_current(parser);
+        if (discriminant->token_kind != TOKEN_KIND_IDENTIFIER) {
+            (void)parse_fail(parser, STR("the name of the field to match"));
+            return failed;
+        }
+        opened.discriminant = discriminant->payload.identifier.text;
+        parse_token_advance(parser);
+    } else {
+        if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_CASE, STR("'case'")) == false ||
+            parse_token_expect(parser, TOKEN_KIND_DOT, STR("'.' and the member of the enum")) ==
+                false) {
+            return failed;
+        }
+        Token const *member = parse_token_current(parser);
+        if (member->token_kind != TOKEN_KIND_IDENTIFIER) {
+            (void)parse_fail(parser, STR("the member of the enum"));
+            return failed;
+        }
+        opened.member = member->payload.identifier.text;
+        opened.kind = PARSE_STRUCT_FRAME_KIND_CASE;
+        parse_token_advance(parser);
+    }
+
+    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false ||
+        parse_line_end_expect(parser) == false) {
+        return failed;
+    }
+    return opened;
+}
+
+/**
+ * Appends the nodes that say that `field` is in a case of a union match, when `frame` is the part
+ * for the fields of a case: an `AST_NODE_TYPE_UNION_MATCH` with the field that is matched, that
+ * has the `AST_NODE_TYPE_UNION_CASE` with the member as its child. The type of the field must
+ * be its child already, so that the node of the match comes after it. Does nothing for any other
+ * frame. Returns false after it recorded an error.
+ */
+static bool parse_struct_type_union_tag(Parser *parser, Ast_Node_Index field,
+                                        Parse_Struct_Frame const *frame) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->nodes[field].node_type == AST_NODE_TYPE_FIELD);
+
+    if (frame->kind != PARSE_STRUCT_FRAME_KIND_CASE) {
+        return true;
+    }
+
+    Ast_Node_Index match = parse_node_make(parser, AST_NODE_TYPE_UNION_MATCH);
+    if (match == AST_NODE_INDEX_NONE) {
+        return false;
+    }
+    parser->nodes[match].payload.union_match.discriminant = frame->discriminant;
+    parse_node_append_child(parser, field, match);
+
+    Ast_Node_Index union_case = parse_node_make(parser, AST_NODE_TYPE_UNION_CASE);
+    if (union_case == AST_NODE_INDEX_NONE) {
+        return false;
+    }
+    parser->nodes[union_case].payload.union_case.member = frame->member;
+    parse_node_append_child(parser, match, union_case);
+
+    return true;
 }
 
 /**

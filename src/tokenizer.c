@@ -161,6 +161,8 @@ static Token_Kind tokenizer_keyword_type(Str text) {
         return TOKEN_KIND_KEYWORD_PROC;
     } else if (str_equals(text, STR("break"))) {
         return TOKEN_KIND_KEYWORD_BREAK;
+    } else if (str_equals(text, STR("case"))) {
+        return TOKEN_KIND_KEYWORD_CASE;
     } else if (str_equals(text, STR("const"))) {
         return TOKEN_KIND_KEYWORD_CONST;
     } else if (str_equals(text, STR("continue"))) {
@@ -173,6 +175,8 @@ static Token_Kind tokenizer_keyword_type(Str text) {
         return TOKEN_KIND_KEYWORD_IMPORT;
     } else if (str_equals(text, STR("in"))) {
         return TOKEN_KIND_KEYWORD_IN;
+    } else if (str_equals(text, STR("match"))) {
+        return TOKEN_KIND_KEYWORD_MATCH;
     } else if (str_equals(text, STR("if"))) {
         return TOKEN_KIND_KEYWORD_IF;
     } else if (str_equals(text, STR("else"))) {
@@ -187,6 +191,8 @@ static Token_Kind tokenizer_keyword_type(Str text) {
         return TOKEN_KIND_KEYWORD_TRUE;
     } else if (str_equals(text, STR("type_info_of"))) {
         return TOKEN_KIND_KEYWORD_TYPE_INFO_OF;
+    } else if (str_equals(text, STR("union"))) {
+        return TOKEN_KIND_KEYWORD_UNION;
     } else if (str_equals(text, STR("false"))) {
         return TOKEN_KIND_KEYWORD_FALSE;
     } else if (str_equals(text, STR("nil"))) {

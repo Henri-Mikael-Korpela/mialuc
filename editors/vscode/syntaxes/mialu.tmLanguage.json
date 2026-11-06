@@ -183,6 +183,16 @@
                     "match": "\\bstruct\\b"
                 },
                 {
+                    "name": "storage.type.union.mialu",
+                    "comment": "The word that starts a union match among the fields of a struct, as in union match kind ->.",
+                    "match": "\\bunion\\b"
+                },
+                {
+                    "name": "keyword.control.match.mialu",
+                    "comment": "The word after union, and the word that starts a case of a union match, as in union match kind -> and case .IDENTIFIER ->.",
+                    "match": "\\b(match|case)\\b"
+                },
+                {
                     "name": "keyword.operator.type-info.mialu",
                     "comment": "The operator that gathers information about a type while the program is compiled, as in type_info_of(Color).members. It comes before the calls, so it is not taken for one.",
                     "match": "\\btype_info_of\\b"

@@ -504,6 +504,34 @@ static bool            wasm_struct_field_find                 (Wasm_Builder cons
                                                                Str name, size_t *slot_offset,
                                                                Wasm_Type *type);
 static bool            wasm_check_structs                     (Wasm_Builder *builder);
+static bool            wasm_check_unions                      (Wasm_Builder *builder);
+static Ast_Node_Index  wasm_field_union_match                 (Wasm_Builder const *builder,
+                                                               Ast_Node_Index field);
+static Ast_Node_Index  wasm_struct_field_node_find            (Wasm_Builder const *builder,
+                                                               Ast_Node_Index struct_node,
+                                                               Str name);
+static Ast_Node_Index  wasm_union_enum                        (Wasm_Builder const *builder,
+                                                               Ast_Node_Index struct_node,
+                                                               Ast_Node_Index union_match);
+static Str             wasm_union_enum_member_name            (Wasm_Builder const *builder,
+                                                               Ast_Node_Index expression,
+                                                               Ast_Node_Index enum_node);
+static bool            wasm_union_block_changes               (Wasm_Builder const *builder,
+                                                               Ast_Node_Index block,
+                                                               Ast_Node_Index container,
+                                                               Str discriminant);
+static bool            wasm_union_condition_matches           (Wasm_Builder const *builder,
+                                                               Ast_Node_Index condition,
+                                                               Ast_Node_Index container,
+                                                               Ast_Node_Index union_match,
+                                                               Ast_Node_Index enum_node);
+static bool            wasm_union_is_matched                  (Wasm_Builder const *builder,
+                                                               Ast_Node_Index access,
+                                                               Ast_Node_Index struct_node,
+                                                               Ast_Node_Index union_match);
+static bool            wasm_path_equals                       (Wasm_Builder const *builder,
+                                                               Ast_Node_Index first,
+                                                               Ast_Node_Index second);
 static void            wasm_default_write                     (Wasm_Builder *builder,
                                                                Wasm_Type type);
 static void            wasm_slots_load                        (Wasm_Builder *builder,
@@ -632,6 +660,9 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
     bool is_ok = wasm_data_measure(&builder);
     if (is_ok) {
         is_ok = wasm_check_structs(&builder);
+    }
+    if (is_ok) {
+        is_ok = wasm_check_unions(&builder);
     }
     if (is_ok) {
         is_ok = wasm_check_signatures(&builder, root, definition_count);
@@ -3012,6 +3043,8 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     case AST_NODE_TYPE_STRUCT_TYPE:
     case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
     case AST_NODE_TYPE_TYPE_NAME:
+    case AST_NODE_TYPE_UNION_CASE:
+    case AST_NODE_TYPE_UNION_MATCH:
     case AST_NODE_TYPE_VARIABLE_DEFINITION:
         // None of these is part of an expression.
         assert(false);
@@ -3471,6 +3504,8 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_SCOPE_STATEMENT:
         case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
         case AST_NODE_TYPE_TYPE_NAME:
+        case AST_NODE_TYPE_UNION_CASE:
+        case AST_NODE_TYPE_UNION_MATCH:
         case AST_NODE_TYPE_VARIABLE_DEFINITION:
             // Same as above: none of these is part of an expression.
             assert(false);
@@ -4645,6 +4680,8 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
     case AST_NODE_TYPE_SUBTRACTION:
     case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
     case AST_NODE_TYPE_TYPE_NAME:
+    case AST_NODE_TYPE_UNION_CASE:
+    case AST_NODE_TYPE_UNION_MATCH:
     case AST_NODE_TYPE_VARIABLE_DEFINITION:
         // A value without a place, such as a number, a call or the result of an operator.
         return wasm_fail(builder, WASM_BUILD_STATUS_ADDRESS_INVALID, subject);
@@ -5929,6 +5966,331 @@ static bool wasm_check_structs(Wasm_Builder *builder) {
 }
 
 /**
+ * Returns the `AST_NODE_TYPE_UNION_MATCH` after the type of `field`, which says that the field is
+ * in a case of a union match, or `AST_NODE_INDEX_NONE` for a field that is not.
+ */
+static Ast_Node_Index wasm_field_union_match(Wasm_Builder const *builder, Ast_Node_Index field) {
+    assert(builder->nodes[field].node_type == AST_NODE_TYPE_FIELD);
+
+    Ast_Node_Index match = builder->nodes[builder->nodes[field].first_child].next_sibling;
+    assert(match == AST_NODE_INDEX_NONE ||
+           builder->nodes[match].node_type == AST_NODE_TYPE_UNION_MATCH);
+    return match;
+}
+
+/**
+ * Returns the `AST_NODE_TYPE_FIELD` of the struct `struct_node` that is called `name`, or
+ * `AST_NODE_INDEX_NONE` when it has none.
+ */
+static Ast_Node_Index wasm_struct_field_node_find(Wasm_Builder const *builder,
+                                                  Ast_Node_Index struct_node, Str name) {
+    assert(builder->nodes[struct_node].node_type == AST_NODE_TYPE_STRUCT_TYPE);
+
+    Ast_Node_Index field = builder->nodes[struct_node].first_child;
+    // Every field is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && field != AST_NODE_INDEX_NONE; i += 1) {
+        if (str_equals(builder->nodes[field].payload.field.name, name)) {
+            return field;
+        }
+        field = builder->nodes[field].next_sibling;
+    }
+
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Returns the enum of the field that the union match `union_match`, a child of a field of
+ * `struct_node`, is matched against, or `AST_NODE_INDEX_NONE` when that is not a field of the
+ * struct that has an enum for its type, or is in a case itself: what the cases are members of
+ * must exist whatever the case is.
+ */
+static Ast_Node_Index wasm_union_enum(Wasm_Builder const *builder, Ast_Node_Index struct_node,
+                                      Ast_Node_Index union_match) {
+    assert(builder->nodes[union_match].node_type == AST_NODE_TYPE_UNION_MATCH);
+
+    Ast_Node_Index discriminant = wasm_struct_field_node_find(
+        builder, struct_node, builder->nodes[union_match].payload.union_match.discriminant);
+    if (discriminant == AST_NODE_INDEX_NONE ||
+        wasm_field_union_match(builder, discriminant) != AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index type = builder->nodes[discriminant].first_child;
+    if (builder->nodes[type].node_type != AST_NODE_TYPE_TYPE_NAME) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return wasm_enum_find(builder, builder->nodes[type].payload.type_name.name);
+}
+
+/**
+ * Checks the union matches of the structs: the field that is matched must be a field of an enum
+ * type that is not in a case, and every case must be a member of that enum. Returns false after it
+ * recorded an error. What comes after can ask for the enum of a union match and assume that it
+ * is known.
+ */
+static bool wasm_check_unions(Wasm_Builder *builder) {
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        if (builder->nodes[i].node_type != AST_NODE_TYPE_FIELD) {
+            continue;
+        }
+        Ast_Node_Index match = wasm_field_union_match(builder, (Ast_Node_Index)i);
+        if (match == AST_NODE_INDEX_NONE) {
+            continue;
+        }
+
+        Ast_Node_Index struct_node = wasm_parent_find(builder, (Ast_Node_Index)i);
+        assert(struct_node != AST_NODE_INDEX_NONE);
+        Ast_Node_Index enum_node = wasm_union_enum(builder, struct_node, match);
+        if (enum_node == AST_NODE_INDEX_NONE) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_UNION_DISCRIMINANT_INVALID,
+                             builder->nodes[match].payload.union_match.discriminant);
+        }
+
+        Str member = builder->nodes[builder->nodes[match].first_child].payload.union_case.member;
+        size_t number = 0;
+        if (wasm_enum_member_find(builder, enum_node, member, &number) == false) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_UNION_CASE_UNKNOWN, member);
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Returns the name of the member of the enum `enum_node` that `expression` is, when that is known
+ * from the text of the program: `.RED`, or `Color.RED` where `Color` is that enum. Otherwise
+ * returns a `Str` whose `bytes` is NULL. The enum of `.RED` is not checked, because the place that
+ * it is in, which compares it or gives it to a field, already makes it the enum of the other side.
+ */
+static Str wasm_union_enum_member_name(Wasm_Builder const *builder, Ast_Node_Index expression,
+                                       Ast_Node_Index enum_node) {
+    assert(builder->nodes[enum_node].node_type == AST_NODE_TYPE_ENUM_TYPE);
+
+    Ast_Node const *node = &builder->nodes[expression];
+    if (node->node_type == AST_NODE_TYPE_ENUM_LITERAL) {
+        return node->payload.enum_literal.name;
+    }
+    if (node->node_type == AST_NODE_TYPE_FIELD_ACCESS &&
+        wasm_enum_of_access(builder, expression) == enum_node) {
+        return node->payload.field_access.name;
+    }
+
+    return STR_EMPTY;
+}
+
+/**
+ * Returns whether `first` and `second` are the same place: the same variable or parameter, or the
+ * same field or what the same pointer points to, of places that are the same. Such a place has the
+ * same value at two points of the program as long as nothing assigns to it in between. An element
+ * of an array is never taken as the same place as another, because its index may differ.
+ */
+static bool wasm_path_equals(Wasm_Builder const *builder, Ast_Node_Index first,
+                             Ast_Node_Index second) {
+    Ast_Node_Index a = first;
+    Ast_Node_Index b = second;
+    // Each step goes down one node of both, so there are fewer steps than nodes.
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        Ast_Node const *node_a = &builder->nodes[a];
+        Ast_Node const *node_b = &builder->nodes[b];
+        if (node_a->node_type != node_b->node_type) {
+            return false;
+        }
+
+        if (node_a->node_type == AST_NODE_TYPE_IDENTIFIER) {
+            Semantic_Binding binding_a = builder->bindings[a];
+            Semantic_Binding binding_b = builder->bindings[b];
+            return binding_a.kind == binding_b.kind && binding_a.target == binding_b.target &&
+                   binding_a.position == binding_b.position;
+        }
+        if (node_a->node_type == AST_NODE_TYPE_FIELD_ACCESS) {
+            if (str_equals(node_a->payload.field_access.name,
+                           node_b->payload.field_access.name) == false) {
+                return false;
+            }
+        } else if (node_a->node_type != AST_NODE_TYPE_DEREFERENCE) {
+            return false;
+        }
+        a = node_a->first_child;
+        b = node_b->first_child;
+    }
+
+    return false;
+}
+
+/**
+ * Returns whether the statements in `block` can change which case the object `container` is in,
+ * which they do when they assign to the field called `discriminant` of it, to the object itself, or
+ * to a place it is in, or take the address of one of them, because the address can be used to
+ * assign later. `container` is the expression before the dot, such as `t` in `t.identifier`.
+ * A pointer to the object that was made elsewhere is not followed, so a call can change the case
+ * of an object that is reached through a pointer; see the language specification.
+ */
+static bool wasm_union_block_changes(Wasm_Builder const *builder, Ast_Node_Index block,
+                                     Ast_Node_Index container, Str discriminant) {
+    assert(builder->nodes[block].node_type == AST_NODE_TYPE_BLOCK);
+
+    // The nodes of the block are the ones from its own index up to its end.
+    for (Ast_Node_Index node = block + 1; node < builder->nodes[block].payload.block.end;
+         node += 1) {
+        Ast_Node_Type node_type = builder->nodes[node].node_type;
+        if (ast_node_type_is_assignment(node_type) == false &&
+            node_type != AST_NODE_TYPE_ADDRESS_OF) {
+            continue;
+        }
+
+        // The place that is assigned to, or whose address is taken, is the first child.
+        Ast_Node_Index place = builder->nodes[node].first_child;
+        if (builder->nodes[place].node_type == AST_NODE_TYPE_FIELD_ACCESS &&
+            str_equals(builder->nodes[place].payload.field_access.name, discriminant) &&
+            wasm_path_equals(builder, builder->nodes[place].first_child, container)) {
+            return true;
+        }
+
+        // The object itself or a place that it is in: `t`, and for `a.b.t` also `a.b` and `a`. A
+        // pointer that the object is reached through counts as such a place.
+        Ast_Node_Index outer = container;
+        for (size_t i = 0; i < builder->node_count; i += 1) {
+            if (wasm_path_equals(builder, place, outer)) {
+                return true;
+            }
+            Ast_Node_Type outer_type = builder->nodes[outer].node_type;
+            if (outer_type != AST_NODE_TYPE_FIELD_ACCESS &&
+                outer_type != AST_NODE_TYPE_DEREFERENCE) {
+                break;
+            }
+            outer = builder->nodes[outer].first_child;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Returns whether `condition` holds only when the field of the union match `union_match` of the
+ * object `container` is the member of its case, which is when it is a comparison with `==` of the
+ * two, or an `and` that has such a comparison among its operands, however deep. The comparison can
+ * have either side first. `enum_node` is the enum of the field.
+ */
+static bool wasm_union_condition_matches(Wasm_Builder const *builder, Ast_Node_Index condition,
+                                         Ast_Node_Index container, Ast_Node_Index union_match,
+                                         Ast_Node_Index enum_node) {
+    assert(builder->nodes[union_match].node_type == AST_NODE_TYPE_UNION_MATCH);
+
+    Str discriminant = builder->nodes[union_match].payload.union_match.discriminant;
+    Str member = builder->nodes[builder->nodes[union_match].first_child].payload.union_case.member;
+
+    // The operands of the `and`s that are still to be looked at, kept in an array instead of
+    // calling this function again. A condition with more `and`s than fit is not matched.
+    Ast_Node_Index pending[WASM_STRUCT_DEPTH_MAX];
+    size_t pending_count = 0;
+    pending[0] = condition;
+    pending_count += 1;
+
+    // Each step takes a node from the condition, so there are fewer steps than nodes.
+    for (size_t step = 0; step < builder->node_count && pending_count > 0; step += 1) {
+        pending_count -= 1;
+        Ast_Node const *node = &builder->nodes[pending[pending_count]];
+
+        if (node->node_type == AST_NODE_TYPE_AND) {
+            if (pending_count + 2 > WASM_STRUCT_DEPTH_MAX) {
+                return false;
+            }
+            pending[pending_count] = node->first_child;
+            pending[pending_count + 1] = node->last_child;
+            pending_count += 2;
+            continue;
+        }
+        if (node->node_type != AST_NODE_TYPE_COMPARISON ||
+            node->payload.comparison.operator != AST_COMPARISON_OPERATOR_EQUAL) {
+            continue;
+        }
+
+        Ast_Node_Index sides[2] = {node->first_child, node->last_child};
+        for (size_t side = 0; side < 2; side += 1) {
+            Ast_Node const *matched = &builder->nodes[sides[side]];
+            if (matched->node_type != AST_NODE_TYPE_FIELD_ACCESS ||
+                str_equals(matched->payload.field_access.name, discriminant) == false ||
+                wasm_path_equals(builder, matched->first_child, container) == false) {
+                continue;
+            }
+
+            Str other_member = wasm_union_enum_member_name(builder, sides[1 - side], enum_node);
+            if (other_member.bytes != NULL && str_equals(other_member, member)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Returns whether the compiler can tell that the field in a case of the union match `union_match`,
+ * which the field access `access` reads or assigns, exists. The field is of the object that is the
+ * expression before the dot, and that must be known to be in the case. It is where the access is in
+ * the block of an if statement, or in an `and` after a comparison, whose condition compares the
+ * field that is matched with the member of the case, and where the statements of the block do not
+ * change the object, see `wasm_union_block_changes`. The search goes outwards from the access,
+ * one node at a time, through all of the if statements around it. `struct_node` is the struct that
+ * the field is in.
+ */
+static bool wasm_union_is_matched(Wasm_Builder const *builder, Ast_Node_Index access,
+                                  Ast_Node_Index struct_node, Ast_Node_Index union_match) {
+    assert(builder->nodes[access].node_type == AST_NODE_TYPE_FIELD_ACCESS);
+
+    Ast_Node_Index enum_node = wasm_union_enum(builder, struct_node, union_match);
+    assert(enum_node != AST_NODE_INDEX_NONE);
+    Ast_Node_Index container = builder->nodes[access].first_child;
+    Str discriminant = builder->nodes[union_match].payload.union_match.discriminant;
+
+    Ast_Node_Index node = access;
+    // Each step goes up one node, so there are fewer steps than nodes.
+    for (size_t step = 0; step < builder->node_count; step += 1) {
+        Ast_Node_Index parent = wasm_parent_find(builder, node);
+        if (parent == AST_NODE_INDEX_NONE ||
+            builder->nodes[parent].node_type == AST_NODE_TYPE_PROCEDURE ||
+            builder->nodes[parent].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION) {
+            return false;
+        }
+
+        // The right operand of an `and` is only evaluated when the left one holds.
+        if (builder->nodes[parent].node_type == AST_NODE_TYPE_AND &&
+            builder->nodes[parent].last_child == node &&
+            wasm_union_condition_matches(builder, builder->nodes[parent].first_child, container,
+                                         union_match, enum_node)) {
+            return true;
+        }
+
+        if (builder->nodes[parent].node_type == AST_NODE_TYPE_BLOCK) {
+            Ast_Node_Index statement = wasm_parent_find(builder, parent);
+            // The children of an if statement are a condition and its block, again and again, and
+            // the block of the `else` comes last, with a block before it instead of a condition.
+            Ast_Node_Index previous = AST_NODE_INDEX_NONE;
+            if (statement != AST_NODE_INDEX_NONE &&
+                builder->nodes[statement].node_type == AST_NODE_TYPE_IF_STATEMENT) {
+                Ast_Node_Index child = builder->nodes[statement].first_child;
+                // The block is one of the children, so there are fewer steps than nodes.
+                for (size_t j = 0; j < builder->node_count && child != parent; j += 1) {
+                    previous = child;
+                    child = builder->nodes[child].next_sibling;
+                }
+            }
+            if (previous != AST_NODE_INDEX_NONE &&
+                builder->nodes[previous].node_type != AST_NODE_TYPE_BLOCK &&
+                wasm_union_condition_matches(builder, previous, container, union_match,
+                                             enum_node) &&
+                wasm_union_block_changes(builder, parent, container, discriminant) == false) {
+                return true;
+            }
+        }
+
+        node = parent;
+    }
+
+    return false;
+}
+
+/**
  * Writes the instructions that push the default value of `type`: zero for an `Int`, `false` for a
  * `Bool`, the empty string for a `Str`, an empty array slice for an array slice, and the default of
  * each of its fields for a struct. Every slot of all of them is the number zero, which is why it is
@@ -6391,10 +6753,23 @@ static Wasm_Field_Path wasm_field_path(Wasm_Builder const *builder, Ast_Node_Ind
         }
 
         size_t slot_offset = 0;
-        if (wasm_struct_field_find(builder, current_type.definition, name, &slot_offset,
-                                   &current_type) == false) {
+        Ast_Node_Index struct_node = current_type.definition;
+        if (wasm_struct_field_find(builder, struct_node, name, &slot_offset, &current_type) ==
+            false) {
             path.status = WASM_BUILD_STATUS_STRUCT_FIELD_UNKNOWN;
             path.subject = name;
+            return path;
+        }
+
+        // A field in a case of a union match exists only when the object is in that case, which
+        // the compiler must be able to tell from the program.
+        Ast_Node_Index union_match = wasm_field_union_match(
+            builder, wasm_struct_field_node_find(builder, struct_node, name));
+        if (union_match != AST_NODE_INDEX_NONE &&
+            wasm_union_is_matched(builder, chain[i - 1], struct_node, union_match) == false) {
+            path.status = WASM_BUILD_STATUS_UNION_FIELD_UNMATCHED;
+            path.subject = name;
+            path.type = wasm_type_make(WASM_VALUE_TYPE_NONE);
             return path;
         }
         path.slot_offset += slot_offset;
@@ -6537,6 +6912,48 @@ static bool wasm_build_code_section_body_struct_literal(Wasm_Builder *builder,
                                  builder->nodes[later].payload.field_initializer.name);
             }
             later = builder->nodes[later].next_sibling;
+        }
+        initializer = builder->nodes[initializer].next_sibling;
+    }
+
+    // A field in a case of a union match can only be given a value when the field that the union
+    // is matched against is given the member of the case, or is left out and so is the first member
+    // of its enum, which is the default value of an enum. The member must be written out in the
+    // literal, because the case is decided when the program is compiled.
+    initializer = builder->nodes[literal].first_child;
+    for (size_t i = 0; i < builder->node_count && initializer != AST_NODE_INDEX_NONE; i += 1) {
+        Str name = builder->nodes[initializer].payload.field_initializer.name;
+        Ast_Node_Index union_match = wasm_field_union_match(
+            builder, wasm_struct_field_node_find(builder, struct_node, name));
+        if (union_match != AST_NODE_INDEX_NONE) {
+            Ast_Node_Index enum_node = wasm_union_enum(builder, struct_node, union_match);
+            assert(enum_node != AST_NODE_INDEX_NONE);
+
+            Str matched_name = builder->nodes[union_match].payload.union_match.discriminant;
+            Ast_Node_Index matched = builder->nodes[literal].first_child;
+            // Every initializer is a distinct node, so there cannot be more than there are nodes.
+            for (size_t j = 0; j < builder->node_count && matched != AST_NODE_INDEX_NONE; j += 1) {
+                if (str_equals(builder->nodes[matched].payload.field_initializer.name,
+                               matched_name)) {
+                    break;
+                }
+                matched = builder->nodes[matched].next_sibling;
+            }
+
+            Str given_member = builder->nodes[builder->nodes[enum_node].first_child]
+                                   .payload.enum_member.name;
+            if (matched != AST_NODE_INDEX_NONE) {
+                given_member = wasm_union_enum_member_name(
+                    builder, builder->nodes[matched].first_child, enum_node);
+                if (given_member.bytes == NULL) {
+                    return wasm_fail(builder, WASM_BUILD_STATUS_UNION_KIND_NOT_CONSTANT, name);
+                }
+            }
+            Str case_member =
+                builder->nodes[builder->nodes[union_match].first_child].payload.union_case.member;
+            if (str_equals(given_member, case_member) == false) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH, name);
+            }
         }
         initializer = builder->nodes[initializer].next_sibling;
     }

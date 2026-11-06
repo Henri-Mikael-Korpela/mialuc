@@ -308,6 +308,7 @@
             strings: "strings",
             structs: "structs",
             sum: "sum",
+            unions: "unions",
             variables: "variables",
         };
         const EXAMPLE_DEFAULT = "sum";
@@ -336,7 +337,7 @@
                 ["string", /"[^"\\\n]*"/],
                 ["attribute", /#(?:[ \t]*\([ \t]*[A-Za-z_]\w*[ \t]*\))+/],
                 ["label", /@[A-Za-z_]\w*/],
-                ["keyword", /\b(?:proc|return|if|else|for|in|break|const|continue|enum|struct|type_info_of|foreign|import|and|or)\b|\bnot\b(?!=)/],
+                ["keyword", /\b(?:proc|return|if|else|for|in|break|case|const|continue|enum|match|struct|type_info_of|union|foreign|import|and|or)\b|\bnot\b(?!=)/],
                 ["literal", /\b(?:true|false|nil)\b/],
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
                 ["function", /\b[A-Za-z_]\w*(?=\()/],

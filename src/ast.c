@@ -74,6 +74,8 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_SUBTRACTION:
     case AST_NODE_TYPE_TYPE_INFO_OF:
     case AST_NODE_TYPE_TYPE_NAME:
+    case AST_NODE_TYPE_UNION_CASE:
+    case AST_NODE_TYPE_UNION_MATCH:
     case AST_NODE_TYPE_VARIABLE_DEFINITION:
         return false;
     }
@@ -395,6 +397,14 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_TYPE_NAME:
             printf("TYPE_NAME %.*s\n", (int)node.payload.type_name.name.length,
                    node.payload.type_name.name.bytes);
+            break;
+        case AST_NODE_TYPE_UNION_CASE:
+            printf("UNION_CASE %.*s\n", (int)node.payload.union_case.member.length,
+                   node.payload.union_case.member.bytes);
+            break;
+        case AST_NODE_TYPE_UNION_MATCH:
+            printf("UNION_MATCH %.*s\n", (int)node.payload.union_match.discriminant.length,
+                   node.payload.union_match.discriminant.bytes);
             break;
         case AST_NODE_TYPE_VARIABLE_DEFINITION:
             printf("VARIABLE_DEFINITION %.*s\n", (int)node.payload.variable_definition.name.length,

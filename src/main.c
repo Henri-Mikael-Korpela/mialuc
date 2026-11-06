@@ -453,6 +453,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_KIND_KEYWORD_BREAK:
             printf("KEYWORD_BREAK\n");
             break;
+        case TOKEN_KIND_KEYWORD_CASE:
+            printf("KEYWORD_CASE\n");
+            break;
         case TOKEN_KIND_KEYWORD_CONST:
             printf("KEYWORD_CONST\n");
             break;
@@ -486,6 +489,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_KIND_KEYWORD_IN:
             printf("KEYWORD_IN\n");
             break;
+        case TOKEN_KIND_KEYWORD_MATCH:
+            printf("KEYWORD_MATCH\n");
+            break;
         case TOKEN_KIND_KEYWORD_NIL:
             printf("KEYWORD_NIL\n");
             break;
@@ -509,6 +515,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
             break;
         case TOKEN_KIND_KEYWORD_TYPE_INFO_OF:
             printf("KEYWORD_TYPE_INFO_OF\n");
+            break;
+        case TOKEN_KIND_KEYWORD_UNION:
+            printf("KEYWORD_UNION\n");
             break;
         case TOKEN_KIND_LABEL:
             printf("LABEL %.*s\n", (int)token.payload.identifier.text.length,
@@ -844,6 +853,35 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         break;
     case WASM_BUILD_STATUS_TYPE_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: type '%.*s' is not supported by the wasm target.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_UNION_CASE_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: the case '.%.*s' is not a member of the enum of the field "
+                "that the union is matched against.\n", path, position.line, position.column,
+                subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_UNION_DISCRIMINANT_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be matched by a union: it must be a field of "
+                "the struct, outside of the cases, and of an enum type.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is in a case of a union, but the struct "
+                "object is given another member for the field that the union is matched "
+                "against, so the field does not exist there.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_UNION_FIELD_UNMATCHED:
+        fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is in a case of a union, so it can only be "
+                "used where the field that the union is matched against is known to be the "
+                "member of the case, such as inside 'if x.kind == .MEMBER ->' and without "
+                "changing 'x' or 'x.kind' in it.\n", path, position.line, position.column,
+                subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_UNION_KIND_NOT_CONSTANT:
+        fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is in a case of a union, so the struct "
+                "object must give the field that the union is matched against a member of the "
+                "enum that is written out, such as '.MEMBER', and not another value.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
     }

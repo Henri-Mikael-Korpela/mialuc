@@ -83,6 +83,16 @@
        through a variable, a parameter, an element of an array or what a pointer points to, and not
        through the result of a call. The grammar allows the lines of a literal between braces to be
        indented by any number of spaces, but the compiler requires a multiple of 4, as everywhere.
+     - The field that a union match is matched against must be a field of the struct that the
+       union match is in, of an enum type, and not a field of a case. Every case must be a member of
+       that enum. In a struct literal a field of a case can only be given a value when the matched
+       field is given the member of that case, written out as `.MEMBER` or `Enum.MEMBER`, or when it
+       is left out and the member is the first one of the enum. A field of a case can only be read
+       or assigned where the compiler can tell that the object is in the case: in the block of an
+       if statement, or of an `else if`, whose condition compares the matched field of the same
+       object with the member using `==`, or after such a comparison in an `and`, and where the
+       block does not assign to the object or the matched field or take their address. All of this
+       is checked after parsing.
      - The type that an enum writes after `enum` is the type of the numbers of its members, and the
        only one there is is `Int`, so `enum Byte ->` is an error. The name of a type must be an enum
        too when it is the name of one. A member of an enum must
@@ -148,7 +158,14 @@ constant_definition =
 (* A struct is a record type: `struct ->` and then its fields, one on each line, indented one level
    deeper, each of them `name: Type`. The type of a field can be `struct ->` again, followed by
    the fields of that struct one level deeper still, so a struct can be inside a struct. Like the
-   blocks, the rules go down to the fourth level. *)
+   blocks, the rules go down to the fourth level.
+
+   A struct can also have a union match among its fields: `union match kind ->`, and below it, one
+   level deeper, a `case .MEMBER ->` for each case, and below that, one level deeper still, the
+   fields of the case, written like the fields of a struct. They are fields of the struct that the
+   union match is in. The rules of the union matches go down to the fourth level too, so a union
+   match in a struct of the first level has its fields in the third, which can be structs, and one
+   in a struct of the second level has them in the fourth, which cannot. *)
 struct_definition = "struct" , branch_end , struct_body_1 ;
 
 (* An enum is a type with a fixed set of members: `enum Int ->` and then its members, one on each line,
@@ -166,15 +183,38 @@ enum_member = indentation_1 , name , ws , line_end ;
 (* The value of a constant that is the member of an enum. *)
 enum_member_value = name , ws , "." , ws , name , ws , line_end ;
 
-struct_body_1 = { blank_line } , struct_field_1 , { blank_line | struct_field_1 } ;
+struct_body_1 = { blank_line } , struct_item_1 , { blank_line | struct_item_1 } ;
+struct_item_1 = struct_field_1 | union_match_1 ;
 struct_field_1 =
     indentation_1 , name , ws , ":" , ws ,
     ( type , ws , line_end | "struct" , branch_end , struct_body_2 ) ;
 
-struct_body_2 = { blank_line } , struct_field_2 , { blank_line | struct_field_2 } ;
+(* The union match, its cases and the fields of the cases, for a struct of the first level. *)
+union_match_1 =
+    indentation_1 , "union" , required_space , "match" , required_space , name , branch_end ,
+    { blank_line } , union_case_2 , { blank_line | union_case_2 } ;
+union_case_2 =
+    indentation_2 , "case" , ws , "." , ws , name , branch_end ,
+    { blank_line } , case_field_3 , { blank_line | case_field_3 } ;
+case_field_3 =
+    indentation_3 , name , ws , ":" , ws ,
+    ( type , ws , line_end | "struct" , branch_end , struct_body_4 ) ;
+
+struct_body_2 = { blank_line } , struct_item_2 , { blank_line | struct_item_2 } ;
+struct_item_2 = struct_field_2 | union_match_2 ;
 struct_field_2 =
     indentation_2 , name , ws , ":" , ws ,
     ( type , ws , line_end | "struct" , branch_end , struct_body_3 ) ;
+
+(* The same for a struct of the second level. The fields of its cases are in the fourth level, so
+   none of them is a struct. *)
+union_match_2 =
+    indentation_2 , "union" , required_space , "match" , required_space , name , branch_end ,
+    { blank_line } , union_case_3 , { blank_line | union_case_3 } ;
+union_case_3 =
+    indentation_3 , "case" , ws , "." , ws , name , branch_end ,
+    { blank_line } , case_field_4 , { blank_line | case_field_4 } ;
+case_field_4 = indentation_4 , name , ws , ":" , ws , type , ws , line_end ;
 
 struct_body_3 = { blank_line } , struct_field_3 , { blank_line | struct_field_3 } ;
 struct_field_3 =
@@ -524,7 +564,8 @@ reserved_word = keyword | literal_word ;
 
 keyword =
     "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "struct" |
-    "enum" | "not" | "and" | "or" | "foreign" | "import" | "type_info_of" ;
+    "enum" | "not" | "and" | "or" | "foreign" | "import" | "type_info_of" | "union" | "match" |
+    "case" ;
 
 (* The words that are literals: the two values of a `Bool` and the null pointer. *)
 literal_word = "true" | "false" | "nil" ;

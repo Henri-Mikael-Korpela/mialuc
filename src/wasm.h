@@ -207,6 +207,23 @@ typedef enum {
     // that is not an enum. The subject is the name of the type.
     WASM_BUILD_STATUS_TYPE_INFO_UNSUPPORTED,
     WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
+    // A case of a union match that is not a member of the enum of the field that is matched. The
+    // subject is the member.
+    WASM_BUILD_STATUS_UNION_CASE_UNKNOWN,
+    // The field that a union match matches is not a field of the struct that the union match is
+    // in, is not of an enum type, or is itself in a case. The subject is its name.
+    WASM_BUILD_STATUS_UNION_DISCRIMINANT_INVALID,
+    // A struct object that gives a field of a case of a union match, and a value for the matched
+    // field that is not the member of the case. The subject is the name of the field of the case.
+    WASM_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH,
+    // A field of a case of a union match that is used where the compiler cannot tell that the
+    // matched field is the member of the case: not inside an if statement that compares them, or
+    // in one where the matched field is changed. The subject is the name of the field.
+    WASM_BUILD_STATUS_UNION_FIELD_UNMATCHED,
+    // A struct object that gives a field of a case of a union match, and a value for the matched
+    // field that is not a member of the enum written out, such as `.IDENTIFIER`, so the case is
+    // not known when the program is compiled. The subject is the name of the field of the case.
+    WASM_BUILD_STATUS_UNION_KIND_NOT_CONSTANT,
     WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
 } Wasm_Build_Status;
 
@@ -263,6 +280,12 @@ typedef struct {
  * many locals. A struct is never stored in memory as a whole, except as an element of an array or
  * where a pointer points to it: every value of it takes 8 bytes there, whether it is a 32-bit or a
  * 64-bit one.
+ *
+ * The fields of the cases of a union match are fields of the struct, in the order of the source, so
+ * they take their own values and the cases do not share them. The target checks that they are only
+ * given and used where the object is known to be in their case, see
+ * `WASM_BUILD_STATUS_UNION_FIELD_UNMATCHED`, and does not need to know about the cases to write the
+ * code of a field.
  *
  * A pointer, written `^Int`, is one 32-bit integer: the address in the memory of the module of what
  * it points to, which takes 8 bytes for each of its values, like an element of an array. So a

@@ -36,6 +36,10 @@
     - [Fields](#fields)
     - [Structs in structs](#structs-in-structs)
     - [Structs in arrays](#structs-in-arrays)
+    - [Unions](#unions)
+      - [Union objects](#union-objects)
+      - [Using the fields of a union](#using-the-fields-of-a-union)
+      - [Storage of a union](#storage-of-a-union)
   - [Enumerations](#enumerations)
 - [Static reflection](#static-reflection)
   - [Information about an enum](#information-about-an-enum)
@@ -112,16 +116,18 @@ Reserved words are categorized into used and unused keywords and literal words. 
 ```
 and
 break
-const continue
+case const continue
 else enum
 for foreign
 if import in
+match
 not
 or
 proc
 return
 struct
 type_info_of
+union
 ```
 
 There are also literal words, which look like keywords but are actually literals, because each one is a value and not a part of the syntax of a statement. In alphabetical order they are:
@@ -136,14 +142,14 @@ Mialu also defines the following unused keywords. They are reserved for possible
 
 ```
 abstract alias as async await
-case cast catch class
+cast catch class
 defer delete distinct do dynamic
 extern
 final finally
 gen generate goto
 impl interface is
 loop
-macro match mutable
+macro mutable
 new
 of operator override
 private public
@@ -152,7 +158,7 @@ safe self switch
 super
 this throw throws trait
 transmute try type_id_of type_of
-union unsafe use
+unsafe use
 virtual
 where while
 yield
@@ -986,7 +992,7 @@ Info :: struct ->
         district: Str
 ```
 
-The value of a field that is a struct is a struct literal, which does not need the name of the struct when the field says which struct it is, and which is the only place where a literal without a name is allowed:
+A struct that is defined where the field is has no name of its own, so it is an anonymous struct: it can only be the type of that field. Its fields can be structs defined in the same way, as deep as the nesting of the source allows. The value of a field that is a struct is a struct literal, which does not need the name of the struct when the field says which struct it is, and which is the only place where a literal without a name is allowed:
 
 ```
 create_nested_struct_object :: proc() Str ->
@@ -1002,7 +1008,7 @@ create_nested_struct_object :: proc() Str ->
     return info.address.area_name
 ```
 
-A field that is a struct and is left out has the default value of each of its own fields.
+A field that is a struct and is left out has the default value of each of its own fields. The fields of an anonymous struct are read like any other, with the dots one after the other: `info.address.area_name`.
 
 #### Structs in arrays
 
@@ -1019,6 +1025,104 @@ create_array_of_struct_objects :: proc() Int ->
 ```
 
 An element is a struct object, so `persons[1]` can be assigned a whole struct object, a field of an element is read and assigned with `persons[1].age`, a [for statement](#for-statements) over the array goes through the struct objects, and a range of them can be copied.
+
+#### Unions
+
+Some data has fields that only make sense for one of several kinds of it. A token of a program is an identifier, which has a text, or an integer literal, which has a value, or an operator, which has neither. A union match puts such fields in a struct. It is written `union match` and the name of a field of the struct, `->`, and below it, one level deeper, a `case` for each member of the enum of that field, written with a dot and the member as the enum literal `.IDENTIFIER` is. The fields of a case are one level deeper still, and they are written like any other field of a struct, also the ones that are [structs of their own](#structs-in-structs):
+
+```
+Token_Kind :: enum Int ->
+    IDENTIFIER
+    INTEGER_LITERAL
+    OPERATOR_ADD
+
+Token :: struct ->
+    kind: Token_Kind
+    union match kind ->
+        case .IDENTIFIER ->
+            identifier: struct ->
+                text: Str
+        case .INTEGER_LITERAL ->
+            integer_literal: struct ->
+                value: Int
+```
+
+A `Token` has the field `kind`, which every token has, and either `identifier` or `integer_literal`, depending on its kind. A token whose kind is `OPERATOR_ADD` has neither, because a member does not need a case. The union match is anonymous: it has no name, and its fields are fields of the struct, so they are read as `token.identifier` and not through a name for the union. The word `union` stands for the group of fields that are in cases and `match` says what they are matched against, which is the field after it. A struct can have more than one union match, for different fields or for the same one, as long as the names of all of its fields differ. It is in a struct that is defined by name, or in one that is defined as the type of a field.
+
+The field that is matched must be a field of the struct that the union match is in, it must have an enum for its type, and it cannot be a field of a case. Every case must be a member of that enum. Every union match has at least one case and every case at least one field. A field of a case has the same types as any other field, but a struct cannot contain itself through a case either.
+
+The point of a union match is that the compiler makes sure that a field is only used while it exists. The kind is known when the program is compiled, so a field of another case is an error and not a value that is meant for something else.
+
+##### Union objects
+
+A struct object is made with the struct literal as usual, and a field of a case can only be given a value when the field that is matched is given the member of that case. The member must be written out in the literal, as `.IDENTIFIER` or `Token_Kind.IDENTIFIER`, and not be a variable or any other expression, because the case has to be known when the program is compiled:
+
+```
+create_tokens :: proc() Token ->
+    tokens := [const]Token {
+        Token {
+            kind = .IDENTIFIER,
+            identifier = {
+                text = "x",
+            },
+        },
+        Token {
+            kind = .OPERATOR_ADD,
+        },
+        Token {
+            kind = .INTEGER_LITERAL,
+            integer_literal = {
+                value = 16,
+            },
+        },
+    }
+    return tokens[0]
+```
+
+The fields of the cases that the token is not in are not given a value, and have the default value of their type. When the field that is matched is left out, it has the default value of an enum, which is the first member, so the literal is in the first case. These are errors:
+
+```
+bad :: proc() ->
+    a := Token { kind = .IDENTIFIER, integer_literal = { value = 1 } }
+    b := Token { integer_literal = { value = 1 } }
+    k := Token_Kind.IDENTIFIER
+    c := Token { kind = k, identifier = { text = "x" } }
+```
+
+`a` gives the field of another case, `b` leaves the kind out, so it is `IDENTIFIER` and the field is of another case, and `c` gives a kind that the compiler cannot see in the literal.
+
+##### Using the fields of a union
+
+A field of a case is read or assigned only where the compiler can tell from the program that the object is in that case. That is the block of an if statement, or of one of its `else if`, whose condition compares the field that is matched of that object with the member of the case using `==`, with the member on either side. An `and` in the condition can have the comparison as one of its operands, and then the operands after it are in the case as well. Both operands of an `and` are always evaluated, see [Logical operators](#logical-operators), so when the object is in another case the field is read and has the default value of its type, which does not change the result, because the comparison before it is false. The block can use the field, and the fields of the fields, however deep:
+
+```
+value_of_token :: proc(token: Token) Int ->
+    if token.kind == .INTEGER_LITERAL ->
+        return token.integer_literal.value
+    else if token.kind == .IDENTIFIER ->
+        return 1
+    return 0
+
+is_three :: proc(token: Token) Bool ->
+    return token.kind == .INTEGER_LITERAL and token.integer_literal.value == 3
+```
+
+The object that is compared and the object that is used must be the same place: the same variable or parameter, or the same field of one, or the same pointer followed, such as `token`, `line.token` and `p`. An element of an array, such as `tokens[0]`, is never taken as the same place as another element, so it is read through a variable first, as in `token := tokens[0]` in the example of `first_token_text` in `test-code/unions.mu`.
+
+The compiler does not take any of these as a proof, and the use of a field of a case there is an error:
+
+- an `else` branch, or a comparison with `not=`, or any other condition, since the object could be in any of several other cases;
+- a block of an if statement for another member;
+- a block in which the object, a place that contains it, or the field that is matched is assigned to, or has its address taken, anywhere in the block, since the case could change;
+- an object that is not the one that is compared.
+
+A kind can be changed in the usual way, by assigning the whole struct object, `token = Token { kind = .INTEGER_LITERAL, integer_literal = { value = 9 } }`, and then the object is matched again with an if statement. Procedures that are called with a pointer to the object are not followed, so a call inside a block can change the kind of an object that is reached through a pointer, after which the fields of the case are the defaults of their type; the program stays well defined, but a later use of the field is not a use of the case.
+
+The other fields of the struct, such as `kind`, are always available.
+
+##### Storage of a union
+
+The cases do not share their storage: a struct with a union match has all the fields of all of its cases, and the compiler decides which of them can be used. So a union match makes the struct as large as all its cases together, and not as large as the largest of them. A future version may let the cases share the place of their fields, which the programs would not notice, since only the fields of the case that the compiler has proved are used. For the [WebAssembly](#webassembly) target the values of a token are the values of `kind`, then the ones of all the fields of the cases in the order of the source, so JavaScript sees a token as that many values.
 
 ### Enumerations
 

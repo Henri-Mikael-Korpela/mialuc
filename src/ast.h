@@ -67,6 +67,8 @@ typedef enum {
     AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT,
     AST_NODE_TYPE_TYPE_INFO_OF,
     AST_NODE_TYPE_TYPE_NAME,
+    AST_NODE_TYPE_UNION_CASE,
+    AST_NODE_TYPE_UNION_MATCH,
     AST_NODE_TYPE_VARIABLE_DEFINITION,
 } Ast_Node_Type;
 
@@ -190,10 +192,14 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   such as `Int` in `enum Int ->`, is in the payload. It is always written, and which types an
  *   enum can have is for the target to tell. It is the value of an
  *   `AST_NODE_TYPE_CONSTANT_DEFINITION` that defines an enum.
- * - `AST_NODE_TYPE_FIELD`: one child, the type of the field, which is an `AST_NODE_TYPE_TYPE_NAME`,
+ * - `AST_NODE_TYPE_FIELD`: the type of the field, which is an `AST_NODE_TYPE_TYPE_NAME`,
  *   an `AST_NODE_TYPE_POINTER_TYPE` or, for a field that is a struct of its own, an
- *   `AST_NODE_TYPE_STRUCT_TYPE`. The name of the
- *   field is in the payload. It is a child of an `AST_NODE_TYPE_STRUCT_TYPE`.
+ *   `AST_NODE_TYPE_STRUCT_TYPE`, and for a field of a case of a union match an
+ *   `AST_NODE_TYPE_UNION_MATCH` after it. The name of the
+ *   field is in the payload. It is a child of an `AST_NODE_TYPE_STRUCT_TYPE`, also when it is
+ *   written inside a union match: the fields of the cases are children of the struct that the
+ *   union match is in, in the order of the source, so every walk over the fields of a struct sees
+ *   them without knowing about unions.
  * - `AST_NODE_TYPE_FIELD_ACCESS`: one child, the expression whose field is read, such as `p` in
  *   `p.age`, or `p^` in `p^.age`. The name of the field is in the payload. It is an expression,
  *   and it can be the target of an assignment. Like a subscript it is made after its child.
@@ -317,6 +323,16 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   `type_info_of(Color).members`, and it is the value of an
  *   `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION` when a subscript follows it.
  * - `AST_NODE_TYPE_TYPE_NAME`: no children.
+ * - `AST_NODE_TYPE_UNION_CASE`: no children. The member of the enum that the field is for, such as
+ *   `IDENTIFIER` in `case .IDENTIFIER ->`, in the payload without the dot. It is the only child of
+ *   an `AST_NODE_TYPE_UNION_MATCH`.
+ * - `AST_NODE_TYPE_UNION_MATCH`: one child, the `AST_NODE_TYPE_UNION_CASE`. It is written
+ *   `union match kind ->` and its cases below it, and it is the last child of every
+ *   `AST_NODE_TYPE_FIELD` that is in a case, which says that the field exists only while the field
+ *   called `kind` of the same struct, the name of which is in the payload, is the member of the
+ *   case. The struct has no node for the union match as a whole. It is anonymous: its fields are
+ *   fields of the struct. The field `kind` and the case are checked by the target, because
+ *   they need to know the types.
  * - `AST_NODE_TYPE_VARIABLE_DEFINITION`: the initial value, preceded by the type, an
  *   `AST_NODE_TYPE_TYPE_NAME`, an `AST_NODE_TYPE_POINTER_TYPE` or an `AST_NODE_TYPE_ARRAY_TYPE`,
  *   when the definition gives one. A
@@ -450,6 +466,16 @@ typedef struct {
         struct {
             Str name;
         } type_name;
+        struct {
+            // The member of the enum, as a view of the source text, like the other names. Without
+            // the dot.
+            Str member;
+        } union_case;
+        struct {
+            // The name of the field that the cases are matched against, as a view of the source
+            // text, like the other names.
+            Str discriminant;
+        } union_match;
     } payload;
 } Ast_Node;
 
