@@ -29,12 +29,13 @@
   - [Array literals](#array-literals)
   - [Elements](#elements)
   - [Array slices](#array-slices)
-- [Structs](#structs)
-  - [Struct objects](#struct-objects)
-  - [Fields](#fields)
-  - [Structs in structs](#structs-in-structs)
-  - [Structs in arrays](#structs-in-arrays)
-- [Enumerations](#enumerations)
+- [Custom data types](#custom-data-types)
+  - [Structs](#structs)
+    - [Struct objects](#struct-objects)
+    - [Fields](#fields)
+    - [Structs in structs](#structs-in-structs)
+    - [Structs in arrays](#structs-in-arrays)
+  - [Enumerations](#enumerations)
 - [Pointers](#pointers)
   - [Taking an address](#taking-an-address)
   - [Following a pointer](#following-a-pointer)
@@ -855,7 +856,11 @@ array_element_range_assignment :: proc() Int ->
 
 `array_element_range_assignment` returns 69. The elements of the value must be of the type of the elements of the range. The assignment operators such as `+=` are for one element, so `a[0:3] += 1` is an error.
 
-## Structs
+## Custom data types
+
+Besides the [primitive data types](#primitive-data-types), a program can define data types of its own: [structs](#structs), which group values of other types into one, and [enumerations](#enumerations), which are a fixed set of named members. A custom data type is a [constant](#constants) with a name, and it is used wherever a type is written.
+
+### Structs
 
 A struct is a record type: a name for a fixed set of fields, each with a name and a type. A struct is defined as a [constant](#constants) whose value is `struct ->` followed by its fields, one on each line, indented one level deeper than the line of the definition. A field is its name, a colon and its type:
 
@@ -867,7 +872,7 @@ Person :: struct ->
 
 The type of a field can be `Int`, `Bool`, `Str`, another struct or a [pointer](#pointers), and it cannot be an [array or an array slice](#arrays). The fields of a struct have different names, and a struct cannot contain itself, since it would never end: not directly, as in a field `next: Person` of `Person`, and not through other structs. A pointer to the struct is not the struct, so a field `next: ^Person` is fine. A struct is a type and not a value, so its name is written where a type is, and in a struct literal, but `x := Person` is an error. Like any constant, a struct can be defined below the procedures that use it.
 
-### Struct objects
+#### Struct objects
 
 A value of a struct type is called a struct object. It is made with a struct literal: the name of the struct and then the fields that are given a value between braces, each of them the name of the field, `=` and an expression of the type of the field, separated by commas:
 
@@ -912,7 +917,7 @@ late_initialization_of_struct_object :: proc(flag: Bool) Str ->
     return p.name
 ```
 
-### Fields
+#### Fields
 
 A field of a struct object is read by writing a dot and its name after the object, such as `p.age`. Fields are assigned to like variables, with `=` and with the operators `+=`, `-=`, `*=` and `/=` for an `Int`:
 
@@ -926,7 +931,7 @@ assign_field_of_struct_object :: proc() Int ->
 
 `assign_field_of_struct_object` returns 32. A field can be a struct itself, and then the dots follow each other, such as `info.address.area_name`. A field is read or assigned through a variable, a parameter, an element of an array, such as `persons[0].age`, or a [pointer](#pointers) to a struct, such as `p.age`, and not through the value of a call: `birthday(p).age` is an error, and has to be written with a variable that is given the result first. The same rules as for the variables apply to the assignment: a parameter and the iterator of a for statement are not assigned to, so neither is a field of one, unless it is a pointer, because then the field is a field of what it points to, and the pointer itself is not changed, see [Fields of a pointer](#fields-of-a-pointer).
 
-### Structs in structs
+#### Structs in structs
 
 A field can be a struct that is defined by name:
 
@@ -970,7 +975,7 @@ create_nested_struct_object :: proc() Str ->
 
 A field that is a struct and is left out has the default value of each of its own fields.
 
-### Structs in arrays
+#### Structs in arrays
 
 The elements of an [array](#arrays) can be struct objects, and so can the elements of an array slice. The array literal gives them with struct literals, which can be on lines of their own with a comma after the last one:
 
@@ -986,7 +991,7 @@ create_array_of_struct_objects :: proc() Int ->
 
 An element is a struct object, so `persons[1]` can be assigned a whole struct object, a field of an element is read and assigned with `persons[1].age`, a [for statement](#for-statements) over the array goes through the struct objects, and a range of them can be copied.
 
-## Enumerations
+### Enumerations
 
 An enumeration, or enum, is a type with a fixed set of named members. It is a constant whose value is `enum ->` and below it the names of its members, one on each line, indented one level deeper:
 
