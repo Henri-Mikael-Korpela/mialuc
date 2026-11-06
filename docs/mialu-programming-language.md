@@ -7,16 +7,24 @@
 - [Lines, spaces and indentation](#lines-spaces-and-indentation)
 - [Reserved words](#reserved-words)
 - [Identifiers](#identifiers)
-- [Constants](#constants)
 - [Primitive data types](#primitive-data-types)
-  - [Strings](#strings)
   - [Booleans](#booleans)
-  - [Logical operators](#logical-operators)
+  - [Integers](#integers)
+  - [Strings](#strings)
 - [Operators](#operators)
-- [Variables](#variables)
-- [Assignment](#assignment)
-- [If statements](#if-statements)
-- [For statements](#for-statements)
+  - [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators)
+  - [Comparison operators](#comparison-operators)
+  - [Logical operators](#logical-operators)
+- [Constants and variables](#constants-and-variables)
+  - [Constants](#constants)
+  - [Variables](#variables)
+  - [Global variables](#global-variables)
+- [Control flow structures](#control-flow-structures)
+  - [If statements](#if-statements)
+  - [For statements](#for-statements)
+  - [Loops without a range](#loops-without-a-range)
+  - [Scopes](#scopes)
+  - [Break and continue](#break-and-continue)
 - [Arrays](#arrays)
   - [Array literals](#array-literals)
   - [Elements](#elements)
@@ -35,12 +43,8 @@
 - [Procedures](#procedures)
   - [Calling procedures](#calling-procedures)
   - [Pointers to procedures](#pointers-to-procedures)
-- [Loops without a range](#loops-without-a-range)
-- [Scopes](#scopes)
-- [Break and continue](#break-and-continue)
 - [Scope resolution](#scope-resolution)
 - [Attributes](#attributes)
-- [Global variables](#global-variables)
 - [Foreign procedures](#foreign-procedures)
   - [Foreign procedures in WebAssembly](#foreign-procedures-in-webassembly)
 - [Compilation targets](#compilation-targets)
@@ -152,27 +156,6 @@ yield
 
 Identifiers can contain alphanumeric characters and underscores. Case matters for identifiers in Mialu are case-sensitive. An identifier cannot begin with a digit. A [keyword](#keywords) or a [literal word](#literal-words) cannot be used as an identifier.
 
-## Constants
-
-Constants are immutable values. They can be defined by placing two subsequent colons after an identifier:
-
-```
-CONSTANT_NAME :: value
-```
-
-Constants are commonly used to define procedures:
-
-```
-sum :: proc(a: Int, b: Int) Int ->
-    return a + b
-```
-
-A constant can also be a [struct](#structs), which is a type, and a string, which is written on its own line:
-
-```
-greeting :: "Hello, world"
-```
-
 ## Primitive data types
 
 Every value has a type, which is written as an identifier. Mialu has the following primitive data types:
@@ -180,7 +163,7 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 | Type  | Description                                                  |
 |-------|--------------------------------------------------------------|
 | `Bool` | A boolean value, which is `true` or `false`. See [Booleans](#booleans). |
-| `Int` | A signed 64-bit integer. Written as a decimal number, such as `42`. |
+| `Int` | A signed 64-bit integer. Written as a decimal number, such as `42`. See [Integers](#integers). |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
 
 The following primitive data types are reserved for possible future use:
@@ -192,6 +175,30 @@ The following primitive data types are reserved for possible future use:
 | Floating point number | `F32 F64` |
 | Signed integer | `I8 I16 I32 I64` |
 | Unsigned integer | `U8 U16 U32 U64` |
+
+### Booleans
+
+There's only one boolean value type, `Bool`, which is either `true` or `false`, which are [literal words](#literal-words):
+
+```
+ready : Bool = true
+```
+
+Unlike C, integer types are not implicitly converted into boolean values. A `Bool` is never converted to or from another type. An `Int` is not a condition, so `if n ->` is an error and has to be written `if n not= 0 ->`, and `true` is not `1`: `x : Int = true` and `b : Bool = 1` are errors.
+
+A comparison such as `x > 5` is an expression of type `Bool`, see [Comparison operators](#comparison-operators). The logical operators `and`, `or` and `not` combine `Bool` values, see [Logical operators](#logical-operators).
+
+### Integers
+
+There's one integer type, `Int`, a signed 64-bit integer: it holds the numbers from -9223372036854775808 to 9223372036854775807. An integer literal is a decimal number, such as `42`, and a literal that does not fit in an `Int` is an error. There is no negative literal, so a negative number is written as a subtraction, such as `0 - 4`.
+
+```
+count : Int = 42
+```
+
+The arithmetic operators `+`, `-`, `*` and `/` take two `Int` values and give an `Int`, see [Operators](#operators), and so do the assignment operators `+=`, `-=`, `*=` and `/=`, see [Assignment](#assignment). Addition, subtraction and multiplication wrap around on overflow, so the largest `Int` plus 1 is the smallest. Division truncates toward zero, so `(0 - 7) / 2` is -3. Dividing by zero, or dividing the smallest `Int` by -1, whose result does not fit, is an error at run time, see [WebAssembly](#webassembly).
+
+An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an error, and an operand of arithmetic that is not an `Int` is an error. The integer types `I8`, `I16`, `I32`, `I64` and `U8`, `U16`, `U32`, `U64` are reserved for possible future use, see [Primitive data types](#primitive-data-types).
 
 ### Strings
 
@@ -207,55 +214,6 @@ A string is length-based, not null-terminated. It is its bytes together with the
 
 The compiler rejects a string literal that is not valid UTF-8. A string cannot contain a double quote or a line break, because they would end it, and cannot contain a backslash. There are no escape sequences.
 
-### Booleans
-
-A `Bool` is either `true` or `false`, which are [literal words](#literal-words):
-
-```
-ready : Bool = true
-```
-
-A comparison such as `x > 5` is an expression of type `Bool`, so it can be the value of a variable, a returned value or the condition of an if statement:
-
-```
-is_positive :: proc(n: Int) Bool ->
-    return n > 0
-
-is_even :: proc(n: Int) Bool ->
-    return n / 2 * 2 == n
-```
-
-Unlike C, integer types are not implicitly converted into boolean values. A `Bool` is never converted to or from another type. An `Int` is not a condition, so `if n ->` is an error and has to be written `if n not= 0 ->`, and `true` is not `1`: `x : Int = true` and `b : Bool = 1` are errors.
-
-A `Bool` has no arithmetic. Two `Bool` values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`, but they have no order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Both operands of a comparison must have the same type. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). The logical operators `and`, `or` and `not` combine `Bool` values, see [Logical operators](#logical-operators).
-
-### Logical operators
-
-`and`, `or` and `not` are keywords, and their operands must be `Bool`: an `Int` or a string is an error, because nothing is converted to a `Bool`. The result is a `Bool`.
-
-| Operator | Result |
-|----------|--------|
-| `a and b` | `true` when both `a` and `b` are `true` |
-| `a or b` | `true` when at least one of `a` and `b` is `true` |
-| `not a` | `true` when `a` is `false`, and `false` when `a` is `true` |
-
-```
-in_range :: proc(n: Int, low: Int, high: Int) Bool ->
-    return n >= low and n <= high
-
-out_of_range :: proc(n: Int, low: Int, high: Int) Bool ->
-    return n < low or n > high
-
-can_enter :: proc(age: Int, has_ticket: Bool, is_banned: Bool) Bool ->
-    return age >= 18 and has_ticket and not is_banned
-```
-
-A comparison binds tighter than all three, so `n >= low and n <= high` needs no grouping. `not` binds tighter than `and`, and `and` binds tighter than `or`, so `a or b and c` means `a or (b and c)`, and `a and not b or not a and b` is true when exactly one of `a` and `b` is. `not` binds looser than a comparison, so `not a == b` means `not (a == b)`, and it may be repeated: `not not a` is `a`. `and` and `or` are left associative. There are no parentheses yet, so the precedence is the only way to group.
-
-Both operands of `and` and `or` are always evaluated: there is no short circuit. That makes no difference for a value that is already computed, but in `d not= 0 and n / d > 1` the division still happens, and traps when `d` is zero.
-
-A word must be separated from what is next to it by whitespace, unlike a symbol, so `a and b` cannot be written `aandb`. `not=` is one token for the inequality, and the keyword `not` is a `not` that is not directly followed by `=`.
-
 ## Operators
 
 Mialu supports the following operators. A higher precedence binds tighter:
@@ -265,7 +223,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `or`     | Logical or, see [Logical operators](#logical-operators). | 1 | `a or b` |
 | `and`    | Logical and. | 2 | `a and b` |
 | `not`    | Logical not. It is written before its operand, and may be repeated. | 3 | `not a` |
-| `==`     | Equal to. A comparison, see [Booleans](#booleans). | 4 | `x == 3` |
+| `==`     | Equal to. A comparison, see [Comparison operators](#comparison-operators). | 4 | `x == 3` |
 | `not=`   | Not equal to. A comparison. `not` and `=` are written together, without a space. | 4 | `x not= 3` |
 | `<`      | Less than. A comparison. | 4 | `x < 3` |
 | `<=`     | Less than or equal to. A comparison. | 4 | `x <= 3` |
@@ -297,38 +255,13 @@ The operators of precedence 0 define names or assign to them, and are not part o
 
 See [Variables](#variables) for variable definitions and [Constants](#constants) for constants.
 
-## Variables
+### Assignment and compound assignment operators
 
-A variable is a name for a value that is local to a procedure. It is defined by a name followed by `:=` and its initial value, which is an expression:
+An assignment changes the value of a variable that is defined already. It is a statement that has the name of the variable, an assignment operator and a value, which is an expression.
 
-```
-x := 4
-```
+> **Lessons learnt from C** In C, assignment is an expression. While it can be useful in certain conditions and loops, it has often produced logical errors due to the fact that people have mistyped equality operator `==`, typing in `=` instead. This, combined with implicit conversions in C, leads into situations where an assignment expression ends up having a truthy value more than necessary. In Mialu, this mistake cannot happen because assignment is never an expression.
 
-The type of the variable is deduced from the initial value. It is implicit. `x` above is of type `Int` because literal `4` is.
-
-The type can also be written explicitly, between the `:` and the `=`:
-
-```
-x : Int = 5
-```
-
-When the type is written, the value can be left out. The variable then has the default value of its type, and it can be given another one with an assignment later:
-
-```
-x : Int
-p : Person
-```
-
-The default value is 0 for an `Int`, `false` for a `Bool`, the empty string `""` for a `Str`, an array slice with no elements for an array slice, `nil`, the null pointer, for a [pointer](#null-and-lifetime), and for a [struct](#structs) the default value of each of its fields. An array has no default value, since it is made by an array literal, so `a : [3]Int` is an error.
-
-A variable is defined once, with its initial value, and every variable has one. It can be used in the statements below its definition, but not above it and not in its own initial value. The variables of a procedure are not visible outside of it, so two procedures can have a variable of the same name.
-
-A variable that is defined outside of every procedure is a [global variable](#global-variables).
-
-## Assignment
-
-An assignment changes the value of a variable that is defined already. It is a statement that has the name of the variable, an assignment operator and a value, which is an expression. The plain assignment `=` gives the variable a new value of its type, whatever the type is: `x = 5` for an `Int`, and `p = Person { age = 30 }` for a struct object, which replaces all of its fields. The value must be of the type of the variable, so `x = true` is an error for an `Int`. An array is not assigned to as a whole.
+The plain assignment `=` gives the variable a new value of its type, whatever the type is: `x = 5` for an `Int`, and `p = Person { age = 30 }` for a struct object, which replaces all of its fields. The value must be of the type of the variable, so `x = true` is an error for an `Int`. An array is not assigned to as a whole.
 
 ```
 foo :: proc() Int ->
@@ -349,7 +282,18 @@ swap :: proc() Int ->
     return a * 10 + b
 ```
 
-`swap` returns 73. An assignment can be in a block of an if or a for statement, and the variable that it assigns to can be defined above the block. A variable that is defined with a type and no value, such as `x : Int`, is given its value with `=` as well. The name must stand for a variable, so `n = 2` is an error for a parameter `n`, and so is assigning to a constant or to the iterator of a for statement. The other assignments work on an `Int` only. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was:
+`swap` returns 73. An assignment can be in a block of an if or a for statement, and the variable that it assigns to can be defined above the block. A variable that is defined with a type and no value, such as `x : Int`, is given its value with `=` as well. The name must stand for a variable, so `n = 2` is an error for a parameter `n`, and so is assigning to a constant or to the iterator of a for statement. The other assignments work on an `Int` only. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was.
+
+A compound assignment operator applies an arithmetic operator to the variable and the value, and stores the result in the variable, so `x += 2` means `x = x + 2`. The variable and the value must be `Int`.
+
+| Operator | Meaning |
+|----------|---------|
+| `x += v` | adds `v` to `x` |
+| `x -= v` | subtracts `v` from `x` |
+| `x *= v` | multiplies `x` by `v` |
+| `x /= v` | divides `x` by `v`, truncating toward zero |
+
+`+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 5` leaves `x` 5 more than it was:
 
 ```
 foo :: proc() Int ->
@@ -387,7 +331,135 @@ foo :: proc() Int ->
 
 `foo` returns 5. An element of an array can be assigned to as well, such as `a[0] += 2`, see [Elements](#elements). Dividing by zero is an error at run time, see [WebAssembly](#webassembly). The value is evaluated first, with the value that the variable has before the assignment, so `x += x` doubles `x`, `x += 2 * 3` adds 6, `x -= 1 + 1` subtracts 2, `x *= 1 + 2` multiplies `x` by 3, and `x /= 1 + 1` divides `x` by 2. The name must be a variable of the procedure, defined above the assignment, or a global variable: a parameter or a constant cannot be assigned to. The variable and the value must be an `Int`, because addition, subtraction, multiplication and division are defined for `Int` only.
 
-## If statements
+### Comparison operators
+
+A comparison takes two operands and is an expression of type `Bool`, so it can be the value of a variable, a returned value or the condition of an if statement:
+
+| Operator | Result |
+|----------|--------|
+| `a == b` | `true` when `a` is equal to `b` |
+| `a not= b` | `true` when `a` is not equal to `b`. `not` and `=` are written together, without a space |
+| `a < b` | `true` when `a` is less than `b` |
+| `a <= b` | `true` when `a` is less than or equal to `b` |
+| `a > b` | `true` when `a` is greater than `b` |
+| `a >= b` | `true` when `a` is greater than or equal to `b` |
+
+```
+is_positive :: proc(n: Int) Bool ->
+    return n > 0
+
+is_even :: proc(n: Int) Bool ->
+    return n / 2 * 2 == n
+```
+
+Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. `Int` is the only type that has an order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Strings cannot be compared.
+
+A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, see [Operators](#operators).
+
+### Logical operators
+
+`and`, `or` and `not` are keywords, and their operands must be `Bool`: an `Int` or a string is an error, because nothing is converted to a `Bool`. The result is a `Bool`.
+
+| Operator | Result |
+|----------|--------|
+| `a and b` | `true` when both `a` and `b` are `true` |
+| `a or b` | `true` when at least one of `a` and `b` is `true` |
+| `not a` | `true` when `a` is `false`, and `false` when `a` is `true` |
+
+```
+in_range :: proc(n: Int, low: Int, high: Int) Bool ->
+    return n >= low and n <= high
+
+out_of_range :: proc(n: Int, low: Int, high: Int) Bool ->
+    return n < low or n > high
+
+can_enter :: proc(age: Int, has_ticket: Bool, is_banned: Bool) Bool ->
+    return age >= 18 and has_ticket and not is_banned
+```
+
+A comparison binds tighter than all three, so `n >= low and n <= high` needs no grouping. `not` binds tighter than `and`, and `and` binds tighter than `or`, so `a or b and c` means `a or (b and c)`, and `a and not b or not a and b` is true when exactly one of `a` and `b` is. `not` binds looser than a comparison, so `not a == b` means `not (a == b)`, and it may be repeated: `not not a` is `a`. `and` and `or` are left associative. There are no parentheses yet, so the precedence is the only way to group.
+
+Both operands of `and` and `or` are always evaluated: there is no short circuit. That makes no difference for a value that is already computed, but in `d not= 0 and n / d > 1` the division still happens, and traps when `d` is zero.
+
+A word must be separated from what is next to it by whitespace, unlike a symbol, so `a and b` cannot be written `aandb`. `not=` is one token for the inequality, and the keyword `not` is a `not` that is not directly followed by `=`.
+
+## Constants and variables
+
+### Constants
+
+A constant is an immutable value with a name, and it is visible in the whole module, also above where it is defined. It is defined by placing two subsequent colons after an identifier:
+
+```
+CONSTANT_NAME :: value
+```
+
+Constants are commonly used to define procedures:
+
+```
+sum :: proc(a: Int, b: Int) Int ->
+    return a + b
+```
+
+A constant can also be a [struct](#structs), which is a type, and a string, which is written on its own line:
+
+```
+greeting :: "Hello, world"
+```
+
+### Variables
+
+A variable is a name for a value that is local to a procedure. It is defined by a name followed by `:=` and its initial value, which is an expression:
+
+```
+x := 4
+```
+
+The type of the variable is deduced from the initial value. It is implicit. `x` above is of type `Int` because literal `4` is.
+
+The type can also be written explicitly, between the `:` and the `=`:
+
+```
+x : Int = 5
+```
+
+When the type is written, the value can be left out. The variable then has the default value of its type, and it can be given another one with an assignment later:
+
+```
+x : Int
+p : Person
+```
+
+The default value is 0 for an `Int`, `false` for a `Bool`, the empty string `""` for a `Str`, an array slice with no elements for an array slice, `nil`, the null pointer, for a [pointer](#null-and-lifetime), and for a [struct](#structs) the default value of each of its fields. An array has no default value, since it is made by an array literal, so `a : [3]Int` is an error.
+
+A variable is defined once, with its initial value, and every variable has one. It can be used in the statements below its definition, but not above it and not in its own initial value. The variables of a procedure are not visible outside of it, so two procedures can have a variable of the same name.
+
+A variable that is defined outside of every procedure is a [global variable](#global-variables).
+
+### Global variables
+
+A global variable is a variable that is defined at file scope, outside of every procedure. It is written like a variable, with the attribute `static` before the `:`, and it starts in the first column like a constant:
+
+```
+counter #(static) := 0
+
+next :: proc() Int ->
+    counter += 1
+    return counter
+```
+
+A global variable has static storage duration, which is what the `static` attribute says: it exists for as long as the program runs, and not only for as long as a call of a procedure does. It is initialized once, before any procedure is called, and it keeps the value that the procedures assign to it, so the first call of `next` returns 1, the second returns 2, and so on. Every global variable must have the attribute `static`, because storage of this kind is the only one that global variables can have.
+
+The type of a global variable is deduced from its initial value, or written between the `:` and the `=`, as for any variable:
+
+```
+ready #(static) : Bool = false
+```
+
+The initial value is a literal: a number, `true` or `false`, or a string. It is stored when the program starts, before any code runs, so it cannot be an expression, a name or a call. A global variable can be used and assigned to in every procedure of the module, also in the ones that are written above its definition, because it is in the module scope, see [Scope resolution](#scope-resolution). Like a constant, it has a name of its own in that scope, so it cannot have the name of a constant or of another global variable, and a parameter or a variable of a procedure cannot have its name.
+
+## Control flow structures
+
+### If statements
 
 An if statement runs a block of statements only when a condition holds. It is written like in C, but the condition has no parentheses. The `->` after the condition starts the block, which is the lines that are indented one level deeper than the `if`, so an indented block takes the place of the curly braces:
 
@@ -442,7 +514,7 @@ foo :: proc() Int ->
 
 A block is a scope, see [Scope resolution](#scope-resolution): a variable that is defined in a block can be used in the rest of that block, but not after it.
 
-## For statements
+### For statements
 
 A for statement runs a block of statements once for each number in a range. There is also a [loop without a range](#loops-without-a-range), and a loop can be left early or skipped ahead with [`break` and `continue`](#break-and-continue). After `for` comes the name of the iterator, then the keyword `in`, and then the range. The `->` after the range starts the block, which is indented one level deeper than the `for`, like the block of an `if`:
 
@@ -510,6 +582,174 @@ fill :: proc() Int ->
         a[i] = i * i
     return a[4]
 ```
+
+### Loops without a range
+
+A for statement with no iterator and no range is a loop that has no end of its own. It is written `for ->`, and the block, which is indented one level deeper, runs again and again until a `break` or a `return` leaves it:
+
+```
+count_up_to :: proc(limit: Int) Int ->
+    count := 0
+    for ->
+        if count >= limit ->
+            break
+        count += 1
+    return count
+```
+
+`count_up_to(5)` returns 5. A loop without a way out is not an error, but it never ends, and neither does a program that runs it.
+
+### Scopes
+
+A scope statement is a block of statements that is not the branch of an `if` or the body of a loop. It is written `->` alone on a line, and the block, which is indented one level deeper, runs once, from the first statement to the last:
+
+```
+add_eleven :: proc(x: Int) Int ->
+    total := x
+    ->
+        extra := 10
+        total += extra
+        total += 1
+    return total
+```
+
+A scope statement is a scope like the block of an `if`, see [Scope resolution](#scope-resolution): `extra` is in scope in the rest of the block and not after it, so two scopes one after another can each define a variable of the same name. Its use is to leave it early with a [`break`](#break-and-continue), and to limit where its variables can be used.
+
+A scope can have a label, which is written before the `->`. A label is the character `@` directly followed by a name, with no space in between, such as `@outer`:
+
+```
+find_first :: proc(limit: Int) Int ->
+    found := 0
+    @search ->
+        for i in 1..<=limit ->
+            if i * i > 50 ->
+                found += i
+                break search
+    return found
+```
+
+The name of a label follows the rules of an [identifier](#identifiers), so a keyword or a literal word cannot be one, and `@ outer` with a space is an error. Labels are a kind of name of their own: they cannot be used as variables, and a variable or a procedure with the same name does not clash with them. A statement cannot have the label of a statement that it is inside of, so a label has one meaning wherever it can be used, but statements that are not inside each other can have the same label.
+
+An if statement, a for statement and a [loop without a range](#loops-without-a-range) can have a label as well. It is written before the `if` or the `for` on the same line, with a space after it:
+
+```
+@check if n > 5 ->
+    ...
+else ->
+    ...
+
+@rows for row in 0..<n ->
+    ...
+
+@again for ->
+    ...
+```
+
+The label belongs to the whole statement. For an if statement that is the `if` with all of its `else if` and `else` branches, and only the first line has the label: `@check else ->` is an error. A label does not change what the statement does. It lets a [`break` or a `continue`](#break-and-continue) name it.
+
+### Break and continue
+
+`break` leaves the innermost loop or scope that it is in, and the statement after it runs next. `continue` ends the current pass of the loop and starts the next one: in a loop without a range that is the first statement of the block again, and in a for statement with a range it is the next number of the range, or the end of the loop when there are no more. The iterator is stepped after a `continue` the same way as after a block that runs to its end, so an inclusive range that ends at the largest `Int` also ends. Both are statements of one word on a line of their own:
+
+```
+sum_of_odd_numbers :: proc(n: Int) Int ->
+    total := 0
+    for i in 1..<=n ->
+        if i / 2 * 2 == i ->
+            continue
+        total += i
+    return total
+
+first_multiple :: proc(factor: Int, limit: Int) Int ->
+    found := 0
+    for i in 1..<=limit ->
+        if i / factor * factor == i ->
+            found += i
+            break
+    return found
+```
+
+They work in the loops without a range and in the for statements with a range alike, and they can be in the blocks of if statements that are inside the loop. They belong to the innermost loop only, so a `break` in an inner loop does not leave the outer one. The block of an `if` is not a scope to leave, so a `break` in it leaves the loop or scope around the `if`:
+
+```
+count_pairs :: proc(n: Int) Int ->
+    pairs := 0
+    for row in 0..<n ->
+        for column in 0..<n ->
+            if column > row ->
+                break
+            pairs += 1
+    return pairs
+```
+
+A [scope statement](#scopes) can be left with a `break` as well, and so can a labeled if statement, see below. A `break` without a label leaves the innermost loop or scope, whichever is nearer, so in a scope inside a loop it leaves the scope and the loop goes on. `continue` is only for loops: it goes on with the innermost loop, also when scopes are in between.
+
+```
+break_early :: proc() Int ->
+    x := 1
+    ->
+        if x < 10 ->
+            x += 1
+        else ->
+            break
+        x += 2
+    return x
+```
+
+`break_early()` returns 4. A `break` can name a statement to leave by the name of its label, written after `break` without the `@`. It leaves that scope, loop or if statement, and everything in between, so it can leave several at once:
+
+```
+break_early_with_label :: proc() Int ->
+    x := 1
+    ->
+        @my_block ->
+            if x > 10 ->
+                x += 1
+            else ->
+                break my_block
+            x += 2
+        x += 5
+    return x
+```
+
+`break_early_with_label()` returns 6: `break my_block` leaves the labeled scope, and `x += 5` runs next. A `break` writes the label without the `@`, which is for the line that declares it only, and `break @my_block` is an error. The label must be one of a statement that the `break` is inside of.
+
+A `break` with a label can leave a [labeled if statement](#scopes) from any of its branches, also from a loop inside it, and then the statement after the if statement runs next. A `break` without a label passes an if statement, labeled or not, and leaves the loop or scope around it, because the block of an `if` is not a scope:
+
+```
+classify :: proc(n: Int) Int ->
+    x := 0
+    @check if n > 5 ->
+        x += 1
+        if n > 10 ->
+            break check
+        x += 10
+    else if n > 2 ->
+        x += 100
+    else ->
+        x += 1000
+    x += 10000
+    return x
+```
+
+`classify(11)` returns 10001, because `break check` skips `x += 10` and the other branches, and `classify(7)` returns 10011.
+
+A labeled loop is left with `break` and its label from anywhere inside it, also from an inner loop. `continue` and the label of a loop goes on with the next pass of that loop, ending the inner loops on the way, which is what a plain `continue` cannot do from an inner loop:
+
+```
+count_triangle :: proc(n: Int) Int ->
+    total := 0
+    @rows for row in 0..<n ->
+        for column in 0..<n ->
+            if column > row ->
+                continue rows
+            total += 1
+    return total
+```
+
+`count_triangle(3)` returns 6. The label of a `continue` must be the one of a for statement or a loop without a range that it is inside of. A scope or an if statement cannot be continued, so `continue` with the label of one is an error.
+
+A `break` that is not inside a loop or a scope, and a `continue` that is not inside a loop, are errors, and so is one in a procedure that has no loop, even if the procedure is only called from a loop. A `break` or a `continue` with a label that no statement around it has is an error as well. They are not expressions, so they have no value and nothing can follow them on the line, except a label. The statements that come after them in the same block are never run.
 
 ## Arrays
 
@@ -1000,174 +1240,6 @@ A few things cannot be done with a pointer to a procedure, which a later version
 - Only the name of a variable, a parameter or a global variable is called, and not an element, a field or the result of following a pointer, which are stored in a variable first.
 
 
-## Loops without a range
-
-A for statement with no iterator and no range is a loop that has no end of its own. It is written `for ->`, and the block, which is indented one level deeper, runs again and again until a `break` or a `return` leaves it:
-
-```
-count_up_to :: proc(limit: Int) Int ->
-    count := 0
-    for ->
-        if count >= limit ->
-            break
-        count += 1
-    return count
-```
-
-`count_up_to(5)` returns 5. A loop without a way out is not an error, but it never ends, and neither does a program that runs it.
-
-## Scopes
-
-A scope statement is a block of statements that is not the branch of an `if` or the body of a loop. It is written `->` alone on a line, and the block, which is indented one level deeper, runs once, from the first statement to the last:
-
-```
-add_eleven :: proc(x: Int) Int ->
-    total := x
-    ->
-        extra := 10
-        total += extra
-        total += 1
-    return total
-```
-
-A scope statement is a scope like the block of an `if`, see [Scope resolution](#scope-resolution): `extra` is in scope in the rest of the block and not after it, so two scopes one after another can each define a variable of the same name. Its use is to leave it early with a [`break`](#break-and-continue), and to limit where its variables can be used.
-
-A scope can have a label, which is written before the `->`. A label is the character `@` directly followed by a name, with no space in between, such as `@outer`:
-
-```
-find_first :: proc(limit: Int) Int ->
-    found := 0
-    @search ->
-        for i in 1..<=limit ->
-            if i * i > 50 ->
-                found += i
-                break search
-    return found
-```
-
-The name of a label follows the rules of an [identifier](#identifiers), so a keyword or a literal word cannot be one, and `@ outer` with a space is an error. Labels are a kind of name of their own: they cannot be used as variables, and a variable or a procedure with the same name does not clash with them. A statement cannot have the label of a statement that it is inside of, so a label has one meaning wherever it can be used, but statements that are not inside each other can have the same label.
-
-An if statement, a for statement and a [loop without a range](#loops-without-a-range) can have a label as well. It is written before the `if` or the `for` on the same line, with a space after it:
-
-```
-@check if n > 5 ->
-    ...
-else ->
-    ...
-
-@rows for row in 0..<n ->
-    ...
-
-@again for ->
-    ...
-```
-
-The label belongs to the whole statement. For an if statement that is the `if` with all of its `else if` and `else` branches, and only the first line has the label: `@check else ->` is an error. A label does not change what the statement does. It lets a [`break` or a `continue`](#break-and-continue) name it.
-
-## Break and continue
-
-`break` leaves the innermost loop or scope that it is in, and the statement after it runs next. `continue` ends the current pass of the loop and starts the next one: in a loop without a range that is the first statement of the block again, and in a for statement with a range it is the next number of the range, or the end of the loop when there are no more. The iterator is stepped after a `continue` the same way as after a block that runs to its end, so an inclusive range that ends at the largest `Int` also ends. Both are statements of one word on a line of their own:
-
-```
-sum_of_odd_numbers :: proc(n: Int) Int ->
-    total := 0
-    for i in 1..<=n ->
-        if i / 2 * 2 == i ->
-            continue
-        total += i
-    return total
-
-first_multiple :: proc(factor: Int, limit: Int) Int ->
-    found := 0
-    for i in 1..<=limit ->
-        if i / factor * factor == i ->
-            found += i
-            break
-    return found
-```
-
-They work in the loops without a range and in the for statements with a range alike, and they can be in the blocks of if statements that are inside the loop. They belong to the innermost loop only, so a `break` in an inner loop does not leave the outer one. The block of an `if` is not a scope to leave, so a `break` in it leaves the loop or scope around the `if`:
-
-```
-count_pairs :: proc(n: Int) Int ->
-    pairs := 0
-    for row in 0..<n ->
-        for column in 0..<n ->
-            if column > row ->
-                break
-            pairs += 1
-    return pairs
-```
-
-A [scope statement](#scopes) can be left with a `break` as well, and so can a labeled if statement, see below. A `break` without a label leaves the innermost loop or scope, whichever is nearer, so in a scope inside a loop it leaves the scope and the loop goes on. `continue` is only for loops: it goes on with the innermost loop, also when scopes are in between.
-
-```
-break_early :: proc() Int ->
-    x := 1
-    ->
-        if x < 10 ->
-            x += 1
-        else ->
-            break
-        x += 2
-    return x
-```
-
-`break_early()` returns 4. A `break` can name a statement to leave by the name of its label, written after `break` without the `@`. It leaves that scope, loop or if statement, and everything in between, so it can leave several at once:
-
-```
-break_early_with_label :: proc() Int ->
-    x := 1
-    ->
-        @my_block ->
-            if x > 10 ->
-                x += 1
-            else ->
-                break my_block
-            x += 2
-        x += 5
-    return x
-```
-
-`break_early_with_label()` returns 6: `break my_block` leaves the labeled scope, and `x += 5` runs next. A `break` writes the label without the `@`, which is for the line that declares it only, and `break @my_block` is an error. The label must be one of a statement that the `break` is inside of.
-
-A `break` with a label can leave a [labeled if statement](#scopes) from any of its branches, also from a loop inside it, and then the statement after the if statement runs next. A `break` without a label passes an if statement, labeled or not, and leaves the loop or scope around it, because the block of an `if` is not a scope:
-
-```
-classify :: proc(n: Int) Int ->
-    x := 0
-    @check if n > 5 ->
-        x += 1
-        if n > 10 ->
-            break check
-        x += 10
-    else if n > 2 ->
-        x += 100
-    else ->
-        x += 1000
-    x += 10000
-    return x
-```
-
-`classify(11)` returns 10001, because `break check` skips `x += 10` and the other branches, and `classify(7)` returns 10011.
-
-A labeled loop is left with `break` and its label from anywhere inside it, also from an inner loop. `continue` and the label of a loop goes on with the next pass of that loop, ending the inner loops on the way, which is what a plain `continue` cannot do from an inner loop:
-
-```
-count_triangle :: proc(n: Int) Int ->
-    total := 0
-    @rows for row in 0..<n ->
-        for column in 0..<n ->
-            if column > row ->
-                continue rows
-            total += 1
-    return total
-```
-
-`count_triangle(3)` returns 6. The label of a `continue` must be the one of a for statement or a loop without a range that it is inside of. A scope or an if statement cannot be continued, so `continue` with the label of one is an error.
-
-A `break` that is not inside a loop or a scope, and a `continue` that is not inside a loop, are errors, and so is one in a procedure that has no loop, even if the procedure is only called from a loop. A `break` or a `continue` with a label that no statement around it has is an error as well. They are not expressions, so they have no value and nothing can follow them on the line, except a label. The statements that come after them in the same block are never run.
-
 ## Scope resolution
 
 Every name that is used refers to something that is declared, and the compiler finds out what before the program is built for a target. This is called scope resolution. There are two scopes:
@@ -1216,28 +1288,6 @@ counter #(static) := 0
 A list can have more than one attribute, which are written one after the other, such as `#(first)(second)`, and the `#` is written once. The list is not an expression and it has no value. Spaces may be written between its tokens, but the convention is to write no space inside it and one space before the `#`, as above. A list has at least one attribute, so `#()` is an error, and so is a name that is not between parentheses, such as `#static`.
 
 The attributes are built into the language. The only one that Mialu has so far is `static`, which is an attribute of a variable, see [Global variables](#global-variables). Any other attribute is an error, and so is an attribute that is given twice in the same list. Attributes are accepted on the definition of a global variable only. A constant and a variable of a procedure take none yet, so they are errors there.
-
-## Global variables
-
-A global variable is a variable that is defined at file scope, outside of every procedure. It is written like a variable, with the attribute `static` before the `:`, and it starts in the first column like a constant:
-
-```
-counter #(static) := 0
-
-next :: proc() Int ->
-    counter += 1
-    return counter
-```
-
-A global variable has static storage duration, which is what the `static` attribute says: it exists for as long as the program runs, and not only for as long as a call of a procedure does. It is initialized once, before any procedure is called, and it keeps the value that the procedures assign to it, so the first call of `next` returns 1, the second returns 2, and so on. Every global variable must have the attribute `static`, because storage of this kind is the only one that global variables can have.
-
-The type of a global variable is deduced from its initial value, or written between the `:` and the `=`, as for any variable:
-
-```
-ready #(static) : Bool = false
-```
-
-The initial value is a literal: a number, `true` or `false`, or a string. It is stored when the program starts, before any code runs, so it cannot be an expression, a name or a call. A global variable can be used and assigned to in every procedure of the module, also in the ones that are written above its definition, because it is in the module scope, see [Scope resolution](#scope-resolution). Like a constant, it has a name of its own in that scope, so it cannot have the name of a constant or of another global variable, and a parameter or a variable of a procedure cannot have its name.
 
 ## Foreign procedures
 
@@ -1293,7 +1343,7 @@ The compiler has two modes: `run` prints the tokens and the syntax tree of a pro
 
 The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool` and `Str` are the basic types that the target supports, and then the structs, the pointers to any of them, and the arrays and array slices of any of them.
 
-`Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`, and addition, subtraction and multiplication wrap around on overflow. Division truncates toward zero, so `(0 - 7) / 2` is -3. It traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
+`Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`. The arithmetic is the one of [Integers](#integers), with the signed `i64` instructions. Division traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
 
 `Bool` is a 32-bit integer (`i32`), which is 0 for `false` and 1 for `true`, as a comparison in WebAssembly leaves it. So JavaScript passes a `Bool` as `true`, `false`, 0 or 1, and receives it as the number 0 or 1, which `Boolean(...)` turns into a boolean. Comparisons of `Int` values are signed `i64` instructions, and comparisons of `Bool` values with `==` and `not=` are `i32.eq` and `i32.ne`. `and`, `or` and `not` are `i32.and`, `i32.or` and `i32.eqz`, which are correct because a `Bool` is always 0 or 1.
 
