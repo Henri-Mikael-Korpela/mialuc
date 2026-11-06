@@ -21,6 +21,10 @@ to the grammar only need another reload. To remove the link:
 powershell -File scripts/install_vscode_extension.ps1 -Uninstall
 ```
 
+## Colors
+
+Themes give most of the operator scopes (`keyword.operator.*`) the color of plain text, so the operators would look as if they had no highlighting. `package.json` gives every operator scope of Mialu, and the arrow and the dot of a field access, a color of their own (`#56b6c2`, a teal) with `configurationDefaults`, next to the orange of the literal words. That covers `+`, `-`, `*`, `/`, `+=`, `-=`, `*=`, `/=`, `==`, `not=`, `<`, `<=`, `>`, `>=`, `..<`, `..<=`, `->`, `:`, `::`, `:=`, `=`, `%`, `^`, `.`, `...` and the word operators `and`, `or` and `not`. A new operator scope in the grammar has to be added to that list as well. The colors are defaults that a user can override in `editor.tokenColorCustomizations` in their settings. The colors of the parentheses, brackets and braces do not come from here: VS Code colors them itself, by how deeply they are nested, when bracket pair colorization is on.
+
 ## Reserved words
 
 The reserved words are listed in `syntaxes/mialu.tmLanguage.json`. They must be the same as the

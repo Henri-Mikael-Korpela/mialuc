@@ -42,6 +42,25 @@
                         "settings": {
                             "foreground": "#d19a66"
                         }
+                    },
+                    {
+                        "scope": [
+                            "keyword.operator.address.mialu",
+                            "keyword.operator.arithmetic.mialu",
+                            "keyword.operator.assignment.compound.mialu",
+                            "keyword.operator.assignment.mialu",
+                            "keyword.operator.comparison.mialu",
+                            "keyword.operator.ellipsis.mialu",
+                            "keyword.operator.pointer.mialu",
+                            "keyword.operator.range.mialu",
+                            "keyword.operator.type.mialu",
+                            "keyword.operator.word.mialu",
+                            "punctuation.accessor.dot.mialu",
+                            "punctuation.separator.arrow.mialu"
+                        ],
+                        "settings": {
+                            "foreground": "#56b6c2"
+                        }
                     }
                 ]
             }
