@@ -2,7 +2,7 @@
 // a sequence of tokens.
 //
 // The tokenizer is designed to be simple and efficient, with a focus on ASCII characters and
-// a limited set of token types. Character classes are ASCII only and spelled out instead of
+// a limited set of token kinds. Character classes are ASCII only and spelled out instead of
 // using `<ctype.h>`, whose results // depend on the locale, so that behavior does not change
 // between machines.
 #include <assert.h>
@@ -22,9 +22,9 @@ static bool   char_is_lower     (char character);
 static bool   char_is_upper     (char character);
 static bool   char_is_whitespace(char character);
 static size_t utf8_sequence_size(Str text, size_t offset);
-static Token_Type tokenizer_keyword_type(Str text);
-static bool   tokenizer_operator_types(char character, Token_Type *plain_type,
-                                       Token_Type *equals_type);
+static Token_Kind tokenizer_keyword_type(Str text);
+static bool   tokenizer_operator_types(char character, Token_Kind *plain_type,
+                                       Token_Kind *equals_type);
 
 /**
  * Returns the number of bytes of the UTF-8 encoded character that starts at `offset` in `text`,
@@ -120,32 +120,32 @@ static bool char_is_whitespace(char character) {
  * Returns whether `character` is an operator that is also a token with an `=` after it, and sets
  * `*plain_type` to the token of the character alone and `*equals_type` to the token with the `=`.
  */
-static bool tokenizer_operator_types(char character, Token_Type *plain_type,
-                                     Token_Type *equals_type) {
+static bool tokenizer_operator_types(char character, Token_Kind *plain_type,
+                                     Token_Kind *equals_type) {
     switch (character) {
     case '=':
-        *plain_type = TOKEN_TYPE_EQUALS;
-        *equals_type = TOKEN_TYPE_EQUALS_EQUALS;
+        *plain_type = TOKEN_KIND_EQUALS;
+        *equals_type = TOKEN_KIND_EQUALS_EQUALS;
         return true;
     case '>':
-        *plain_type = TOKEN_TYPE_GREATER;
-        *equals_type = TOKEN_TYPE_GREATER_EQUALS;
+        *plain_type = TOKEN_KIND_GREATER;
+        *equals_type = TOKEN_KIND_GREATER_EQUALS;
         return true;
     case '<':
-        *plain_type = TOKEN_TYPE_LESS;
-        *equals_type = TOKEN_TYPE_LESS_EQUALS;
+        *plain_type = TOKEN_KIND_LESS;
+        *equals_type = TOKEN_KIND_LESS_EQUALS;
         return true;
     case '*':
-        *plain_type = TOKEN_TYPE_ASTERISK;
-        *equals_type = TOKEN_TYPE_ASTERISK_EQUALS;
+        *plain_type = TOKEN_KIND_ASTERISK;
+        *equals_type = TOKEN_KIND_ASTERISK_EQUALS;
         return true;
     case '+':
-        *plain_type = TOKEN_TYPE_PLUS;
-        *equals_type = TOKEN_TYPE_PLUS_EQUALS;
+        *plain_type = TOKEN_KIND_PLUS;
+        *equals_type = TOKEN_KIND_PLUS_EQUALS;
         return true;
     case '/':
-        *plain_type = TOKEN_TYPE_SLASH;
-        *equals_type = TOKEN_TYPE_SLASH_EQUALS;
+        *plain_type = TOKEN_KIND_SLASH;
+        *equals_type = TOKEN_KIND_SLASH_EQUALS;
         return true;
     default:
         return false;
@@ -153,52 +153,52 @@ static bool tokenizer_operator_types(char character, Token_Type *plain_type,
 }
 
 /**
- * Returns the keyword token type of `text`, or `TOKEN_TYPE_IDENTIFIER` when it is not a reserved
+ * Returns the keyword token kind of `text`, or `TOKEN_KIND_IDENTIFIER` when it is not a reserved
  * word. `not` followed by `=` must be handled before, because that is the token `not=`.
  */
-static Token_Type tokenizer_keyword_type(Str text) {
+static Token_Kind tokenizer_keyword_type(Str text) {
     if (str_equals(text, STR("proc"))) {
-        return TOKEN_TYPE_KEYWORD_PROC;
+        return TOKEN_KIND_KEYWORD_PROC;
     } else if (str_equals(text, STR("break"))) {
-        return TOKEN_TYPE_KEYWORD_BREAK;
+        return TOKEN_KIND_KEYWORD_BREAK;
     } else if (str_equals(text, STR("const"))) {
-        return TOKEN_TYPE_KEYWORD_CONST;
+        return TOKEN_KIND_KEYWORD_CONST;
     } else if (str_equals(text, STR("continue"))) {
-        return TOKEN_TYPE_KEYWORD_CONTINUE;
+        return TOKEN_KIND_KEYWORD_CONTINUE;
     } else if (str_equals(text, STR("for"))) {
-        return TOKEN_TYPE_KEYWORD_FOR;
+        return TOKEN_KIND_KEYWORD_FOR;
     } else if (str_equals(text, STR("foreign"))) {
-        return TOKEN_TYPE_KEYWORD_FOREIGN;
+        return TOKEN_KIND_KEYWORD_FOREIGN;
     } else if (str_equals(text, STR("import"))) {
-        return TOKEN_TYPE_KEYWORD_IMPORT;
+        return TOKEN_KIND_KEYWORD_IMPORT;
     } else if (str_equals(text, STR("in"))) {
-        return TOKEN_TYPE_KEYWORD_IN;
+        return TOKEN_KIND_KEYWORD_IN;
     } else if (str_equals(text, STR("if"))) {
-        return TOKEN_TYPE_KEYWORD_IF;
+        return TOKEN_KIND_KEYWORD_IF;
     } else if (str_equals(text, STR("else"))) {
-        return TOKEN_TYPE_KEYWORD_ELSE;
+        return TOKEN_KIND_KEYWORD_ELSE;
     } else if (str_equals(text, STR("enum"))) {
-        return TOKEN_TYPE_KEYWORD_ENUM;
+        return TOKEN_KIND_KEYWORD_ENUM;
     } else if (str_equals(text, STR("return"))) {
-        return TOKEN_TYPE_KEYWORD_RETURN;
+        return TOKEN_KIND_KEYWORD_RETURN;
     } else if (str_equals(text, STR("struct"))) {
-        return TOKEN_TYPE_KEYWORD_STRUCT;
+        return TOKEN_KIND_KEYWORD_STRUCT;
     } else if (str_equals(text, STR("true"))) {
-        return TOKEN_TYPE_KEYWORD_TRUE;
+        return TOKEN_KIND_KEYWORD_TRUE;
     } else if (str_equals(text, STR("type_info_of"))) {
-        return TOKEN_TYPE_KEYWORD_TYPE_INFO_OF;
+        return TOKEN_KIND_KEYWORD_TYPE_INFO_OF;
     } else if (str_equals(text, STR("false"))) {
-        return TOKEN_TYPE_KEYWORD_FALSE;
+        return TOKEN_KIND_KEYWORD_FALSE;
     } else if (str_equals(text, STR("nil"))) {
-        return TOKEN_TYPE_KEYWORD_NIL;
+        return TOKEN_KIND_KEYWORD_NIL;
     } else if (str_equals(text, STR("not"))) {
-        return TOKEN_TYPE_KEYWORD_NOT;
+        return TOKEN_KIND_KEYWORD_NOT;
     } else if (str_equals(text, STR("and"))) {
-        return TOKEN_TYPE_KEYWORD_AND;
+        return TOKEN_KIND_KEYWORD_AND;
     } else if (str_equals(text, STR("or"))) {
-        return TOKEN_TYPE_KEYWORD_OR;
+        return TOKEN_KIND_KEYWORD_OR;
     }
-    return TOKEN_TYPE_IDENTIFIER;
+    return TOKEN_KIND_IDENTIFIER;
 }
 
 Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
@@ -223,8 +223,8 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
     // which happens once per line. So the loop ends after at most twice `source.length` steps.
     size_t offset = 0;
     bool is_line_start = true;
-    Token_Type plain_type = TOKEN_TYPE_END;
-    Token_Type equals_type = TOKEN_TYPE_END;
+    Token_Kind plain_type = TOKEN_KIND_END;
+    Token_Kind equals_type = TOKEN_KIND_END;
     while (offset < source.length) {
         char character = source.bytes[offset];
 
@@ -267,7 +267,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                 // Every non-blank line gets an indentation token, even at level zero, because
                 // there is no separate end-of-line token to tell where a line starts.
                 token_elements[result.tokens.length] = (Token){
-                    .token_type = TOKEN_TYPE_INDENTATION,
+                    .token_kind = TOKEN_KIND_INDENTATION,
                     .source_offset = (uint32_t)offset,
                     .payload.indentation.level =
                         (uint32_t)(space_count / INDENTATION_SPACES_PER_LEVEL),
@@ -331,7 +331,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             assert(source.bytes[end] == '"');
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_STRING_LITERAL,
+                .token_kind = TOKEN_KIND_STRING_LITERAL,
                 .source_offset = (uint32_t)offset,
                 .payload.string_literal.text = str_make(source.bytes + offset + 1,
                                                         end - offset - 1),
@@ -374,7 +374,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             }
 
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_INTEGER_LITERAL,
+                .token_kind = TOKEN_KIND_INTEGER_LITERAL,
                 .source_offset = (uint32_t)offset,
                 .payload.integer_literal.value = value,
             };
@@ -407,7 +407,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             // such as `cannot` is not affected, and `not =` with a space is a name and an `=`.
             if (str_equals(text, STR("not")) && end < source.length && source.bytes[end] == '=') {
                 token_elements[result.tokens.length] = (Token){
-                    .token_type = TOKEN_TYPE_NOT_EQUALS,
+                    .token_kind = TOKEN_KIND_NOT_EQUALS,
                     .source_offset = (uint32_t)offset,
                 };
                 result.tokens.length += 1;
@@ -417,10 +417,10 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             // Keywords are scanned like identifiers and told apart afterwards, so that a longer
             // identifier such as `returned` is not split into a keyword and a remainder.
-            Token_Type token_type = tokenizer_keyword_type(text);
+            Token_Kind token_kind = tokenizer_keyword_type(text);
 
             token_elements[result.tokens.length] = (Token){
-                .token_type = token_type,
+                .token_kind = token_kind,
                 .source_offset = (uint32_t)offset,
                 .payload.identifier.text = text,
             };
@@ -445,14 +445,14 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             }
 
             Str name = str_make(source.bytes + offset + 1, end - offset - 1);
-            if (tokenizer_keyword_type(name) != TOKEN_TYPE_IDENTIFIER) {
+            if (tokenizer_keyword_type(name) != TOKEN_KIND_IDENTIFIER) {
                 result.status = TOKENIZE_STATUS_LABEL_INVALID;
                 result.error_offset = offset;
                 return result;
             }
 
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_LABEL,
+                .token_kind = TOKEN_KIND_LABEL,
                 .source_offset = (uint32_t)offset,
                 .payload.identifier.text = name,
             };
@@ -463,23 +463,23 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         // which is one token: `=` and `==`, `<` and `<=`, `>` and `>=`, `*` and `*=`, `+` and `+=`,
         // `/` and `/=`.
         else if (tokenizer_operator_types(character, &plain_type, &equals_type)) {
-            Token_Type token_type = plain_type;
+            Token_Kind token_kind = plain_type;
             size_t size_bytes = 1;
             if (offset + 1 < source.length && source.bytes[offset + 1] == '=') {
-                token_type = equals_type;
+                token_kind = equals_type;
                 size_bytes = 2;
             }
 
             token_elements[result.tokens.length] = (Token){
-                .token_type = token_type,
+                .token_kind = token_kind,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
             offset += size_bytes;
         }
-        else if (character == (char)TOKEN_TYPE_HASH) {
+        else if (character == (char)TOKEN_KIND_HASH) {
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_HASH,
+                .token_kind = TOKEN_KIND_HASH,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -487,46 +487,46 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         }
         // The brackets, the braces, the caret and the percent sign are single tokens that mean the
         // same everywhere: `^` and `%` are never the start of a longer token.
-        else if (character == (char)TOKEN_TYPE_BRACE_LEFT ||
-                 character == (char)TOKEN_TYPE_BRACE_RIGHT ||
-                 character == (char)TOKEN_TYPE_BRACKET_LEFT ||
-                 character == (char)TOKEN_TYPE_BRACKET_RIGHT ||
-                 character == (char)TOKEN_TYPE_CARET ||
-                 character == (char)TOKEN_TYPE_PERCENT) {
+        else if (character == (char)TOKEN_KIND_BRACE_LEFT ||
+                 character == (char)TOKEN_KIND_BRACE_RIGHT ||
+                 character == (char)TOKEN_KIND_BRACKET_LEFT ||
+                 character == (char)TOKEN_KIND_BRACKET_RIGHT ||
+                 character == (char)TOKEN_KIND_CARET ||
+                 character == (char)TOKEN_KIND_PERCENT) {
             token_elements[result.tokens.length] = (Token){
-                .token_type = (Token_Type)character,
+                .token_kind = (Token_Kind)character,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
             offset += 1;
         }
-        else if (character == (char)TOKEN_TYPE_COMMA) {
+        else if (character == (char)TOKEN_KIND_COMMA) {
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_COMMA,
+                .token_kind = TOKEN_KIND_COMMA,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
             offset += 1;
         }
-        else if (character == (char)TOKEN_TYPE_PARENTHESIS_LEFT) {
+        else if (character == (char)TOKEN_KIND_PARENTHESIS_LEFT) {
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_PARENTHESIS_LEFT,
+                .token_kind = TOKEN_KIND_PARENTHESIS_LEFT,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
             offset += 1;
         }
-        else if (character == (char)TOKEN_TYPE_PARENTHESIS_RIGHT) {
+        else if (character == (char)TOKEN_KIND_PARENTHESIS_RIGHT) {
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_PARENTHESIS_RIGHT,
+                .token_kind = TOKEN_KIND_PARENTHESIS_RIGHT,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
             offset += 1;
         }
-        else if (character == (char)TOKEN_TYPE_TYPE_SEPARATOR) {
+        else if (character == (char)TOKEN_KIND_TYPE_SEPARATOR) {
             token_elements[result.tokens.length] = (Token){
-                .token_type = TOKEN_TYPE_TYPE_SEPARATOR,
+                .token_kind = TOKEN_KIND_TYPE_SEPARATOR,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -534,19 +534,19 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         }
         // A `-` is the minus operator, unless the two subsequent characters form a `->` or a `-=`
         // token, which are recognized as single tokens.
-        else if (character == (char)TOKEN_TYPE_MINUS) {
-            Token_Type token_type = TOKEN_TYPE_MINUS;
+        else if (character == (char)TOKEN_KIND_MINUS) {
+            Token_Kind token_kind = TOKEN_KIND_MINUS;
             size_t size_bytes = 1;
             if (offset + 1 < source.length && source.bytes[offset + 1] == '>') {
-                token_type = TOKEN_TYPE_ARROW;
+                token_kind = TOKEN_KIND_ARROW;
                 size_bytes = 2;
             } else if (offset + 1 < source.length && source.bytes[offset + 1] == '=') {
-                token_type = TOKEN_TYPE_MINUS_EQUALS;
+                token_kind = TOKEN_KIND_MINUS_EQUALS;
                 size_bytes = 2;
             }
 
             token_elements[result.tokens.length] = (Token){
-                .token_type = token_type,
+                .token_kind = token_kind,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -559,7 +559,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             if (offset + 2 < source.length && source.bytes[offset + 1] == '.' &&
                 source.bytes[offset + 2] == '.') {
                 token_elements[result.tokens.length] = (Token){
-                    .token_type = TOKEN_TYPE_ELLIPSIS,
+                    .token_kind = TOKEN_KIND_ELLIPSIS,
                     .source_offset = (uint32_t)offset,
                 };
                 result.tokens.length += 1;
@@ -571,7 +571,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                             source.bytes[offset + 2] == '<';
             if (is_range == false) {
                 token_elements[result.tokens.length] = (Token){
-                    .token_type = TOKEN_TYPE_DOT,
+                    .token_kind = TOKEN_KIND_DOT,
                     .source_offset = (uint32_t)offset,
                 };
                 result.tokens.length += 1;
@@ -579,15 +579,15 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                 continue;
             }
 
-            Token_Type token_type = TOKEN_TYPE_RANGE_EXCLUSIVE;
+            Token_Kind token_kind = TOKEN_KIND_RANGE_EXCLUSIVE;
             size_t size_bytes = 3;
             if (offset + 3 < source.length && source.bytes[offset + 3] == '=') {
-                token_type = TOKEN_TYPE_RANGE_INCLUSIVE;
+                token_kind = TOKEN_KIND_RANGE_INCLUSIVE;
                 size_bytes = 4;
             }
 
             token_elements[result.tokens.length] = (Token){
-                .token_type = token_type,
+                .token_kind = token_kind,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -606,7 +606,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
     // to look at the token that follows the last real one.
     assert(result.tokens.length <= token_count_max);
     token_elements[result.tokens.length] = (Token){
-        .token_type = TOKEN_TYPE_END,
+        .token_kind = TOKEN_KIND_END,
         .source_offset = (uint32_t)source.length,
     };
     result.tokens.length += 1;

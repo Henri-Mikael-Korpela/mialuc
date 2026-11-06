@@ -99,7 +99,7 @@ static Ast_Node_Index parse_term                (Parser *parser);
 static Ast_Node_Index parse_type_info_of        (Parser *parser);
 static void           parse_token_advance       (Parser *parser);
 static Token const *  parse_token_current       (Parser const *parser);
-static bool           parse_token_expect        (Parser *parser, Token_Type token_type,
+static bool           parse_token_expect        (Parser *parser, Token_Kind token_kind,
                                                  Str expected);
 static Ast_Node_Index parse_type                (Parser *parser, Str expected);
 static Ast_Node_Index parse_type_name           (Parser *parser, Str expected,
@@ -113,7 +113,7 @@ Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
     assert(tokens.length >= 1);
 
     Token const *token_elements = tokens.elements;
-    assert(token_elements[tokens.length - 1].token_type == TOKEN_TYPE_END);
+    assert(token_elements[tokens.length - 1].token_kind == TOKEN_KIND_END);
 
     Parser parser = {
         .tokens = token_elements,
@@ -155,15 +155,15 @@ static Ast_Node_Index parse_module(Parser *parser) {
     // Every definition consumes at least its indentation token, and the last token, `END`, is
     // never consumed. So there are fewer definitions than tokens, which bounds the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->token_type == TOKEN_TYPE_END) {
+        if (parse_token_current(parser)->token_kind == TOKEN_KIND_END) {
             break;
         }
 
         // A `foreign` block declares several procedures at once, so it appends them itself. The
         // token after the indentation tells it from any other definition.
-        if (parse_token_current(parser)->token_type == TOKEN_TYPE_INDENTATION &&
+        if (parse_token_current(parser)->token_kind == TOKEN_KIND_INDENTATION &&
             parser->token_index + 1 < parser->token_count &&
-            parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_KEYWORD_FOREIGN) {
+            parser->tokens[parser->token_index + 1].token_kind == TOKEN_KIND_KEYWORD_FOREIGN) {
             if (parse_foreign_block(parser, module) == false) {
                 return AST_NODE_INDEX_NONE;
             }
@@ -177,7 +177,7 @@ static Ast_Node_Index parse_module(Parser *parser) {
         parse_node_append_child(parser, module, definition);
     }
 
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_END);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_END);
     if (parser->has_type_info && parse_reflection_types_append(parser, module) == false) {
         return AST_NODE_INDEX_NONE;
     }
@@ -242,7 +242,7 @@ static Ast_Node_Index parse_definition(Parser *parser) {
 
     // Expect definitions to be at the top level.
     Token const *indentation = parse_token_current(parser);
-    if (indentation->token_type != TOKEN_TYPE_INDENTATION) {
+    if (indentation->token_kind != TOKEN_KIND_INDENTATION) {
         return parse_fail(parser, STR("the start of a line"));
     }
     if (indentation->payload.indentation.level != INDENTATION_LEVEL_TOP) {
@@ -251,13 +251,13 @@ static Ast_Node_Index parse_definition(Parser *parser) {
     parse_token_advance(parser);
 
     // `import foreign js "name"` is not a definition: it has no name of its own.
-    if (parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_IMPORT) {
+    if (parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_IMPORT) {
         return parse_foreign_import(parser);
     }
 
     // Expect a definition to start with an identifier.
     Token const *name = parse_token_current(parser);
-    if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+    if (name->token_kind != TOKEN_KIND_IDENTIFIER) {
         return parse_fail(parser, STR("a name"));
     }
 
@@ -266,10 +266,10 @@ static Ast_Node_Index parse_definition(Parser *parser) {
     // `END`, which is neither, so a name at the end of the file is not a constant, and the global
     // variable it starts reports what it expected.
     bool is_constant = parser->token_index + 2 < parser->token_count &&
-                       parser->tokens[parser->token_index + 1].token_type ==
-                           TOKEN_TYPE_TYPE_SEPARATOR &&
-                       parser->tokens[parser->token_index + 2].token_type ==
-                           TOKEN_TYPE_TYPE_SEPARATOR;
+                       parser->tokens[parser->token_index + 1].token_kind ==
+                           TOKEN_KIND_TYPE_SEPARATOR &&
+                       parser->tokens[parser->token_index + 2].token_kind ==
+                           TOKEN_KIND_TYPE_SEPARATOR;
     if (is_constant == false) {
         return parse_global_variable_definition(parser);
     }
@@ -282,25 +282,25 @@ static Ast_Node_Index parse_definition(Parser *parser) {
     parse_token_advance(parser);
 
     // `::` is two separator tokens, one after the other.
-    if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("'::'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("'::'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
     // The value is a string, a struct, an enum, the member of an enum, or a procedure, which is
     // what any other token here starts.
     Ast_Node_Index value = AST_NODE_INDEX_NONE;
-    if (parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_STRUCT) {
+    if (parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_STRUCT) {
         // Like a procedure, a struct ends with its body.
         value = parse_struct_type(parser, INDENTATION_LEVEL_TOP);
-    } else if (parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_ENUM) {
+    } else if (parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_ENUM) {
         // An enum ends with its members.
         value = parse_enum_type(parser, INDENTATION_LEVEL_TOP);
-    } else if (parse_token_current(parser)->token_type == TOKEN_TYPE_IDENTIFIER) {
+    } else if (parse_token_current(parser)->token_kind == TOKEN_KIND_IDENTIFIER) {
         value = parse_enum_member_value(parser);
-    } else if (parse_token_current(parser)->token_type == TOKEN_TYPE_STRING_LITERAL) {
+    } else if (parse_token_current(parser)->token_kind == TOKEN_KIND_STRING_LITERAL) {
         value = parse_string_literal(parser);
         // A procedure ends with its body, but a string is one line, so its end is checked here.
         if (value != AST_NODE_INDEX_NONE && parse_line_end_expect(parser) == false) {
@@ -326,7 +326,7 @@ static Ast_Node_Index parse_definition(Parser *parser) {
  */
 static Ast_Node_Index parse_enum_type(Parser *parser, uint32_t indentation_level) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_ENUM);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_ENUM);
     assert(indentation_level < UINT32_MAX);
 
     parse_token_advance(parser);
@@ -336,12 +336,12 @@ static Ast_Node_Index parse_enum_type(Parser *parser, uint32_t indentation_level
     }
     // The type of the numbers is always written, so that it is not a surprise what they are.
     Token const *value_type = parse_token_current(parser);
-    if (value_type->token_type != TOKEN_TYPE_IDENTIFIER) {
+    if (value_type->token_kind != TOKEN_KIND_IDENTIFIER) {
         return parse_fail(parser, STR("the type of the members after 'enum', such as 'Int'"));
     }
     parser->nodes[root].payload.enum_type.value_type = value_type->payload.identifier.text;
     parse_token_advance(parser);
-    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false ||
+    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false ||
         parse_line_end_expect(parser) == false) {
         return AST_NODE_INDEX_NONE;
     }
@@ -350,7 +350,7 @@ static Ast_Node_Index parse_enum_type(Parser *parser, uint32_t indentation_level
     // tokens, which bounds the loop. It stops at the first line that is not a member.
     for (size_t i = 0; i < parser->token_count; i += 1) {
         Token const *line_start = parse_token_current(parser);
-        if (line_start->token_type != TOKEN_TYPE_INDENTATION ||
+        if (line_start->token_kind != TOKEN_KIND_INDENTATION ||
             line_start->payload.indentation.level <= INDENTATION_LEVEL_TOP) {
             break;
         }
@@ -360,7 +360,7 @@ static Ast_Node_Index parse_enum_type(Parser *parser, uint32_t indentation_level
         parse_token_advance(parser);
 
         Token const *member_name = parse_token_current(parser);
-        if (member_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        if (member_name->token_kind != TOKEN_KIND_IDENTIFIER) {
             return parse_fail(parser, STR("a member name"));
         }
         Ast_Node_Index member = parse_node_make(parser, AST_NODE_TYPE_ENUM_MEMBER);
@@ -394,11 +394,11 @@ static Ast_Node_Index parse_enum_member_value(Parser *parser) {
     if (enum_name == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_token_expect(parser, TOKEN_TYPE_DOT, STR("'.' and the member of an enum")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_DOT, STR("'.' and the member of an enum")) == false) {
         return AST_NODE_INDEX_NONE;
     }
     Token const *member_name = parse_token_current(parser);
-    if (member_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+    if (member_name->token_kind != TOKEN_KIND_IDENTIFIER) {
         return parse_fail(parser, STR("the name of a member"));
     }
     Ast_Node_Index access = parse_node_make(parser, AST_NODE_TYPE_FIELD_ACCESS);
@@ -422,7 +422,7 @@ static Ast_Node_Index parse_enum_member_value(Parser *parser) {
  */
 static Ast_Node_Index parse_foreign_import(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_IMPORT);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_IMPORT);
 
     Ast_Node_Index import = parse_node_make(parser, AST_NODE_TYPE_FOREIGN_IMPORT);
     if (import == AST_NODE_INDEX_NONE) {
@@ -430,7 +430,7 @@ static Ast_Node_Index parse_foreign_import(Parser *parser) {
     }
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_KEYWORD_FOREIGN, STR("'foreign'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_FOREIGN, STR("'foreign'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
     if (parse_foreign_target_expect(parser) == false) {
@@ -438,7 +438,7 @@ static Ast_Node_Index parse_foreign_import(Parser *parser) {
     }
 
     Token const *module_name = parse_token_current(parser);
-    if (module_name->token_type != TOKEN_TYPE_STRING_LITERAL) {
+    if (module_name->token_kind != TOKEN_KIND_STRING_LITERAL) {
         return parse_fail(parser, STR("the name of the object to import from, in quotes"));
     }
     parser->nodes[import].payload.foreign_import.module_name =
@@ -461,7 +461,7 @@ static bool parse_foreign_target_expect(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
 
     Token const *target = parse_token_current(parser);
-    if (target->token_type != TOKEN_TYPE_IDENTIFIER ||
+    if (target->token_kind != TOKEN_KIND_IDENTIFIER ||
         str_equals(target->payload.identifier.text, STR("js")) == false) {
         // The false return value reports the failure, so the node index is not needed.
         (void)parse_fail(parser, STR("'js', the only foreign target"));
@@ -480,7 +480,7 @@ static bool parse_foreign_target_expect(Parser *parser) {
  */
 static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_INDENTATION);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_INDENTATION);
 
     if (parse_token_current(parser)->payload.indentation.level != INDENTATION_LEVEL_TOP) {
         // The false return value reports the failure, so the node index is not needed.
@@ -489,12 +489,12 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
     }
     parse_token_advance(parser);
 
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_FOREIGN);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_FOREIGN);
     parse_token_advance(parser);
     if (parse_foreign_target_expect(parser) == false) {
         return false;
     }
-    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false) {
         return false;
     }
     if (parse_line_end_expect(parser) == false) {
@@ -506,7 +506,7 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
     size_t procedure_count = 0;
     for (size_t i = 0; i < parser->token_count; i += 1) {
         Token const *line_start = parse_token_current(parser);
-        if (line_start->token_type != TOKEN_TYPE_INDENTATION) {
+        if (line_start->token_kind != TOKEN_KIND_INDENTATION) {
             break;
         }
         if (line_start->payload.indentation.level == INDENTATION_LEVEL_TOP) {
@@ -520,7 +520,7 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
         parse_token_advance(parser);
 
         Token const *name = parse_token_current(parser);
-        if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        if (name->token_kind != TOKEN_KIND_IDENTIFIER) {
             // The false return value reports the failure, so the node index is not needed.
             (void)parse_fail(parser, STR("the name of a foreign procedure"));
             return false;
@@ -533,10 +533,10 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
         parse_token_advance(parser);
 
         // `::` is two separator tokens, one after the other.
-        if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("'::'")) == false) {
+        if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'")) == false) {
             return false;
         }
-        if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("'::'")) == false) {
+        if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'")) == false) {
             return false;
         }
 
@@ -565,7 +565,7 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
  */
 static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_IDENTIFIER);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_IDENTIFIER);
 
     Token const *name = parse_token_current(parser);
     Ast_Node_Index definition = parse_node_make(parser, AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION);
@@ -575,43 +575,43 @@ static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
     parser->nodes[definition].payload.global_variable_definition.name = name->payload.identifier.text;
     parse_token_advance(parser);
 
-    if (parse_token_current(parser)->token_type == TOKEN_TYPE_HASH) {
+    if (parse_token_current(parser)->token_kind == TOKEN_KIND_HASH) {
         if (parse_attributes(parser, definition) == false) {
             return AST_NODE_INDEX_NONE;
         }
     }
 
-    if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("':' or '#'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':' or '#'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
     // `:=` has no type, which is then deduced from the value. Otherwise the type comes before `=`.
-    if (parse_token_current(parser)->token_type != TOKEN_TYPE_EQUALS) {
+    if (parse_token_current(parser)->token_kind != TOKEN_KIND_EQUALS) {
         Ast_Node_Index type = parse_type(parser, STR("a type name or '='"));
         if (type == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
         parse_node_append_child(parser, definition, type);
     }
-    if (parse_token_expect(parser, TOKEN_TYPE_EQUALS, STR("'='")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_EQUALS, STR("'='")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
     // The value is stored once, before any code runs, so it is a literal and not an expression.
     // Information about a type is known when the program is compiled, so it is allowed as well.
     Ast_Node_Index value = AST_NODE_INDEX_NONE;
-    switch (parse_token_current(parser)->token_type) {
-    case TOKEN_TYPE_INTEGER_LITERAL:
+    switch (parse_token_current(parser)->token_kind) {
+    case TOKEN_KIND_INTEGER_LITERAL:
         value = parse_integer_literal(parser);
         break;
-    case TOKEN_TYPE_KEYWORD_FALSE:
-    case TOKEN_TYPE_KEYWORD_TRUE:
+    case TOKEN_KIND_KEYWORD_FALSE:
+    case TOKEN_KIND_KEYWORD_TRUE:
         value = parse_bool_literal(parser);
         break;
-    case TOKEN_TYPE_STRING_LITERAL:
+    case TOKEN_KIND_STRING_LITERAL:
         value = parse_string_literal(parser);
         break;
-    case TOKEN_TYPE_KEYWORD_TYPE_INFO_OF:
+    case TOKEN_KIND_KEYWORD_TYPE_INFO_OF:
         value = parse_type_info_of(parser);
         break;
     default:
@@ -637,19 +637,19 @@ static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
  */
 static bool parse_attributes(Parser *parser, Ast_Node_Index definition) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_HASH);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_HASH);
 
     parse_token_advance(parser);
 
     // Every attribute consumes three tokens, so there are fewer attributes than tokens, which
     // bounds the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_LEFT, STR("'(' after '#'")) == false) {
+        if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'(' after '#'")) == false) {
             return false;
         }
 
         Token const *name = parse_token_current(parser);
-        if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        if (name->token_kind != TOKEN_KIND_IDENTIFIER) {
             // The false return value reports the failure, so the node index is not needed.
             (void)parse_fail(parser, STR("an attribute name"));
             return false;
@@ -662,10 +662,10 @@ static bool parse_attributes(Parser *parser, Ast_Node_Index definition) {
         parse_token_advance(parser);
         parse_node_append_child(parser, definition, attribute);
 
-        if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_RIGHT, STR("')'")) == false) {
+        if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'")) == false) {
             return false;
         }
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_PARENTHESIS_LEFT) {
+        if (parse_token_current(parser)->token_kind != TOKEN_KIND_PARENTHESIS_LEFT) {
             break;
         }
     }
@@ -683,7 +683,7 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
     assert(indentation_level < UINT32_MAX);
     assert(parser->status == PARSE_STATUS_OK);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_KEYWORD_PROC, STR("'proc'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_PROC, STR("'proc'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -692,13 +692,13 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
         return AST_NODE_INDEX_NONE;
     }
 
-    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_LEFT, STR("'('")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('")) == false) {
         return AST_NODE_INDEX_NONE;
     }
     if (parse_procedure_parameters(parser, procedure) == false) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_RIGHT, STR("')'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -706,7 +706,7 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
         return AST_NODE_INDEX_NONE;
     }
 
-    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
     if (is_foreign) {
@@ -714,7 +714,7 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
         if (body == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
-        if (parse_token_expect(parser, TOKEN_TYPE_ELLIPSIS, STR("'...'")) == false) {
+        if (parse_token_expect(parser, TOKEN_KIND_ELLIPSIS, STR("'...'")) == false) {
             return AST_NODE_INDEX_NONE;
         }
         parse_node_append_child(parser, procedure, body);
@@ -745,22 +745,22 @@ static bool parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure
            parser->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE_TYPE);
 
     Token const *first = parse_token_current(parser);
-    if (first->token_type != TOKEN_TYPE_IDENTIFIER && first->token_type != TOKEN_TYPE_CARET) {
+    if (first->token_kind != TOKEN_KIND_IDENTIFIER && first->token_kind != TOKEN_KIND_CARET) {
         return true;
     }
 
     // Every caret consumes a token, so there are fewer carets than tokens, which bounds the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_CARET) {
+        if (parse_token_current(parser)->token_kind != TOKEN_KIND_CARET) {
             break;
         }
         parse_token_advance(parser);
     }
 
     Token const *name = parse_token_current(parser);
-    if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+    if (name->token_kind != TOKEN_KIND_IDENTIFIER) {
         // The false return value reports the failure, so the node index is not needed.
-        if (name->token_type == TOKEN_TYPE_KEYWORD_PROC) {
+        if (name->token_kind == TOKEN_KIND_KEYWORD_PROC) {
             (void)parse_fail(parser, STR("the name of the return type after '^', because a "
                                          "procedure does not return a pointer to a procedure"));
             return false;
@@ -790,7 +790,7 @@ static bool parse_procedure_parameters(Parser *parser, Ast_Node_Index procedure)
     assert(procedure < parser->node_count);
     assert(parser->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
 
-    if (parse_token_current(parser)->token_type == TOKEN_TYPE_PARENTHESIS_RIGHT) {
+    if (parse_token_current(parser)->token_kind == TOKEN_KIND_PARENTHESIS_RIGHT) {
         return true;
     }
 
@@ -803,7 +803,7 @@ static bool parse_procedure_parameters(Parser *parser, Ast_Node_Index procedure)
         }
         parse_node_append_child(parser, procedure, parameter);
 
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
+        if (parse_token_current(parser)->token_kind != TOKEN_KIND_COMMA) {
             break;
         }
         parse_token_advance(parser);
@@ -838,7 +838,7 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
     size_t statement_count = 0;
     for (size_t i = 0; i < parser->token_count; i += 1) {
         Token const *line_start = parse_token_current(parser);
-        if (line_start->token_type != TOKEN_TYPE_INDENTATION) {
+        if (line_start->token_kind != TOKEN_KIND_INDENTATION) {
             break;
         }
 
@@ -868,16 +868,16 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
         parse_token_advance(parser);
 
         Ast_Node_Index parent = blocks[block_count - 1].node;
-        Token_Type next = parse_token_current(parser)->token_type;
-        if (next == TOKEN_TYPE_KEYWORD_IF || next == TOKEN_TYPE_KEYWORD_ELSE ||
-            next == TOKEN_TYPE_KEYWORD_FOR || next == TOKEN_TYPE_ARROW ||
-            next == TOKEN_TYPE_LABEL) {
+        Token_Kind next = parse_token_current(parser)->token_kind;
+        if (next == TOKEN_KIND_KEYWORD_IF || next == TOKEN_KIND_KEYWORD_ELSE ||
+            next == TOKEN_KIND_KEYWORD_FOR || next == TOKEN_KIND_ARROW ||
+            next == TOKEN_KIND_LABEL) {
             Ast_Node_Index block = AST_NODE_INDEX_NONE;
-            if (next == TOKEN_TYPE_ARROW || next == TOKEN_TYPE_LABEL) {
+            if (next == TOKEN_KIND_ARROW || next == TOKEN_KIND_LABEL) {
                 block = parse_scope_statement(parser, parent);
-            } else if (next == TOKEN_TYPE_KEYWORD_IF) {
+            } else if (next == TOKEN_KIND_KEYWORD_IF) {
                 block = parse_if_statement(parser, parent);
-            } else if (next == TOKEN_TYPE_KEYWORD_FOR) {
+            } else if (next == TOKEN_KIND_KEYWORD_FOR) {
                 block = parse_for_statement(parser, parent);
             } else {
                 block = parse_else_branch(parser, parent);
@@ -943,7 +943,7 @@ static Ast_Node_Index parse_block_open(Parser *parser, Ast_Node_Index statement)
     assert(parser->status == PARSE_STATUS_OK);
     assert(statement < parser->node_count);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
     if (parse_line_end_expect(parser) == false) {
@@ -966,7 +966,7 @@ static Ast_Node_Index parse_block_open(Parser *parser, Ast_Node_Index statement)
  */
 static Ast_Node_Index parse_if_statement(Parser *parser, Ast_Node_Index parent) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_IF);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_IF);
 
     parse_token_advance(parser);
 
@@ -989,12 +989,12 @@ static Ast_Node_Index parse_if_statement(Parser *parser, Ast_Node_Index parent) 
  */
 static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_FOR);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_FOR);
 
     parse_token_advance(parser);
 
     // `for ->` has no iterator and no range: the block runs until it is left.
-    if (parse_token_current(parser)->token_type == TOKEN_TYPE_ARROW) {
+    if (parse_token_current(parser)->token_kind == TOKEN_KIND_ARROW) {
         Ast_Node_Index loop = parse_node_make(parser, AST_NODE_TYPE_LOOP_STATEMENT);
         if (loop == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
@@ -1004,7 +1004,7 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
     }
 
     Token const *iterator = parse_token_current(parser);
-    if (iterator->token_type != TOKEN_TYPE_IDENTIFIER) {
+    if (iterator->token_kind != TOKEN_KIND_IDENTIFIER) {
         return parse_fail(parser, STR("the name of the iterator"));
     }
 
@@ -1016,7 +1016,7 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
     parse_node_append_child(parser, parent, statement);
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_KEYWORD_IN, STR("'in'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_IN, STR("'in'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1042,12 +1042,12 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
     }
     parse_node_append_child(parser, range, first);
 
-    Token_Type range_operator = parse_token_current(parser)->token_type;
-    if (range_operator != TOKEN_TYPE_RANGE_EXCLUSIVE &&
-        range_operator != TOKEN_TYPE_RANGE_INCLUSIVE) {
+    Token_Kind range_operator = parse_token_current(parser)->token_kind;
+    if (range_operator != TOKEN_KIND_RANGE_EXCLUSIVE &&
+        range_operator != TOKEN_KIND_RANGE_INCLUSIVE) {
         return parse_fail(parser, STR("'..<' or '..<='"));
     }
-    parser->nodes[range].payload.range.is_inclusive = range_operator == TOKEN_TYPE_RANGE_INCLUSIVE;
+    parser->nodes[range].payload.range.is_inclusive = range_operator == TOKEN_KIND_RANGE_INCLUSIVE;
     parse_token_advance(parser);
 
     Ast_Node_Index end = parse_expression(parser);
@@ -1070,12 +1070,12 @@ static bool parse_for_statement_has_range(Parser const *parser) {
 
     // The last token is `END`, which ends the line as well, so the loop stops at it.
     for (size_t i = parser->token_index; i < parser->token_count; i += 1) {
-        Token_Type token_type = parser->tokens[i].token_type;
-        if (token_type == TOKEN_TYPE_RANGE_EXCLUSIVE || token_type == TOKEN_TYPE_RANGE_INCLUSIVE) {
+        Token_Kind token_kind = parser->tokens[i].token_kind;
+        if (token_kind == TOKEN_KIND_RANGE_EXCLUSIVE || token_kind == TOKEN_KIND_RANGE_INCLUSIVE) {
             return true;
         }
-        if (token_type == TOKEN_TYPE_ARROW || token_type == TOKEN_TYPE_INDENTATION ||
-            token_type == TOKEN_TYPE_END) {
+        if (token_kind == TOKEN_KIND_ARROW || token_kind == TOKEN_KIND_INDENTATION ||
+            token_kind == TOKEN_KIND_END) {
             return false;
         }
     }
@@ -1096,13 +1096,13 @@ static Ast_Node_Index parse_scope_statement(Parser *parser, Ast_Node_Index paren
     assert(parser->status == PARSE_STATUS_OK);
 
     Token const *label = parse_token_current(parser);
-    assert(label->token_type == TOKEN_TYPE_ARROW || label->token_type == TOKEN_TYPE_LABEL);
+    assert(label->token_kind == TOKEN_KIND_ARROW || label->token_kind == TOKEN_KIND_LABEL);
 
-    if (label->token_type == TOKEN_TYPE_LABEL) {
+    if (label->token_kind == TOKEN_KIND_LABEL) {
         // The label is not the last token, because the last one is `END`.
         assert(parser->token_index + 1 < parser->token_count);
-        Token_Type after_label = parser->tokens[parser->token_index + 1].token_type;
-        if (after_label == TOKEN_TYPE_KEYWORD_IF || after_label == TOKEN_TYPE_KEYWORD_FOR) {
+        Token_Kind after_label = parser->tokens[parser->token_index + 1].token_kind;
+        if (after_label == TOKEN_KIND_KEYWORD_IF || after_label == TOKEN_KIND_KEYWORD_FOR) {
             Ast_Node_Index labeled = parse_node_make(parser, AST_NODE_TYPE_LABELED_STATEMENT);
             if (labeled == AST_NODE_INDEX_NONE) {
                 return AST_NODE_INDEX_NONE;
@@ -1110,7 +1110,7 @@ static Ast_Node_Index parse_scope_statement(Parser *parser, Ast_Node_Index paren
             parser->nodes[labeled].payload.label.name = label->payload.identifier.text;
             parse_node_append_child(parser, parent, labeled);
             parse_token_advance(parser);
-            if (after_label == TOKEN_TYPE_KEYWORD_IF) {
+            if (after_label == TOKEN_KIND_KEYWORD_IF) {
                 return parse_if_statement(parser, labeled);
             }
             return parse_for_statement(parser, labeled);
@@ -1123,7 +1123,7 @@ static Ast_Node_Index parse_scope_statement(Parser *parser, Ast_Node_Index paren
     }
     parse_node_append_child(parser, parent, statement);
 
-    if (label->token_type == TOKEN_TYPE_LABEL) {
+    if (label->token_kind == TOKEN_KIND_LABEL) {
         Ast_Node_Index label_node = parse_node_make(parser, AST_NODE_TYPE_LABEL);
         if (label_node == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
@@ -1146,11 +1146,11 @@ static Ast_Node_Index parse_jump_statement(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
 
     Token const *keyword = parse_token_current(parser);
-    assert(keyword->token_type == TOKEN_TYPE_KEYWORD_BREAK ||
-           keyword->token_type == TOKEN_TYPE_KEYWORD_CONTINUE);
+    assert(keyword->token_kind == TOKEN_KIND_KEYWORD_BREAK ||
+           keyword->token_kind == TOKEN_KIND_KEYWORD_CONTINUE);
 
     Ast_Node_Type node_type = AST_NODE_TYPE_BREAK_STATEMENT;
-    if (keyword->token_type == TOKEN_TYPE_KEYWORD_CONTINUE) {
+    if (keyword->token_kind == TOKEN_KIND_KEYWORD_CONTINUE) {
         node_type = AST_NODE_TYPE_CONTINUE_STATEMENT;
     }
     Ast_Node_Index jump = parse_node_make(parser, node_type);
@@ -1161,7 +1161,7 @@ static Ast_Node_Index parse_jump_statement(Parser *parser) {
     parse_token_advance(parser);
 
     Token const *name = parse_token_current(parser);
-    if (name->token_type == TOKEN_TYPE_IDENTIFIER) {
+    if (name->token_kind == TOKEN_KIND_IDENTIFIER) {
         Ast_Node_Index label = parse_node_make(parser, AST_NODE_TYPE_LABEL);
         if (label == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
@@ -1169,7 +1169,7 @@ static Ast_Node_Index parse_jump_statement(Parser *parser) {
         parser->nodes[label].payload.label.name = name->payload.identifier.text;
         parse_node_append_child(parser, jump, label);
         parse_token_advance(parser);
-    } else if (name->token_type == TOKEN_TYPE_LABEL) {
+    } else if (name->token_kind == TOKEN_KIND_LABEL) {
         // The prefix is only for declaring a label.
         return parse_fail(parser, STR("the name of a label without '@'"));
     }
@@ -1187,7 +1187,7 @@ static Ast_Node_Index parse_jump_statement(Parser *parser) {
  */
 static Ast_Node_Index parse_else_branch(Parser *parser, Ast_Node_Index parent) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_ELSE);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_ELSE);
 
     Ast_Node_Index statement = parser->nodes[parent].last_child;
     // An if statement with a label is inside a labeled statement.
@@ -1203,7 +1203,7 @@ static Ast_Node_Index parse_else_branch(Parser *parser, Ast_Node_Index parent) {
     }
     parse_token_advance(parser);
 
-    if (parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_IF) {
+    if (parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_IF) {
         parse_token_advance(parser);
         return parse_branch(parser, statement);
     }
@@ -1257,7 +1257,7 @@ static Ast_Node_Index parse_disjunction(Parser *parser) {
     // Every operator consumes a token, so there are fewer operators than tokens, which bounds
     // the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_KEYWORD_OR) {
+        if (parse_token_current(parser)->token_kind != TOKEN_KIND_KEYWORD_OR) {
             break;
         }
         parse_token_advance(parser);
@@ -1294,7 +1294,7 @@ static Ast_Node_Index parse_conjunction(Parser *parser) {
     // Every operator consumes a token, so there are fewer operators than tokens, which bounds
     // the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_KEYWORD_AND) {
+        if (parse_token_current(parser)->token_kind != TOKEN_KIND_KEYWORD_AND) {
             break;
         }
         parse_token_advance(parser);
@@ -1328,7 +1328,7 @@ static Ast_Node_Index parse_negation(Parser *parser) {
     size_t negation_count = 0;
     // Every `not` consumes a token, so there are fewer of them than tokens, which bounds the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_KEYWORD_NOT) {
+        if (parse_token_current(parser)->token_kind != TOKEN_KIND_KEYWORD_NOT) {
             break;
         }
         parse_token_advance(parser);
@@ -1368,18 +1368,18 @@ static Ast_Node_Index parse_comparison(Parser *parser) {
     }
 
     Ast_Comparison_Operator operator = AST_COMPARISON_OPERATOR_EQUAL;
-    Token_Type operator_token = parse_token_current(parser)->token_type;
-    if (operator_token == TOKEN_TYPE_GREATER) {
+    Token_Kind operator_token = parse_token_current(parser)->token_kind;
+    if (operator_token == TOKEN_KIND_GREATER) {
         operator = AST_COMPARISON_OPERATOR_GREATER;
-    } else if (operator_token == TOKEN_TYPE_GREATER_EQUALS) {
+    } else if (operator_token == TOKEN_KIND_GREATER_EQUALS) {
         operator = AST_COMPARISON_OPERATOR_GREATER_EQUAL;
-    } else if (operator_token == TOKEN_TYPE_LESS) {
+    } else if (operator_token == TOKEN_KIND_LESS) {
         operator = AST_COMPARISON_OPERATOR_LESS;
-    } else if (operator_token == TOKEN_TYPE_LESS_EQUALS) {
+    } else if (operator_token == TOKEN_KIND_LESS_EQUALS) {
         operator = AST_COMPARISON_OPERATOR_LESS_EQUAL;
-    } else if (operator_token == TOKEN_TYPE_NOT_EQUALS) {
+    } else if (operator_token == TOKEN_KIND_NOT_EQUALS) {
         operator = AST_COMPARISON_OPERATOR_NOT_EQUAL;
-    } else if (operator_token != TOKEN_TYPE_EQUALS_EQUALS) {
+    } else if (operator_token != TOKEN_KIND_EQUALS_EQUALS) {
         // Not a comparison, so the expression is the sum alone.
         return left;
     }
@@ -1410,7 +1410,7 @@ static Ast_Node_Index parse_parameter(Parser *parser) {
     assert(parser->token_index < parser->token_count);
 
     Token const *name = parse_token_current(parser);
-    if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+    if (name->token_kind != TOKEN_KIND_IDENTIFIER) {
         return parse_fail(parser, STR("a parameter name"));
     }
 
@@ -1421,7 +1421,7 @@ static Ast_Node_Index parse_parameter(Parser *parser) {
     parser->nodes[parameter].payload.parameter.name = name->payload.identifier.text;
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("':'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1443,21 +1443,21 @@ static Ast_Node_Index parse_statement(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
-    Token_Type next = parse_token_current(parser)->token_type;
-    if (next == TOKEN_TYPE_KEYWORD_RETURN) {
+    Token_Kind next = parse_token_current(parser)->token_kind;
+    if (next == TOKEN_KIND_KEYWORD_RETURN) {
         return parse_return_statement(parser);
     }
-    if (next == TOKEN_TYPE_KEYWORD_BREAK || next == TOKEN_TYPE_KEYWORD_CONTINUE) {
+    if (next == TOKEN_KIND_KEYWORD_BREAK || next == TOKEN_KIND_KEYWORD_CONTINUE) {
         return parse_jump_statement(parser);
     }
-    if (next == TOKEN_TYPE_IDENTIFIER) {
+    if (next == TOKEN_KIND_IDENTIFIER) {
         // The name is not the last token, because the last one is `END`.
         assert(parser->token_index + 1 < parser->token_count);
-        Token_Type after_name = parser->tokens[parser->token_index + 1].token_type;
-        if (after_name == TOKEN_TYPE_TYPE_SEPARATOR) {
+        Token_Kind after_name = parser->tokens[parser->token_index + 1].token_kind;
+        if (after_name == TOKEN_KIND_TYPE_SEPARATOR) {
             return parse_variable_definition(parser);
         }
-        if (after_name == TOKEN_TYPE_PARENTHESIS_LEFT) {
+        if (after_name == TOKEN_KIND_PARENTHESIS_LEFT) {
             return parse_call_statement(parser);
         }
         return parse_assignment(parser);
@@ -1497,17 +1497,17 @@ static Ast_Node_Index parse_assignment(Parser *parser) {
     parse_node_append_child(parser, assignment, target);
 
     // The error for anything else is at the token after the target.
-    Token_Type operator = parse_token_current(parser)->token_type;
+    Token_Kind operator = parse_token_current(parser)->token_kind;
     Ast_Node_Type node_type = AST_NODE_TYPE_ADDITION_ASSIGNMENT;
-    if (operator == TOKEN_TYPE_SLASH_EQUALS) {
+    if (operator == TOKEN_KIND_SLASH_EQUALS) {
         node_type = AST_NODE_TYPE_DIVISION_ASSIGNMENT;
-    } else if (operator == TOKEN_TYPE_ASTERISK_EQUALS) {
+    } else if (operator == TOKEN_KIND_ASTERISK_EQUALS) {
         node_type = AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT;
-    } else if (operator == TOKEN_TYPE_MINUS_EQUALS) {
+    } else if (operator == TOKEN_KIND_MINUS_EQUALS) {
         node_type = AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT;
-    } else if (operator == TOKEN_TYPE_EQUALS) {
+    } else if (operator == TOKEN_KIND_EQUALS) {
         node_type = AST_NODE_TYPE_ASSIGNMENT;
-    } else if (operator != TOKEN_TYPE_PLUS_EQUALS) {
+    } else if (operator != TOKEN_KIND_PLUS_EQUALS) {
         return parse_fail(parser, STR("':' or an assignment operator"));
     }
     parser->nodes[assignment].node_type = node_type;
@@ -1537,7 +1537,7 @@ static Ast_Node_Index parse_variable_definition(Parser *parser) {
     assert(parser->token_index < parser->token_count);
 
     Token const *name = parse_token_current(parser);
-    if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+    if (name->token_kind != TOKEN_KIND_IDENTIFIER) {
         return parse_fail(parser, STR("a variable name"));
     }
 
@@ -1548,13 +1548,13 @@ static Ast_Node_Index parse_variable_definition(Parser *parser) {
     parser->nodes[definition].payload.variable_definition.name = name->payload.identifier.text;
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("':'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
     // `:=` has no type, which is then deduced from the value. Otherwise the type comes before `=`.
     bool has_type = false;
-    if (parse_token_current(parser)->token_type != TOKEN_TYPE_EQUALS) {
+    if (parse_token_current(parser)->token_kind != TOKEN_KIND_EQUALS) {
         Ast_Node_Index type = parse_type(parser, STR("a type name or '='"));
         if (type == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
@@ -1565,15 +1565,15 @@ static Ast_Node_Index parse_variable_definition(Parser *parser) {
 
     // A variable with a type can leave its value out, as in `p : Person`. It then gets the default
     // value of its type, so the type is the only child.
-    Token_Type after_type = parse_token_current(parser)->token_type;
-    if (has_type && (after_type == TOKEN_TYPE_INDENTATION || after_type == TOKEN_TYPE_END)) {
+    Token_Kind after_type = parse_token_current(parser)->token_kind;
+    if (has_type && (after_type == TOKEN_KIND_INDENTATION || after_type == TOKEN_KIND_END)) {
         return definition;
     }
     Str expected = STR("'='");
     if (has_type) {
         expected = STR("'=' or the end of the line");
     }
-    if (parse_token_expect(parser, TOKEN_TYPE_EQUALS, expected) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_EQUALS, expected) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1595,7 +1595,7 @@ static Ast_Node_Index parse_return_statement(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_KEYWORD_RETURN, STR("'return'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_RETURN, STR("'return'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1626,8 +1626,8 @@ static bool parse_line_end_expect(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
-    Token_Type next = parse_token_current(parser)->token_type;
-    bool is_line_end = next == TOKEN_TYPE_INDENTATION || next == TOKEN_TYPE_END;
+    Token_Kind next = parse_token_current(parser)->token_kind;
+    bool is_line_end = next == TOKEN_KIND_INDENTATION || next == TOKEN_KIND_END;
     if (is_line_end == false) {
         // The false return value reports the failure, so the node index is not needed.
         (void)parse_fail(parser, STR("the end of the line"));
@@ -1656,8 +1656,8 @@ static Ast_Node_Index parse_sum(Parser *parser) {
     // Every operator consumes a token, so there are fewer operators than tokens, which bounds
     // the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        Token_Type operator = parse_token_current(parser)->token_type;
-        if (operator != TOKEN_TYPE_PLUS && operator != TOKEN_TYPE_MINUS) {
+        Token_Kind operator = parse_token_current(parser)->token_kind;
+        if (operator != TOKEN_KIND_PLUS && operator != TOKEN_KIND_MINUS) {
             break;
         }
         parse_token_advance(parser);
@@ -1668,7 +1668,7 @@ static Ast_Node_Index parse_sum(Parser *parser) {
         }
 
         Ast_Node_Type node_type = AST_NODE_TYPE_ADDITION;
-        if (operator == TOKEN_TYPE_MINUS) {
+        if (operator == TOKEN_KIND_MINUS) {
             node_type = AST_NODE_TYPE_SUBTRACTION;
         }
         Ast_Node_Index arithmetic = parse_node_make(parser, node_type);
@@ -1699,8 +1699,8 @@ static Ast_Node_Index parse_term(Parser *parser) {
     // Every operator consumes a token, so there are fewer operators than tokens, which bounds
     // the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        Token_Type operator = parse_token_current(parser)->token_type;
-        if (operator != TOKEN_TYPE_ASTERISK && operator != TOKEN_TYPE_SLASH) {
+        Token_Kind operator = parse_token_current(parser)->token_kind;
+        if (operator != TOKEN_KIND_ASTERISK && operator != TOKEN_KIND_SLASH) {
             break;
         }
         parse_token_advance(parser);
@@ -1711,7 +1711,7 @@ static Ast_Node_Index parse_term(Parser *parser) {
         }
 
         Ast_Node_Type node_type = AST_NODE_TYPE_MULTIPLICATION;
-        if (operator == TOKEN_TYPE_SLASH) {
+        if (operator == TOKEN_KIND_SLASH) {
             node_type = AST_NODE_TYPE_DIVISION;
         }
         Ast_Node_Index arithmetic = parse_node_make(parser, node_type);
@@ -1736,7 +1736,7 @@ static Ast_Node_Index parse_call(Parser *parser) {
     assert(parser->token_index + 1 < parser->token_count);
 
     Token const *name = parse_token_current(parser);
-    if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+    if (name->token_kind != TOKEN_KIND_IDENTIFIER) {
         return parse_fail(parser, STR("a name"));
     }
 
@@ -1747,11 +1747,11 @@ static Ast_Node_Index parse_call(Parser *parser) {
     parser->nodes[call].payload.call.name = name->payload.identifier.text;
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_LEFT, STR("'('")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
-    if (parse_token_current(parser)->token_type != TOKEN_TYPE_PARENTHESIS_RIGHT) {
+    if (parse_token_current(parser)->token_kind != TOKEN_KIND_PARENTHESIS_RIGHT) {
         // Every argument consumes a token, so there are fewer arguments than tokens, which bounds
         // the loop.
         for (size_t i = 0; i < parser->token_count; i += 1) {
@@ -1761,14 +1761,14 @@ static Ast_Node_Index parse_call(Parser *parser) {
             }
             parse_node_append_child(parser, call, argument);
 
-            if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
+            if (parse_token_current(parser)->token_kind != TOKEN_KIND_COMMA) {
                 break;
             }
             parse_token_advance(parser);
         }
     }
 
-    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_RIGHT, STR("',' or ')'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("',' or ')'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1811,7 +1811,7 @@ static Ast_Node_Index parse_operand(Parser *parser) {
     size_t address_count = 0;
     // Every `%` consumes a token, so there are fewer of them than tokens, which bounds the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_PERCENT) {
+        if (parse_token_current(parser)->token_kind != TOKEN_KIND_PERCENT) {
             break;
         }
         parse_token_advance(parser);
@@ -1844,18 +1844,18 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
-    Token_Type next = parse_token_current(parser)->token_type;
-    if (next == TOKEN_TYPE_INTEGER_LITERAL) {
+    Token_Kind next = parse_token_current(parser)->token_kind;
+    if (next == TOKEN_KIND_INTEGER_LITERAL) {
         return parse_integer_literal(parser);
     }
-    if (next == TOKEN_TYPE_IDENTIFIER) {
+    if (next == TOKEN_KIND_IDENTIFIER) {
         // The name is not the last token, because the last one is `END`.
         assert(parser->token_index + 1 < parser->token_count);
-        if (parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_PARENTHESIS_LEFT) {
+        if (parser->tokens[parser->token_index + 1].token_kind == TOKEN_KIND_PARENTHESIS_LEFT) {
             return parse_call(parser);
         }
         // A name directly followed by a brace starts a struct literal, such as `Person { ... }`.
-        if (parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_BRACE_LEFT) {
+        if (parser->tokens[parser->token_index + 1].token_kind == TOKEN_KIND_BRACE_LEFT) {
             Ast_Node_Index literal = parse_struct_literal(parser);
             if (literal == AST_NODE_INDEX_NONE) {
                 return AST_NODE_INDEX_NONE;
@@ -1868,24 +1868,24 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
         }
         return parse_subscripts(parser, identifier);
     }
-    if (next == TOKEN_TYPE_BRACKET_LEFT) {
+    if (next == TOKEN_KIND_BRACKET_LEFT) {
         Ast_Node_Index literal = parse_array_literal(parser);
         if (literal == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
         return parse_subscripts(parser, literal);
     }
-    if (next == TOKEN_TYPE_STRING_LITERAL) {
+    if (next == TOKEN_KIND_STRING_LITERAL) {
         return parse_string_literal(parser);
     }
-    if (next == TOKEN_TYPE_KEYWORD_TRUE || next == TOKEN_TYPE_KEYWORD_FALSE) {
+    if (next == TOKEN_KIND_KEYWORD_TRUE || next == TOKEN_KIND_KEYWORD_FALSE) {
         return parse_bool_literal(parser);
     }
-    if (next == TOKEN_TYPE_DOT) {
+    if (next == TOKEN_KIND_DOT) {
         // `.RED` is the member of an enum that the place of the literal knows.
         parse_token_advance(parser);
         Token const *member_name = parse_token_current(parser);
-        if (member_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        if (member_name->token_kind != TOKEN_KIND_IDENTIFIER) {
             return parse_fail(parser, STR("the name of a member of an enum after '.'"));
         }
         Ast_Node_Index literal = parse_node_make(parser, AST_NODE_TYPE_ENUM_LITERAL);
@@ -1896,10 +1896,10 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
         parse_token_advance(parser);
         return literal;
     }
-    if (next == TOKEN_TYPE_KEYWORD_TYPE_INFO_OF) {
+    if (next == TOKEN_KIND_KEYWORD_TYPE_INFO_OF) {
         return parse_type_info_of(parser);
     }
-    if (next == TOKEN_TYPE_KEYWORD_NIL) {
+    if (next == TOKEN_KIND_KEYWORD_NIL) {
         Ast_Node_Index nil = parse_node_make(parser, AST_NODE_TYPE_NIL_LITERAL);
         if (nil == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
@@ -1920,7 +1920,7 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
  */
 static Ast_Node_Index parse_type_info_of(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_TYPE_INFO_OF);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_TYPE_INFO_OF);
 
     Ast_Node_Index info = parse_node_make(parser, AST_NODE_TYPE_TYPE_INFO_OF);
     if (info == AST_NODE_INDEX_NONE) {
@@ -1929,7 +1929,7 @@ static Ast_Node_Index parse_type_info_of(Parser *parser) {
     parse_token_advance(parser);
     parser->has_type_info = true;
 
-    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_LEFT, STR("'('")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('")) == false) {
         return AST_NODE_INDEX_NONE;
     }
     Ast_Node_Index type = parse_type_name(parser, STR("the name of a type"), false);
@@ -1937,7 +1937,7 @@ static Ast_Node_Index parse_type_info_of(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
     parse_node_append_child(parser, info, type);
-    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_RIGHT, STR("')'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1961,8 +1961,8 @@ static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
     // Every subscript consumes a token, so there are fewer subscripts than tokens, which bounds
     // the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        Token_Type next = parse_token_current(parser)->token_type;
-        if (next == TOKEN_TYPE_CARET) {
+        Token_Kind next = parse_token_current(parser)->token_kind;
+        if (next == TOKEN_KIND_CARET) {
             // `p^` follows the pointer `p`. It can follow itself, as in `pp^^`.
             Ast_Node_Index dereference = parse_node_make(parser, AST_NODE_TYPE_DEREFERENCE);
             if (dereference == AST_NODE_INDEX_NONE) {
@@ -1973,10 +1973,10 @@ static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
             base = dereference;
             continue;
         }
-        if (next == TOKEN_TYPE_DOT) {
+        if (next == TOKEN_KIND_DOT) {
             parse_token_advance(parser);
             Token const *field_name = parse_token_current(parser);
-            if (field_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+            if (field_name->token_kind != TOKEN_KIND_IDENTIFIER) {
                 return parse_fail(parser, STR("a field name"));
             }
             Ast_Node_Index access = parse_node_make(parser, AST_NODE_TYPE_FIELD_ACCESS);
@@ -1989,7 +1989,7 @@ static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
             base = access;
             continue;
         }
-        if (next != TOKEN_TYPE_BRACKET_LEFT) {
+        if (next != TOKEN_KIND_BRACKET_LEFT) {
             break;
         }
         parse_token_advance(parser);
@@ -2000,16 +2000,16 @@ static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
         }
 
         Ast_Node_Index end = AST_NODE_INDEX_NONE;
-        if (parse_token_current(parser)->token_type == TOKEN_TYPE_TYPE_SEPARATOR) {
+        if (parse_token_current(parser)->token_kind == TOKEN_KIND_TYPE_SEPARATOR) {
             parse_token_advance(parser);
             end = parse_expression(parser);
             if (end == AST_NODE_INDEX_NONE) {
                 return AST_NODE_INDEX_NONE;
             }
-            if (parse_token_expect(parser, TOKEN_TYPE_BRACKET_RIGHT, STR("']'")) == false) {
+            if (parse_token_expect(parser, TOKEN_KIND_BRACKET_RIGHT, STR("']'")) == false) {
                 return AST_NODE_INDEX_NONE;
             }
-        } else if (parse_token_expect(parser, TOKEN_TYPE_BRACKET_RIGHT, STR("':' or ']'")) ==
+        } else if (parse_token_expect(parser, TOKEN_KIND_BRACKET_RIGHT, STR("':' or ']'")) ==
                    false) {
             return AST_NODE_INDEX_NONE;
         }
@@ -2041,12 +2041,12 @@ static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
  */
 static Ast_Node_Index parse_array_literal(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_BRACKET_LEFT);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_BRACKET_LEFT);
 
     // The bracket is not the last token, because the last one is `END`. The error is at the
     // closing bracket, where the length is missing.
     assert(parser->token_index + 1 < parser->token_count);
-    if (parser->tokens[parser->token_index + 1].token_type == TOKEN_TYPE_BRACKET_RIGHT) {
+    if (parser->tokens[parser->token_index + 1].token_kind == TOKEN_KIND_BRACKET_RIGHT) {
         parse_token_advance(parser);
         return parse_fail(parser, STR("an array length or 'const'"));
     }
@@ -2065,7 +2065,7 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
     }
     parse_node_append_child(parser, literal, type);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_BRACE_LEFT, STR("'{'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_BRACE_LEFT, STR("'{'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2074,7 +2074,7 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
     parser->literal_depth += 1;
     for (size_t i = 0; i < parser->token_count; i += 1) {
         parse_skip_indentation(parser);
-        if (parse_token_current(parser)->token_type == TOKEN_TYPE_BRACE_RIGHT) {
+        if (parse_token_current(parser)->token_kind == TOKEN_KIND_BRACE_RIGHT) {
             break;
         }
 
@@ -2085,7 +2085,7 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
         parse_node_append_child(parser, literal, element);
 
         parse_skip_indentation(parser);
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
+        if (parse_token_current(parser)->token_kind != TOKEN_KIND_COMMA) {
             break;
         }
         parse_token_advance(parser);
@@ -2093,7 +2093,7 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
     parser->literal_depth -= 1;
 
     parse_skip_indentation(parser);
-    if (parse_token_expect(parser, TOKEN_TYPE_BRACE_RIGHT, STR("',' or '}'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_BRACE_RIGHT, STR("',' or '}'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2109,7 +2109,7 @@ static void parse_skip_indentation(Parser *parser) {
 
     // Every indentation token is a token, so there are fewer of them than tokens.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_INDENTATION) {
+        if (parse_token_current(parser)->token_kind != TOKEN_KIND_INDENTATION) {
             break;
         }
         parse_token_advance(parser);
@@ -2128,8 +2128,8 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
 
     Token const *start = parse_token_current(parser);
-    assert(start->token_type == TOKEN_TYPE_IDENTIFIER ||
-           start->token_type == TOKEN_TYPE_BRACE_LEFT);
+    assert(start->token_kind == TOKEN_KIND_IDENTIFIER ||
+           start->token_kind == TOKEN_KIND_BRACE_LEFT);
 
     if (parser->literal_depth >= AST_BLOCK_DEPTH_MAX) {
         return parse_fail(parser, STR("fewer nested literals"));
@@ -2138,12 +2138,12 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
     if (literal == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    if (start->token_type == TOKEN_TYPE_IDENTIFIER) {
+    if (start->token_kind == TOKEN_KIND_IDENTIFIER) {
         parser->nodes[literal].payload.struct_literal.name = start->payload.identifier.text;
         parse_token_advance(parser);
     }
 
-    if (parse_token_expect(parser, TOKEN_TYPE_BRACE_LEFT, STR("'{'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_BRACE_LEFT, STR("'{'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2151,12 +2151,12 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
     parser->literal_depth += 1;
     for (size_t i = 0; i < parser->token_count; i += 1) {
         parse_skip_indentation(parser);
-        if (parse_token_current(parser)->token_type == TOKEN_TYPE_BRACE_RIGHT) {
+        if (parse_token_current(parser)->token_kind == TOKEN_KIND_BRACE_RIGHT) {
             break;
         }
 
         Token const *field_name = parse_token_current(parser);
-        if (field_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        if (field_name->token_kind != TOKEN_KIND_IDENTIFIER) {
             return parse_fail(parser, STR("a field name or '}'"));
         }
         Ast_Node_Index initializer = parse_node_make(parser, AST_NODE_TYPE_FIELD_INITIALIZER);
@@ -2168,11 +2168,11 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
         parse_token_advance(parser);
         parse_node_append_child(parser, literal, initializer);
 
-        if (parse_token_expect(parser, TOKEN_TYPE_EQUALS, STR("'='")) == false) {
+        if (parse_token_expect(parser, TOKEN_KIND_EQUALS, STR("'='")) == false) {
             return AST_NODE_INDEX_NONE;
         }
         Ast_Node_Index value = AST_NODE_INDEX_NONE;
-        if (parse_token_current(parser)->token_type == TOKEN_TYPE_BRACE_LEFT) {
+        if (parse_token_current(parser)->token_kind == TOKEN_KIND_BRACE_LEFT) {
             value = parse_struct_literal(parser);
         } else {
             value = parse_expression(parser);
@@ -2183,7 +2183,7 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
         parse_node_append_child(parser, initializer, value);
 
         parse_skip_indentation(parser);
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
+        if (parse_token_current(parser)->token_kind != TOKEN_KIND_COMMA) {
             break;
         }
         parse_token_advance(parser);
@@ -2191,7 +2191,7 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
     parser->literal_depth -= 1;
 
     parse_skip_indentation(parser);
-    if (parse_token_expect(parser, TOKEN_TYPE_BRACE_RIGHT, STR("',' or '}'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_BRACE_RIGHT, STR("',' or '}'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2209,7 +2209,7 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
  */
 static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_level) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_STRUCT);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_STRUCT);
     assert(indentation_level < UINT32_MAX);
 
     parse_token_advance(parser);
@@ -2217,7 +2217,7 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
     if (root == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false ||
+    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false ||
         parse_line_end_expect(parser) == false) {
         return AST_NODE_INDEX_NONE;
     }
@@ -2231,7 +2231,7 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
     // which bounds the loop. It stops at the first line that is not part of the struct.
     for (size_t i = 0; i < parser->token_count; i += 1) {
         Token const *line_start = parse_token_current(parser);
-        if (line_start->token_type != TOKEN_TYPE_INDENTATION) {
+        if (line_start->token_kind != TOKEN_KIND_INDENTATION) {
             break;
         }
 
@@ -2251,7 +2251,7 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
         parse_token_advance(parser);
 
         Token const *field_name = parse_token_current(parser);
-        if (field_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        if (field_name->token_kind != TOKEN_KIND_IDENTIFIER) {
             return parse_fail(parser, STR("a field name"));
         }
         Ast_Node_Index field = parse_node_make(parser, AST_NODE_TYPE_FIELD);
@@ -2262,11 +2262,11 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
         parse_token_advance(parser);
         parse_node_append_child(parser, structs[struct_count - 1].node, field);
 
-        if (parse_token_expect(parser, TOKEN_TYPE_TYPE_SEPARATOR, STR("':'")) == false) {
+        if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'")) == false) {
             return AST_NODE_INDEX_NONE;
         }
 
-        if (parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_STRUCT) {
+        if (parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_STRUCT) {
             if (struct_count == AST_BLOCK_DEPTH_MAX + 1) {
                 return parse_fail(parser, STR("fewer nested structs"));
             }
@@ -2276,7 +2276,7 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
                 return AST_NODE_INDEX_NONE;
             }
             parse_node_append_child(parser, field, nested);
-            if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false ||
+            if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false ||
                 parse_line_end_expect(parser) == false) {
                 return AST_NODE_INDEX_NONE;
             }
@@ -2318,7 +2318,7 @@ static Ast_Node_Index parse_type(Parser *parser, Str expected) {
     assert(expected.length > 0);
 
     Token const *start = parse_token_current(parser);
-    if (start->token_type != TOKEN_TYPE_BRACKET_LEFT) {
+    if (start->token_kind != TOKEN_KIND_BRACKET_LEFT) {
         return parse_type_name(parser, expected, true);
     }
 
@@ -2331,20 +2331,20 @@ static Ast_Node_Index parse_type(Parser *parser, Str expected) {
     Token const *length = parse_token_current(parser);
     Ast_Array_Length_Kind length_kind = AST_ARRAY_LENGTH_OMITTED;
     int64_t length_value = 0;
-    if (length->token_type == TOKEN_TYPE_INTEGER_LITERAL) {
+    if (length->token_kind == TOKEN_KIND_INTEGER_LITERAL) {
         length_kind = AST_ARRAY_LENGTH_FIXED;
         length_value = length->payload.integer_literal.value;
         parse_token_advance(parser);
-    } else if (length->token_type == TOKEN_TYPE_KEYWORD_CONST) {
+    } else if (length->token_kind == TOKEN_KIND_KEYWORD_CONST) {
         length_kind = AST_ARRAY_LENGTH_INFERRED;
         parse_token_advance(parser);
-    } else if (length->token_type != TOKEN_TYPE_BRACKET_RIGHT) {
+    } else if (length->token_kind != TOKEN_KIND_BRACKET_RIGHT) {
         return parse_fail(parser, STR("an array length, 'const' or ']'"));
     }
     parser->nodes[array_type].payload.array_type.length = length_value;
     parser->nodes[array_type].payload.array_type.length_kind = length_kind;
 
-    if (parse_token_expect(parser, TOKEN_TYPE_BRACKET_RIGHT, STR("']'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_BRACKET_RIGHT, STR("']'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2376,7 +2376,7 @@ static Ast_Node_Index parse_type_name(Parser *parser, Str expected, bool is_proc
     Ast_Node_Index innermost = AST_NODE_INDEX_NONE;
     // Every caret consumes a token, so there are fewer carets than tokens, which bounds the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->token_type != TOKEN_TYPE_CARET) {
+        if (parse_token_current(parser)->token_kind != TOKEN_KIND_CARET) {
             break;
         }
 
@@ -2395,14 +2395,14 @@ static Ast_Node_Index parse_type_name(Parser *parser, Str expected, bool is_proc
 
     Token const *name = parse_token_current(parser);
     Ast_Node_Index type_name = AST_NODE_INDEX_NONE;
-    if (name->token_type == TOKEN_TYPE_KEYWORD_PROC && outermost != AST_NODE_INDEX_NONE &&
+    if (name->token_kind == TOKEN_KIND_KEYWORD_PROC && outermost != AST_NODE_INDEX_NONE &&
         is_procedure_allowed) {
         type_name = parse_procedure_type(parser);
         if (type_name == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
     } else {
-        if (name->token_type == TOKEN_TYPE_KEYWORD_PROC) {
+        if (name->token_kind == TOKEN_KIND_KEYWORD_PROC) {
             // The word starts a procedure type, which is not accepted here: either the caret is
             // missing, or the type is a parameter of a procedure type.
             if (outermost == AST_NODE_INDEX_NONE) {
@@ -2412,7 +2412,7 @@ static Ast_Node_Index parse_type_name(Parser *parser, Str expected, bool is_proc
             return parse_fail(parser, STR("a type name, because the parameter of a procedure type "
                                           "is not a pointer to a procedure"));
         }
-        if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        if (name->token_kind != TOKEN_KIND_IDENTIFIER) {
             if (outermost != AST_NODE_INDEX_NONE) {
                 return parse_fail(parser, STR("a type name after '^'"));
             }
@@ -2443,7 +2443,7 @@ static Ast_Node_Index parse_type_name(Parser *parser, Str expected, bool is_proc
  */
 static Ast_Node_Index parse_procedure_type(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
-    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_PROC);
+    assert(parse_token_current(parser)->token_kind == TOKEN_KIND_KEYWORD_PROC);
 
     Ast_Node_Index procedure_type = parse_node_make(parser, AST_NODE_TYPE_PROCEDURE_TYPE);
     if (procedure_type == AST_NODE_INDEX_NONE) {
@@ -2453,10 +2453,10 @@ static Ast_Node_Index parse_procedure_type(Parser *parser) {
     Str keyword = parse_token_current(parser)->payload.identifier.text;
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_LEFT, STR("'('")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('")) == false) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_token_current(parser)->token_type != TOKEN_TYPE_PARENTHESIS_RIGHT) {
+    if (parse_token_current(parser)->token_kind != TOKEN_KIND_PARENTHESIS_RIGHT) {
         // Every parameter consumes at least a token, so there are fewer parameters than tokens,
         // which bounds the loop. A comma means that another parameter has to follow.
         for (size_t i = 0; i < parser->token_count; i += 1) {
@@ -2467,13 +2467,13 @@ static Ast_Node_Index parse_procedure_type(Parser *parser) {
             }
             parse_node_append_child(parser, procedure_type, parameter);
 
-            if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
+            if (parse_token_current(parser)->token_kind != TOKEN_KIND_COMMA) {
                 break;
             }
             parse_token_advance(parser);
         }
     }
-    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_RIGHT, STR("',' or ')'")) == false) {
+    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("',' or ')'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2491,8 +2491,8 @@ static Ast_Node_Index parse_bool_literal(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
-    Token_Type keyword = parse_token_current(parser)->token_type;
-    if (keyword != TOKEN_TYPE_KEYWORD_TRUE && keyword != TOKEN_TYPE_KEYWORD_FALSE) {
+    Token_Kind keyword = parse_token_current(parser)->token_kind;
+    if (keyword != TOKEN_KIND_KEYWORD_TRUE && keyword != TOKEN_KIND_KEYWORD_FALSE) {
         return parse_fail(parser, STR("'true' or 'false'"));
     }
 
@@ -2500,7 +2500,7 @@ static Ast_Node_Index parse_bool_literal(Parser *parser) {
     if (node == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    parser->nodes[node].payload.bool_literal.value = keyword == TOKEN_TYPE_KEYWORD_TRUE;
+    parser->nodes[node].payload.bool_literal.value = keyword == TOKEN_KIND_KEYWORD_TRUE;
     parse_token_advance(parser);
 
     assert(parser->nodes[node].first_child == AST_NODE_INDEX_NONE);
@@ -2512,7 +2512,7 @@ static Ast_Node_Index parse_string_literal(Parser *parser) {
     assert(parser->token_index < parser->token_count);
 
     Token const *literal = parse_token_current(parser);
-    if (literal->token_type != TOKEN_TYPE_STRING_LITERAL) {
+    if (literal->token_kind != TOKEN_KIND_STRING_LITERAL) {
         return parse_fail(parser, STR("a string literal"));
     }
 
@@ -2532,7 +2532,7 @@ static Ast_Node_Index parse_integer_literal(Parser *parser) {
     assert(parser->token_index < parser->token_count);
 
     Token const *literal = parse_token_current(parser);
-    if (literal->token_type != TOKEN_TYPE_INTEGER_LITERAL) {
+    if (literal->token_kind != TOKEN_KIND_INTEGER_LITERAL) {
         return parse_fail(parser, STR("an integer literal"));
     }
 
@@ -2552,7 +2552,7 @@ static Ast_Node_Index parse_identifier(Parser *parser) {
     assert(parser->token_index < parser->token_count);
 
     Token const *identifier = parse_token_current(parser);
-    if (identifier->token_type != TOKEN_TYPE_IDENTIFIER) {
+    if (identifier->token_kind != TOKEN_KIND_IDENTIFIER) {
         return parse_fail(parser, STR("a name"));
     }
 
@@ -2576,7 +2576,7 @@ static Token const *parse_token_current(Parser const *parser) {
 
 static void parse_token_advance(Parser *parser) {
     // The `END` token is never consumed, so there is always a current token.
-    assert(parse_token_current(parser)->token_type != TOKEN_TYPE_END);
+    assert(parse_token_current(parser)->token_kind != TOKEN_KIND_END);
 
     parser->token_index += 1;
 
@@ -2584,14 +2584,14 @@ static void parse_token_advance(Parser *parser) {
 }
 
 /**
- * Consumes the current token if it has type `token_type`. Otherwise records an error that says
+ * Consumes the current token if it has type `token_kind`. Otherwise records an error that says
  * `expected` and returns false.
  */
-static bool parse_token_expect(Parser *parser, Token_Type token_type, Str expected) {
+static bool parse_token_expect(Parser *parser, Token_Kind token_kind, Str expected) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(expected.length > 0);
 
-    if (parse_token_current(parser)->token_type == token_type) {
+    if (parse_token_current(parser)->token_kind == token_kind) {
         parse_token_advance(parser);
         return true;
     }

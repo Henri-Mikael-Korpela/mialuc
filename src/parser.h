@@ -30,7 +30,7 @@ typedef struct {
 
 /**
  * Builds a syntax tree from `tokens`, which holds `Token` elements and must be the tokens of a
- * successful `tokenize`, so the last one is `TOKEN_TYPE_END`. The nodes are written to
+ * successful `tokenize`, so the last one is `TOKEN_KIND_END`. The nodes are written to
  * `node_buffer`, which holds `Ast_Node` elements. Stops at the first token that does not fit the
  * grammar (see top of parser.h), since the parser has no error recovery yet.
  */

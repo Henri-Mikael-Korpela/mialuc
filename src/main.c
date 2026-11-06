@@ -387,180 +387,180 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
     for (size_t i = 0; i < tokens.length; i += 1) {
         Token token = token_elements[i];
 
-        switch (token.token_type) {
-        case TOKEN_TYPE_ARROW:
+        switch (token.token_kind) {
+        case TOKEN_KIND_ARROW:
             printf("ARROW\n");
             break;
-        case TOKEN_TYPE_ASTERISK:
+        case TOKEN_KIND_ASTERISK:
             printf("ASTERISK\n");
             break;
-        case TOKEN_TYPE_ASTERISK_EQUALS:
+        case TOKEN_KIND_ASTERISK_EQUALS:
             printf("ASTERISK_EQUALS\n");
             break;
-        case TOKEN_TYPE_BRACE_LEFT:
+        case TOKEN_KIND_BRACE_LEFT:
             printf("BRACE_LEFT\n");
             break;
-        case TOKEN_TYPE_BRACE_RIGHT:
+        case TOKEN_KIND_BRACE_RIGHT:
             printf("BRACE_RIGHT\n");
             break;
-        case TOKEN_TYPE_BRACKET_LEFT:
+        case TOKEN_KIND_BRACKET_LEFT:
             printf("BRACKET_LEFT\n");
             break;
-        case TOKEN_TYPE_BRACKET_RIGHT:
+        case TOKEN_KIND_BRACKET_RIGHT:
             printf("BRACKET_RIGHT\n");
             break;
-        case TOKEN_TYPE_CARET:
+        case TOKEN_KIND_CARET:
             printf("CARET\n");
             break;
-        case TOKEN_TYPE_COMMA:
+        case TOKEN_KIND_COMMA:
             printf("COMMA\n");
             break;
-        case TOKEN_TYPE_DOT:
+        case TOKEN_KIND_DOT:
             printf("DOT\n");
             break;
-        case TOKEN_TYPE_ELLIPSIS:
+        case TOKEN_KIND_ELLIPSIS:
             printf("ELLIPSIS\n");
             break;
-        case TOKEN_TYPE_END:
+        case TOKEN_KIND_END:
             printf("END\n");
             break;
-        case TOKEN_TYPE_EQUALS:
+        case TOKEN_KIND_EQUALS:
             printf("EQUALS\n");
             break;
-        case TOKEN_TYPE_EQUALS_EQUALS:
+        case TOKEN_KIND_EQUALS_EQUALS:
             printf("EQUALS_EQUALS\n");
             break;
-        case TOKEN_TYPE_GREATER:
+        case TOKEN_KIND_GREATER:
             printf("GREATER\n");
             break;
-        case TOKEN_TYPE_GREATER_EQUALS:
+        case TOKEN_KIND_GREATER_EQUALS:
             printf("GREATER_EQUALS\n");
             break;
-        case TOKEN_TYPE_HASH:
+        case TOKEN_KIND_HASH:
             printf("HASH\n");
             break;
-        case TOKEN_TYPE_IDENTIFIER:
+        case TOKEN_KIND_IDENTIFIER:
             // The cast is needed because `%.*s` takes an `int` precision.
             printf("IDENTIFIER %.*s\n", (int)token.payload.identifier.text.length,
                    token.payload.identifier.text.bytes);
             break;
-        case TOKEN_TYPE_INDENTATION:
+        case TOKEN_KIND_INDENTATION:
             printf("INDENTATION %" PRIu32 "\n", token.payload.indentation.level);
             break;
-        case TOKEN_TYPE_INTEGER_LITERAL:
+        case TOKEN_KIND_INTEGER_LITERAL:
             printf("INTEGER_LITERAL %" PRId64 "\n", token.payload.integer_literal.value);
             break;
-        case TOKEN_TYPE_KEYWORD_BREAK:
+        case TOKEN_KIND_KEYWORD_BREAK:
             printf("KEYWORD_BREAK\n");
             break;
-        case TOKEN_TYPE_KEYWORD_CONST:
+        case TOKEN_KIND_KEYWORD_CONST:
             printf("KEYWORD_CONST\n");
             break;
-        case TOKEN_TYPE_KEYWORD_CONTINUE:
+        case TOKEN_KIND_KEYWORD_CONTINUE:
             printf("KEYWORD_CONTINUE\n");
             break;
-        case TOKEN_TYPE_KEYWORD_ELSE:
+        case TOKEN_KIND_KEYWORD_ELSE:
             printf("KEYWORD_ELSE\n");
             break;
-        case TOKEN_TYPE_KEYWORD_ENUM:
+        case TOKEN_KIND_KEYWORD_ENUM:
             printf("KEYWORD_ENUM\n");
             break;
-        case TOKEN_TYPE_KEYWORD_FALSE:
+        case TOKEN_KIND_KEYWORD_FALSE:
             printf("KEYWORD_FALSE\n");
             break;
-        case TOKEN_TYPE_KEYWORD_AND:
+        case TOKEN_KIND_KEYWORD_AND:
             printf("KEYWORD_AND\n");
             break;
-        case TOKEN_TYPE_KEYWORD_FOR:
+        case TOKEN_KIND_KEYWORD_FOR:
             printf("KEYWORD_FOR\n");
             break;
-        case TOKEN_TYPE_KEYWORD_FOREIGN:
+        case TOKEN_KIND_KEYWORD_FOREIGN:
             printf("KEYWORD_FOREIGN\n");
             break;
-        case TOKEN_TYPE_KEYWORD_IF:
+        case TOKEN_KIND_KEYWORD_IF:
             printf("KEYWORD_IF\n");
             break;
-        case TOKEN_TYPE_KEYWORD_IMPORT:
+        case TOKEN_KIND_KEYWORD_IMPORT:
             printf("KEYWORD_IMPORT\n");
             break;
-        case TOKEN_TYPE_KEYWORD_IN:
+        case TOKEN_KIND_KEYWORD_IN:
             printf("KEYWORD_IN\n");
             break;
-        case TOKEN_TYPE_KEYWORD_NIL:
+        case TOKEN_KIND_KEYWORD_NIL:
             printf("KEYWORD_NIL\n");
             break;
-        case TOKEN_TYPE_KEYWORD_NOT:
+        case TOKEN_KIND_KEYWORD_NOT:
             printf("KEYWORD_NOT\n");
             break;
-        case TOKEN_TYPE_KEYWORD_OR:
+        case TOKEN_KIND_KEYWORD_OR:
             printf("KEYWORD_OR\n");
             break;
-        case TOKEN_TYPE_KEYWORD_PROC:
+        case TOKEN_KIND_KEYWORD_PROC:
             printf("KEYWORD_PROC\n");
             break;
-        case TOKEN_TYPE_KEYWORD_RETURN:
+        case TOKEN_KIND_KEYWORD_RETURN:
             printf("KEYWORD_RETURN\n");
             break;
-        case TOKEN_TYPE_KEYWORD_STRUCT:
+        case TOKEN_KIND_KEYWORD_STRUCT:
             printf("KEYWORD_STRUCT\n");
             break;
-        case TOKEN_TYPE_KEYWORD_TRUE:
+        case TOKEN_KIND_KEYWORD_TRUE:
             printf("KEYWORD_TRUE\n");
             break;
-        case TOKEN_TYPE_KEYWORD_TYPE_INFO_OF:
+        case TOKEN_KIND_KEYWORD_TYPE_INFO_OF:
             printf("KEYWORD_TYPE_INFO_OF\n");
             break;
-        case TOKEN_TYPE_LABEL:
+        case TOKEN_KIND_LABEL:
             printf("LABEL %.*s\n", (int)token.payload.identifier.text.length,
                    token.payload.identifier.text.bytes);
             break;
-        case TOKEN_TYPE_LESS:
+        case TOKEN_KIND_LESS:
             printf("LESS\n");
             break;
-        case TOKEN_TYPE_LESS_EQUALS:
+        case TOKEN_KIND_LESS_EQUALS:
             printf("LESS_EQUALS\n");
             break;
-        case TOKEN_TYPE_MINUS:
+        case TOKEN_KIND_MINUS:
             printf("MINUS\n");
             break;
-        case TOKEN_TYPE_MINUS_EQUALS:
+        case TOKEN_KIND_MINUS_EQUALS:
             printf("MINUS_EQUALS\n");
             break;
-        case TOKEN_TYPE_NOT_EQUALS:
+        case TOKEN_KIND_NOT_EQUALS:
             printf("NOT_EQUALS\n");
             break;
-        case TOKEN_TYPE_PARENTHESIS_LEFT:
+        case TOKEN_KIND_PARENTHESIS_LEFT:
             printf("PARENTHESIS_LEFT\n");
             break;
-        case TOKEN_TYPE_PARENTHESIS_RIGHT:
+        case TOKEN_KIND_PARENTHESIS_RIGHT:
             printf("PARENTHESIS_RIGHT\n");
             break;
-        case TOKEN_TYPE_PERCENT:
+        case TOKEN_KIND_PERCENT:
             printf("PERCENT\n");
             break;
-        case TOKEN_TYPE_PLUS:
+        case TOKEN_KIND_PLUS:
             printf("PLUS\n");
             break;
-        case TOKEN_TYPE_PLUS_EQUALS:
+        case TOKEN_KIND_PLUS_EQUALS:
             printf("PLUS_EQUALS\n");
             break;
-        case TOKEN_TYPE_RANGE_EXCLUSIVE:
+        case TOKEN_KIND_RANGE_EXCLUSIVE:
             printf("RANGE_EXCLUSIVE\n");
             break;
-        case TOKEN_TYPE_RANGE_INCLUSIVE:
+        case TOKEN_KIND_RANGE_INCLUSIVE:
             printf("RANGE_INCLUSIVE\n");
             break;
-        case TOKEN_TYPE_SLASH:
+        case TOKEN_KIND_SLASH:
             printf("SLASH\n");
             break;
-        case TOKEN_TYPE_SLASH_EQUALS:
+        case TOKEN_KIND_SLASH_EQUALS:
             printf("SLASH_EQUALS\n");
             break;
-        case TOKEN_TYPE_STRING_LITERAL:
+        case TOKEN_KIND_STRING_LITERAL:
             printf("STRING_LITERAL \"%.*s\"\n", (int)token.payload.string_literal.text.length,
                    token.payload.string_literal.text.bytes);
             break;
-        case TOKEN_TYPE_TYPE_SEPARATOR:
+        case TOKEN_KIND_TYPE_SEPARATOR:
             printf("TYPE_SEPARATOR\n");
             break;
         }
