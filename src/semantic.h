@@ -128,7 +128,7 @@ typedef struct {
  * the statement only, not in its range, and it cannot be assigned to. A name is looked up in the
  * innermost scope that uses it first, and then in the scopes around it, up to the module scope.
  *
- * A constant can be an enum, such as `Color :: enum -> ...`, which is a type like a struct: it
+ * A constant can be an enum, such as `Color :: enum Int -> ...`, which is a type like a struct: it
  * has its name in the module scope, and is not counted among the constants either. The members of
  * an enum are not names in a scope, and must only differ from each other in the enum. A constant
  * can also be the member of an enum, such as `DEFAULT :: Color.RED`, which is a constant like the

@@ -174,7 +174,7 @@
                 },
                 {
                     "name": "storage.type.enum.mialu",
-                    "comment": "The word that starts the definition of an enum, as in Color :: enum ->.",
+                    "comment": "The word that starts the definition of an enum, as in Color :: enum Int ->.",
                     "match": "\\benum\\b"
                 },
                 {

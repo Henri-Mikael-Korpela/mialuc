@@ -258,9 +258,10 @@ static Ast_Node_Index parse_definition(Parser *parser) {
 }
 
 /**
- * Parses the enum `enum ->` and its members, which are the lines below it, indented one level
- * deeper than the line of the definition, each one a name. The enum must have a member. The
- * current token is `enum`, and `indentation_level` is the level of the line it is on.
+ * Parses the enum `enum Int ->`, with the name of the type of the numbers of its members, and the
+ * members, which are the lines below it, indented one level deeper than the line of the
+ * definition, each one a name. The enum must have a member. The current token is `enum`, and
+ * `indentation_level` is the level of the line it is on.
  */
 static Ast_Node_Index parse_enum_type(Parser *parser, uint32_t indentation_level) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -272,6 +273,13 @@ static Ast_Node_Index parse_enum_type(Parser *parser, uint32_t indentation_level
     if (root == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
+    // The type of the numbers is always written, so that it is not a surprise what they are.
+    Token const *value_type = parse_token_current(parser);
+    if (value_type->token_type != TOKEN_TYPE_IDENTIFIER) {
+        return parse_fail(parser, STR("the type of the members after 'enum', such as 'Int'"));
+    }
+    parser->nodes[root].payload.enum_type.value_type = value_type->payload.identifier.text;
+    parse_token_advance(parser);
     if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false ||
         parse_line_end_expect(parser) == false) {
         return AST_NODE_INDEX_NONE;

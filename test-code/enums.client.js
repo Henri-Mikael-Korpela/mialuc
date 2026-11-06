@@ -1,7 +1,8 @@
-// An enum is a type with a fixed set of named members, such as `Color :: enum ->` with RED, GREEN and
-// BLUE below it. A member is written with the name of its enum, `Color.RED`, or with just a dot,
-// `.RED`, where the enum is known from the place it is in. For JavaScript a member is the number of
-// its place in the enum, counted from 0, so RED is 0, GREEN is 1 and BLUE is 2.
+// An enum is a type with a fixed set of named members, such as `Color :: enum Int ->` with RED, GREEN
+// and BLUE below it, where `Int` is the type of the numbers of the members. A member is written with
+// the name of its enum, `Color.RED`, or with just a dot, `.RED`, where the enum is known from the
+// place it is in. For JavaScript a member is the number of its place in the enum, counted from 0,
+// as a BigInt, so RED is 0n, GREEN is 1n and BLUE is 2n.
 console.log("A variable, a constant and a member found by the type of the result, 0, 0 and 1:",
     create_enum_variable(), return_enum_constant_outside_the_current_proc(),
     auto_deduce_enum_by_return_type());

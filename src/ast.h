@@ -185,7 +185,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_ENUM_MEMBER`: no children. One member of an enum, with its name in the payload.
  *   It is a child of an `AST_NODE_TYPE_ENUM_TYPE`.
  * - `AST_NODE_TYPE_ENUM_TYPE`: one `AST_NODE_TYPE_ENUM_MEMBER` for each member, in the order of the
- *   source, which is the order of their numbers, from zero. It is the value of an
+ *   source, which is the order of their numbers, from zero. The name of the type of the numbers,
+ *   such as `Int` in `enum Int ->`, is in the payload. It is always written, and which types an
+ *   enum can have is for the target to tell. It is the value of an
  *   `AST_NODE_TYPE_CONSTANT_DEFINITION` that defines an enum.
  * - `AST_NODE_TYPE_FIELD`: one child, the type of the field, which is an `AST_NODE_TYPE_TYPE_NAME`,
  *   an `AST_NODE_TYPE_POINTER_TYPE` or, for a field that is a struct of its own, an
@@ -359,6 +361,10 @@ typedef struct {
         struct {
             Ast_Comparison_Operator operator;
         } comparison;
+        struct {
+            // The name of the type of the numbers of the members, as a view of the source text.
+            Str value_type;
+        } enum_type;
         struct {
             // Views the source text, like the other names. Without the dot.
             Str name;

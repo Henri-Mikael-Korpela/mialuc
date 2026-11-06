@@ -1,4 +1,4 @@
-Color :: enum ->
+Color :: enum Int ->
     RED
     GREEN
     BLUE
@@ -36,14 +36,14 @@ enum_field_type_auto_detected_in_struct :: proc() Color ->
     }
     return car_model.color
 
-Light :: enum ->
+Light :: enum Int ->
     RED
     YELLOW
     GREEN
 
 DEFAULT_LIGHT :: Light.YELLOW
 
-Weekday :: enum ->
+Weekday :: enum Int ->
     MONDAY
     TUESDAY
     WEDNESDAY

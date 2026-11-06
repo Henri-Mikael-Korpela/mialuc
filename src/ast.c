@@ -257,7 +257,8 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
                    node.payload.enum_member.name.bytes);
             break;
         case AST_NODE_TYPE_ENUM_TYPE:
-            printf("ENUM_TYPE\n");
+            printf("ENUM_TYPE %.*s\n", (int)node.payload.enum_type.value_type.length,
+                   node.payload.enum_type.value_type.bytes);
             break;
         case AST_NODE_TYPE_FIELD:
             printf("FIELD %.*s\n", (int)node.payload.field.name.length,

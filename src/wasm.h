@@ -267,11 +267,12 @@ typedef struct {
  * what a pointer that was not given a value is. A pointer to a variable is good until the
  * procedure that has the variable returns.
  *
- * An enum is one 32-bit integer as well: the number of the member, counted from zero in the order
- * of the definition. A member, written `Color.RED` or `.RED`, is the `i32.const` of its number,
+ * An enum is one `Int` (`i64`): the number of the member, counted from zero in the order of the
+ * definition, whose type `enum Int ->` writes and has to be `Int`. A member, written `Color.RED`
+ * or `.RED`, is the `i64.const` of its number,
  * and a constant that is a member is a function without parameters that returns it, like a
  * constant string. An enum is a type and no function, like a struct is. Members are compared with
- * `i32.eq` and `i32.ne`, and the default of an enum is 0.
+ * `i64.eq` and `i64.ne`, and the default of an enum is 0.
  *
  * A pointer to a procedure, written `^proc(Int) Int`, is one 32-bit integer as well, but it is not
  * an address in memory: it is a slot of the one table of the module, which has every function of

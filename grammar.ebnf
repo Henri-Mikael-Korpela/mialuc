@@ -81,7 +81,9 @@
        through a variable, a parameter, an element of an array or what a pointer points to, and not
        through the result of a call. The grammar allows the lines of a literal between braces to be
        indented by any number of spaces, but the compiler requires a multiple of 4, as everywhere.
-     - The name of a type must be an enum too when it is the name of one. A member of an enum must
+     - The type that an enum writes after `enum` is the type of the numbers of its members, and the
+       only one there is is `Int`, so `enum Byte ->` is an error. The name of a type must be an enum
+       too when it is the name of one. A member of an enum must
        be a member that the enum has. The enum of a member that is written with a dot only must be
        known from the place of the member, which is the type of the variable that it is the value
        of, of what it is assigned to, of the result that it is returned as, of the parameter, the
@@ -147,13 +149,13 @@ constant_definition =
    blocks, the rules go down to the fourth level. *)
 struct_definition = "struct" , branch_end , struct_body_1 ;
 
-(* An enum is a type with a fixed set of members: `enum ->` and then its members, one on each line,
+(* An enum is a type with a fixed set of members: `enum Int ->` and then its members, one on each line,
    indented one level deeper, each of them a name. There is at least one member. The members are
    numbered from zero, in the order they are written. Their names only have to differ from each
    other, so two enums can have members of one name. A member is written with the name of its
    enum, such as `Color.RED`, or with a dot only, as in `.RED`, where the compiler knows the enum
    from the place that it is in. *)
-enum_definition = "enum" , branch_end , enum_body ;
+enum_definition = "enum" , required_space , type_name , branch_end , enum_body ;
 
 enum_body = { blank_line } , enum_member , { blank_line | enum_member } ;
 

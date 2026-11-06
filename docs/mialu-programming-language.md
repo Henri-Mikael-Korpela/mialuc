@@ -993,16 +993,16 @@ An element is a struct object, so `persons[1]` can be assigned a whole struct ob
 
 ### Enumerations
 
-An enumeration, or enum, is a type with a fixed set of named members. It is a constant whose value is `enum ->` and below it the names of its members, one on each line, indented one level deeper:
+An enumeration, or enum, is a type with a fixed set of named members. It is a constant whose value is `enum`, the type of the numbers of its members and `->`, and below it the names of its members, one on each line, indented one level deeper:
 
 ```
-Color :: enum ->
+Color :: enum Int ->
     RED
     GREEN
     BLUE
 ```
 
-`Color` is now a type, which can be written wherever a type is: for a variable, a parameter, a result, a field of a [struct](#structs), an element of an [array](#arrays) and what a [pointer](#pointers) points to. A name of a member does not have to be unique in the program, only in its enum, so another enum can have a `GREEN` as well. An enum has at least one member, and no two members have the same name.
+The type after `enum` is the type of the number that every member has, which is its place among the members, counted from 0. It is always written, so that what an enum is made of does not depend on a default. The only type that can be written for now is `Int`, and the integer types that are reserved for the future, such as `I8` and `U32`, will be the others. `Color` is now a type, which can be written wherever a type is: for a variable, a parameter, a result, a field of a [struct](#structs), an element of an [array](#arrays) and what a [pointer](#pointers) points to. A name of a member does not have to be unique in the program, only in its enum, so another enum can have a `GREEN` as well. An enum has at least one member, and no two members have the same name.
 
 A member is written with the name of its enum and a dot, such as `Color.RED`:
 
@@ -1046,7 +1046,7 @@ comparison_between_enum_values :: proc() Bool ->
 
 `comparison_between_enum_values` returns `false`. Members have no order, so `<`, `<=`, `>` and `>=` are errors, and so is a comparison of members of two enums. An enum is not converted to or from an `Int` or any other type. A variable of an enum type that is defined without a value is the first member of the enum, so `color : Color` is `Color.RED`, and so is a field of an enum type that a struct literal leaves out.
 
-Every member has a number, which is its place among the members, counted from 0, so `RED` is 0, `GREEN` is 1 and `BLUE` is 2. The number is only visible outside of the program, for example to JavaScript, see [WebAssembly](#webassembly). It is not a value that the language works with, so the order of the members is only a matter of how they are numbered there.
+Every member has a number of the type after `enum`, which is its place among the members, counted from 0, so `RED` is 0, `GREEN` is 1 and `BLUE` is 2. The number is only visible outside of the program, for example to JavaScript, see [WebAssembly](#webassembly). It is not a value that the language works with, so an enum is not an `Int`, and the order of the members is only a matter of how they are numbered there.
 
 Not everything can be done with an enum yet, which a later version of the language may allow:
 
@@ -1459,13 +1459,14 @@ A variable whose address is taken, as in `%x` or `%x.field`, is not in locals, b
 A pointer to a procedure is one 32-bit integer (`i32`) as well, but it is not an address in the memory: it is the index of the procedure in the table of the module. The table has a slot for every function of the module, the imported ones too, put there by an element segment in the order of the function indexes, from slot 1 on. Slot 0 has no function, so the number 0, which is `nil` and what a pointer that was not given a value is, is the pointer that can be called to no effect but a trap. So the pointer to a procedure is its function index plus one, and the name of a procedure that is not called is `i32.const` of that. A call through a pointer is the arguments, then the pointer, and `call_indirect` with the type of the procedures that the pointer can point to and table 0. WebAssembly checks that the function in the slot has that type, and it traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the slot is empty, as it is for `nil`. The type is the type of the function of the first procedure that has the parameters and result of the pointer, and when there is none that comes first, a type of its own that the type section has after the types of the functions. The module has a table and an element segment only when the program uses a pointer to a procedure, which is when it has such a type or uses a procedure by its name without calling it. A pointer to a procedure can be kept in memory like any pointer, so `^^proc(Int) Int` and the elements of an array of them take 8 bytes each. JavaScript has no way to get a pointer to a procedure from the module, but it can pass the number of a slot, which is the function index plus one.
 
 
-An enum is one 32-bit integer (`i32`), which is the number of the member, counted from 0 in the order of the definition. So a parameter of an enum type is one WebAssembly parameter and a result is one result, which JavaScript passes and receives as a number, so `Color.GREEN` is 1. A member that is written `Color.GREEN` or `.GREEN` is `i32.const` of its number, which is worked out when the module is built, from the enum that the place of `.GREEN` wants. A constant that is a member is a function without parameters that returns the number, like a constant that is a string, and is exported under its name. Members are compared with `i32.eq` and `i32.ne`, and the default value of an enum type is `i32.const 0`. A field of an enum type is one value of a struct, and the elements of an array of enums and what a pointer to an enum points to take 8 bytes each, like those of any other type. An enum has no code of its own, as a struct has not, so it is not exported and is no function.
+An enum is one `Int` (`i64`), which is the number of the member, counted from 0 in the order of the definition. So a parameter of an enum type is one WebAssembly parameter and a result is one result, which JavaScript passes and receives as a `BigInt`, so `Color.GREEN` is `1n`. A member that is written `Color.GREEN` or `.GREEN` is `i64.const` of its number, which is worked out when the module is built, from the enum that the place of `.GREEN` wants. A constant that is a member is a function without parameters that returns the number, like a constant that is a string, and is exported under its name. Members are compared with `i64.eq` and `i64.ne`, and the default value of an enum type is `i64.const 0`. A field of an enum type is one value of a struct, and the elements of an array of enums and what a pointer to an enum points to take 8 bytes each, like those of any other type. An enum has no code of its own, as a struct has not, so it is not exported and is no function.
 
 
 A module has a memory only when the program has a string literal, which includes the value of a global variable, an array type, which includes the array literals and the array slices, or a pointer: a pointer type, `%` or `^`. The strings are at the start of the memory, and the stack of the arrays is after them. A procedure cannot be called `memory`, whether the module has one or not, because that is the name of the export.
 
 The target rejects a program that the parser accepts when:
 
+- the type written after `enum` is not `Int`,
 - a type, also the one of a global variable, is not `Int`, `Bool`, `Str`, a struct or an enum that is defined, a pointer to one of them, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
 - a struct contains itself, or has a field that is an array or an array slice,
 - a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field,
