@@ -187,4 +187,14 @@ typedef struct {
 Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
                                  Array_Slice binding_buffer);
 
+/**
+ * Returns whether `name` is the name of a built-in procedure, which is called like any procedure
+ * but is not defined in the program. Today that is only `length_of`. The analysis does not bind the
+ * call of a built-in procedure to a definition, so its binding keeps the kind
+ * `SEMANTIC_BINDING_KIND_NONE`, and the target knows what the call means from the name. A
+ * definition of the program with the same name is called instead, because a name has one meaning
+ * and the program's own is looked up first.
+ */
+bool semantic_is_built_in_procedure(Str name);
+
 #endif

@@ -67,6 +67,7 @@ typedef enum {
     TOKEN_TYPE_KEYWORD_RETURN,
     TOKEN_TYPE_KEYWORD_STRUCT,
     TOKEN_TYPE_KEYWORD_TRUE,
+    TOKEN_TYPE_KEYWORD_TYPE_INFO_OF,
     // `@` and a name with nothing in between, such as `@outer`. The name without the `@` is in the
     // `identifier` payload.
     TOKEN_TYPE_LABEL,

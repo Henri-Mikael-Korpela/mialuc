@@ -185,6 +185,8 @@ static Token_Type tokenizer_keyword_type(Str text) {
         return TOKEN_TYPE_KEYWORD_STRUCT;
     } else if (str_equals(text, STR("true"))) {
         return TOKEN_TYPE_KEYWORD_TRUE;
+    } else if (str_equals(text, STR("type_info_of"))) {
+        return TOKEN_TYPE_KEYWORD_TYPE_INFO_OF;
     } else if (str_equals(text, STR("false"))) {
         return TOKEN_TYPE_KEYWORD_FALSE;
     } else if (str_equals(text, STR("nil"))) {

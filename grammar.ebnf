@@ -47,6 +47,8 @@
      - A line may be indented by any number of spaces that is a multiple of 4. The grammar only
        has blocks nested up to the fourth level, see `block_1`. Deeper nesting is accepted by the
        compiler, up to 32 blocks inside each other, and the grammar needs more rules for it.
+     - `length_of` is a built-in procedure, so it is a call of a name that nothing in the program
+       defines. It takes one array or array slice.
      - The name of a call must be a procedure, or a variable, a parameter or a global variable that
        holds a pointer to a procedure, and the arguments must match the parameters in number and in
        type. A call of a procedure that returns nothing can only be a statement. The name of a
@@ -184,7 +186,8 @@ struct_field_4 = indentation_4 , name , ws , ":" , ws , type , ws , line_end ;
 
 (* A global variable, which is also defined in the first column. It has static storage duration:
    it exists for as long as the program runs, and it is initialized once, before any procedure is
-   called. Its value is a literal, because nothing runs before it is set, and it keeps what the
+   called. Its value is a literal, or a field of the information about a type, which is known when
+   the program is compiled, because nothing runs before it is set, and it keeps what the
    procedures assign to it from one call to the next. The attribute list comes right after the
    name, and `static` in it is required. Without a type the type of the variable is the type of the
    literal. `counter #(static) := 0` is an `Int`, `ready #(static) : Bool = false` gives the type. *)
@@ -192,7 +195,8 @@ global_variable_definition =
     name , ws , [ attribute_list , ws ] , ":" , ws , [ type , ws ] , "=" , ws ,
     global_value , ws , line_end ;
 
-global_value = integer_literal | bool_literal | string_literal ;
+global_value =
+    integer_literal | bool_literal | string_literal | type_info_of , { ws , postfix } ;
 
 (* An attribute list starts with `#`, and has one or more attributes, each of them between
    parentheses: `#(static)`, or `#(first)(second)`. An attribute is a name. The compiler knows
@@ -440,7 +444,12 @@ operand = { "%" , ws } , operand_value ;
    after them. *)
 operand_value =
     integer_literal | string_literal | bool_literal | nil_literal | enum_literal | call |
-    ( name | array_literal | struct_literal ) , { ws , postfix } ;
+    ( name | array_literal | struct_literal | type_info_of ) , { ws , postfix } ;
+
+(* The information about a type, which the compiler works out while it compiles the program:
+   `type_info_of(Color)`. Only a field can follow it, such as `type_info_of(Color).members`, and
+   the type must be an enum. The compiler checks both after parsing. *)
+type_info_of = "type_info_of" , ws , "(" , ws , name , ws , ")" ;
 
 (* The member of an enum that is written without the enum, such as `.RED`. *)
 enum_literal = "." , name ;
@@ -515,7 +524,7 @@ reserved_word = keyword | literal_word ;
 
 keyword =
     "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "struct" |
-    "enum" | "not" | "and" | "or" | "foreign" | "import" ;
+    "enum" | "not" | "and" | "or" | "foreign" | "import" | "type_info_of" ;
 
 (* The words that are literals: the two values of a `Bool` and the null pointer. *)
 literal_word = "true" | "false" | "nil" ;

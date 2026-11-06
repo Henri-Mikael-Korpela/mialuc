@@ -31,6 +31,9 @@ typedef struct {
     // their elements and fields are expressions. It is bounded by `AST_BLOCK_DEPTH_MAX`, so that
     // the recursion that this needs cannot go on without end.
     size_t literal_depth;
+    // Whether `type_info_of` was parsed, which makes the module get the types of the information,
+    // see `parse_reflection_types_append`.
+    bool has_type_info;
     size_t token_count;
     size_t token_index;
     size_t node_count;
@@ -84,6 +87,7 @@ static bool           parse_procedure_body      (Parser *parser, Ast_Node_Index 
                                                  uint32_t indentation_level);
 static bool           parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure);
 static bool           parse_procedure_parameters(Parser *parser, Ast_Node_Index procedure);
+static bool           parse_reflection_types_append(Parser *parser, Ast_Node_Index module);
 static Ast_Node_Index parse_return_statement    (Parser *parser);
 static Ast_Node_Index parse_statement           (Parser *parser);
 static Ast_Node_Index parse_string_literal      (Parser *parser);
@@ -92,6 +96,7 @@ static Ast_Node_Index parse_struct_literal      (Parser *parser);
 static Ast_Node_Index parse_struct_type         (Parser *parser, uint32_t indentation_level);
 static Ast_Node_Index parse_subscripts          (Parser *parser, Ast_Node_Index operand);
 static Ast_Node_Index parse_term                (Parser *parser);
+static Ast_Node_Index parse_type_info_of        (Parser *parser);
 static void           parse_token_advance       (Parser *parser);
 static Token const *  parse_token_current       (Parser const *parser);
 static bool           parse_token_expect        (Parser *parser, Token_Type token_type,
@@ -115,6 +120,7 @@ Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
         .nodes = node_buffer.elements,
         .expected = STR(""),
         .literal_depth = 0,
+        .has_type_info = false,
         .token_count = tokens.length,
         .token_index = 0,
         .node_count = 0,
@@ -172,7 +178,62 @@ static Ast_Node_Index parse_module(Parser *parser) {
     }
 
     assert(parse_token_current(parser)->token_type == TOKEN_TYPE_END);
+    if (parser->has_type_info && parse_reflection_types_append(parser, module) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
     return module;
+}
+
+/**
+ * Appends the definitions of the types that `type_info_of` gives information in to `module`, as if
+ * the program had them at its end:
+ *
+ *     Enum_Member_Type_Info :: struct ->
+ *         name: Str
+ *         value: Int
+ *
+ * They are made only when the program uses `type_info_of`, so that other programs have the same
+ * tree as before. They are ordinary structs from here on, so the analysis and the target need no
+ * special case for the elements of `members`. Their names and fields are views of string literals
+ * and not of the source, so an error about them, which only a program that defines the same name
+ * can cause, has no place in the source. Returns false after it recorded an error.
+ */
+static bool parse_reflection_types_append(Parser *parser, Ast_Node_Index module) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(module < parser->node_count);
+
+    Ast_Node_Index definition = parse_node_make(parser, AST_NODE_TYPE_CONSTANT_DEFINITION);
+    if (definition == AST_NODE_INDEX_NONE) {
+        return false;
+    }
+    parser->nodes[definition].payload.constant_definition.name = STR("Enum_Member_Type_Info");
+    parse_node_append_child(parser, module, definition);
+
+    Ast_Node_Index struct_type = parse_node_make(parser, AST_NODE_TYPE_STRUCT_TYPE);
+    if (struct_type == AST_NODE_INDEX_NONE) {
+        return false;
+    }
+    parse_node_append_child(parser, definition, struct_type);
+
+    Str const field_names[] = {STR("name"), STR("value")};
+    Str const field_types[] = {STR("Str"), STR("Int")};
+    for (size_t i = 0; i < 2; i += 1) {
+        Ast_Node_Index field = parse_node_make(parser, AST_NODE_TYPE_FIELD);
+        if (field == AST_NODE_INDEX_NONE) {
+            return false;
+        }
+        parser->nodes[field].payload.field.name = field_names[i];
+        parse_node_append_child(parser, struct_type, field);
+
+        Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
+        if (type_name == AST_NODE_INDEX_NONE) {
+            return false;
+        }
+        parser->nodes[type_name].payload.type_name.name = field_types[i];
+        parse_node_append_child(parser, field, type_name);
+    }
+
+    return true;
 }
 
 static Ast_Node_Index parse_definition(Parser *parser) {
@@ -537,6 +598,7 @@ static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
     }
 
     // The value is stored once, before any code runs, so it is a literal and not an expression.
+    // Information about a type is known when the program is compiled, so it is allowed as well.
     Ast_Node_Index value = AST_NODE_INDEX_NONE;
     switch (parse_token_current(parser)->token_type) {
     case TOKEN_TYPE_INTEGER_LITERAL:
@@ -549,8 +611,11 @@ static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
     case TOKEN_TYPE_STRING_LITERAL:
         value = parse_string_literal(parser);
         break;
+    case TOKEN_TYPE_KEYWORD_TYPE_INFO_OF:
+        value = parse_type_info_of(parser);
+        break;
     default:
-        return parse_fail(parser, STR("a number, a string, 'true' or 'false'"));
+        return parse_fail(parser, STR("a number, a string, 'true', 'false' or 'type_info_of'"));
     }
     if (value == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
@@ -1831,6 +1896,9 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
         parse_token_advance(parser);
         return literal;
     }
+    if (next == TOKEN_TYPE_KEYWORD_TYPE_INFO_OF) {
+        return parse_type_info_of(parser);
+    }
     if (next == TOKEN_TYPE_KEYWORD_NIL) {
         Ast_Node_Index nil = parse_node_make(parser, AST_NODE_TYPE_NIL_LITERAL);
         if (nil == AST_NODE_INDEX_NONE) {
@@ -1841,8 +1909,39 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
     }
 
     return parse_fail(parser, STR("an integer literal, a string literal, 'true', 'false', 'nil', "
-                                  "a name, a call, an array literal, a struct literal or a "
-                                  "member of an enum such as '.RED'"));
+                                  "a name, a call, an array literal, a struct literal, "
+                                  "'type_info_of' or a member of an enum such as '.RED'"));
+}
+
+/**
+ * Parses `type_info_of(Type)`, the information about a type, and the subscripts that follow it,
+ * such as the `.members` of `type_info_of(Color).members`. The node has the type as its child.
+ * Returns the node of the last subscript, or the node itself when there is none.
+ */
+static Ast_Node_Index parse_type_info_of(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_TYPE_INFO_OF);
+
+    Ast_Node_Index info = parse_node_make(parser, AST_NODE_TYPE_TYPE_INFO_OF);
+    if (info == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_token_advance(parser);
+    parser->has_type_info = true;
+
+    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_LEFT, STR("'('")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    Ast_Node_Index type = parse_type_name(parser, STR("the name of a type"), false);
+    if (type == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, info, type);
+    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_RIGHT, STR("')'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    return parse_subscripts(parser, info);
 }
 
 /**

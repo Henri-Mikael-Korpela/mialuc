@@ -198,6 +198,14 @@ typedef enum {
     // A struct that has itself as a field, directly or through other structs, so it would be
     // infinitely large. The subject is the name of the first field of the struct.
     WASM_BUILD_STATUS_STRUCT_RECURSIVE,
+    // `type_info_of(Type)` that is not directly followed by a field, as in `info := type_info_of(
+    // Color)`, or that is the value of a global variable with more than one field after it. The
+    // information only exists at compile time, so only its fields can be used. The subject is the
+    // name of the type, or of the global variable.
+    WASM_BUILD_STATUS_TYPE_INFO_MISPLACED,
+    // `type_info_of(Type)` of a type that the target has no information about, which is every type
+    // that is not an enum. The subject is the name of the type.
+    WASM_BUILD_STATUS_TYPE_INFO_UNSUPPORTED,
     WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
     WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
 } Wasm_Build_Status;

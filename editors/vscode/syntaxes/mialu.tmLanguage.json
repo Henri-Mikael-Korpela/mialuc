@@ -183,6 +183,11 @@
                     "match": "\\bstruct\\b"
                 },
                 {
+                    "name": "keyword.operator.type-info.mialu",
+                    "comment": "The operator that gathers information about a type while the program is compiled, as in type_info_of(Color).members. It comes before the calls, so it is not taken for one.",
+                    "match": "\\btype_info_of\\b"
+                },
+                {
                     "name": "storage.modifier.const.mialu",
                     "comment": "The length of an array type that is the number of elements of the array literal that it starts, as in [const]Int { 1, 2 }.",
                     "match": "\\bconst\\b"

@@ -56,3 +56,16 @@ console.log("Negative index:", trapped(() => element_out_of_bounds(-1)));
 console.log("Slice 1:3 and slice 1:4 of three:", slice_out_of_bounds(1, 3), trapped(() => slice_out_of_bounds(1, 4)));
 console.log("Low bound above the high one:", trapped(() => slice_out_of_bounds(2, 1)));
 console.log("Copy to a range of another length:", trapped(() => copy_with_different_lengths()));
+
+// length_of gives the number of elements of an array or an array slice as an Int. For an array the
+// number is known when the program is compiled, and for a slice it is read when the program runs.
+console.log("Length of arrays with a deduced, an explicit and no length, 5, 7 and 0:",
+    length_of_array(), length_of_array_with_explicit_length(), length_of_empty_array());
+console.log("Length of a[1:4] and of a[2:2], 3 and 0:", length_of_slice_of_array(1, 4),
+    length_of_slice_of_array(2, 2));
+console.log("A loop up to the length, 1 + 2 + 3 + 4:", fill_with_length());
+console.log("Length of a slice that JavaScript wrote at address 0, 5 and 2:", length_of_slice(0, 5),
+    length_of_slice(24, 2));
+console.log("Average of 4 8 15 16 23, and of nothing:", average(0, 5), average(0, 0));
+console.log("The last element of the five, and of the last two:", last_element(0, 5),
+    last_element(24, 2));

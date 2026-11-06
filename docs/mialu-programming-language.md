@@ -29,6 +29,7 @@
   - [Array literals](#array-literals)
   - [Elements](#elements)
   - [Array slices](#array-slices)
+  - [Length of an array](#length-of-an-array)
 - [Custom data types](#custom-data-types)
   - [Structs](#structs)
     - [Struct objects](#struct-objects)
@@ -36,6 +37,8 @@
     - [Structs in structs](#structs-in-structs)
     - [Structs in arrays](#structs-in-arrays)
   - [Enumerations](#enumerations)
+- [Static reflection](#static-reflection)
+  - [Information about an enum](#information-about-an-enum)
 - [Pointers](#pointers)
   - [Taking an address](#taking-an-address)
   - [Following a pointer](#following-a-pointer)
@@ -118,6 +121,7 @@ or
 proc
 return
 struct
+type_info_of
 ```
 
 There are also literal words, which look like keywords but are actually literals, because each one is a value and not a part of the syntax of a statement. In alphabetical order they are:
@@ -457,7 +461,7 @@ The type of a global variable is deduced from its initial value, or written betw
 ready #(static) : Bool = false
 ```
 
-The initial value is a literal: a number, `true` or `false`, or a string. It is stored when the program starts, before any code runs, so it cannot be an expression, a name or a call. A global variable can be used and assigned to in every procedure of the module, also in the ones that are written above its definition, because it is in the module scope, see [Scope resolution](#scope-resolution). Like a constant, it has a name of its own in that scope, so it cannot have the name of a constant or of another global variable, and a parameter or a variable of a procedure cannot have its name.
+The initial value is a literal: a number, `true` or `false`, or a string, or else a field of [type information](#static-reflection), such as `type_info_of(Color).members`, which is known when the program is compiled and so is a constant like a literal. It is stored when the program starts, before any code runs, so it cannot be an expression, a name or a call. A global variable can be used and assigned to in every procedure of the module, also in the ones that are written above its definition, because it is in the module scope, see [Scope resolution](#scope-resolution). Like a constant, it has a name of its own in that scope, so it cannot have the name of a constant or of another global variable, and a parameter or a variable of a procedure cannot have its name.
 
 ## Control flow structures
 
@@ -788,7 +792,7 @@ a : [3]Int = [const]Int { 7, 8, 9 }
 
 An array literal is an expression, so it can also be used without a variable, for example as an argument of a call. Each time that a literal is evaluated it puts its elements in their place again, so a literal in the block of a loop makes a new array in every pass.
 
-An array cannot be the type of a parameter, of a global variable or of a returned value, because its elements are in the frame of the procedure that defines it: a parameter would have to be a copy, and the elements of a returned array would be gone when the procedure returns. A procedure that works on the elements of an array takes an [array slice](#array-slices) of them.
+An array cannot be the type of a parameter, of a global variable (except for the [members of an enum](#static-reflection), which are constant) or of a returned value, because its elements are in the frame of the procedure that defines it: a parameter would have to be a copy, and the elements of a returned array would be gone when the procedure returns. A procedure that works on the elements of an array takes an [array slice](#array-slices) of them.
 
 ### Elements
 
@@ -855,6 +859,31 @@ array_element_range_assignment :: proc() Int ->
 ```
 
 `array_element_range_assignment` returns 69. The elements of the value must be of the type of the elements of the range. The assignment operators such as `+=` are for one element, so `a[0:3] += 1` is an error.
+
+### Length of an array
+
+The built-in procedure `length_of` gives the number of elements of an array or an array slice, as an `Int`. It takes one argument, and it is called like any procedure:
+
+```
+length_of_array :: proc() Int ->
+    a := [const]Int { 1, 2, 3, 4, 5 }
+    return length_of(a)
+
+average :: proc(elements: []Int) Int ->
+    if length_of(elements) == 0 ->
+        return 0
+    return sum(elements) / length_of(elements)
+
+fill_with_length :: proc() Int ->
+    a := [const]Int { 0, 0, 0, 0 }
+    for i in 0..<length_of(a) ->
+        a[i] = i + 1
+    return sum(a)
+```
+
+`length_of_array` returns 5. The length of an array is part of the program, so for an array `length_of` is a number that is known when the program is compiled, also for an array whose length is `const`. The length of a slice is not known until the program runs, so for a slice it reads the length that the slice holds, which for `a[low:high]` is `high - low`. The length of an array of nothing, `[const]Int { }`, is 0. Anything else as the argument, such as an `Int` or a `Str`, is an error.
+
+`length_of` is not a keyword but a name that a program can define itself: a procedure with that name is called instead of the built-in one. The [members of an enum](#static-reflection) are an array, so `length_of` gives their number as well.
 
 ## Custom data types
 
@@ -1054,6 +1083,55 @@ Not everything can be done with an enum yet, which a later version of the langua
 - A member has no value of its own, such as a number or a string, that is written in the definition.
 - A member cannot be the value of a variable without a type written, as above, and a member is not called or followed with `^`.
 
+
+## Static reflection
+
+Reflection is a program looking at its own types. Static reflection does it while the program is compiled: the information is worked out by the compiler, and nothing is looked up when the program runs. The operator `type_info_of` takes the name of a type between parentheses and gives the information about it, as a struct object. What the information is depends on the type that is asked about, and each kind of type has a struct of its own for it. The `type_info_of` word is a [keyword](#reserved-words), because it is an operator and not a procedure: its operand is a type, which is not a value.
+
+### Information about an enum
+
+For an [enum](#enumerations), `type_info_of` gives an `Enum_Type_Info`. It has these fields:
+
+- `name`, a `Str` with the name of the enum, such as `"Color"`,
+- `members`, an array with an `Enum_Member_Type_Info` for each member of the enum, in the order of the definition. The length of the array is the number of members, which is part of its type, so it is a compile-time array.
+
+An `Enum_Member_Type_Info` is an ordinary [struct](#structs) that has these fields:
+
+- `name`, a `Str` with the name of the member, such as `"GREEN"`,
+- `value`, an `Int` with the number of the member, which is its place among the members, counted from 0.
+
+```
+Color :: enum Int ->
+    RED
+    GREEN
+    BLUE
+
+Color_Members #(static) := type_info_of(Color).members
+
+get_enum_members_count :: proc() Int ->
+    return length_of(Color_Members)
+
+member_name :: proc(index: Int) Str ->
+    return Color_Members[index].name
+
+sum_of_numbers :: proc() Int ->
+    total := 0
+    for member in type_info_of(Color).members ->
+        total += member.value
+    return total
+```
+
+`get_enum_members_count` returns 3, `member_name(1)` is `"GREEN"` and `sum_of_numbers` returns 3, which is 0 + 1 + 2.
+
+The `Enum_Type_Info` exists only when the program is compiled, because the length of its `members` is a part of its type, and a value of a type that depends on the enum has nowhere to be kept when the program runs. So a field has to be read from it right away: `type_info_of(Color).members` and `type_info_of(Color).name` are values, and `info := type_info_of(Color)` and passing `type_info_of(Color)` to a procedure are errors. The array of the members is a constant of the program, so a [global variable](#global-variables) can be given it for its initial value, as `Color_Members` above, which is the only expression other than a literal that a global variable can be given. A global variable or a local variable that is given the members holds the address of the array and does not copy it, which is the one case where a variable of an array type is not defined with an array literal. It has the type `[3]Enum_Member_Type_Info` here, which can also be written. Its elements are indexed, sliced and gone through by a `for` statement like those of any array, and `length_of` gives their number. The elements are information, so a program should not assign to them; the compiler does not stop it.
+
+`Enum_Member_Type_Info` is a struct that the compiler adds to a program that uses `type_info_of`, as if the program ended with its definition, so a program cannot define a struct with that name as well. The compiler gives no information about a type that is not an enum for now, and asking for it is an error.
+
+Not everything can be done with the information yet, which a later version of the language may allow:
+
+- `type_info_of` can only be asked about the name of an enum. The information about a struct or a primitive type is not available.
+- The information is not a value that a variable or a parameter can hold, as above.
+- `Enum_Type_Info` and `Enum_Member_Type_Info` are not written as the type of a variable or a parameter, because the name of the first is not a type that a program can use. The second is, so `[]Enum_Member_Type_Info` is the type of a slice of the members.
 
 ## Pointers
 
@@ -1462,11 +1540,15 @@ A pointer to a procedure is one 32-bit integer (`i32`) as well, but it is not an
 An enum is one `Int` (`i64`), which is the number of the member, counted from 0 in the order of the definition. So a parameter of an enum type is one WebAssembly parameter and a result is one result, which JavaScript passes and receives as a `BigInt`, so `Color.GREEN` is `1n`. A member that is written `Color.GREEN` or `.GREEN` is `i64.const` of its number, which is worked out when the module is built, from the enum that the place of `.GREEN` wants. A constant that is a member is a function without parameters that returns the number, like a constant that is a string, and is exported under its name. Members are compared with `i64.eq` and `i64.ne`, and the default value of an enum type is `i64.const 0`. A field of an enum type is one value of a struct, and the elements of an array of enums and what a pointer to an enum points to take 8 bytes each, like those of any other type. An enum has no code of its own, as a struct has not, so it is not exported and is no function.
 
 
-A module has a memory only when the program has a string literal, which includes the value of a global variable, an array type, which includes the array literals and the array slices, or a pointer: a pointer type, `%` or `^`. The strings are at the start of the memory, and the stack of the arrays is after them. A procedure cannot be called `memory`, whether the module has one or not, because that is the name of the export.
+A module has a memory only when the program has a string literal, which includes the value of a global variable, an array type, which includes the array literals and the array slices, `type_info_of`, or a pointer: a pointer type, `%` or `^`. The strings are at the start of the memory, then the information of `type_info_of`, and the stack of the arrays is after them.
+
+`type_info_of(Color).members` is an array in the data of the module, after the strings and at an address that is a multiple of 8, and the value of the expression is `i32.const` of that address, as any array is the address of its first element. Its elements are `Enum_Member_Type_Info` structs, which take three slots of 8 bytes each: the address and the length of the name, which are 32-bit numbers in the first two slots, and the number of the member, a 64-bit one, in the third. The bytes of the name of the enum and of the members come after the array. A global variable that is given the members is an `i32` global that has the address, and `type_info_of(Color).name` is the address and the length of the name, as for any `Str`. Every use of `type_info_of` has an array of its own, even for an enum that has one already. `length_of` of an array is the `i64.const` of its length, with the array itself written first, and the length of a slice is the second of its two values, extended to 64 bits, with the address dropped. A procedure cannot be called `memory`, whether the module has one or not, because that is the name of the export.
 
 The target rejects a program that the parser accepts when:
 
 - the type written after `enum` is not `Int`,
+- `type_info_of` is asked about a type that is not an enum, or is not followed by `.name` or `.members` right away, or is the initial value of a global variable with anything more than one of them after it,
+- `length_of` has other than one argument, or an argument that is not an array or an array slice,
 - a type, also the one of a global variable, is not `Int`, `Bool`, `Str`, a struct or an enum that is defined, a pointer to one of them, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
 - a struct contains itself, or has a field that is an array or an array slice,
 - a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field,

@@ -65,6 +65,7 @@ typedef enum {
     AST_NODE_TYPE_SUBSCRIPT,
     AST_NODE_TYPE_SUBTRACTION,
     AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT,
+    AST_NODE_TYPE_TYPE_INFO_OF,
     AST_NODE_TYPE_TYPE_NAME,
     AST_NODE_TYPE_VARIABLE_DEFINITION,
 } Ast_Node_Type;
@@ -219,8 +220,10 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   Its children are one `AST_NODE_TYPE_ATTRIBUTE` for each attribute of its attribute list, in the
  *   order of the source, then the type, an `AST_NODE_TYPE_TYPE_NAME` or an
  *   `AST_NODE_TYPE_ARRAY_TYPE`, when the definition gives one, and last the initial value, which is
- *   an `AST_NODE_TYPE_INTEGER_LITERAL`, an `AST_NODE_TYPE_BOOL_LITERAL` or an
- *   `AST_NODE_TYPE_STRING_LITERAL`, and never another expression. The name is in the payload. It is
+ *   an `AST_NODE_TYPE_INTEGER_LITERAL`, an `AST_NODE_TYPE_BOOL_LITERAL`, an
+ *   `AST_NODE_TYPE_STRING_LITERAL` or, for information that is known when the program is compiled,
+ *   an `AST_NODE_TYPE_FIELD_ACCESS` of an `AST_NODE_TYPE_TYPE_INFO_OF`, and never another
+ *   expression. The name is in the payload. It is
  *   a child of the `AST_NODE_TYPE_MODULE`, between the constant definitions.
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_IF_STATEMENT`: a chain of `if`, any number of `else if` and an optional `else`,
@@ -307,6 +310,12 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that gets the difference, and the value that is subtracted from it, in that order.
  *   It is a statement of a procedure body.
+ * - `AST_NODE_TYPE_TYPE_INFO_OF`: one child, the `AST_NODE_TYPE_TYPE_NAME` of the type whose
+ *   information is gathered, as in `type_info_of(Color)`. It is an expression, whose value is the
+ *   struct object of information about the type, which the target gives a type that depends on the
+ *   type that is asked about. It can be followed by subscripts, such as the `.members` of
+ *   `type_info_of(Color).members`, and it is the value of an
+ *   `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION` when a subscript follows it.
  * - `AST_NODE_TYPE_TYPE_NAME`: no children.
  * - `AST_NODE_TYPE_VARIABLE_DEFINITION`: the initial value, preceded by the type, an
  *   `AST_NODE_TYPE_TYPE_NAME`, an `AST_NODE_TYPE_POINTER_TYPE` or an `AST_NODE_TYPE_ARRAY_TYPE`,

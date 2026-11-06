@@ -187,3 +187,36 @@ copy_with_different_lengths :: proc() Int ->
     a := [const]Int { 1, 2, 3 }
     a[0:2] = a[0:3]
     return a[0]
+
+length_of_array :: proc() Int ->
+    a := [const]Int { 1, 2, 3, 4, 5 }
+    return length_of(a)
+
+length_of_array_with_explicit_length :: proc() Int ->
+    a := [7]Int { 1, 2, 3, 4, 5, 6, 7 }
+    return length_of(a)
+
+length_of_empty_array :: proc() Int ->
+    a := [const]Int { }
+    return length_of(a)
+
+length_of_slice :: proc(elements: []Int) Int ->
+    return length_of(elements)
+
+length_of_slice_of_array :: proc(low: Int, high: Int) Int ->
+    a := [const]Int { 1, 2, 3, 4, 5 }
+    return length_of(a[low:high])
+
+average :: proc(elements: []Int) Int ->
+    if length_of(elements) == 0 ->
+        return 0
+    return sum(elements) / length_of(elements)
+
+fill_with_length :: proc() Int ->
+    a := [const]Int { 0, 0, 0, 0 }
+    for i in 0..<length_of(a) ->
+        a[i] = i + 1
+    return sum(a)
+
+last_element :: proc(elements: []Int) Int ->
+    return elements[length_of(elements) - 1]

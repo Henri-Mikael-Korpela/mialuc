@@ -690,6 +690,11 @@ static bool semantic_call_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index pr
         binding = semantic_definition_find(analyzer, name);
     }
     if (binding.kind == SEMANTIC_BINDING_KIND_NONE) {
+        // A built-in procedure is what is called when the program has no name of its own, and the
+        // call keeps the kind `SEMANTIC_BINDING_KIND_NONE` for the target to recognize by name.
+        if (semantic_is_built_in_procedure(name)) {
+            return true;
+        }
         return semantic_fail(analyzer, SEMANTIC_STATUS_IDENTIFIER_UNKNOWN, name);
     }
 
@@ -885,3 +890,10 @@ static bool semantic_fail(Semantic_Analyzer *analyzer, Semantic_Status status, S
     analyzer->subject = subject;
     return false;
 }
+
+bool semantic_is_built_in_procedure(Str name) {
+    assert(name.bytes != NULL);
+
+    return str_equals(name, STR("length_of"));
+}
+

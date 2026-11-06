@@ -507,6 +507,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_KEYWORD_TRUE:
             printf("KEYWORD_TRUE\n");
             break;
+        case TOKEN_TYPE_KEYWORD_TYPE_INFO_OF:
+            printf("KEYWORD_TYPE_INFO_OF\n");
+            break;
         case TOKEN_TYPE_LABEL:
             printf("LABEL %.*s\n", (int)token.payload.identifier.text.length,
                    token.payload.identifier.text.bytes);
@@ -827,6 +830,18 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: variable '%.*s' is given a value that is not of its type.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case WASM_BUILD_STATUS_TYPE_INFO_MISPLACED:
+        fprintf(stderr, "%s:%zu:%zu: type_info_of('%.*s') exists only when the program is "
+                "compiled, so a field has to follow it right away, as in "
+                "type_info_of(%.*s).members. A global variable can be given that and nothing "
+                "more.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_TYPE_INFO_UNSUPPORTED:
+        fprintf(stderr, "%s:%zu:%zu: the wasm target has information about enums only, and '%.*s' "
+                "is not one.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_TYPE_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: type '%.*s' is not supported by the wasm target.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
@@ -947,10 +962,13 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
  * of the analysis and of the build both point at a name in the source this way.
  */
 static Str_Position main_subject_position(Str source, Str subject) {
-    // The subject views the source, so its distance from the start is its offset.
-    assert(subject.bytes >= source.bytes);
+    // The subject views the source, so its distance from the start is its offset. The exception is
+    // the built-in struct that `type_info_of` adds, whose name is not in the source, so an error
+    // about it, which a program that defines the same name causes, points at the start.
+    if (subject.bytes < source.bytes || subject.bytes > source.bytes + source.length) {
+        return str_position_at(source, 0);
+    }
     size_t offset = (size_t)(subject.bytes - source.bytes);
-    assert(offset <= source.length);
     return str_position_at(source, offset);
 }
 
