@@ -6,6 +6,7 @@
 - [Source code representation](#source-code-representation)
 - [Lines, spaces and indentation](#lines-spaces-and-indentation)
 - [Keywords](#keywords)
+- [Literal words](#literal-words)
 - [Identifiers](#identifiers)
 - [Constants](#constants)
 - [Data types](#data-types)
@@ -102,26 +103,35 @@ break
 const
 continue
 else
-false
 for
 foreign
 if
 import
 in
-nil
 not
 or
 proc
 return
 struct
-true
 ```
 
 Keywords are case-sensitive, so `If` is an identifier and `if` is not. A longer identifier that only starts with a keyword, such as `returned` or `cannot`, is an identifier.
 
+## Literal words
+
+Three more words are reserved, but they are literals and not keywords, because each one is a value and not a part of the syntax of a statement. In alphabetical order they are:
+
+```
+false
+nil
+true
+```
+
+`false` and `true` are the two values of a [`Bool`](#booleans), and `nil` is the [null pointer](#null-and-lifetime), a value of every pointer type. Like a keyword, a literal word is case-sensitive, is reserved so it cannot be used as an identifier, and is not the start of a longer identifier such as `nilable` or `trueish`. The other literals, which are not words, are the integer literals, such as `42`, and the [string literals](#strings), such as `"Bob"`.
+
 ## Identifiers
 
-Identifiers can contain alphanumeric characters and underscores. Case matters for identifiers in Mialu are case-sensitive. An identifier cannot begin with a digit. A [keyword](#keywords) cannot be used as an identifier.
+Identifiers can contain alphanumeric characters and underscores. Case matters for identifiers in Mialu are case-sensitive. An identifier cannot begin with a digit. A [keyword](#keywords) or a [literal word](#literal-words) cannot be used as an identifier.
 
 ## Constants
 
@@ -174,7 +184,7 @@ The compiler rejects a string literal that is not valid UTF-8. A string cannot c
 
 ### Booleans
 
-A `Bool` is either `true` or `false`, which are keywords:
+A `Bool` is either `true` or `false`, which are [literal words](#literal-words):
 
 ```
 ready : Bool = true
@@ -774,7 +784,7 @@ The value that is assigned through a pointer must be of the type that the pointe
 
 ### Null and lifetime
 
-`nil` is the null pointer, a pointer that points to nothing, like `NULL` in C. It is a keyword, and a value of every pointer type: it is a `^Int` where a `^Int` is wanted, a `^Person` where that is, and so on, so it can be the value of a variable that has a pointer type, an argument, a returned value, a field of a struct literal and an element of an array literal. A pointer that is defined with a type and without a value, as in `p : ^Int`, is `nil` as well, and so is a field of a struct that is left out of a struct literal.
+`nil` is the null pointer, a pointer that points to nothing, like `NULL` in C. It is a [literal word](#literal-words), and a value of every pointer type: it is a `^Int` where a `^Int` is wanted, a `^Person` where that is, and so on, so it can be the value of a variable that has a pointer type, an argument, a returned value, a field of a struct literal and an element of an array literal. A pointer that is defined with a type and without a value, as in `p : ^Int`, is `nil` as well, and so is a field of a struct that is left out of a struct literal.
 
 ```
 read_or_default :: proc(p: ^Int, default: Int) Int ->
@@ -943,7 +953,7 @@ find_first :: proc(limit: Int) Int ->
     return found
 ```
 
-The name of a label follows the rules of an [identifier](#identifiers), so a keyword cannot be one, and `@ outer` with a space is an error. Labels are a kind of name of their own: they cannot be used as variables, and a variable or a procedure with the same name does not clash with them. A statement cannot have the label of a statement that it is inside of, so a label has one meaning wherever it can be used, but statements that are not inside each other can have the same label.
+The name of a label follows the rules of an [identifier](#identifiers), so a keyword or a literal word cannot be one, and `@ outer` with a space is an error. Labels are a kind of name of their own: they cannot be used as variables, and a variable or a procedure with the same name does not clash with them. A statement cannot have the label of a statement that it is inside of, so a label has one meaning wherever it can be used, but statements that are not inside each other can have the same label.
 
 An if statement, a for statement and a [loop without a range](#loops-without-a-range) can have a label as well. It is written before the `if` or the `for` on the same line, with a space after it:
 

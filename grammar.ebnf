@@ -457,12 +457,18 @@ string_character = any_character - ( '"' | "\\" | "\n" | "\r" ) ;
 
 any_character = ? any character ? ;
 
-(* Names. An identifier that is a reserved word is not a name. *)
+(* Names. An identifier that is a reserved word is not a name. A reserved word is a keyword or a
+   literal word. *)
 name = identifier - reserved_word ;
 
-reserved_word =
+reserved_word = keyword | literal_word ;
+
+keyword =
     "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "struct" |
-    "true" | "false" | "nil" | "not" | "and" | "or" | "foreign" | "import" ;
+    "not" | "and" | "or" | "foreign" | "import" ;
+
+(* The words that are literals: the two values of a `Bool` and the null pointer. *)
+literal_word = "true" | "false" | "nil" ;
 
 identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 

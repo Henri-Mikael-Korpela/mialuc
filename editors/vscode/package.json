@@ -30,6 +30,21 @@
                 "scopeName": "source.mialu",
                 "path": "./syntaxes/mialu.tmLanguage.json"
             }
-        ]
+        ],
+        "configurationDefaults": {
+            "editor.tokenColorCustomizations": {
+                "textMateRules": [
+                    {
+                        "scope": [
+                            "constant.language.boolean.mialu",
+                            "constant.language.nil.mialu"
+                        ],
+                        "settings": {
+                            "foreground": "#d19a66"
+                        }
+                    }
+                ]
+            }
+        }
     }
 }

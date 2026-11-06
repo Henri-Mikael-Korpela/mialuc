@@ -160,6 +160,7 @@
         .token-instruction { color: #9cdcfe; }
         .token-keyword { color: #569cd6; }
         .token-label { color: #c586c0; }
+        .token-literal { color: #d19a66; }
         .token-number { color: #b5cea8; }
         .token-string { color: #ce9178; }
         .token-type { color: #4ec9b0; }
@@ -332,7 +333,8 @@
                 ["string", /"[^"\\\n]*"/],
                 ["attribute", /#(?:[ \t]*\([ \t]*[A-Za-z_]\w*[ \t]*\))+/],
                 ["label", /@[A-Za-z_]\w*/],
-                ["keyword", /\b(?:proc|return|if|else|for|in|break|const|continue|struct|foreign|import|true|false|and|or)\b|\bnot\b(?!=)/],
+                ["keyword", /\b(?:proc|return|if|else|for|in|break|const|continue|struct|foreign|import|and|or)\b|\bnot\b(?!=)/],
+                ["literal", /\b(?:true|false|nil)\b/],
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
                 ["function", /\b[A-Za-z_]\w*(?=\()/],
                 ["type", /\b[A-Z]\w*\b/],
