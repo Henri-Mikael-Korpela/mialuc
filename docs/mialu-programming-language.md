@@ -8,7 +8,7 @@
 - [Reserved words](#reserved-words)
 - [Identifiers](#identifiers)
 - [Constants](#constants)
-- [Data types](#data-types)
+- [Primitive data types](#primitive-data-types)
   - [Strings](#strings)
   - [Booleans](#booleans)
   - [Logical operators](#logical-operators)
@@ -172,19 +172,25 @@ A constant can also be a [struct](#structs), which is a type, and a string, whic
 greeting :: "Hello, world"
 ```
 
-## Data types
+## Primitive data types
 
-Every value has a type, which is written as an identifier. Mialu has the following types:
+Every value has a type, which is written as an identifier. Mialu has the following primitive data types:
 
 | Type  | Description                                                  |
 |-------|--------------------------------------------------------------|
 | `Bool` | A boolean value, which is `true` or `false`. See [Booleans](#booleans). |
 | `Int` | A signed 64-bit integer. Written as a decimal number, such as `42`. |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
-| `[5]Int` | An array: a fixed number of values, here five `Int` values, that are one after the other. See [Arrays](#arrays). |
-| `[]Int` | An array slice: a view of some of the elements of an array, whose number is not known until the program runs. See [Array slices](#array-slices). |
-| `Person` | A struct, which is a record type that is defined by the program, such as `Person :: struct -> ...`. See [Structs](#structs). |
-| `^Int` | A pointer: the address of a value, here of an `Int`. See [Pointers](#pointers). |
+
+The following primitive data types are reserved for possible future use:
+
+| Category | Types |
+| -------- | ----- |
+| Byte | `Byte` |
+| Character | `Rune` |
+| Floating point number | `F32 F64` |
+| Signed integer | `I8 I16 I32 I64` |
+| Unsigned integer | `U8 U16 U32 U64` |
 
 ### Strings
 
