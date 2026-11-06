@@ -5,8 +5,7 @@
 - [Introduction](#introduction)
 - [Source code representation](#source-code-representation)
 - [Lines, spaces and indentation](#lines-spaces-and-indentation)
-- [Keywords](#keywords)
-- [Literal words](#literal-words)
+- [Reserved words](#reserved-words)
 - [Identifiers](#identifiers)
 - [Constants](#constants)
 - [Data types](#data-types)
@@ -94,21 +93,19 @@ Indentation is made of spaces only. Tabs are not allowed in indentation. Each le
 
 Mialu doesn't need semicolons (`;`) to separate statements. Each statement is on its own line, and a line can have at most one statement.
 
-## Keywords
+## Reserved words
 
-Keywords are words that have a meaning of their own in the language, so they are reserved and cannot be used as identifiers. Mialu has the following keywords, in alphabetical order:
+Mialu has reserved words that cannot be used as names for identifiers. Reserved words are case-sensitive, so `If` is an identifier and `if` is not. A longer identifier that only starts with a keyword, such as `returned` or `cannot`, is an identifier.
+
+Reserved words are categorized into used and unused keywords and literal words. Mialu has the following keywords in use, in alphabetical order:
 
 ```
 and
 break
-const
-continue
+const continue
 else
-for
-foreign
-if
-import
-in
+for foreign
+if import in
 not
 or
 proc
@@ -116,19 +113,39 @@ return
 struct
 ```
 
-Keywords are case-sensitive, so `If` is an identifier and `if` is not. A longer identifier that only starts with a keyword, such as `returned` or `cannot`, is an identifier.
-
-## Literal words
-
-Three more words are reserved, but they are literals and not keywords, because each one is a value and not a part of the syntax of a statement. In alphabetical order they are:
+There are also literal words, which look like keywords but are actually literals, because each one is a value and not a part of the syntax of a statement. In alphabetical order they are:
 
 ```
-false
-nil
-true
+false nil true
 ```
 
-`false` and `true` are the two values of a [`Bool`](#booleans), and `nil` is the [null pointer](#null-and-lifetime), a value of every pointer type. Like a keyword, a literal word is case-sensitive, is reserved so it cannot be used as an identifier, and is not the start of a longer identifier such as `nilable` or `trueish`. The other literals, which are not words, are the integer literals, such as `42`, and the [string literals](#strings), such as `"Bob"`.
+`false` and `true` are the two values of a [`Bool`](#booleans), and `nil` is the [null pointer](#null-and-lifetime), a value of every pointer type.
+
+Mialu also defines the following unused keywords. They are reserved for possible future use:
+
+```
+abstract alias as async await
+case cast catch class
+defer delete distinct do dynamic
+enum extern
+final finally
+gen generate goto
+impl interface is
+loop
+macro match mutable
+new
+of operator override
+private public
+ref
+safe self switch
+super
+this throw throws trait
+transmute try type_id_of type_of
+union unsafe use
+virtual
+where while
+yield
+```
 
 ## Identifiers
 
