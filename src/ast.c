@@ -59,6 +59,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_PARAMETER:
     case AST_NODE_TYPE_POINTER_TYPE:
     case AST_NODE_TYPE_PROCEDURE:
+    case AST_NODE_TYPE_PROCEDURE_TYPE:
     case AST_NODE_TYPE_RANGE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
     case AST_NODE_TYPE_SCOPE_STATEMENT:
@@ -95,6 +96,20 @@ Ast_Node_Index ast_procedure_end(Ast_Node const *nodes, size_t node_count,
     }
 
     return (Ast_Node_Index)end;
+}
+
+Str ast_procedure_return_type(Ast_Node const *procedure) {
+    assert(procedure != NULL);
+    assert(procedure->node_type == AST_NODE_TYPE_PROCEDURE ||
+           procedure->node_type == AST_NODE_TYPE_PROCEDURE_TYPE);
+
+    Str return_type = procedure->payload.procedure.return_type;
+    // A procedure type that returns nothing keeps the keyword in the place of the return type.
+    if (procedure->node_type == AST_NODE_TYPE_PROCEDURE_TYPE && return_type.bytes != NULL &&
+        str_equals(return_type, STR("proc"))) {
+        return STR_EMPTY;
+    }
+    return return_type;
 }
 
 bool ast_procedure_is_foreign(Ast_Node const *nodes, Ast_Node_Index procedure) {
@@ -311,6 +326,15 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             } else {
                 printf("PROCEDURE returns %.*s\n", (int)node.payload.procedure.return_type.length,
                        node.payload.procedure.return_type.bytes);
+            }
+            break;
+        case AST_NODE_TYPE_PROCEDURE_TYPE:
+            if (ast_procedure_return_type(&node).bytes == NULL) {
+                printf("PROCEDURE_TYPE\n");
+            } else {
+                printf("PROCEDURE_TYPE returns %.*s\n",
+                       (int)ast_procedure_return_type(&node).length,
+                       ast_procedure_return_type(&node).bytes);
             }
             break;
         case AST_NODE_TYPE_RANGE:

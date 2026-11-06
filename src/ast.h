@@ -51,6 +51,7 @@ typedef enum {
     AST_NODE_TYPE_PARAMETER,
     AST_NODE_TYPE_POINTER_TYPE,
     AST_NODE_TYPE_PROCEDURE,
+    AST_NODE_TYPE_PROCEDURE_TYPE,
     AST_NODE_TYPE_RANGE,
     AST_NODE_TYPE_RETURN_STATEMENT,
     AST_NODE_TYPE_SCOPE_STATEMENT,
@@ -150,7 +151,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   label it leaves the labeled statement with that label, which is a scope, a loop or an if
  *   statement. The word is in the payload. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_CALL`: one child per argument, in the order of the source, each one an
- *   expression. It is a call of the procedure that the name in the payload stands for, and an
+ *   expression. It is a call of the procedure that the name in the payload stands for, which is a
+ *   procedure, or a variable, a parameter or a global variable that holds a pointer to one, and an
  *   expression like the others. The node is made before its arguments. Whether it has a value
  *   depends on the procedure, which is for the target to tell.
  * - `AST_NODE_TYPE_CALL_STATEMENT`: one child, an `AST_NODE_TYPE_CALL` whose value, if it has
@@ -250,6 +252,18 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   body, which are variable definitions, assignments, if statements, loops, jumps and return
  *   statements. A foreign procedure has one `AST_NODE_TYPE_FOREIGN_BODY` instead of statements. The
  *   return type is in the payload.
+ * - `AST_NODE_TYPE_PROCEDURE_TYPE`: one child per parameter, in the order of the source, each one a
+ *   type: an `AST_NODE_TYPE_TYPE_NAME` or an `AST_NODE_TYPE_POINTER_TYPE`, and never a procedure
+ *   type, an array or an array slice. It is the `proc(Int, Int) Int` of `^proc(Int, Int) Int`, the
+ *   type of a pointer to a procedure, and so it is always the end of the carets of an
+ *   `AST_NODE_TYPE_POINTER_TYPE`: the first caret is the pointer, and each one more is a pointer to
+ *   that. The parameters have no names, so they are types and not `AST_NODE_TYPE_PARAMETER`
+ *   nodes. The return type is in the payload, like that of an `AST_NODE_TYPE_PROCEDURE`, except
+ *   that a procedure type that returns nothing has the keyword `proc` there instead, because the
+ *   node has no name that an error about it could point at and a return type is never a keyword:
+ *   read the return type with `ast_procedure_return_type`. It is a type like
+ *   `AST_NODE_TYPE_TYPE_NAME`, found wherever a type is, and the type of the elements of an
+ *   `AST_NODE_TYPE_ARRAY_TYPE` can be one.
  * - `AST_NODE_TYPE_RANGE`: two children, the first number and the end of the range, in that order,
  *   each one an expression (the target requires them to be `Int`). Whether the end is part of the
  *   range is in the payload. It is the child of an `AST_NODE_TYPE_FOR_STATEMENT`, and not an
@@ -412,6 +426,13 @@ STATIC_ASSERT(sizeof(Ast_Node) == 32, ast_node_size_is_32_bytes);
  * the children of each type above.
  */
 bool ast_node_type_is_assignment(Ast_Node_Type node_type);
+
+/**
+ * Returns the return type of `procedure`, which must be an `AST_NODE_TYPE_PROCEDURE` or an
+ * `AST_NODE_TYPE_PROCEDURE_TYPE`, as the text of the source, or a `Str` whose `bytes` is NULL when
+ * it returns nothing. For a procedure type that is not what the payload holds, see above.
+ */
+Str ast_procedure_return_type(Ast_Node const *procedure);
 
 /**
  * Returns whether `procedure`, an `AST_NODE_TYPE_PROCEDURE`, is declared in a `foreign js ->` block:

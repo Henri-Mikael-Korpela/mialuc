@@ -59,9 +59,12 @@ typedef struct {
 // of its first element, and its length is known from the program, see `wasm_array_length`. An
 // array slice is two 32-bit values, the address of its first element and its length, like `Str`. A
 // struct is the values of its fields one after the other, see `wasm_struct_slots`. A pointer is one
-// 32-bit value, the address of what it points to in the memory of the module. `nil` has the kind
-// `WASM_VALUE_TYPE_NIL`, which is a pointer to nothing in particular: it is accepted where any
-// pointer is wanted, see `wasm_type_equals`, and no variable has it as its type.
+// 32-bit value, the address of what it points to in the memory of the module. A pointer to a
+// procedure, which is the kind `WASM_VALUE_TYPE_PROCEDURE`, is one 32-bit value as well, but it is
+// not an address in memory: it is the index of the procedure in the table of the module, see
+// `wasm_procedure_table_index`. `nil` has the kind `WASM_VALUE_TYPE_NIL`, which is a pointer to
+// nothing in particular: it is accepted where any pointer is wanted, see `wasm_type_equals`, and no
+// variable has it as its type.
 typedef enum {
     WASM_VALUE_TYPE_ARRAY,
     WASM_VALUE_TYPE_BOOL,
@@ -69,6 +72,7 @@ typedef enum {
     WASM_VALUE_TYPE_NIL,
     WASM_VALUE_TYPE_NONE,
     WASM_VALUE_TYPE_POINTER,
+    WASM_VALUE_TYPE_PROCEDURE,
     WASM_VALUE_TYPE_SLICE,
     WASM_VALUE_TYPE_STR,
     WASM_VALUE_TYPE_STRUCT,
@@ -87,6 +91,14 @@ typedef enum {
  * when that is one. So a pointer is described without a type inside a type. The elements of an
  * array that are pointers are described the same way by `element_depth`, `element_pointee_kind`
  * and `element_definition`. `depth` and `element_depth` are zero when there is no pointer.
+ *
+ * A pointer to a procedure, written `^proc(Int) Int`, has the kind `WASM_VALUE_TYPE_PROCEDURE`,
+ * and its `definition` is the signature, an `AST_NODE_TYPE_PROCEDURE` or an
+ * `AST_NODE_TYPE_PROCEDURE_TYPE`. Signatures with the same parameter types and return type are one
+ * type, so `definition` is the first node that has the signature, see `wasm_signature_canonical`,
+ * and two types are compared by comparing nodes. A pointer to a pointer to a procedure is a pointer
+ * as above whose `pointee_kind` is `WASM_VALUE_TYPE_PROCEDURE`, and it has the signature as its
+ * `definition`.
  */
 typedef struct {
     Wasm_Value_Type kind;
@@ -98,6 +110,7 @@ typedef struct {
     uint32_t depth;
     uint32_t element_depth;
 } Wasm_Type;
+
 
 // The locals that a procedure with arrays has after its parameters and variables, for the code that
 // is written for subscripts, slices and the like to hold values in. The order is the order of the
@@ -156,6 +169,9 @@ typedef struct {
     // The number of foreign procedures. They are imported functions, which come before the
     // functions of the module in the function index space, see `wasm_function_index`.
     size_t foreign_count;
+    // The number of functions that the module defines, which are not foreign, see
+    // `wasm_function_count`.
+    size_t definition_count;
     size_t data_size_bytes;
     // Where the stack of the arrays ends at the low side, which is after the data, and where it
     // starts. The stack grows down from the top, which is the end of the memory.
@@ -170,6 +186,9 @@ typedef struct {
     // Whether the module has a stack in its memory, and a global that points to it, which it has
     // when there is an array literal.
     bool has_stack;
+    // Whether the module has a table with its functions, which it has when a pointer to a
+    // procedure can be made or called, see `wasm_data_measure`.
+    bool has_table;
 } Wasm_Builder;
 
 /**
@@ -284,6 +303,23 @@ static size_t          wasm_global_slot_index                 (Wasm_Builder cons
 static size_t          wasm_global_slot_count                 (Wasm_Builder const *builder);
 static void            wasm_build_global_section              (Wasm_Builder *builder);
 static bool            wasm_data_measure                      (Wasm_Builder *builder);
+static void            wasm_build_table_section               (Wasm_Builder *builder);
+static void            wasm_build_element_section             (Wasm_Builder *builder);
+static void            wasm_write_signature                   (Wasm_Builder *builder,
+                                                               Ast_Node_Index signature);
+static Ast_Node_Index  wasm_signature_canonical               (Wasm_Builder const *builder,
+                                                               Ast_Node_Index signature);
+static size_t          wasm_signature_parameter_count         (Wasm_Builder const *builder,
+                                                               Ast_Node_Index signature);
+static Ast_Node_Index  wasm_signature_parameter_type          (Wasm_Builder const *builder,
+                                                               Ast_Node_Index signature,
+                                                               size_t position);
+static size_t          wasm_signature_type_index              (Wasm_Builder const *builder,
+                                                               Ast_Node_Index signature);
+static Ast_Node_Index  wasm_call_signature                    (Wasm_Builder const *builder,
+                                                               Ast_Node_Index call);
+static size_t          wasm_children_count                    (Wasm_Builder const *builder,
+                                                               Ast_Node_Index parent);
 static Str             wasm_expression_subject                (Wasm_Builder const *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index expression);
@@ -528,6 +564,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
         .node_count = nodes.length,
         .module = root,
         .foreign_count = 0,
+        .definition_count = 0,
         .data_size_bytes = 0,
         .stack_limit_bytes = 0,
         .stack_top_bytes = 0,
@@ -535,12 +572,14 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
         .has_memory = false,
         .has_data = false,
         .has_stack = false,
+        .has_table = false,
     };
 
     // Only the constant definitions are functions. A global variable is a global of the module.
     // The foreign ones are imported, and the others are defined in the module and exported.
     builder.foreign_count = wasm_function_count(&builder, root, true);
     size_t definition_count = wasm_function_count(&builder, root, false);
+    builder.definition_count = definition_count;
     wasm_write_bytes(&builder.writer, WASM_MODULE_HEADER, sizeof(WASM_MODULE_HEADER));
 
     // The types are checked first, so that the sections below can rely on every type being known.
@@ -565,6 +604,9 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
             wasm_build_import_section(&builder, root);
         }
         wasm_build_function_section(&builder, definition_count);
+        if (builder.has_table) {
+            wasm_build_table_section(&builder);
+        }
         if (builder.has_memory) {
             wasm_build_memory_section(&builder);
         }
@@ -572,6 +614,9 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
             wasm_build_global_section(&builder);
         }
         is_ok = wasm_build_export_section(&builder, root, definition_count);
+    }
+    if (is_ok && builder.has_table) {
+        wasm_build_element_section(&builder);
     }
     if (is_ok) {
         is_ok = wasm_build_code_section(&builder, root, definition_count);
@@ -619,7 +664,18 @@ static bool wasm_data_measure(Wasm_Builder *builder) {
     bool has_array_literal = false;
     bool has_address_of = false;
     bool has_pointer = false;
+    bool has_procedure_pointer = false;
     for (size_t i = 0; i < builder->node_count; i += 1) {
+        if (builder->nodes[i].node_type == AST_NODE_TYPE_PROCEDURE_TYPE) {
+            has_procedure_pointer = true;
+        } else if (builder->nodes[i].node_type == AST_NODE_TYPE_IDENTIFIER &&
+                   builder->bindings[i].kind == SEMANTIC_BINDING_KIND_CONSTANT) {
+            // The name of a procedure that is not called is the pointer to it.
+            Ast_Node_Index constant_value = builder->nodes[builder->bindings[i].target].first_child;
+            if (builder->nodes[constant_value].node_type == AST_NODE_TYPE_PROCEDURE) {
+                has_procedure_pointer = true;
+            }
+        }
         if (builder->nodes[i].node_type == AST_NODE_TYPE_STRING_LITERAL) {
             has_literal = true;
             // Each literal is shorter than 4 GiB and there are fewer than 4 Gi of them, so the
@@ -659,6 +715,10 @@ static bool wasm_data_measure(Wasm_Builder *builder) {
     // A variable whose address is taken is on the stack, in the frame of its procedure, like the
     // elements of an array literal.
     builder->has_stack = has_array_literal || has_address_of;
+    // A pointer to a procedure is an index in the table, so the module needs one as soon as such a
+    // pointer can be made, which is when a procedure is used as a value, or called, which needs a
+    // type of a pointer to a procedure to be written.
+    builder->has_table = has_procedure_pointer;
     builder->stack_limit_bytes = stack_limit_bytes;
     builder->stack_top_bytes = stack_top_bytes;
     return true;
@@ -666,13 +726,33 @@ static bool wasm_data_measure(Wasm_Builder *builder) {
 
 /**
  * Checks the types of the signature of every procedure: its parameters, and its return type when
- * it has one. Returns false after it recorded an error. What comes after can ask for the type of
- * a parameter or of a result and assume that it is known.
+ * it has one, and the same for every procedure type. Returns false after it recorded an error.
+ * What comes after can ask for the type of a parameter or of a result and assume that it is known.
  */
 static bool wasm_check_signatures(Wasm_Builder *builder, Ast_Node_Index module,
                                   size_t definition_count) {
     assert(module < builder->node_count);
     assert(builder->nodes[module].node_type == AST_NODE_TYPE_MODULE);
+
+    // The types in the types of pointers to procedures too, wherever they are written.
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (builder->nodes[node].node_type != AST_NODE_TYPE_PROCEDURE_TYPE) {
+            continue;
+        }
+        size_t parameter_count = wasm_signature_parameter_count(builder, node);
+        for (size_t i = 0; i < parameter_count; i += 1) {
+            Ast_Node_Index parameter = wasm_signature_parameter_type(builder, node, i);
+            if (wasm_type_of_node(builder, parameter).kind == WASM_VALUE_TYPE_NONE) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
+                                 wasm_type_subject(builder, parameter));
+            }
+        }
+        Str return_type = ast_procedure_return_type(&builder->nodes[node]);
+        if (return_type.bytes != NULL &&
+            wasm_type_of_name(builder, return_type).kind == WASM_VALUE_TYPE_NONE) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED, return_type);
+        }
+    }
 
     Ast_Node_Index definition = wasm_constant_find(builder, builder->nodes[module].first_child);
     for (size_t i = 0; i < definition_count; i += 1) {
@@ -818,6 +898,17 @@ static size_t wasm_function_index(Wasm_Builder const *builder, Ast_Node_Index de
         return index;
     }
     return builder->foreign_count + index;
+}
+
+/**
+ * Returns the pointer to the procedure that the constant `definition` is, which is its slot in the
+ * table of the module: the function index plus one, because slot 0 is for `nil`, see
+ * `wasm_build_table_section`.
+ */
+static size_t wasm_procedure_table_index(Wasm_Builder const *builder, Ast_Node_Index definition) {
+    assert(builder->has_table);
+
+    return wasm_function_index(builder, definition) + 1;
 }
 
 /**
@@ -1045,16 +1136,28 @@ static size_t wasm_stack_global_index(Wasm_Builder const *builder) {
  * Writes the type section, which has one function type per function: first the foreign procedures,
  * which are the imported functions, and then the definitions of the module, so that the function at
  * index `i` has the type at index `i`. The type is the parameters and the result of its procedure.
- * Types are not shared, because that would save only a few bytes. The types in the signatures must
- * have been checked by `wasm_check_signatures`.
+ * Types are not shared, because that would save only a few bytes. After them come the types of the
+ * pointers to procedures whose signature no procedure has first, see `wasm_signature_canonical`.
+ * The types in the signatures must have been checked by `wasm_check_signatures`.
  */
 static void wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module,
                                     size_t definition_count) {
     assert(module < builder->node_count);
     assert(builder->nodes[module].node_type == AST_NODE_TYPE_MODULE);
 
+    // The types of the procedures are followed by the signature of each type of a pointer to a
+    // procedure that no procedure has the signature of first, see `wasm_signature_canonical`.
+    size_t signature_count = 0;
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (builder->nodes[node].node_type == AST_NODE_TYPE_PROCEDURE_TYPE &&
+            wasm_signature_canonical(builder, node) == node) {
+            signature_count += 1;
+        }
+    }
+
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_TYPE);
-    wasm_write_unsigned(&builder->writer, builder->foreign_count + definition_count);
+    wasm_write_unsigned(&builder->writer,
+                        builder->foreign_count + definition_count + signature_count);
 
     // Every function is in one of the two passes, and the foreign ones are first.
     for (int pass = 0; pass < 2; pass += 1) {
@@ -1076,6 +1179,13 @@ static void wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module
         }
     }
 
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (builder->nodes[node].node_type == AST_NODE_TYPE_PROCEDURE_TYPE &&
+            wasm_signature_canonical(builder, node) == node) {
+            wasm_write_signature(builder, node);
+        }
+    }
+
     wasm_block_end(&builder->writer, section);
 }
 
@@ -1085,11 +1195,10 @@ static void wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module
 static void wasm_build_function_type(Wasm_Builder *builder, Ast_Node_Index definition) {
     assert(definition < builder->node_count);
 
-    wasm_write_byte(&builder->writer, WASM_TYPE_FUNCTION);
-
     Ast_Node_Index value = builder->nodes[definition].first_child;
     if (builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL) {
         // A constant string is a function without parameters that returns the string.
+        wasm_write_byte(&builder->writer, WASM_TYPE_FUNCTION);
         wasm_write_unsigned(&builder->writer, 0);
         Wasm_Type string = wasm_type_make(WASM_VALUE_TYPE_STR);
         wasm_write_unsigned(&builder->writer, wasm_type_slot_count(builder, string));
@@ -1097,21 +1206,33 @@ static void wasm_build_function_type(Wasm_Builder *builder, Ast_Node_Index defin
         return;
     }
 
-    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    wasm_write_signature(builder, wasm_procedure_of(builder, definition));
+}
+
+/**
+ * Writes a function type: the marker, the parameters and the result of `signature`, which is an
+ * `AST_NODE_TYPE_PROCEDURE` or an `AST_NODE_TYPE_PROCEDURE_TYPE`. The types in it must have been
+ * checked.
+ */
+static void wasm_write_signature(Wasm_Builder *builder, Ast_Node_Index signature) {
+    assert(signature < builder->node_count);
+
+    wasm_write_byte(&builder->writer, WASM_TYPE_FUNCTION);
 
     // A `Str` is two WebAssembly values, so the count is of values and not of parameters.
-    wasm_write_unsigned(&builder->writer, wasm_parameter_slot_count(builder, procedure));
-    Ast_Node_Index parameter = builder->nodes[procedure].first_child;
-    size_t parameter_count = wasm_parameter_count(builder, procedure);
-    for (size_t j = 0; j < parameter_count; j += 1) {
-        assert(parameter != AST_NODE_INDEX_NONE);
-        Ast_Node const *parameter_node = &builder->nodes[parameter];
-
-        wasm_write_type(builder, wasm_type_of_node(builder, parameter_node->first_child));
-        parameter = parameter_node->next_sibling;
+    size_t parameter_count = wasm_signature_parameter_count(builder, signature);
+    size_t slot_count = 0;
+    for (size_t i = 0; i < parameter_count; i += 1) {
+        Ast_Node_Index type = wasm_signature_parameter_type(builder, signature, i);
+        slot_count += wasm_type_slot_count(builder, wasm_type_of_node(builder, type));
+    }
+    wasm_write_unsigned(&builder->writer, slot_count);
+    for (size_t i = 0; i < parameter_count; i += 1) {
+        Ast_Node_Index type = wasm_signature_parameter_type(builder, signature, i);
+        wasm_write_type(builder, wasm_type_of_node(builder, type));
     }
 
-    Str return_type_name = builder->nodes[procedure].payload.procedure.return_type;
+    Str return_type_name = ast_procedure_return_type(&builder->nodes[signature]);
     if (return_type_name.bytes == NULL) {
         wasm_write_unsigned(&builder->writer, 0);
     } else {
@@ -1236,6 +1357,46 @@ static void wasm_build_function_section(Wasm_Builder *builder, size_t definition
     for (size_t i = 0; i < definition_count; i += 1) {
         // The types of the imported functions come first.
         wasm_write_unsigned(&builder->writer, builder->foreign_count + i);
+    }
+    wasm_block_end(&builder->writer, section);
+}
+
+/**
+ * Writes the table section, which declares the one table of the module. It has a slot for each
+ * function of the module, the imported ones too, and one more at index 0, which is left empty: a
+ * pointer to a procedure is the index of the procedure in the table plus one, so that the null
+ * pointer `nil`, which is 0, is a slot that has no function, and calling it traps.
+ */
+static void wasm_build_table_section(Wasm_Builder *builder) {
+    assert(builder->has_table);
+
+    size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_TABLE);
+    wasm_write_unsigned(&builder->writer, 1);
+    wasm_write_byte(&builder->writer, WASM_TYPE_FUNCREF);
+    wasm_write_byte(&builder->writer, WASM_TABLE_LIMITS_MIN_ONLY);
+    wasm_write_unsigned(&builder->writer, 1 + builder->foreign_count + builder->definition_count);
+    wasm_block_end(&builder->writer, section);
+}
+
+/**
+ * Writes the element section, which has one segment: all functions of the module, in the order of
+ * their indexes, put in the table from slot 1 on when the module is instantiated, see
+ * `wasm_build_table_section`. So the slot of a function is its function index plus one.
+ */
+static void wasm_build_element_section(Wasm_Builder *builder) {
+    assert(builder->has_table);
+
+    size_t function_count = builder->foreign_count + builder->definition_count;
+    size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_ELEMENT);
+    wasm_write_unsigned(&builder->writer, 1);
+    wasm_write_byte(&builder->writer, WASM_ELEMENT_SEGMENT_ACTIVE);
+    // The index of the first slot is a constant expression: a constant, and the end of it.
+    wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
+    wasm_write_signed(&builder->writer, 1);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+    wasm_write_unsigned(&builder->writer, function_count);
+    for (size_t i = 0; i < function_count; i += 1) {
+        wasm_write_unsigned(&builder->writer, i);
     }
     wasm_block_end(&builder->writer, section);
 }
@@ -1779,32 +1940,34 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
     assert(call < builder->node_count);
     assert(builder->nodes[call].node_type == AST_NODE_TYPE_CALL);
 
-    Semantic_Binding binding = builder->bindings[call];
-    assert(binding.kind == SEMANTIC_BINDING_KIND_CONSTANT);
-    Ast_Node_Index callee = wasm_procedure_of(builder, binding.target);
     Str name = builder->nodes[call].payload.call.name;
 
-    if (wasm_children_count(builder, call) != wasm_parameter_count(builder, callee)) {
+    // The procedure is known by its name, or by the type of the pointer to it that the name stands
+    // for. A name that is not a pointer to a procedure has none.
+    Ast_Node_Index callee = wasm_call_signature(builder, call);
+    if (callee == AST_NODE_INDEX_NONE) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE, name);
+    }
+
+    size_t argument_count = wasm_children_count(builder, call);
+    if (argument_count != wasm_signature_parameter_count(builder, callee)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
     }
 
     Ast_Node_Index argument = builder->nodes[call].first_child;
-    Ast_Node_Index parameter = builder->nodes[callee].first_child;
-    size_t argument_count = wasm_children_count(builder, call);
     for (size_t i = 0; i < argument_count; i += 1) {
-        assert(argument != AST_NODE_INDEX_NONE && parameter != AST_NODE_INDEX_NONE);
+        assert(argument != AST_NODE_INDEX_NONE);
 
-        Ast_Node_Index type = builder->nodes[parameter].first_child;
+        Ast_Node_Index type = wasm_signature_parameter_type(builder, callee, i);
         Wasm_Type parameter_type = wasm_type_of_node(builder, type);
         // An array is passed as an array slice, see `wasm_array_decay`.
         if (wasm_type_accepts(parameter_type, wasm_expression_type(builder, argument)) == false) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         }
         argument = builder->nodes[argument].next_sibling;
-        parameter = builder->nodes[parameter].next_sibling;
     }
 
-    bool has_result = builder->nodes[callee].payload.procedure.return_type.bytes != NULL;
+    bool has_result = ast_procedure_return_type(&builder->nodes[callee]).bytes != NULL;
     if (has_result == false && is_result_unused == false) {
         return wasm_fail(builder, WASM_BUILD_STATUS_CALL_RESULT_MISSING, name);
     }
@@ -2324,6 +2487,10 @@ static bool wasm_expression_fail(Wasm_Builder *builder, Ast_Node_Index definitio
 
     Ast_Node const *node = &builder->nodes[expression];
     if (node->node_type == AST_NODE_TYPE_CALL) {
+        if (wasm_call_signature(builder, expression) == AST_NODE_INDEX_NONE) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE,
+                             node->payload.call.name);
+        }
         return wasm_fail(builder, WASM_BUILD_STATUS_CALL_RESULT_MISSING, node->payload.call.name);
     }
     if (node->node_type == AST_NODE_TYPE_IDENTIFIER) {
@@ -2532,10 +2699,13 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     case AST_NODE_TYPE_OR:
         return wasm_type_make(WASM_VALUE_TYPE_BOOL);
     case AST_NODE_TYPE_CALL: {
-        // The type of what the procedure returns, which is none for a procedure without a result.
-        Semantic_Binding binding = builder->bindings[expression];
-        Ast_Node_Index callee = wasm_procedure_of(builder, binding.target);
-        Str return_type = builder->nodes[callee].payload.procedure.return_type;
+        // The type of what the procedure returns, which is none for a procedure without a result,
+        // and for a name that is not a pointer to a procedure, which is an error found later.
+        Ast_Node_Index callee = wasm_call_signature(builder, expression);
+        if (callee == AST_NODE_INDEX_NONE) {
+            return wasm_type_make(WASM_VALUE_TYPE_NONE);
+        }
+        Str return_type = ast_procedure_return_type(&builder->nodes[callee]);
         if (return_type.bytes == NULL) {
             return wasm_type_make(WASM_VALUE_TYPE_NONE);
         }
@@ -2605,6 +2775,7 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     case AST_NODE_TYPE_PARAMETER:
     case AST_NODE_TYPE_POINTER_TYPE:
     case AST_NODE_TYPE_PROCEDURE:
+    case AST_NODE_TYPE_PROCEDURE_TYPE:
     case AST_NODE_TYPE_RANGE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
     case AST_NODE_TYPE_SCOPE_STATEMENT:
@@ -2728,6 +2899,7 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     // Pointers have no order either, and are the same when they hold the same address. `nil` is
     // compared with a pointer of any type.
     bool is_address = left_type.kind == WASM_VALUE_TYPE_POINTER ||
+                      left_type.kind == WASM_VALUE_TYPE_PROCEDURE ||
                       left_type.kind == WASM_VALUE_TYPE_NIL;
     bool is_left_comparable = left_type.kind == WASM_VALUE_TYPE_INT ||
                               ((left_type.kind == WASM_VALUE_TYPE_BOOL || is_address) &&
@@ -2871,13 +3043,28 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_OR:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I32_OR);
             break;
-        case AST_NODE_TYPE_CALL:
-            // The function index of a procedure is not the position of its definition, because the
-            // foreign procedures are imported, and so come first.
-            wasm_write_byte(&builder->writer, WASM_OPCODE_CALL);
-            wasm_write_unsigned(&builder->writer,
-                                wasm_function_index(builder, builder->bindings[current].target));
+        case AST_NODE_TYPE_CALL: {
+            Semantic_Binding callee_binding = builder->bindings[current];
+            if (callee_binding.kind == SEMANTIC_BINDING_KIND_CONSTANT) {
+                // The function index of a procedure is not the position of its definition,
+                // because the foreign procedures are imported, and so come first.
+                wasm_write_byte(&builder->writer, WASM_OPCODE_CALL);
+                wasm_write_unsigned(&builder->writer,
+                                    wasm_function_index(builder, callee_binding.target));
+                break;
+            }
+            // The procedure that is called is what the name holds, which is pushed after the
+            // arguments, because `call_indirect` takes it from the top of the stack. It checks
+            // that the type of the function it finds is the type that is written here, which
+            // is the type that the pointer was made for, and traps for the null pointer.
+            wasm_build_code_section_body_identifier(builder, procedure, callee_binding);
+            wasm_write_byte(&builder->writer, WASM_OPCODE_CALL_INDIRECT);
+            wasm_write_unsigned(
+                &builder->writer,
+                wasm_signature_type_index(builder, wasm_call_signature(builder, current)));
+            wasm_write_unsigned(&builder->writer, 0);
             break;
+        }
         case AST_NODE_TYPE_BOOL_LITERAL:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
             wasm_write_signed(&builder->writer, node->payload.bool_literal.value ? 1 : 0);
@@ -2886,6 +3073,8 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             // `Bool` values and addresses are compared as the 32-bit integers that they are.
             if (wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_BOOL ||
                 wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_NIL ||
+                wasm_expression_type(builder, node->first_child).kind ==
+                    WASM_VALUE_TYPE_PROCEDURE ||
                 wasm_expression_type(builder, node->first_child).kind ==
                     WASM_VALUE_TYPE_POINTER) {
                 if (node->payload.comparison.operator == AST_COMPARISON_OPERATOR_EQUAL) {
@@ -2996,6 +3185,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_PARAMETER:
         case AST_NODE_TYPE_POINTER_TYPE:
         case AST_NODE_TYPE_PROCEDURE:
+        case AST_NODE_TYPE_PROCEDURE_TYPE:
         case AST_NODE_TYPE_RANGE:
         case AST_NODE_TYPE_RETURN_STATEMENT:
         case AST_NODE_TYPE_SCOPE_STATEMENT:
@@ -3051,6 +3241,12 @@ static void wasm_build_code_section_body_identifier(Wasm_Builder *builder,
 
     switch (binding.kind) {
     case SEMANTIC_BINDING_KIND_CONSTANT:
+        // The name of a procedure is the pointer to it, and the name of a string is a call.
+        if (value_type.kind == WASM_VALUE_TYPE_PROCEDURE) {
+            wasm_write_i32_const(&builder->writer,
+                                 (int64_t)wasm_procedure_table_index(builder, binding.target));
+            break;
+        }
         wasm_write_byte(&builder->writer, WASM_OPCODE_CALL);
         wasm_write_unsigned(&builder->writer, wasm_function_index(builder, binding.target));
         break;
@@ -3100,8 +3296,8 @@ static void wasm_build_code_section_body_identifier(Wasm_Builder *builder,
 
 /**
  * Returns the type of the value that `binding` stands for, or a type of the kind
- * `WASM_VALUE_TYPE_NONE` when the target cannot use it as a value, which is the case for a
- * procedure and for a struct. The types of the parameters must be known.
+ * `WASM_VALUE_TYPE_NONE` when the target cannot use it as a value, which is the case for a struct.
+ * The types of the parameters must be known.
  */
 static Wasm_Type wasm_binding_value_type(Wasm_Builder const *builder, Semantic_Binding binding) {
     assert(binding.target < builder->node_count);
@@ -3112,7 +3308,12 @@ static Wasm_Type wasm_binding_value_type(Wasm_Builder const *builder, Semantic_B
         if (builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL) {
             return wasm_type_make(WASM_VALUE_TYPE_STR);
         }
-        // A procedure has no value that can be passed around yet, and a struct is a type.
+        // A procedure is the pointer to it, and a struct is a type.
+        if (builder->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE) {
+            Wasm_Type pointer = wasm_type_make(WASM_VALUE_TYPE_PROCEDURE);
+            pointer.definition = wasm_signature_canonical(builder, value);
+            return pointer;
+        }
         return wasm_type_make(WASM_VALUE_TYPE_NONE);
     }
     case SEMANTIC_BINDING_KIND_GLOBAL:
@@ -3244,13 +3445,15 @@ static bool wasm_node_is_type(Wasm_Builder const *builder, Ast_Node_Index node) 
     return builder->nodes[node].node_type == AST_NODE_TYPE_TYPE_NAME ||
            builder->nodes[node].node_type == AST_NODE_TYPE_ARRAY_TYPE ||
            builder->nodes[node].node_type == AST_NODE_TYPE_POINTER_TYPE ||
+           builder->nodes[node].node_type == AST_NODE_TYPE_PROCEDURE_TYPE ||
            builder->nodes[node].node_type == AST_NODE_TYPE_STRUCT_TYPE;
 }
 
 /**
  * Returns the text in the source that an error about the type `type` points at: the name of the
  * type, or the name of the type of the elements for an array type, or the name that the carets of
- * a pointer type are before.
+ * a pointer type are before. For a pointer to a procedure that is the name of the type of the first
+ * parameter that the target does not have, the return type, or the keyword `proc`.
  */
 static Str wasm_type_subject(Wasm_Builder const *builder, Ast_Node_Index type) {
     assert(wasm_node_is_type(builder, type));
@@ -3268,6 +3471,20 @@ static Str wasm_type_subject(Wasm_Builder const *builder, Ast_Node_Index type) {
     // A struct that is the type of a field has no name, so its first field stands for it.
     if (builder->nodes[current].node_type == AST_NODE_TYPE_STRUCT_TYPE) {
         return builder->nodes[builder->nodes[current].first_child].payload.field.name;
+    }
+    // A procedure type has no name either: the type of the first parameter or of the result that
+    // the target does not have stands for it, and else the keyword or the result.
+    if (builder->nodes[current].node_type == AST_NODE_TYPE_PROCEDURE_TYPE) {
+        size_t parameter_count = wasm_signature_parameter_count(builder, current);
+        for (size_t i = 0; i < parameter_count; i += 1) {
+            Ast_Node_Index parameter = wasm_signature_parameter_type(builder, current, i);
+            // The type of a parameter is a name or a pointer, which this function does not
+            // recurse on any further.
+            if (wasm_type_of_node(builder, parameter).kind == WASM_VALUE_TYPE_NONE) {
+                return wasm_type_subject(builder, parameter);
+            }
+        }
+        return builder->nodes[current].payload.procedure.return_type;
     }
     return builder->nodes[current].payload.type_name.name;
 }
@@ -4111,6 +4328,7 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
     case AST_NODE_TYPE_PARAMETER:
     case AST_NODE_TYPE_POINTER_TYPE:
     case AST_NODE_TYPE_PROCEDURE:
+    case AST_NODE_TYPE_PROCEDURE_TYPE:
     case AST_NODE_TYPE_RANGE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
     case AST_NODE_TYPE_SCOPE_STATEMENT:
@@ -4349,9 +4567,10 @@ static Wasm_Type wasm_type_make(Wasm_Value_Type kind) {
 
 /**
  * Returns the type of a pointer to a value of the type `target`, which is a pointer with one more
- * caret when `target` is a pointer already. Only an `Int`, a `Bool`, a `Str`, a struct or a pointer
- * is pointed to: there is no pointer to an array or to an array slice, so those, and a type that
- * the target does not have, give a type of the kind `WASM_VALUE_TYPE_NONE`.
+ * caret when `target` is a pointer already. Only an `Int`, a `Bool`, a `Str`, a struct, a pointer
+ * or a pointer to a procedure is pointed to: there is no pointer to an array or to an array slice,
+ * so those, and a type that the target does not have, give a type of the kind
+ * `WASM_VALUE_TYPE_NONE`.
  */
 static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
     assert(target.kind != WASM_VALUE_TYPE_POINTER || target.depth >= 1);
@@ -4360,6 +4579,7 @@ static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
     switch (target.kind) {
     case WASM_VALUE_TYPE_BOOL:
     case WASM_VALUE_TYPE_INT:
+    case WASM_VALUE_TYPE_PROCEDURE:
     case WASM_VALUE_TYPE_STR:
     case WASM_VALUE_TYPE_STRUCT: {
         Wasm_Type pointer = wasm_type_make(WASM_VALUE_TYPE_POINTER);
@@ -4497,6 +4717,42 @@ static Wasm_Type wasm_type_of_plain_name(Wasm_Builder const *builder, Str type_n
 }
 
 /**
+ * Returns the type of `depth` carets before the procedure type `procedure_type`: the type of a
+ * pointer to a procedure for one caret, which is what a procedure type is always written with, and
+ * a pointer to it for each caret more. The kind is `WASM_VALUE_TYPE_NONE` when a type in the
+ * signature is not one that the target has.
+ */
+static Wasm_Type wasm_type_of_procedure(Wasm_Builder const *builder,
+                                        Ast_Node_Index procedure_type, uint32_t depth) {
+    assert(builder->nodes[procedure_type].node_type == AST_NODE_TYPE_PROCEDURE_TYPE);
+    assert(depth >= 1);
+
+    size_t parameter_count = wasm_signature_parameter_count(builder, procedure_type);
+    for (size_t i = 0; i < parameter_count; i += 1) {
+        Ast_Node_Index parameter = wasm_signature_parameter_type(builder, procedure_type, i);
+        if (wasm_type_of_node(builder, parameter).kind == WASM_VALUE_TYPE_NONE) {
+            return wasm_type_make(WASM_VALUE_TYPE_NONE);
+        }
+    }
+    Str return_type = ast_procedure_return_type(&builder->nodes[procedure_type]);
+    if (return_type.bytes != NULL &&
+        wasm_type_of_name(builder, return_type).kind == WASM_VALUE_TYPE_NONE) {
+        return wasm_type_make(WASM_VALUE_TYPE_NONE);
+    }
+
+    Wasm_Type procedure = wasm_type_make(WASM_VALUE_TYPE_PROCEDURE);
+    procedure.definition = wasm_signature_canonical(builder, procedure_type);
+    if (depth == 1) {
+        return procedure;
+    }
+
+    Wasm_Type pointer = wasm_type_pointer_to(procedure);
+    assert(pointer.kind == WASM_VALUE_TYPE_POINTER);
+    pointer.depth = depth - 1;
+    return pointer;
+}
+
+/**
  * Returns the type that the type `type` stands for, or a type of the kind `WASM_VALUE_TYPE_NONE`
  * if the target does not have it. The elements of an array and of an array slice can be an `Int`,
  * a `Bool`, a `Str`, a struct or a pointer, and not an array. An array type is an array slice when
@@ -4526,7 +4782,11 @@ static Wasm_Type wasm_type_of_node(Wasm_Builder const *builder, Ast_Node_Index t
             depth += 1;
             current = builder->nodes[current].first_child;
         }
-        assert(builder->nodes[current].node_type == AST_NODE_TYPE_TYPE_NAME);
+        assert(builder->nodes[current].node_type == AST_NODE_TYPE_TYPE_NAME ||
+               builder->nodes[current].node_type == AST_NODE_TYPE_PROCEDURE_TYPE);
+        if (builder->nodes[current].node_type == AST_NODE_TYPE_PROCEDURE_TYPE) {
+            return wasm_type_of_procedure(builder, current, depth);
+        }
 
         Wasm_Type pointer = wasm_type_pointer_to(
             wasm_type_of_name(builder, builder->nodes[current].payload.type_name.name));
@@ -4665,6 +4925,7 @@ static size_t wasm_type_slot_count(Wasm_Builder const *builder, Wasm_Type type) 
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_POINTER:
+    case WASM_VALUE_TYPE_PROCEDURE:
         return 1;
     case WASM_VALUE_TYPE_SLICE:
     case WASM_VALUE_TYPE_STR:
@@ -4697,6 +4958,7 @@ static byte wasm_type_slot_kind(Wasm_Builder const *builder, Wasm_Type type, siz
     case WASM_VALUE_TYPE_BOOL:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_POINTER:
+    case WASM_VALUE_TYPE_PROCEDURE:
     case WASM_VALUE_TYPE_SLICE:
     case WASM_VALUE_TYPE_STR:
         return WASM_TYPE_I32;
@@ -4784,15 +5046,22 @@ static bool wasm_type_elements_equal(Wasm_Type first, Wasm_Type second) {
  * Returns whether the two types are the same type. Two structs are the same when they are the same
  * definition, a pointer is the same as another when it has as many carets and points to the same
  * type at the end of them, and an array or an array slice is the same as another when the elements
- * are. `nil` is the same as every pointer, because it is a pointer of whatever type is wanted.
+ * are. A pointer to a procedure is the same as another when they have the same signature, which
+ * the definition of the type says, see `wasm_signature_canonical`. `nil` is the same as every
+ * pointer, because it is a pointer of whatever type is wanted.
  */
 static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
     if (first.kind != second.kind) {
-        return (first.kind == WASM_VALUE_TYPE_POINTER && second.kind == WASM_VALUE_TYPE_NIL) ||
-               (first.kind == WASM_VALUE_TYPE_NIL && second.kind == WASM_VALUE_TYPE_POINTER);
+        bool is_first_pointer = first.kind == WASM_VALUE_TYPE_POINTER ||
+                                first.kind == WASM_VALUE_TYPE_PROCEDURE;
+        bool is_second_pointer = second.kind == WASM_VALUE_TYPE_POINTER ||
+                                 second.kind == WASM_VALUE_TYPE_PROCEDURE;
+        return (is_first_pointer && second.kind == WASM_VALUE_TYPE_NIL) ||
+               (first.kind == WASM_VALUE_TYPE_NIL && is_second_pointer);
     }
 
     switch (first.kind) {
+    case WASM_VALUE_TYPE_PROCEDURE:
     case WASM_VALUE_TYPE_STRUCT:
         return first.definition == second.definition;
     case WASM_VALUE_TYPE_POINTER:
@@ -4825,6 +5094,180 @@ static bool wasm_type_accepts(Wasm_Type target, Wasm_Type value) {
     }
     return target.kind == WASM_VALUE_TYPE_SLICE && value.kind == WASM_VALUE_TYPE_ARRAY &&
            wasm_type_elements_equal(target, value);
+}
+
+/**
+ * Returns the number of parameters of `signature`, which is an `AST_NODE_TYPE_PROCEDURE` or an
+ * `AST_NODE_TYPE_PROCEDURE_TYPE`.
+ */
+static size_t wasm_signature_parameter_count(Wasm_Builder const *builder,
+                                             Ast_Node_Index signature) {
+    assert(signature < builder->node_count);
+
+    if (builder->nodes[signature].node_type == AST_NODE_TYPE_PROCEDURE) {
+        return wasm_parameter_count(builder, signature);
+    }
+    assert(builder->nodes[signature].node_type == AST_NODE_TYPE_PROCEDURE_TYPE);
+    // The children of a procedure type are the types of its parameters, and nothing else.
+    return wasm_children_count(builder, signature);
+}
+
+/**
+ * Returns the type of the parameter at `position` of `signature`, which is an
+ * `AST_NODE_TYPE_PROCEDURE` or an `AST_NODE_TYPE_PROCEDURE_TYPE`, as the node of the type. The
+ * parameter of a procedure is a node that has the type as its child, and the parameter of a
+ * procedure type is the node of its type.
+ */
+static Ast_Node_Index wasm_signature_parameter_type(Wasm_Builder const *builder,
+                                                    Ast_Node_Index signature, size_t position) {
+    assert(position < wasm_signature_parameter_count(builder, signature));
+
+    Ast_Node_Index parameter = builder->nodes[signature].first_child;
+    for (size_t i = 0; i < position; i += 1) {
+        assert(parameter != AST_NODE_INDEX_NONE);
+        parameter = builder->nodes[parameter].next_sibling;
+    }
+
+    assert(parameter != AST_NODE_INDEX_NONE);
+    if (builder->nodes[parameter].node_type == AST_NODE_TYPE_PARAMETER) {
+        return builder->nodes[parameter].first_child;
+    }
+    return parameter;
+}
+
+/**
+ * Returns whether the type `type` has a procedure type at the end of its carets, or of the carets
+ * of the type of its elements. A type like that is not compared by what it is made of, see
+ * `wasm_signature_equals`.
+ */
+static bool wasm_type_node_has_procedure(Wasm_Builder const *builder, Ast_Node_Index type) {
+    Ast_Node_Index current = type;
+    // Each step goes down one level, so there are fewer steps than nodes.
+    for (size_t i = 0; i < builder->node_count &&
+                       (builder->nodes[current].node_type == AST_NODE_TYPE_ARRAY_TYPE ||
+                        builder->nodes[current].node_type == AST_NODE_TYPE_POINTER_TYPE);
+         i += 1) {
+        current = builder->nodes[current].first_child;
+    }
+    return builder->nodes[current].node_type == AST_NODE_TYPE_PROCEDURE_TYPE;
+}
+
+/**
+ * Returns whether the signatures `first` and `second`, each an `AST_NODE_TYPE_PROCEDURE` or an
+ * `AST_NODE_TYPE_PROCEDURE_TYPE`, have the same types of parameters and the same return type, or
+ * both have none. The names of the parameters do not matter. A parameter that is a pointer to a
+ * procedure itself is not compared by what that is made of, so such a signature is the same as
+ * itself only: that keeps the comparison from asking for the type of a signature while it is
+ * working out which signature that is, and a procedure type cannot be written with one anyway.
+ */
+static bool wasm_signature_equals(Wasm_Builder const *builder, Ast_Node_Index first,
+                                  Ast_Node_Index second) {
+    if (first == second) {
+        return true;
+    }
+
+    size_t parameter_count = wasm_signature_parameter_count(builder, first);
+    if (parameter_count != wasm_signature_parameter_count(builder, second)) {
+        return false;
+    }
+    for (size_t i = 0; i < parameter_count; i += 1) {
+        Ast_Node_Index first_type = wasm_signature_parameter_type(builder, first, i);
+        Ast_Node_Index second_type = wasm_signature_parameter_type(builder, second, i);
+        if (wasm_type_node_has_procedure(builder, first_type) ||
+            wasm_type_node_has_procedure(builder, second_type)) {
+            return false;
+        }
+        if (wasm_type_equals(wasm_type_of_node(builder, first_type),
+                             wasm_type_of_node(builder, second_type)) == false) {
+            return false;
+        }
+    }
+
+    Str first_return = ast_procedure_return_type(&builder->nodes[first]);
+    Str second_return = ast_procedure_return_type(&builder->nodes[second]);
+    if (first_return.bytes == NULL || second_return.bytes == NULL) {
+        return first_return.bytes == second_return.bytes;
+    }
+    return wasm_type_equals(wasm_type_of_name(builder, first_return),
+                            wasm_type_of_name(builder, second_return));
+}
+
+/**
+ * Returns the first node, by index, that is an `AST_NODE_TYPE_PROCEDURE` or an
+ * `AST_NODE_TYPE_PROCEDURE_TYPE` with the signature of `signature`, which is one of them as well.
+ * Every node with one signature has the same answer, so it stands for the signature, and two types
+ * of a pointer to a procedure are the same when their answers are, see `wasm_type_equals`.
+ */
+static Ast_Node_Index wasm_signature_canonical(Wasm_Builder const *builder,
+                                               Ast_Node_Index signature) {
+    assert(signature < builder->node_count);
+
+    for (Ast_Node_Index candidate = 0; candidate < signature; candidate += 1) {
+        Ast_Node_Type node_type = builder->nodes[candidate].node_type;
+        if ((node_type == AST_NODE_TYPE_PROCEDURE || node_type == AST_NODE_TYPE_PROCEDURE_TYPE) &&
+            wasm_signature_equals(builder, candidate, signature)) {
+            return candidate;
+        }
+    }
+
+    return signature;
+}
+
+/**
+ * Returns the index of the function type that `call_indirect` has to be given to call a procedure
+ * that has the signature `signature`, which is the answer of `wasm_signature_canonical`. A
+ * procedure has the type of its function, whose index is the index of the function. A procedure
+ * type has its own, after the types of the functions, in the order of the nodes.
+ */
+static size_t wasm_signature_type_index(Wasm_Builder const *builder, Ast_Node_Index signature) {
+    assert(signature < builder->node_count);
+    assert(wasm_signature_canonical(builder, signature) == signature);
+
+    if (builder->nodes[signature].node_type == AST_NODE_TYPE_PROCEDURE) {
+        Ast_Node_Index definition = builder->nodes[builder->module].first_child;
+        // Every definition is a distinct node, so there cannot be more than there are nodes.
+        for (size_t i = 0; i < builder->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
+            if (builder->nodes[definition].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION &&
+                builder->nodes[definition].first_child == signature) {
+                return wasm_function_index(builder, definition);
+            }
+            definition = builder->nodes[definition].next_sibling;
+        }
+        // Unreachable: a procedure is the value of a constant of the module.
+        assert(false);
+        return 0;
+    }
+
+    size_t index = builder->foreign_count + builder->definition_count;
+    for (Ast_Node_Index node = 0; node < signature; node += 1) {
+        if (builder->nodes[node].node_type == AST_NODE_TYPE_PROCEDURE_TYPE &&
+            wasm_signature_canonical(builder, node) == node) {
+            index += 1;
+        }
+    }
+    return index;
+}
+
+/**
+ * Returns the signature, an `AST_NODE_TYPE_PROCEDURE` or an `AST_NODE_TYPE_PROCEDURE_TYPE`, of
+ * what the call `call` calls, or `AST_NODE_INDEX_NONE` when it calls a name that is not a pointer
+ * to a procedure. A constant is called by its name, and a variable, a parameter or a global
+ * variable is called through the pointer it holds, whose type says the signature.
+ */
+static Ast_Node_Index wasm_call_signature(Wasm_Builder const *builder, Ast_Node_Index call) {
+    assert(call < builder->node_count);
+    assert(builder->nodes[call].node_type == AST_NODE_TYPE_CALL);
+
+    Semantic_Binding binding = builder->bindings[call];
+    if (binding.kind == SEMANTIC_BINDING_KIND_CONSTANT) {
+        return wasm_procedure_of(builder, binding.target);
+    }
+
+    Wasm_Type type = wasm_binding_value_type(builder, binding);
+    if (type.kind != WASM_VALUE_TYPE_PROCEDURE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return type.definition;
 }
 
 /**

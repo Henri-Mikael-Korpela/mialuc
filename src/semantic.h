@@ -93,10 +93,11 @@ typedef enum {
 /**
  * On `SEMANTIC_STATUS_OK`, `bindings` is the filled start of the binding buffer, as
  * `Semantic_Binding` elements, with one element per syntax tree node: the element at the index of a
- * node is what that node stands for, if it is an `AST_NODE_TYPE_IDENTIFIER`, or the procedure that
- * it calls, if it is an `AST_NODE_TYPE_CALL`, which is a binding of the kind
- * `SEMANTIC_BINDING_KIND_CONSTANT` whose target is the definition of the procedure. Any other node
- * has the kind `SEMANTIC_BINDING_KIND_NONE` for any other node. Otherwise `bindings.length` is zero
+ * node is what that node stands for, if it is an `AST_NODE_TYPE_IDENTIFIER`, or what it calls, if
+ * it is an `AST_NODE_TYPE_CALL`, which is a binding of the kind `SEMANTIC_BINDING_KIND_CONSTANT`
+ * whose target is the definition of the procedure, or the variable, parameter or global variable
+ * that holds the pointer to a procedure that is called. Any other node has the kind
+ * `SEMANTIC_BINDING_KIND_NONE`. Otherwise `bindings.length` is zero
  * and `subject` is the name that the error is about, as a view into the source that the syntax tree
  * was parsed from, so the caller can work out the position.
  */
@@ -137,9 +138,12 @@ typedef struct {
  * once and above all of them, because the object that it names is where the target looks for every
  * one of them.
  *
- * The name in a call, such as `f(1)`, must stand for a constant that is a procedure. It is looked
- * up among the definitions of the module only, because no other name can be the same as one of
- * them.
+ * The name in a call, such as `f(1)`, must stand for a constant that is a procedure, or for a
+ * variable, a parameter or a global variable, which holds a pointer to a procedure. A name is
+ * looked up like any other use of a name. Whether the variable does hold a pointer to a procedure
+ * is for the target to check, because it depends on the type. The name of a procedure that is not
+ * called but used as a value, such as `p := f`, is an `AST_NODE_TYPE_IDENTIFIER` that is bound to
+ * the constant, and what that is worth is for the target to tell as well.
  *
  * A scope statement is a block of its own, and a `break` leaves the innermost loop or scope that it
  * is in, also when it is in the block of an if statement inside it, which is not one to leave. A

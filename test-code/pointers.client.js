@@ -112,3 +112,8 @@ console.log("JavaScript wrote 41 at address 8 and called increment(8):", ints[1]
 ints[2] = 5n;
 swap(8, 16);
 console.log("swap(8, 16) swaps the Ints at two addresses, 5 and 42:", ints[1], ints[2]);
+
+// A pointer to a procedure is written `^proc(Int, Int) Int`, and the name of a procedure is a pointer
+// to it. It is called like a procedure. See the `procedure pointers` example for more.
+console.log("Pointer to a procedure with a written type, 5 + 15:", create_pointer_to_procedure());
+console.log("Pointer to a procedure with a deduced type, 5 + 15:", create_pointer_to_procedure2());

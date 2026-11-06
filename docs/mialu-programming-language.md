@@ -34,6 +34,7 @@
   - [Pointers in structs and arrays](#pointers-in-structs-and-arrays)
 - [Procedures](#procedures)
   - [Calling procedures](#calling-procedures)
+  - [Pointers to procedures](#pointers-to-procedures)
 - [Loops without a range](#loops-without-a-range)
 - [Scopes](#scopes)
 - [Break and continue](#break-and-continue)
@@ -226,7 +227,7 @@ is_even :: proc(n: Int) Bool ->
 
 Unlike C, integer types are not implicitly converted into boolean values. A `Bool` is never converted to or from another type. An `Int` is not a condition, so `if n ->` is an error and has to be written `if n not= 0 ->`, and `true` is not `1`: `x : Int = true` and `b : Bool = 1` are errors.
 
-A `Bool` has no arithmetic. Two `Bool` values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`, but they have no order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Both operands of a comparison must have the same type. Two pointers can be compared with `==` and `not=` as well, see [Null and lifetime](#null-and-lifetime). The logical operators `and`, `or` and `not` combine `Bool` values, see [Logical operators](#logical-operators).
+A `Bool` has no arithmetic. Two `Bool` values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`, but they have no order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Both operands of a comparison must have the same type. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). The logical operators `and`, `or` and `not` combine `Bool` values, see [Logical operators](#logical-operators).
 
 ### Logical operators
 
@@ -926,7 +927,7 @@ A call is an expression, so it can be the value of a variable or of a `return`, 
 
 The call must match the procedure:
 
-- the name must be that of a constant that is a procedure, so a call of a variable, of a parameter or of a constant string is an error,
+- the name must be that of a constant that is a procedure, or that of a variable, a parameter or a global variable that holds a [pointer to a procedure](#pointers-to-procedures), so a call of a name that is something else, such as an `Int` or a constant string, is an error,
 - there must be as many arguments as the procedure has parameters,
 - each argument must have the type of the parameter that it is given to, because nothing is converted: an `Int` is not a `Bool`, and `add(1, true)` is an error.
 
@@ -950,6 +951,54 @@ ignores_result :: proc(n: Int) Int ->
 ```
 
 A call that is a statement is the way to call a procedure that returns nothing.
+
+### Pointers to procedures
+
+A procedure is not a value that can be stored, but a pointer to it is. The type of a pointer to a procedure is written with a caret, and then `proc`, the types of the parameters between parentheses, and the return type, like the head of a procedure without the names of its parameters: `^proc(Int, Int) Int` is a pointer to a procedure that takes two `Int` values and returns an `Int`, `^proc() Int` to one that takes nothing, and `^proc(^Int)` to one that returns nothing. The caret is always written, because what a variable holds is the pointer, so `proc(Int) Int` alone is not a type.
+
+The name of a procedure that is not called is a pointer to it. A variable that holds one is called by writing its name and the arguments, like the name of a procedure:
+
+```
+add :: proc(a: Int, b: Int) Int ->
+    return a + b
+
+create_pointer_to_procedure :: proc() Int ->
+    proc_p : ^proc(Int, Int) Int = add
+    return proc_p(5, 15)
+
+create_pointer_to_procedure2 :: proc() Int ->
+    proc_p := add
+    return proc_p(5, 15)
+```
+
+Both return 20. The type of `proc_p` is written in the first one and deduced from `add` in the second. What makes the type is the types of the parameters and the return type, and not the names of the parameters or of the procedure, so every procedure that takes two `Int` values and returns an `Int` is a `^proc(Int, Int) Int`, and a variable of that type can point to another of them later with `=`. A pointer to a procedure that takes other types, or returns another type, or returns nothing, is another type, and is not accepted where this one is wanted.
+
+A pointer to a procedure can be a variable, a parameter, a field of a [struct](#structs) and an element of an [array](#arrays) or an array slice, as any other type can. Passing one to another procedure is how a procedure is told what to do for each element, or how to combine two values:
+
+```
+double :: proc(n: Int) Int ->
+    return n * 2
+
+apply_twice :: proc(f: ^proc(Int) Int, n: Int) Int ->
+    return f(f(n))
+
+use_callback :: proc() Int ->
+    return apply_twice(double, 5)
+```
+
+`use_callback` returns 20. A pointer to a procedure that is in an array or a struct is stored in a variable before it is called, as in `f := operations[1]` and then `f(6, 3)`, because a call is written with a name. The elements of an array of them are made with `[const]^proc(Int, Int) Int { add, subtract }`.
+
+A pointer to a procedure that has no value is `nil`, like any other [pointer](#null-and-lifetime): it is the default value, so `f : ^proc(Int) Int` is `nil`, and `nil` can be given to a variable, a field, an element or a parameter of such a type, and compared with `==` and `not=`. Two pointers to procedures are equal when they point to the same procedure. Calling `nil` traps. There is no way to tell that from a bad call at compile time, which is why it is good to compare a pointer with `nil` before it is called when it can be.
+
+A pointer to a procedure does not point to a value, so it is not followed with `^`: `f^` is an error, and the address of a procedure, `%add`, is an error as well. A pointer to a variable that holds a pointer to a procedure is written with one more caret, `^^proc(Int) Int`, and it is made with `%` from the variable, as for any variable. Following it with `^` gives the pointer to the procedure, which is how a procedure can change which procedure a variable of its caller points to.
+
+A few things cannot be done with a pointer to a procedure, which a later version of the language may allow:
+
+- A procedure cannot return one, and it cannot be the return type of a procedure type, because a return type is a name with carets before it. A procedure can take one, and store it where a pointer can be stored.
+- The parameters of a type of a pointer to a procedure are not pointers to procedures themselves, so `^proc(^proc(Int) Int) Int` cannot be written.
+- A global variable cannot hold one, because its initial value is a literal, and no literal is a pointer to a procedure.
+- Only the name of a variable, a parameter or a global variable is called, and not an element, a field or the result of following a pointer, which are stored in a variable first.
+
 
 ## Loops without a range
 
@@ -1287,6 +1336,9 @@ A variable whose address is taken, as in `%x` or `%x.field`, is not in locals, b
 
 `p^` follows a pointer by holding it in a local, trapping if it is 0, and loading the values of what it points to from it, one `i64.load` or `i32.load` for each, with the offset of the field in front of it for `p.age`, which is how a field of a pointer to a struct is read, written with or without the `^`. The pointer that is followed is the one before the last dot that is after a pointer, so `node.next.value` loads the pointer `node.next` first and then the field `value` from what it points to. The trap is an `if` with `unreachable` after a test with `i32.eqz`, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, and is needed because address 0 is where the strings start, and a null pointer would read them instead of stopping the program. An address that is outside of the memory traps as well, which is what WebAssembly does for any load or store. An assignment through a pointer evaluates the pointer first, checks it and keeps it in a local while the value is evaluated, like the address of an element is kept, and then stores to it. The operators such as `p^ += 1` load from the pointer, apply the operator and store the result to the same address. Nothing else is done for a pointer: it is copied by copying the number, so a procedure gets a pointer to the same memory as its caller.
 
+A pointer to a procedure is one 32-bit integer (`i32`) as well, but it is not an address in the memory: it is the index of the procedure in the table of the module. The table has a slot for every function of the module, the imported ones too, put there by an element segment in the order of the function indexes, from slot 1 on. Slot 0 has no function, so the number 0, which is `nil` and what a pointer that was not given a value is, is the pointer that can be called to no effect but a trap. So the pointer to a procedure is its function index plus one, and the name of a procedure that is not called is `i32.const` of that. A call through a pointer is the arguments, then the pointer, and `call_indirect` with the type of the procedures that the pointer can point to and table 0. WebAssembly checks that the function in the slot has that type, and it traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the slot is empty, as it is for `nil`. The type is the type of the function of the first procedure that has the parameters and result of the pointer, and when there is none that comes first, a type of its own that the type section has after the types of the functions. The module has a table and an element segment only when the program uses a pointer to a procedure, which is when it has such a type or uses a procedure by its name without calling it. A pointer to a procedure can be kept in memory like any pointer, so `^^proc(Int) Int` and the elements of an array of them take 8 bytes each. JavaScript has no way to get a pointer to a procedure from the module, but it can pass the number of a slot, which is the function index plus one.
+
+
 A module has a memory only when the program has a string literal, which includes the value of a global variable, an array type, which includes the array literals and the array slices, or a pointer: a pointer type, `%` or `^`. The strings are at the start of the memory, and the stack of the arrays is after them. A procedure cannot be called `memory`, whether the module has one or not, because that is the name of the export.
 
 The target rejects a program that the parser accepts when:
@@ -1304,7 +1356,10 @@ The target rejects a program that the parser accepts when:
 - a variable of an array type is not given an array literal,
 - an element of an array literal, or the value that is assigned to an element, is not of the type of the elements,
 - what is subscripted, sliced or gone through by a for statement, or what is copied to a range of elements, is not an array or an array slice, or an index or a bound is not an `Int`,
-- a name in an expression, or the initial value of a variable, is a procedure, which is not a value that the target can use yet,
+- a name in an expression, or the initial value of a variable, is a struct, which is a type and not a value,
+- a call is of a variable, a parameter or a global variable that does not hold a pointer to a procedure,
+- `^` follows a pointer to a procedure, or `%` is given the name of a procedure, which has no address,
+- a type in the parameters or the return type of a pointer to a procedure is not one that the target has,
 - the initial value of a global variable is not of the type that is written for the variable,
 - a definition is called `memory`,
 - a procedure with no return type has a `return` statement,

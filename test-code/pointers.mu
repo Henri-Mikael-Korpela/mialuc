@@ -467,3 +467,14 @@ follow_pointers_with_fields :: proc() Int ->
     middle := Node { value = 2, next = %last }
     first := Node { value = 1, next = %middle }
     return first.next.next.value * 10 + first.next^.next.value
+
+add :: proc(a: Int, b: Int) Int ->
+    return a + b
+
+create_pointer_to_procedure :: proc() Int ->
+    proc_p : ^proc(Int, Int) Int = add
+    return proc_p(5, 15)
+
+create_pointer_to_procedure2 :: proc() Int ->
+    proc_p := add
+    return proc_p(5, 15)

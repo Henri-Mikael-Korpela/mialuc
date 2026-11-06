@@ -95,7 +95,9 @@ static Token const *  parse_token_current       (Parser const *parser);
 static bool           parse_token_expect        (Parser *parser, Token_Type token_type,
                                                  Str expected);
 static Ast_Node_Index parse_type                (Parser *parser, Str expected);
-static Ast_Node_Index parse_type_name           (Parser *parser, Str expected);
+static Ast_Node_Index parse_type_name           (Parser *parser, Str expected,
+                                                 bool is_procedure_allowed);
+static Ast_Node_Index parse_procedure_type      (Parser *parser);
 static Ast_Node_Index parse_variable_definition (Parser *parser);
 
 Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
@@ -559,15 +561,18 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
 }
 
 /**
- * Parses the return type, which is optional: a name, or the carets of a pointer type and then a
- * name, as in `Int` and `^Int`. The type is only the source text for now, from its first token to
- * its last, which is why the name is not a node of its own: an array cannot be returned, so a
- * return type is never more than carets before a name. The current token is the one after the
- * `)`. Returns false after it recorded an error.
+ * Parses the return type of a procedure or of a procedure type, which is optional: a name, or the
+ * carets of a pointer type and then a name, as in `Int` and `^Int`. The type is only the source
+ * text for now, from its first token to its last, which is why the name is not a node of its own:
+ * an array cannot be returned, so a return type is never more than carets before a name, and
+ * neither is it a pointer to a procedure. The current token is the one after the `)`. Returns false
+ * after it recorded an error.
  */
 static bool parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(procedure < parser->node_count);
+    assert(parser->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE ||
+           parser->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE_TYPE);
 
     Token const *first = parse_token_current(parser);
     if (first->token_type != TOKEN_TYPE_IDENTIFIER && first->token_type != TOKEN_TYPE_CARET) {
@@ -585,6 +590,11 @@ static bool parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure
     Token const *name = parse_token_current(parser);
     if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
         // The false return value reports the failure, so the node index is not needed.
+        if (name->token_type == TOKEN_TYPE_KEYWORD_PROC) {
+            (void)parse_fail(parser, STR("the name of the return type after '^', because a "
+                                         "procedure does not return a pointer to a procedure"));
+            return false;
+        }
         (void)parse_fail(parser, STR("the name of the return type after '^'"));
         return false;
     }
@@ -2089,7 +2099,7 @@ static Ast_Node_Index parse_type(Parser *parser, Str expected) {
 
     Token const *start = parse_token_current(parser);
     if (start->token_type != TOKEN_TYPE_BRACKET_LEFT) {
-        return parse_type_name(parser, expected);
+        return parse_type_name(parser, expected, true);
     }
 
     Ast_Node_Index array_type = parse_node_make(parser, AST_NODE_TYPE_ARRAY_TYPE);
@@ -2118,7 +2128,7 @@ static Ast_Node_Index parse_type(Parser *parser, Str expected) {
         return AST_NODE_INDEX_NONE;
     }
 
-    Ast_Node_Index element = parse_type_name(parser, STR("the type of the elements"));
+    Ast_Node_Index element = parse_type_name(parser, STR("the type of the elements"), true);
     if (element == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
@@ -2129,11 +2139,16 @@ static Ast_Node_Index parse_type(Parser *parser, Str expected) {
 
 /**
  * Parses a type that is not an array: a name, such as `Int`, or the carets of a pointer type and
- * then a name, such as `^Int` or `^^Int`. Each caret makes a node that has the rest of the type as
- * its child, and the nodes are made in the order of the source. `expected` is what the caller wants
- * when the current token starts no type; after a caret the name is what is missing.
+ * then a name, such as `^Int` or `^^Int`, or the carets and then a procedure type, such as
+ * `^proc(Int) Int`. Each caret makes a node that has the rest of the type as its child, and the
+ * nodes are made in the order of the source. `expected` is what the caller wants when the current
+ * token starts no type; after a caret the name is what is missing. A procedure type is only
+ * accepted with `is_procedure_allowed`, which the parameters of a procedure type do not have, so
+ * the procedure types do not nest and the parser calls itself at most once for them. A procedure
+ * type needs at least one caret, because what a variable holds is a pointer to a procedure and not
+ * the procedure.
  */
-static Ast_Node_Index parse_type_name(Parser *parser, Str expected) {
+static Ast_Node_Index parse_type_name(Parser *parser, Str expected, bool is_procedure_allowed) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(expected.length > 0);
 
@@ -2159,24 +2174,97 @@ static Ast_Node_Index parse_type_name(Parser *parser, Str expected) {
     }
 
     Token const *name = parse_token_current(parser);
-    if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
-        if (outermost != AST_NODE_INDEX_NONE) {
-            return parse_fail(parser, STR("a type name after '^'"));
+    Ast_Node_Index type_name = AST_NODE_INDEX_NONE;
+    if (name->token_type == TOKEN_TYPE_KEYWORD_PROC && outermost != AST_NODE_INDEX_NONE &&
+        is_procedure_allowed) {
+        type_name = parse_procedure_type(parser);
+        if (type_name == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
         }
-        return parse_fail(parser, expected);
+    } else {
+        if (name->token_type == TOKEN_TYPE_KEYWORD_PROC) {
+            // The word starts a procedure type, which is not accepted here: either the caret is
+            // missing, or the type is a parameter of a procedure type.
+            if (outermost == AST_NODE_INDEX_NONE) {
+                return parse_fail(parser, STR("'^' before 'proc', because what a variable holds is "
+                                              "a pointer to a procedure"));
+            }
+            return parse_fail(parser, STR("a type name, because the parameter of a procedure type "
+                                          "is not a pointer to a procedure"));
+        }
+        if (name->token_type != TOKEN_TYPE_IDENTIFIER) {
+            if (outermost != AST_NODE_INDEX_NONE) {
+                return parse_fail(parser, STR("a type name after '^'"));
+            }
+            return parse_fail(parser, expected);
+        }
+        type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
+        if (type_name == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[type_name].payload.type_name.name = name->payload.identifier.text;
+        parse_token_advance(parser);
     }
-    Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
-    if (type_name == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
-    }
-    parser->nodes[type_name].payload.type_name.name = name->payload.identifier.text;
-    parse_token_advance(parser);
 
     if (outermost == AST_NODE_INDEX_NONE) {
         return type_name;
     }
     parse_node_append_child(parser, innermost, type_name);
     return outermost;
+}
+
+/**
+ * Parses a procedure type, which is what a pointer to a procedure points to: `proc(Int, Int) Int`,
+ * the types of the parameters between parentheses, which can be none, and the return type, which is
+ * optional. The parameters have no names. The node has the types of the parameters as its
+ * children, and the return type in its payload, like the node of a procedure. A parameter is a
+ * name or a pointer type, and never a procedure type or an array. Returns the node, or
+ * `AST_NODE_INDEX_NONE` after it recorded an error.
+ */
+static Ast_Node_Index parse_procedure_type(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_PROC);
+
+    Ast_Node_Index procedure_type = parse_node_make(parser, AST_NODE_TYPE_PROCEDURE_TYPE);
+    if (procedure_type == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    // A keyword token has its text like a name does.
+    Str keyword = parse_token_current(parser)->payload.identifier.text;
+    parse_token_advance(parser);
+
+    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_LEFT, STR("'('")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_token_current(parser)->token_type != TOKEN_TYPE_PARENTHESIS_RIGHT) {
+        // Every parameter consumes at least a token, so there are fewer parameters than tokens,
+        // which bounds the loop. A comma means that another parameter has to follow.
+        for (size_t i = 0; i < parser->token_count; i += 1) {
+            Ast_Node_Index parameter =
+                parse_type_name(parser, STR("the type of a parameter"), false);
+            if (parameter == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            parse_node_append_child(parser, procedure_type, parameter);
+
+            if (parse_token_current(parser)->token_type != TOKEN_TYPE_COMMA) {
+                break;
+            }
+            parse_token_advance(parser);
+        }
+    }
+    if (parse_token_expect(parser, TOKEN_TYPE_PARENTHESIS_RIGHT, STR("',' or ')'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    if (parse_procedure_return_type(parser, procedure_type) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    // See `AST_NODE_TYPE_PROCEDURE_TYPE`: the keyword is what an error about the type points at.
+    if (parser->nodes[procedure_type].payload.procedure.return_type.bytes == NULL) {
+        parser->nodes[procedure_type].payload.procedure.return_type = keyword;
+    }
+    return procedure_type;
 }
 
 static Ast_Node_Index parse_bool_literal(Parser *parser) {

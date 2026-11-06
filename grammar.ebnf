@@ -47,8 +47,12 @@
      - A line may be indented by any number of spaces that is a multiple of 4. The grammar only
        has blocks nested up to the fourth level, see `block_1`. Deeper nesting is accepted by the
        compiler, up to 32 blocks inside each other, and the grammar needs more rules for it.
-     - The name of a call must be a procedure, and the arguments must match its parameters in number
-       and in type. A call of a procedure that returns nothing can only be a statement.
+     - The name of a call must be a procedure, or a variable, a parameter or a global variable that
+       holds a pointer to a procedure, and the arguments must match the parameters in number and in
+       type. A call of a procedure that returns nothing can only be a statement. The name of a
+       procedure that is not called is a pointer to it, and it is accepted where a pointer to a
+       procedure of the same parameter types and return type is, and so is `nil`. Calling `nil`
+       traps.
      - The first number and the end of a range must be `Int`, and the iterator of a for statement is
        a variable of its block that cannot be assigned to, and that no other name may have. A name
        in the range cannot be the iterator of the same statement. All are checked after parsing.
@@ -188,20 +192,34 @@ parameter = name , ws , ":" , ws , type ;
    before the type of the elements, which is a name or a pointer type: `[5]Int` is an array of five
    elements, `[const]Int` an array whose length is the number of elements of the array literal that
    it starts, which only makes sense there, `[]Int` an array slice, which views the elements of an
-   array, and `[]^Int` an array slice of pointers. *)
+   array, and `[]^Int` an array slice of pointers.
+
+   A pointer to a procedure is written with the carets and then `proc`, the types of the
+   parameters between parentheses, and the return type, which is optional: `^proc(Int, Int) Int`.
+   The caret is needed, because what a variable holds is the pointer and not the procedure, and a
+   caret more makes a pointer to such a pointer: `^^proc(Int) Int`. The parameters of a procedure
+   type have no names, and are not procedure types themselves, and the return type of a procedure
+   or of a procedure type is never one either. *)
 type = element_type | array_type ;
 
-element_type = type_name | pointer_type ;
+element_type = plain_type | procedure_pointer_type ;
+
+(* A name, or the carets of a pointer type and then a name, and never a procedure type. *)
+plain_type = type_name | "^" , ws , plain_type ;
 
 type_name = name ;
 
-pointer_type = "^" , ws , element_type ;
+procedure_pointer_type = "^" , ws , { "^" , ws } , procedure_type ;
+
+procedure_type =
+    "proc" , ws , "(" , ws , [ plain_type , { ws , "," , ws , plain_type } , ws ] , ")" ,
+    [ ws , return_type ] ;
 
 array_type = "[" , ws , [ array_length , ws ] , "]" , ws , element_type ;
 
 array_length = integer_literal | "const" ;
 
-return_type = element_type ;
+return_type = plain_type ;
 
 (* At least one statement. Blank lines are allowed before, between and after statements, and are
    not statements. The body is indented exactly one level, 4 spaces. A tab, or any other number of

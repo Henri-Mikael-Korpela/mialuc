@@ -8,8 +8,8 @@
 #include <mialu/wasm.h>
 
 // The text follows the layout of `wasm2wat` from the WebAssembly Binary Toolkit, which is what
-// people who read WebAssembly text are used to: types first, then functions, memories, globals,
-// exports and data, with the index of each in a `(;index;)` comment.
+// people who read WebAssembly text are used to: types first, then functions, tables, memories,
+// globals, exports, elements and data, with the index of each in a `(;index;)` comment.
 
 enum {
     // The longest decimal number that is written: `UINT64_MAX` has 20 digits.
@@ -52,11 +52,13 @@ typedef struct {
 typedef struct {
     Wasm_Text_Section code;
     Wasm_Text_Section data;
+    Wasm_Text_Section element;
     Wasm_Text_Section export;
     Wasm_Text_Section function;
     Wasm_Text_Section global;
     Wasm_Text_Section import;
     Wasm_Text_Section memory;
+    Wasm_Text_Section table;
     Wasm_Text_Section type;
 } Wasm_Text_Sections;
 
@@ -92,6 +94,8 @@ static bool               wasm_text_fail                              (Wasm_Text
                                                                        size_t error_offset);
 static bool               wasm_text_format_data                       (Wasm_Text_Formatter *formatter,
                                                                        Wasm_Text_Section section);
+static bool               wasm_text_format_elements                   (Wasm_Text_Formatter *formatter,
+                                                                       Wasm_Text_Section section);
 static bool               wasm_text_format_exports                    (Wasm_Text_Formatter *formatter,
                                                                        Wasm_Text_Section section);
 static bool               wasm_text_format_function_type              (Wasm_Text_Formatter *formatter);
@@ -106,6 +110,8 @@ static bool               wasm_text_format_functions_body_locals      (Wasm_Text
 static bool               wasm_text_format_globals                    (Wasm_Text_Formatter *formatter,
                                                                        Wasm_Text_Section section);
 static bool               wasm_text_format_memories                   (Wasm_Text_Formatter *formatter,
+                                                                       Wasm_Text_Section section);
+static bool               wasm_text_format_tables                     (Wasm_Text_Formatter *formatter,
                                                                        Wasm_Text_Section section);
 static bool               wasm_text_format_types                      (Wasm_Text_Formatter *formatter,
                                                                        Wasm_Text_Section section);
@@ -174,6 +180,9 @@ Wasm_Text_Result wasm_text_format(Array_Slice module, Array_Slice output_buffer)
         is_ok = wasm_text_format_functions(&formatter, sections.function, sections.code);
     }
     if (is_ok) {
+        is_ok = wasm_text_format_tables(&formatter, sections.table);
+    }
+    if (is_ok) {
         is_ok = wasm_text_format_memories(&formatter, sections.memory);
     }
     if (is_ok) {
@@ -181,6 +190,9 @@ Wasm_Text_Result wasm_text_format(Array_Slice module, Array_Slice output_buffer)
     }
     if (is_ok) {
         is_ok = wasm_text_format_exports(&formatter, sections.export);
+    }
+    if (is_ok) {
+        is_ok = wasm_text_format_elements(&formatter, sections.element);
     }
     if (is_ok) {
         is_ok = wasm_text_format_data(&formatter, sections.data);
@@ -226,11 +238,13 @@ static Wasm_Text_Sections wasm_text_sections_find(Wasm_Text_Formatter *formatter
     Wasm_Text_Sections sections = {
         .code = absent,
         .data = absent,
+        .element = absent,
         .export = absent,
         .function = absent,
         .global = absent,
         .import = absent,
         .memory = absent,
+        .table = absent,
         .type = absent,
     };
 
@@ -280,6 +294,9 @@ static Wasm_Text_Sections wasm_text_sections_find(Wasm_Text_Formatter *formatter
         case WASM_SECTION_ID_DATA:
             known = &sections.data;
             break;
+        case WASM_SECTION_ID_ELEMENT:
+            known = &sections.element;
+            break;
         case WASM_SECTION_ID_EXPORT:
             known = &sections.export;
             break;
@@ -294,6 +311,9 @@ static Wasm_Text_Sections wasm_text_sections_find(Wasm_Text_Formatter *formatter
             break;
         case WASM_SECTION_ID_MEMORY:
             known = &sections.memory;
+            break;
+        case WASM_SECTION_ID_TABLE:
+            known = &sections.table;
             break;
         case WASM_SECTION_ID_TYPE:
             known = &sections.type;
@@ -692,6 +712,24 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             wasm_text_write_unsigned(&formatter->writer, function_index);
             break;
         }
+        case WASM_OPCODE_CALL_INDIRECT: {
+            // The type that the function in the table must have, and the table, which is always
+            // table 0, so the text leaves it out as the text format allows.
+            size_t table_offset = 0;
+            uint32_t type_index = wasm_text_read_unsigned_32(formatter);
+            table_offset = formatter->offset;
+            uint32_t table_index = wasm_text_read_unsigned_32(formatter);
+            if (formatter->status != WASM_TEXT_STATUS_OK) {
+                return false;
+            }
+            if (table_index != 0) {
+                return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, table_offset);
+            }
+            wasm_text_write_instruction(&formatter->writer, STR("call_indirect (type "));
+            wasm_text_write_unsigned(&formatter->writer, type_index);
+            wasm_text_write(&formatter->writer, STR(")"));
+            break;
+        }
         case WASM_OPCODE_DROP:
             wasm_text_write_instruction(&formatter->writer, STR("drop"));
             break;
@@ -1024,6 +1062,96 @@ static bool wasm_text_format_globals(Wasm_Text_Formatter *formatter, Wasm_Text_S
         wasm_text_write(&formatter->writer, initial_name);
         wasm_text_write_signed(&formatter->writer, initial_value);
         wasm_text_write(&formatter->writer, STR("))"));
+    }
+
+    return wasm_text_section_end(formatter);
+}
+
+/**
+ * Writes one `(table ...)` per entry of the table section, with its size and the type of its
+ * elements, which is a reference to a function.
+ */
+static bool wasm_text_format_tables(Wasm_Text_Formatter *formatter, Wasm_Text_Section section) {
+    assert(formatter->status == WASM_TEXT_STATUS_OK);
+    assert(section.start <= section.end);
+
+    uint32_t count = wasm_text_section_count_read(formatter, section);
+    // Bounded like the loop over the types: every entry takes at least one byte.
+    for (uint32_t i = 0; i < count && formatter->status == WASM_TEXT_STATUS_OK; i += 1) {
+        size_t element_type_offset = formatter->offset;
+        byte element_type = wasm_text_read_byte(formatter);
+        size_t flag_offset = formatter->offset;
+        byte flag = wasm_text_read_byte(formatter);
+        uint32_t size_min = wasm_text_read_unsigned_32(formatter);
+        if (formatter->status != WASM_TEXT_STATUS_OK) {
+            return false;
+        }
+        // A table can hold other references, and can have a maximum, which `wasm_build` never
+        // writes.
+        if (element_type != WASM_TYPE_FUNCREF) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED,
+                                  element_type_offset);
+        }
+        if (flag != WASM_TABLE_LIMITS_MIN_ONLY) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, flag_offset);
+        }
+
+        wasm_text_write(&formatter->writer, STR("\n  (table (;"));
+        wasm_text_write_unsigned(&formatter->writer, i);
+        wasm_text_write(&formatter->writer, STR(";) "));
+        wasm_text_write_unsigned(&formatter->writer, size_min);
+        wasm_text_write(&formatter->writer, STR(" funcref)"));
+    }
+
+    return wasm_text_section_end(formatter);
+}
+
+/**
+ * Writes one `(elem ...)` per segment of the element section, with the index in the table that its
+ * functions are put at, and the indexes of the functions. The module only has segments that are put
+ * in table 0 when it is instantiated.
+ */
+static bool wasm_text_format_elements(Wasm_Text_Formatter *formatter, Wasm_Text_Section section) {
+    assert(formatter->status == WASM_TEXT_STATUS_OK);
+    assert(section.start <= section.end);
+
+    uint32_t count = wasm_text_section_count_read(formatter, section);
+    // Bounded like the loop over the types: every segment takes at least one byte.
+    for (uint32_t i = 0; i < count && formatter->status == WASM_TEXT_STATUS_OK; i += 1) {
+        size_t flag_offset = formatter->offset;
+        byte flag = wasm_text_read_byte(formatter);
+        size_t start_offset = formatter->offset;
+        byte start_opcode = wasm_text_read_byte(formatter);
+        int64_t start = wasm_text_read_signed_64(formatter);
+        byte end_opcode = wasm_text_read_byte(formatter);
+        uint32_t function_count = wasm_text_read_unsigned_32(formatter);
+        if (formatter->status != WASM_TEXT_STATUS_OK) {
+            return false;
+        }
+
+        // Other segments are passive or declarative, or for another table, or have expressions
+        // as their elements, and other starts are computed.
+        if (flag != WASM_ELEMENT_SEGMENT_ACTIVE) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, flag_offset);
+        }
+        if (start_opcode != WASM_OPCODE_I32_CONST || end_opcode != WASM_OPCODE_END) {
+            return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, start_offset);
+        }
+
+        wasm_text_write(&formatter->writer, STR("\n  (elem (;"));
+        wasm_text_write_unsigned(&formatter->writer, i);
+        wasm_text_write(&formatter->writer, STR(";) (i32.const "));
+        wasm_text_write_signed(&formatter->writer, start);
+        wasm_text_write(&formatter->writer, STR(") func"));
+        // Every function index takes at least one byte, and a read past the end of the section
+        // fails, so the loop ends within as many steps as the section has bytes.
+        for (uint32_t j = 0; j < function_count && formatter->status == WASM_TEXT_STATUS_OK;
+             j += 1) {
+            uint32_t function_index = wasm_text_read_unsigned_32(formatter);
+            wasm_text_write(&formatter->writer, STR(" "));
+            wasm_text_write_unsigned(&formatter->writer, function_index);
+        }
+        wasm_text_write(&formatter->writer, STR(")"));
     }
 
     return wasm_text_section_end(formatter);

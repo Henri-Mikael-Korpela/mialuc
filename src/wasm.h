@@ -19,6 +19,10 @@ enum {
     WASM_EXPORT_KIND_FUNCTION = 0x00,
     WASM_EXPORT_KIND_MEMORY = 0x02,
 
+    // The flag of an element segment that is copied into table 0 when the module is instantiated,
+    // at the index that a constant expression gives, and has function indexes as its elements.
+    WASM_ELEMENT_SEGMENT_ACTIVE = 0x00,
+
     // The kind of thing that an import brings in. Only functions are imported.
     WASM_IMPORT_KIND_FUNCTION = 0x00,
 
@@ -43,6 +47,7 @@ enum {
     WASM_OPCODE_BR = 0x0C,
     WASM_OPCODE_BR_IF = 0x0D,
     WASM_OPCODE_CALL = 0x10,
+    WASM_OPCODE_CALL_INDIRECT = 0x11,
     WASM_OPCODE_DROP = 0x1A,
     WASM_OPCODE_ELSE = 0x05,
     WASM_OPCODE_END = 0x0B,
@@ -96,13 +101,20 @@ enum {
     WASM_SECTION_ID_CODE = 10,
     WASM_SECTION_ID_CUSTOM = 0,
     WASM_SECTION_ID_DATA = 11,
+    WASM_SECTION_ID_ELEMENT = 9,
     WASM_SECTION_ID_EXPORT = 7,
     WASM_SECTION_ID_FUNCTION = 3,
     WASM_SECTION_ID_GLOBAL = 6,
     WASM_SECTION_ID_IMPORT = 2,
     WASM_SECTION_ID_MEMORY = 5,
+    WASM_SECTION_ID_TABLE = 4,
     WASM_SECTION_ID_TYPE = 1,
 
+    // The flag of a table that has a minimum size but no maximum, like a memory has.
+    WASM_TABLE_LIMITS_MIN_ONLY = 0x00,
+
+    // The type of the elements of a table, which are references to functions.
+    WASM_TYPE_FUNCREF = 0x70,
     // The marker of a function type, and the types of a 32-bit and a 64-bit integer.
     WASM_TYPE_FUNCTION = 0x60,
     WASM_TYPE_I32 = 0x7F,
@@ -137,6 +149,9 @@ typedef enum {
     WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH,
     WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH,
     WASM_BUILD_STATUS_CALL_RESULT_MISSING,
+    // A call of a variable, a parameter or a global variable that does not hold a pointer to a
+    // procedure. The subject is the name.
+    WASM_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE,
     WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
     WASM_BUILD_STATUS_CONDITION_TYPE_INVALID,
     WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED,
@@ -245,6 +260,15 @@ typedef struct {
  * what a pointer that was not given a value is. A pointer to a variable is good until the
  * procedure that has the variable returns.
  *
+ * A pointer to a procedure, written `^proc(Int) Int`, is one 32-bit integer as well, but it is not
+ * an address in memory: it is a slot of the one table of the module, which has every function of
+ * the module from slot 1 on. So the pointer to a procedure is its function index plus one, and 0,
+ * which is `nil`, is a slot that has no function. The name of a procedure that is used as a value
+ * is the `i32.const` of its slot, and a call of a variable, a parameter or a global variable is the
+ * arguments, the pointer and `call_indirect`, which traps for `nil`. The types of the signatures
+ * that no procedure has the first of come after the types of the functions in the type section.
+ * The module has a table and an element segment only when the program uses such a pointer.
+ *
  * An array is on a stack in the memory of the module: a procedure that has an array literal makes
  * room for all of its array literals when it starts, and gives it back when it returns. Only the
  * elements are there, and a variable of an array type is a local that holds the address of the
@@ -254,7 +278,7 @@ typedef struct {
  * does copying to a range of elements from a range of another length.
  *
  * The syntax tree can be valid for the parser but not for the target, for example when it uses a
- * procedure as a value. Such trees are rejected with a status other than
+ * struct as a value. Such trees are rejected with a status other than
  * `WASM_BUILD_STATUS_OK`.
  */
 Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,

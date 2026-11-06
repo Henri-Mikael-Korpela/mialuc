@@ -740,6 +740,11 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 "used as one.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
+    case WASM_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' does not hold a pointer to a procedure, so it cannot "
+                "be called.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "
                 "must be Int, or both must be Bool or pointers of one type for == and not=.\n",
@@ -769,7 +774,7 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is a procedure or a struct, which the wasm target "
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is a struct, which the wasm target "
                 "cannot use as a value.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
