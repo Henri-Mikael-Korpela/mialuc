@@ -45,6 +45,7 @@ typedef enum {
     AST_NODE_TYPE_MODULE,
     AST_NODE_TYPE_MULTIPLICATION,
     AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT,
+    AST_NODE_TYPE_NIL_LITERAL,
     AST_NODE_TYPE_NOT,
     AST_NODE_TYPE_OR,
     AST_NODE_TYPE_PARAMETER,
@@ -231,6 +232,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that gets the product, and the factor that it is multiplied by, in that order. It
  *   is a statement of a procedure body.
+ * - `AST_NODE_TYPE_NIL_LITERAL`: no children. `nil`, the null pointer, which is a pointer of
+ *   whatever pointer type the place that it is given to has.
  * - `AST_NODE_TYPE_NOT`: one child, the operand. It is an expression of type `Bool` and the target
  *   requires the operand to be `Bool`. It binds looser than a comparison, so `not a == b` is
  *   `not (a == b)`.

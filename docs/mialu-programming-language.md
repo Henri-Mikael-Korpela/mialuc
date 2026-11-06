@@ -108,6 +108,7 @@ foreign
 if
 import
 in
+nil
 not
 or
 proc
@@ -191,7 +192,7 @@ is_even :: proc(n: Int) Bool ->
 
 Unlike C, integer types are not implicitly converted into boolean values. A `Bool` is never converted to or from another type. An `Int` is not a condition, so `if n ->` is an error and has to be written `if n not= 0 ->`, and `true` is not `1`: `x : Int = true` and `b : Bool = 1` are errors.
 
-A `Bool` has no arithmetic. Two `Bool` values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`, but they have no order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Both operands of a comparison must have the same type. The logical operators `and`, `or` and `not` combine `Bool` values, see [Logical operators](#logical-operators).
+A `Bool` has no arithmetic. Two `Bool` values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`, but they have no order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Both operands of a comparison must have the same type. Two pointers can be compared with `==` and `not=` as well, see [Null and lifetime](#null-and-lifetime). The logical operators `and`, `or` and `not` combine `Bool` values, see [Logical operators](#logical-operators).
 
 ### Logical operators
 
@@ -253,7 +254,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
 | `=`      | Sets the initial value of a variable whose type is written. It also assigns a new value to a variable, an element or a field, and copies to a range of elements. | 0 | `x : Int = 5`, `x = 6`, `a[0] = 5`, `p.age = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values for `==` and `not=`, and its result is a `Bool`.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values or two pointers of one type for `==` and `not=`, and its result is a `Bool`.
 
 Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2, and so do `*` and `/`, so `8 / 2 * 3` is 12 and not 1. A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, so `a + 1 > b * 2` means `(a + 1) > (b * 2)`. A comparison is an expression of type `Bool`, but its operands are not comparisons, so it cannot be an operand of another operator, and `a < b < c` and `a == b == c` are errors. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2.
 
@@ -284,7 +285,7 @@ x : Int
 p : Person
 ```
 
-The default value is 0 for an `Int`, `false` for a `Bool`, the empty string `""` for a `Str`, an array slice with no elements for an array slice, the null pointer for a [pointer](#null-and-lifetime), and for a [struct](#structs) the default value of each of its fields. An array has no default value, since it is made by an array literal, so `a : [3]Int` is an error.
+The default value is 0 for an `Int`, `false` for a `Bool`, the empty string `""` for a `Str`, an array slice with no elements for an array slice, `nil`, the null pointer, for a [pointer](#null-and-lifetime), and for a [struct](#structs) the default value of each of its fields. An array has no default value, since it is made by an array literal, so `a : [3]Int` is an error.
 
 A variable is defined once, with its initial value, and every variable has one. It can be used in the statements below its definition, but not above it and not in its own initial value. The variables of a procedure are not visible outside of it, so two procedures can have a variable of the same name.
 
@@ -773,7 +774,40 @@ The value that is assigned through a pointer must be of the type that the pointe
 
 ### Null and lifetime
 
-A pointer that is defined with a type and without a value, as in `p : ^Int`, is the null pointer. There is no way to write it, and no way to compare a pointer yet. Following a null pointer is an error at run time: the program traps, see [WebAssembly](#webassembly). A pointer is not checked in any other way. A pointer to a variable, or to an element of an array, is good for as long as the procedure that has the variable or the array runs, because they are gone when it returns. So a procedure can return a pointer to something that outlives it, such as a variable of its caller that it was given a pointer to, as `choose` does below, but a pointer to its own variable points to nothing after it returns. The target cannot tell a pointer to something that is gone: following it reads and writes the memory where the variable was, which another procedure may be using by then.
+`nil` is the null pointer, a pointer that points to nothing, like `NULL` in C. It is a keyword, and a value of every pointer type: it is a `^Int` where a `^Int` is wanted, a `^Person` where that is, and so on, so it can be the value of a variable that has a pointer type, an argument, a returned value, a field of a struct literal and an element of an array literal. A pointer that is defined with a type and without a value, as in `p : ^Int`, is `nil` as well, and so is a field of a struct that is left out of a struct literal.
+
+```
+read_or_default :: proc(p: ^Int, default: Int) Int ->
+    if p == nil ->
+        return default
+    return p^
+
+nil_as_argument :: proc() Int ->
+    x := 7
+    return read_or_default(%x, 0) * 10 + read_or_default(nil, 5)
+```
+
+`nil_as_argument` returns 75. Because `nil` points to nothing in particular, it does not say the type of a variable: `p := nil` is an error, and has to be written `p : ^Int = nil`. For the same reason `nil^` and `%nil` are errors, and `nil` cannot be used where something else than a pointer is wanted, such as `x : Int = nil`.
+
+Pointers are compared with `==` and `not=`, which are defined for two pointers of the same type, or for a pointer and `nil`. Two pointers are equal when they hold the same address, which is when they point to the very same variable or element: the pointers to two variables are different also when the variables have the same value. A pointer has no order, so `<` and the others are errors, like for a `Bool`. The comparison is how code finds out that a pointer can be followed, and how a chain of structs is gone through until it ends:
+
+```
+Node :: struct ->
+    value: Int
+    next: ^Node
+
+sum_list :: proc(first: ^Node) Int ->
+    total := 0
+    current := first
+    for ->
+        if current == nil ->
+            break
+        total += current^.value
+        current = current^.next
+    return total
+```
+
+Following a `nil` pointer is an error at run time: the program traps, see [WebAssembly](#webassembly). A pointer is not checked in any other way. A pointer to a variable, or to an element of an array, is good for as long as the procedure that has the variable or the array runs, because they are gone when it returns. So a procedure can return a pointer to something that outlives it, such as a variable of its caller that it was given a pointer to, as `choose` does below, but a pointer to its own variable points to nothing after it returns. The target cannot tell a pointer to something that is gone: following it reads and writes the memory where the variable was, which another procedure may be using by then.
 
 ```
 choose :: proc(a: ^Int, b: ^Int, first: Bool) ^Int ->
@@ -798,7 +832,7 @@ follow_pointers_in_structs :: proc() Int ->
     return first.next^.value * 10 + first.next^.next^.value
 ```
 
-`follow_pointers_in_structs` returns 23. A field that is left out of a struct literal is the null pointer when it is a pointer. The elements of an [array](#arrays) can be pointers, and so can the elements of an array slice, so a procedure can take `targets: []^Int`, and an array of pointers is made with `[const]^Int { %a, %b }`. An element is followed with `pointers[0]^`, and a for statement over them gives each pointer, as in `for p in pointers ->` and then `p^`.
+`follow_pointers_in_structs` returns 23. A field that is left out of a struct literal is `nil` when it is a pointer. The elements of an [array](#arrays) can be pointers, and so can the elements of an array slice, so a procedure can take `targets: []^Int`, and an array of pointers is made with `[const]^Int { %a, %b }`. An element is followed with `pointers[0]^`, and a for statement over them gives each pointer, as in `for p in pointers ->` and then `p^`.
 
 ## Procedures
 
@@ -1189,7 +1223,7 @@ A for statement that goes through the elements of an array or a slice is the sam
 
 A struct is made of the values of its fields, one after the other, in the order of its definition, where a field that is a struct takes its own fields in its place, and nothing else: it has no header and no padding. So a `Person` is three values, the `i64` of the age and the `i32` address and `i32` length of the name. A parameter of a struct type is that many parameters, a variable is that many locals, and a procedure that returns a struct has that many results, which JavaScript receives as an array, in the order of the fields. Reading a field of a variable or a parameter is a `local.get` for each of its values, with no cost for the rest of the struct, and assigning to a field is a `local.set`; a struct literal pushes the values of the fields in the order of the struct, with the default value, which is zero, for the ones that it does not give. The values of a struct literal are written in the order of the fields of the struct, so a string in a literal can have its address in the data section before one that comes before it in the source, which the address of a string allows, since it is the length of the strings before it in the source. A struct in an array is in memory, with 8 bytes for each of its values, so `Person` takes 24 bytes there. The field of an element is read with a load at the address of the element plus 8 times the number of values before the field, and is assigned with a store there. An assignment of a whole struct to an element is a store of each of its values, with the last on the stack stored first, using a local to hold each value while the address is pushed below it. A default value is `i64.const 0` or `i32.const 0` for each value. A struct is not a function: the definition of one is a constant that has no code and no export.
 
-A pointer is one 32-bit integer (`i32`): the address in the memory of the module of what it points to, so a parameter that is a pointer is one WebAssembly parameter, and a result that is a pointer is one result, which JavaScript passes and receives as a number. The null pointer is 0, which a pointer that is not given a value is, and is not the address of anything that a program can point to. What a pointer points to is in memory like an element of an array: 8 bytes for each of its values, aligned, so a `Str` takes 16 bytes and a struct takes 8 for each of its values, and the first four bytes of the 8 hold a 32-bit value. A field that is a pointer is one value of the struct, and so is an element of an array that is a pointer. A caller from JavaScript can point to what it wrote to the memory of the module, as it does for the elements of a slice:
+A pointer is one 32-bit integer (`i32`): the address in the memory of the module of what it points to, so a parameter that is a pointer is one WebAssembly parameter, and a result that is a pointer is one result, which JavaScript passes and receives as a number. `nil` is `i32.const 0`, which is also what a pointer that is not given a value is, and is not the address of anything that a program can point to. Two pointers or a pointer and `nil` are compared with `i32.eq` and `i32.ne`, as two `Bool` values are. What a pointer points to is in memory like an element of an array: 8 bytes for each of its values, aligned, so a `Str` takes 16 bytes and a struct takes 8 for each of its values, and the first four bytes of the 8 hold a 32-bit value. A field that is a pointer is one value of the struct, and so is an element of an array that is a pointer. A caller from JavaScript can point to what it wrote to the memory of the module, as it does for the elements of a slice:
 
 ```js
 new BigInt64Array(memory.buffer)[1] = 41n;
@@ -1225,7 +1259,8 @@ The target rejects a program that the parser accepts when:
 - a call has a different number of arguments than the procedure has parameters, or an argument is not of the type of its parameter,
 - the call of a procedure without a return type is used as a value, and not as a statement,
 - an operand of an arithmetic operator is not an `Int`,
-- the operands of a comparison are not both `Int`, or not both `Bool` for `==` and `not=`,
+- the operands of a comparison are not both `Int`, or not both `Bool` or both pointers of one type (or `nil`) for `==` and `not=`,
+- the value of a variable that is defined without a type is `nil`, which does not say the type of the variable,
 - an operand of `and`, `or` or `not` is not a `Bool`,
 - the condition of an if statement is not a `Bool`,
 - the first number or the end of a range is not an `Int`,

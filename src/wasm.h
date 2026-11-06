@@ -148,6 +148,9 @@ typedef enum {
     // An index, or the end of a slice, that is not an `Int`.
     WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
     WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
+    // `nil` where no pointer type is known to give it one: the value of a variable that has no
+    // written type, as in `p := nil`. The subject is the name of the variable.
+    WASM_BUILD_STATUS_NIL_TYPE_UNKNOWN,
     WASM_BUILD_STATUS_OK,
     WASM_BUILD_STATUS_OUTPUT_TOO_LARGE,
     // A value that is followed with `^`, or assigned through, and is not a pointer.

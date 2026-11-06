@@ -1701,9 +1701,17 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
     if (next == TOKEN_TYPE_KEYWORD_TRUE || next == TOKEN_TYPE_KEYWORD_FALSE) {
         return parse_bool_literal(parser);
     }
+    if (next == TOKEN_TYPE_KEYWORD_NIL) {
+        Ast_Node_Index nil = parse_node_make(parser, AST_NODE_TYPE_NIL_LITERAL);
+        if (nil == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_token_advance(parser);
+        return nil;
+    }
 
-    return parse_fail(parser, STR("an integer literal, a string literal, 'true', 'false', a name, "
-                                  "a call, an array literal or a struct literal"));
+    return parse_fail(parser, STR("an integer literal, a string literal, 'true', 'false', 'nil', "
+                                  "a name, a call, an array literal or a struct literal"));
 }
 
 /**

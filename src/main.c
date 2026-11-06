@@ -483,6 +483,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_KEYWORD_IN:
             printf("KEYWORD_IN\n");
             break;
+        case TOKEN_TYPE_KEYWORD_NIL:
+            printf("KEYWORD_NIL\n");
+            break;
         case TOKEN_TYPE_KEYWORD_NOT:
             printf("KEYWORD_NOT\n");
             break;
@@ -732,7 +735,8 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         break;
     case WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "
-                "must be Int, or both must be Bool for == and not=.\n", path, position.line,
+                "must be Int, or both must be Bool or pointers of one type for == and not=.\n",
+                path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID:
@@ -765,6 +769,12 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     case WASM_BUILD_STATUS_OK:
     case WASM_BUILD_STATUS_OUTPUT_TOO_LARGE:
         assert(false);
+        break;
+    case WASM_BUILD_STATUS_NIL_TYPE_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: variable '%.*s' is given nil, which does not say what it "
+                "points to, so the variable needs a pointer type, such as '%.*s : ^Int = nil'.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes,
+                subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_POINTER_EXPECTED:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a pointer, so '^' cannot follow it.\n", path,

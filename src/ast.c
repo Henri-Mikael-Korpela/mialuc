@@ -53,6 +53,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_LOOP_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION:
+    case AST_NODE_TYPE_NIL_LITERAL:
     case AST_NODE_TYPE_NOT:
     case AST_NODE_TYPE_OR:
     case AST_NODE_TYPE_PARAMETER:
@@ -287,6 +288,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
             printf("MULTIPLICATION_ASSIGNMENT\n");
+            break;
+        case AST_NODE_TYPE_NIL_LITERAL:
+            printf("NIL_LITERAL\n");
             break;
         case AST_NODE_TYPE_NOT:
             printf("NOT\n");

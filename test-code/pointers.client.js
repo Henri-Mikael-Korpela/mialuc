@@ -64,7 +64,7 @@ console.log("A slice of pointers, 1 + 10 and 2 + 10:", slice_of_pointers());
 console.log("Follow two pointers in structs, 2 and 3:", follow_pointers_in_structs());
 console.log("Assign through a pointer in a struct, 30 + 1:", assign_through_pointers_in_structs());
 
-// A pointer that was not given a value is null, and following it traps, which makes the call from
+// A pointer that was not given a value is nil, and following it traps, which makes the call from
 // JavaScript throw a WebAssembly.RuntimeError.
 function trapped(call) {
     try {
@@ -76,6 +76,22 @@ function trapped(call) {
 console.log("Read a null pointer:", trapped(() => read_null_pointer()));
 console.log("Assign through a null pointer:", trapped(() => assign_null_pointer()));
 console.log("Follow a null pointer in a struct:", trapped(() => follow_null_pointer_in_struct()));
+
+// `nil` is the null pointer, like NULL in C. It is a pointer of whatever type is wanted, so it can be
+// given to any pointer, passed and returned. A pointer is compared with `==` and `not=`, and is
+// equal to another only when it points to the very same variable. A pointer without a value is nil.
+console.log("nil, and a pointer without a value, equal nil:",
+    Boolean(nil_pointer_variable()), Boolean(default_pointer_is_nil()));
+console.log("A pointer to a variable is not nil:", Boolean(pointer_is_not_nil()));
+console.log("Assign nil to a pointer, 1 + 10:", assign_nil_to_pointer());
+console.log("Same variable, other variable with the same value, 1 + 100 and no 10:",
+    compare_pointers());
+console.log("A procedure that gets a pointer or nil, 7 and 5:", nil_as_argument());
+console.log("A procedure that returns a pointer or nil, 10 + 1 and 0:", return_nil_or_pointer());
+console.log("Count the pointers in an array that are not nil:", count_non_nil());
+// nil ends a chain of structs, so a loop can go on until it reaches it.
+console.log("Sum of a list of three that ends in nil, and of nil, 6 and 0:", walk_list_until_nil());
+console.log("Follow nil:", trapped(() => read_explicit_nil_pointer()));
 
 // A pointer is a 32-bit address in the memory of the module, so JavaScript passes it as a number,
 // and can write the value it points to. An Int takes 8 bytes. Address 0 is null, so the Ints

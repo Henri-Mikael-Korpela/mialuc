@@ -190,6 +190,11 @@
                 {
                     "name": "constant.language.boolean.mialu",
                     "match": "\\b(true|false)\\b"
+                },
+                {
+                    "name": "constant.language.nil.mialu",
+                    "comment": "The null pointer.",
+                    "match": "\\bnil\\b"
                 }
             ]
         }

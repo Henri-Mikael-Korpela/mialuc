@@ -77,6 +77,10 @@
        through a variable, a parameter, an element of an array or what a pointer points to, and not
        through the result of a call. The grammar allows the lines of a literal between braces to be
        indented by any number of spaces, but the compiler requires a multiple of 4, as everywhere.
+     - `nil` is a pointer of any type: it can be given to a variable, a field or an element of a
+       pointer type, passed and returned where a pointer is wanted, and compared with `==` and
+       `not=` with a pointer. It cannot be the value of a variable that is defined without a type,
+       and `nil^` and `%nil` mean nothing. Two pointers are compared when they have the same type.
      - `p^` must follow a pointer, and the value that is assigned through it must be of the type
        that the pointer points to. `%` must be followed by something that has an address: a
        variable of a procedure, a field or an element of one, or what a pointer points to, and not a
@@ -388,7 +392,7 @@ operand = { "%" , ws } , operand_value ;
    struct literal by the brace. A name and the literals can have subscripts, fields and carets
    after them. *)
 operand_value =
-    integer_literal | string_literal | bool_literal | call |
+    integer_literal | string_literal | bool_literal | nil_literal | call |
     ( name | array_literal | struct_literal ) , { ws , postfix } ;
 
 (* What can follow a name or a literal: a subscript, a field, such as `p.age`, or a caret, which
@@ -440,6 +444,9 @@ arguments = expression , { ws , "," , ws , expression } ;
 
 bool_literal = "true" | "false" ;
 
+(* `nil` is the null pointer. *)
+nil_literal = "nil" ;
+
 (* Text between quotes, on one line. It is taken as it is: there are no escape sequences yet, so a
    backslash is not allowed, to keep it free for them. Any other character is, including a tab
    and characters that are not ASCII. The grammar works on characters, so it only sees text that
@@ -455,7 +462,7 @@ name = identifier - reserved_word ;
 
 reserved_word =
     "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "struct" |
-    "true" | "false" | "not" | "and" | "or" | "foreign" | "import" ;
+    "true" | "false" | "nil" | "not" | "and" | "or" | "foreign" | "import" ;
 
 identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 

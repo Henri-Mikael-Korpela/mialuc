@@ -343,3 +343,99 @@ assign_null_pointer :: proc() ->
 follow_null_pointer_in_struct :: proc() Int ->
     node := Node { value = 1 }
     return node.next^.value
+
+nil_pointer_variable :: proc() Bool ->
+    p : ^Int = nil
+    return p == nil
+
+default_pointer_is_nil :: proc() Bool ->
+    p : ^Int
+    return p == nil
+
+pointer_is_not_nil :: proc() Bool ->
+    x := 1
+    p := %x
+    return p not= nil
+
+assign_nil_to_pointer :: proc() Int ->
+    x := 1
+    p := %x
+    p = nil
+    if p == nil ->
+        return x + 10
+    return x
+
+compare_pointers :: proc() Int ->
+    x := 1
+    y := 1
+    p := %x
+    q := %x
+    r := %y
+    result := 0
+    if p == q ->
+        result += 1
+    if p == r ->
+        result += 10
+    if p not= r ->
+        result += 100
+    return result
+
+read_or_default :: proc(p: ^Int, default: Int) Int ->
+    if p == nil ->
+        return default
+    return p^
+
+nil_as_argument :: proc() Int ->
+    x := 7
+    return read_or_default(%x, 0) * 10 + read_or_default(nil, 5)
+
+find_negative :: proc(values: []Int) ^Int ->
+    index := 0
+    for value in values ->
+        if value < 0 ->
+            return %values[index]
+        index += 1
+    return nil
+
+return_nil_or_pointer :: proc() Int ->
+    found := [const]Int { 3, 0 - 4, 5 }
+    missing := [const]Int { 3, 4, 5 }
+    p := find_negative(found)
+    q := find_negative(missing)
+    result := 0
+    if p not= nil ->
+        p^ = 0
+        result += 10
+    if q == nil ->
+        result += 1
+    return result * 100 + found[1]
+
+count_non_nil :: proc() Int ->
+    a := 1
+    b := 2
+    pointers := [const]^Int { %a, nil, %b, nil }
+    count := 0
+    for p in pointers ->
+        if p not= nil ->
+            count += 1
+    return count
+
+sum_list :: proc(first: ^Node) Int ->
+    total := 0
+    current := first
+    for ->
+        if current == nil ->
+            break
+        total += current^.value
+        current = current^.next
+    return total
+
+walk_list_until_nil :: proc() Int ->
+    third := Node { value = 3, next = nil }
+    second := Node { value = 2, next = %third }
+    first := Node { value = 1, next = %second }
+    return sum_list(%first) * 10 + sum_list(nil)
+
+read_explicit_nil_pointer :: proc() Int ->
+    p : ^Int = nil
+    return p^

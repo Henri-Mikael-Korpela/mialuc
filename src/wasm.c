@@ -59,11 +59,14 @@ typedef struct {
 // of its first element, and its length is known from the program, see `wasm_array_length`. An
 // array slice is two 32-bit values, the address of its first element and its length, like `Str`. A
 // struct is the values of its fields one after the other, see `wasm_struct_slots`. A pointer is one
-// 32-bit value, the address of what it points to in the memory of the module.
+// 32-bit value, the address of what it points to in the memory of the module. `nil` has the kind
+// `WASM_VALUE_TYPE_NIL`, which is a pointer to nothing in particular: it is accepted where any
+// pointer is wanted, see `wasm_type_equals`, and no variable has it as its type.
 typedef enum {
     WASM_VALUE_TYPE_ARRAY,
     WASM_VALUE_TYPE_BOOL,
     WASM_VALUE_TYPE_INT,
+    WASM_VALUE_TYPE_NIL,
     WASM_VALUE_TYPE_NONE,
     WASM_VALUE_TYPE_POINTER,
     WASM_VALUE_TYPE_SLICE,
@@ -2276,6 +2279,12 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
                                  statement_node->payload.variable_definition.name);
             }
 
+            // `nil` is a pointer of any type, so it does not say the type of a variable.
+            if (wasm_variable_type(builder, statement).kind == WASM_VALUE_TYPE_NIL) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_NIL_TYPE_UNKNOWN,
+                                 statement_node->payload.variable_definition.name);
+            }
+
             // There is no pointer to an array or to an array slice, and a variable in the frame is
             // one that has a pointer to it. An array already is the address of its elements.
             Wasm_Type variable_type = wasm_variable_type(builder, statement);
@@ -2527,6 +2536,8 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     }
     case AST_NODE_TYPE_STRING_LITERAL:
         return wasm_type_make(WASM_VALUE_TYPE_STR);
+    case AST_NODE_TYPE_NIL_LITERAL:
+        return wasm_type_make(WASM_VALUE_TYPE_NIL);
     case AST_NODE_TYPE_ADDRESS_OF:
         // A pointer to the operand, if the operand is something that can be pointed to.
         return wasm_type_pointer_to(wasm_expression_type(builder, node->first_child));
@@ -2707,13 +2718,22 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     Ast_Comparison_Operator operator = node->payload.comparison.operator;
     bool is_equality = operator == AST_COMPARISON_OPERATOR_EQUAL ||
                        operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
+    // Pointers have no order either, and are the same when they hold the same address. `nil` is
+    // compared with a pointer of any type.
+    bool is_address = left_type.kind == WASM_VALUE_TYPE_POINTER ||
+                      left_type.kind == WASM_VALUE_TYPE_NIL;
     bool is_left_comparable = left_type.kind == WASM_VALUE_TYPE_INT ||
-                              (left_type.kind == WASM_VALUE_TYPE_BOOL && is_equality);
+                              ((left_type.kind == WASM_VALUE_TYPE_BOOL || is_address) &&
+                               is_equality);
     if (is_left_comparable == false) {
         return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                          wasm_expression_subject(builder, definition, left));
     }
-    if (right_type.kind != left_type.kind) {
+    if (is_address && wasm_type_equals(left_type, right_type) == false) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                         wasm_expression_subject(builder, definition, right));
+    }
+    if (is_address == false && right_type.kind != left_type.kind) {
         return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                          wasm_expression_subject(builder, definition, right));
     }
@@ -2856,8 +2876,11 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             wasm_write_signed(&builder->writer, node->payload.bool_literal.value ? 1 : 0);
             break;
         case AST_NODE_TYPE_COMPARISON:
-            // `Bool` values are compared as the 32-bit integers that they are.
-            if (wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_BOOL) {
+            // `Bool` values and addresses are compared as the 32-bit integers that they are.
+            if (wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_BOOL ||
+                wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_NIL ||
+                wasm_expression_type(builder, node->first_child).kind ==
+                    WASM_VALUE_TYPE_POINTER) {
                 if (node->payload.comparison.operator == AST_COMPARISON_OPERATOR_EQUAL) {
                     wasm_write_byte(&builder->writer, WASM_OPCODE_I32_EQ);
                 } else {
@@ -2892,6 +2915,10 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             wasm_build_code_section_body_identifier(builder, procedure, binding);
             break;
         }
+        case AST_NODE_TYPE_NIL_LITERAL:
+            // The null pointer is the address 0, which is not the address of anything.
+            wasm_write_i32_const(&builder->writer, 0);
+            break;
         case AST_NODE_TYPE_INTEGER_LITERAL:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_CONST);
             wasm_write_signed(&builder->writer, node->payload.integer_literal.value);
@@ -4061,6 +4088,7 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
+    case AST_NODE_TYPE_NIL_LITERAL:
     case AST_NODE_TYPE_NOT:
     case AST_NODE_TYPE_OR:
     case AST_NODE_TYPE_PARAMETER:
@@ -4330,6 +4358,7 @@ static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
         return pointer;
     }
     case WASM_VALUE_TYPE_ARRAY:
+    case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_NONE:
     case WASM_VALUE_TYPE_SLICE:
         break;
@@ -4617,6 +4646,7 @@ static size_t wasm_type_slot_count(Wasm_Builder const *builder, Wasm_Type type) 
     case WASM_VALUE_TYPE_ARRAY:
     case WASM_VALUE_TYPE_BOOL:
     case WASM_VALUE_TYPE_INT:
+    case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_POINTER:
         return 1;
     case WASM_VALUE_TYPE_SLICE:
@@ -4648,6 +4678,7 @@ static byte wasm_type_slot_kind(Wasm_Builder const *builder, Wasm_Type type, siz
         return WASM_TYPE_I64;
     case WASM_VALUE_TYPE_ARRAY:
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_POINTER:
     case WASM_VALUE_TYPE_SLICE:
     case WASM_VALUE_TYPE_STR:
@@ -4736,11 +4767,12 @@ static bool wasm_type_elements_equal(Wasm_Type first, Wasm_Type second) {
  * Returns whether the two types are the same type. Two structs are the same when they are the same
  * definition, a pointer is the same as another when it has as many carets and points to the same
  * type at the end of them, and an array or an array slice is the same as another when the elements
- * are.
+ * are. `nil` is the same as every pointer, because it is a pointer of whatever type is wanted.
  */
 static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
     if (first.kind != second.kind) {
-        return false;
+        return (first.kind == WASM_VALUE_TYPE_POINTER && second.kind == WASM_VALUE_TYPE_NIL) ||
+               (first.kind == WASM_VALUE_TYPE_NIL && second.kind == WASM_VALUE_TYPE_POINTER);
     }
 
     switch (first.kind) {
@@ -4754,6 +4786,7 @@ static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
         return wasm_type_elements_equal(first, second);
     case WASM_VALUE_TYPE_BOOL:
     case WASM_VALUE_TYPE_INT:
+    case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_NONE:
     case WASM_VALUE_TYPE_STR:
         return true;
