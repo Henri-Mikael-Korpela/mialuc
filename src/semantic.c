@@ -583,12 +583,9 @@ static bool semantic_identifier_resolve(Semantic_Analyzer *analyzer, Ast_Node_In
     if (statement != AST_NODE_INDEX_NONE &&
         ast_node_type_is_assignment(analyzer->nodes[statement].node_type)) {
         Ast_Node_Index target = analyzer->nodes[statement].first_child;
-        // Each step goes down one level, so there are fewer steps than nodes.
-        for (size_t i = 0; i < analyzer->node_count &&
-                           analyzer->nodes[target].node_type == AST_NODE_TYPE_FIELD_ACCESS;
-             i += 1) {
-            target = analyzer->nodes[target].first_child;
-        }
+        // A field of a name can be a field of what the name points to, which is not the name that
+        // is assigned to, and only the types tell. So only a name that is assigned to as a whole is
+        // checked here, and the target checks the fields.
         is_target = target == identifier;
     }
     if (is_target && binding.kind != SEMANTIC_BINDING_KIND_VARIABLE &&

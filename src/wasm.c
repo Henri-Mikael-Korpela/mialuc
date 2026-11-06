@@ -132,6 +132,7 @@ typedef struct {
     size_t slot_offset;
     Ast_Node_Index root;
     Wasm_Build_Status status;
+    bool is_through_pointer;
 } Wasm_Field_Path;
 
 /**
@@ -2000,10 +2001,31 @@ static bool wasm_build_code_section_body_field_assignment(Wasm_Builder *builder,
     }
     Str field_name = builder->nodes[target].payload.field_access.name;
 
+    // The field is of what a pointer points to, as in `p.age = 31` and `p^.age = 31`, which is in
+    // memory at the address that the pointer is, plus the offset of the field. The pointer is not
+    // changed, so it can be a parameter.
+    if (path.is_through_pointer) {
+        if (wasm_build_code_section_body_pointer(builder, definition, path.root, true) == false) {
+            return false;
+        }
+        wasm_write_local_instruction(
+            &builder->writer, WASM_OPCODE_LOCAL_SET,
+            wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_ADDRESS));
+        return wasm_build_code_section_body_place_store(
+            builder, definition, assignment, path.type,
+            path.slot_offset * WASM_ELEMENT_SIZE_BYTES);
+    }
+
     if (builder->nodes[path.root].node_type == AST_NODE_TYPE_IDENTIFIER) {
-        // The analysis checked that the name is a variable, which is not a parameter.
+        // A field is assigned through a variable only: a parameter and the iterator of a for
+        // statement cannot be assigned to, and so neither can their fields. The analysis cannot
+        // tell, because a field of a pointer is not a field of the pointer, so it is told here.
         Semantic_Binding binding = builder->bindings[path.root];
-        assert(binding.kind == SEMANTIC_BINDING_KIND_VARIABLE);
+        if (binding.kind != SEMANTIC_BINDING_KIND_VARIABLE ||
+            builder->nodes[binding.target].node_type != AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_FIELD_TARGET_READ_ONLY,
+                             builder->nodes[path.root].payload.identifier.name);
+        }
 
         // A variable whose address is taken is in the frame, and its field is in memory.
         if (wasm_variable_is_in_memory(builder, binding.target)) {
@@ -2050,21 +2072,6 @@ static bool wasm_build_code_section_body_field_assignment(Wasm_Builder *builder,
                         wasm_assignment_opcode(builder->nodes[assignment].node_type));
         wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, first);
         return true;
-    }
-
-    // The field is of what a pointer points to, as in `p^.age = 31`, which is in memory at the
-    // address that the pointer is, plus the offset of the field.
-    if (builder->nodes[path.root].node_type == AST_NODE_TYPE_DEREFERENCE) {
-        Ast_Node_Index pointer = builder->nodes[path.root].first_child;
-        if (wasm_build_code_section_body_pointer(builder, definition, pointer, true) == false) {
-            return false;
-        }
-        wasm_write_local_instruction(
-            &builder->writer, WASM_OPCODE_LOCAL_SET,
-            wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_ADDRESS));
-        return wasm_build_code_section_body_place_store(
-            builder, definition, assignment, path.type,
-            path.slot_offset * WASM_ELEMENT_SIZE_BYTES);
     }
 
     // The field is of an element, which is in memory.
@@ -3376,8 +3383,8 @@ static Ast_Node_Index wasm_expression_child_first(Wasm_Builder const *builder,
 /**
  * Returns whether the procedure has anything that uses the locals of `Wasm_Scratch`: an array
  * literal, a subscript, a slice, a for statement over the elements of an array, or a pointer that
- * is followed or whose address is taken, which are loads and stores of memory like the others, and
- * need the frame for the variables that have an address.
+ * is followed, also by a field access, or whose address is taken, which are loads and stores of
+ * memory like the others, and need the frame for the variables that have an address.
  */
 static bool wasm_procedure_uses_arrays(Wasm_Builder const *builder, Ast_Node_Index procedure) {
     assert(procedure < builder->node_count);
@@ -3388,6 +3395,11 @@ static bool wasm_procedure_uses_arrays(Wasm_Builder const *builder, Ast_Node_Ind
         if (node_type == AST_NODE_TYPE_ARRAY_LITERAL || node_type == AST_NODE_TYPE_SLICE ||
             node_type == AST_NODE_TYPE_SUBSCRIPT || node_type == AST_NODE_TYPE_ADDRESS_OF ||
             node_type == AST_NODE_TYPE_DEREFERENCE) {
+            return true;
+        }
+        // A field of a pointer to a struct is in memory, though no `^` is written.
+        if (node_type == AST_NODE_TYPE_FIELD_ACCESS &&
+            wasm_field_path(builder, node).is_through_pointer) {
             return true;
         }
         if (node_type == AST_NODE_TYPE_FOR_STATEMENT && wasm_for_is_each(builder, node)) {
@@ -4027,6 +4039,19 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
         }
         root = path.root;
         offset_bytes = path.slot_offset * WASM_ELEMENT_SIZE_BYTES;
+
+        // The address of a field of what a pointer points to follows the pointer, so it is a null
+        // pointer that is reported and not a small address.
+        if (path.is_through_pointer) {
+            if (wasm_build_code_section_body_pointer(builder, definition, root, true) == false) {
+                return false;
+            }
+            if (offset_bytes > 0) {
+                wasm_write_i32_const(&builder->writer, (int64_t)offset_bytes);
+                wasm_write_byte(&builder->writer, WASM_OPCODE_I32_ADD);
+            }
+            return true;
+        }
     }
 
     switch (builder->nodes[root].node_type) {
@@ -4047,14 +4072,6 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
         }
         break;
     case AST_NODE_TYPE_DEREFERENCE:
-        // The address of a field of what a pointer points to follows the pointer, so it is a null
-        // pointer that is reported and not a small address.
-        if (wasm_build_code_section_body_pointer(builder, definition,
-                                                 builder->nodes[root].first_child, true) ==
-            false) {
-            return false;
-        }
-        break;
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
     case AST_NODE_TYPE_ADDRESS_OF:
@@ -5036,7 +5053,11 @@ static size_t wasm_string_address(Wasm_Builder const *builder, Ast_Node_Index li
 /**
  * Finds where the field of the field access `access` is. The accesses are followed down to what
  * they are made through, which is a name, an element of an array or what a pointer points to, and
- * then up again, from the struct that has the first field to the last field. The chain is kept in
+ * then up again, from the struct that has the first field to the last field. A field that is
+ * accessed through a pointer to a struct, written `p.age` or `p^.age`, is in memory: `is_through_
+ * pointer` is set, `root` is the expression whose value is that pointer, and `slot_offset` counts
+ * from the start of what it points to. It is the last pointer that the fields are accessed
+ * through, because a field can be a pointer again, as in `node.next.value`. The chain is kept in
  * an array, so the walk does not call itself. An access through anything else, such as the result
  * of a call, is wrong: its fields would have to be picked out of the values on the stack.
  */
@@ -5060,6 +5081,7 @@ static Wasm_Field_Path wasm_field_path(Wasm_Builder const *builder, Ast_Node_Ind
         .slot_offset = 0,
         .root = current,
         .status = WASM_BUILD_STATUS_OK,
+        .is_through_pointer = false,
     };
     if (builder->nodes[current].node_type == AST_NODE_TYPE_FIELD_ACCESS) {
         path.status = WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP;
@@ -5077,8 +5099,41 @@ static Wasm_Field_Path wasm_field_path(Wasm_Builder const *builder, Ast_Node_Ind
     if (builder->nodes[current].node_type == AST_NODE_TYPE_IDENTIFIER) {
         before = builder->nodes[current].payload.identifier.name;
     }
+
+    // `p^.age` is a field of what the pointer `p` points to: the pointer is the root, and the
+    // fields come after it.
+    if (builder->nodes[current].node_type == AST_NODE_TYPE_DEREFERENCE) {
+        Ast_Node_Index pointer = builder->nodes[current].first_child;
+        Wasm_Type pointer_type = wasm_expression_type(builder, pointer);
+        if (pointer_type.kind != WASM_VALUE_TYPE_POINTER) {
+            path.status = WASM_BUILD_STATUS_POINTER_EXPECTED;
+            path.subject = before;
+            return path;
+        }
+        path.root = pointer;
+        path.is_through_pointer = true;
+        current_type = wasm_type_pointee(pointer_type);
+    }
+
     for (size_t i = chain_count; i > 0; i -= 1) {
         Str name = builder->nodes[chain[i - 1]].payload.field_access.name;
+
+        // A field of a pointer to a struct is a field of the struct, as if the pointer was
+        // followed: `p.age` is `p^.age`. The value before this field, which is the base for the
+        // first field and the field access before it for the others, is the pointer that is
+        // followed, and the offset starts over at the start of what it points to. A pointer to a
+        // pointer is not followed more than once, so `pp.age` is an error and `pp^.age` is not.
+        if (current_type.kind == WASM_VALUE_TYPE_POINTER && current_type.depth == 1 &&
+            current_type.pointee_kind == WASM_VALUE_TYPE_STRUCT) {
+            if (i == chain_count) {
+                path.root = current;
+            } else {
+                path.root = chain[i];
+            }
+            path.is_through_pointer = true;
+            path.slot_offset = 0;
+            current_type = wasm_type_pointee(current_type);
+        }
         if (current_type.kind != WASM_VALUE_TYPE_STRUCT) {
             path.status = WASM_BUILD_STATUS_STRUCT_EXPECTED;
             path.subject = before;
@@ -5121,6 +5176,17 @@ static bool wasm_build_code_section_body_field_access(Wasm_Builder *builder,
         return wasm_fail(builder, path.status, path.subject);
     }
 
+    // The field is of what a pointer points to, as in `p.age` and `p^.age`, which is in memory at
+    // the address that the pointer is, plus the offset of the field.
+    if (path.is_through_pointer) {
+        if (wasm_build_code_section_body_pointer(builder, definition, path.root, true) == false) {
+            return false;
+        }
+        wasm_slots_load_from_stack(builder, procedure, path.type,
+                                   path.slot_offset * WASM_ELEMENT_SIZE_BYTES);
+        return true;
+    }
+
     if (builder->nodes[path.root].node_type == AST_NODE_TYPE_IDENTIFIER) {
         Semantic_Binding binding = builder->bindings[path.root];
         size_t first = 0;
@@ -5145,18 +5211,6 @@ static bool wasm_build_code_section_body_field_access(Wasm_Builder *builder,
         for (size_t slot = 0; slot < slot_count; slot += 1) {
             wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, first + slot);
         }
-        return true;
-    }
-
-    // The field is of what a pointer points to, as in `p^.age`, which is in memory at the address
-    // that the pointer is, plus the offset of the field.
-    if (builder->nodes[path.root].node_type == AST_NODE_TYPE_DEREFERENCE) {
-        Ast_Node_Index pointer = builder->nodes[path.root].first_child;
-        if (wasm_build_code_section_body_pointer(builder, definition, pointer, true) == false) {
-            return false;
-        }
-        wasm_slots_load_from_stack(builder, procedure, path.type,
-                                   path.slot_offset * WASM_ELEMENT_SIZE_BYTES);
         return true;
     }
 

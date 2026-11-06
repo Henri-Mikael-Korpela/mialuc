@@ -153,9 +153,12 @@ typedef struct {
  * An assignment, such as `x += 1`, uses the name that it assigns to like any other use of a name,
  * and the name must stand for a variable or a global variable: a parameter or a constant cannot be
  * assigned to. The same goes for the name that a field is assigned to through, as in `p.age = 1`.
- * Assigning through a pointer, as in `p^ = 1` or `p^.age = 1`, changes what `p` points to and not
- * `p`, so `p` can be a parameter. An operand of `%` that is a variable, or a field of one, marks
- * the variable as having its address taken, see `Semantic_Binding`.
+ * Assigning through a pointer, as in `p^ = 1` or `p.age = 1`, changes what `p` points to and not
+ * `p`, so `p` can be a parameter. For that reason only a name that is assigned to as a whole is
+ * checked here, and not the name that a field is assigned through: whether `p.age = 1` assigns to
+ * `p` or to what it points to is for the target to tell, from the type. An operand of `%` that is
+ * a variable, or a field of one, marks the variable as having its address taken, see
+ * `Semantic_Binding`.
  *
  * A name cannot be declared again where it is already visible, so a name has one meaning
  * everywhere it can be used, and there is no shadowing. Two definitions cannot have one name, two

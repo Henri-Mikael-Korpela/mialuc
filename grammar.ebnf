@@ -81,6 +81,9 @@
        pointer type, passed and returned where a pointer is wanted, and compared with `==` and
        `not=` with a pointer. It cannot be the value of a variable that is defined without a type,
        and `nil^` and `%nil` mean nothing. Two pointers are compared when they have the same type.
+     - A field of a pointer to a struct is accessed as the field of the struct, `p.age`, or `p^.age`
+       with the pointer followed explicitly. A field is not assigned through a parameter or the
+       iterator of a for statement, but it is through a pointer, which only the types tell.
      - `p^` must follow a pointer, and the value that is assigned through it must be of the type
        that the pointer points to. `%` must be followed by something that has an address: a
        variable of a procedure, a field or an element of one, or what a pointer points to, and not a
@@ -348,7 +351,7 @@ variable_definition =
    an array: `a[1] += 2`, and a field of a struct: `p.age += 1`. A plain `=` gives a variable a
    new value, as in `x = 2` or `p = Person { }`, assigns to an element or a field, as in
    `a[1] = 2` and `p.age = 2`, or copies to a range of elements, as in `a[0:3] = b`. The same
-   operators and `=` change what a pointer points to: `p^ += 1`, `p^ = 2` and `p^.age = 2`. *)
+   operators and `=` change what a pointer points to: `p^ += 1`, `p^ = 2` and `p.age = 2`. *)
 assignment = name , { ws , postfix } , ws , ( "+=" | "-=" | "*=" | "/=" | "=" ) , ws , expression ;
 
 (* `return` and its value must be separated, or `return0` would be one identifier. *)
@@ -397,7 +400,7 @@ operand_value =
 
 (* What can follow a name or a literal: a subscript, a field, such as `p.age`, or a caret, which
    follows a pointer to give what it points to, as in `p^`. They can follow each other, as in
-   `lines[1].end.y` and `node.next^.value`. *)
+   `lines[1].end.y` and `node.next.value`. *)
 postfix = subscript | field_access | dereference ;
 
 field_access = "." , ws , name ;

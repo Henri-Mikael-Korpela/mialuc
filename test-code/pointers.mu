@@ -156,20 +156,20 @@ Person :: struct ->
 read_field_through_pointer :: proc() Int ->
     person := Person { age = 30, name = "Bob" }
     p := %person
-    return p^.age
+    return p.age
 
 assign_field_through_pointer :: proc() Int ->
     person := Person { age = 30, name = "Bob" }
     p := %person
-    p^.age = 31
-    p^.age += 1
+    p.age = 31
+    p.age += 1
     return person.age
 
 str_field_through_pointer :: proc() Str ->
     person := Person { age = 30, name = "Bob" }
     p := %person
-    p^.name = "Alice"
-    return p^.name
+    p.name = "Alice"
+    return p.name
 
 assign_whole_struct_through_pointer :: proc() Int ->
     person := Person { age = 30, name = "Bob" }
@@ -185,7 +185,7 @@ read_whole_struct_through_pointer :: proc() Int ->
     return person.age * 100 + copy.age
 
 birthday :: proc(p: ^Person) ->
-    p^.age += 1
+    p.age += 1
 
 struct_as_pointer_parameter :: proc() Int ->
     person := Person { age = 40, name = "Eve" }
@@ -198,7 +198,7 @@ see_changes_of_struct :: proc() Int ->
     p := %person
     person.age = 8
     person.age += 1
-    return p^.age
+    return p.age
 
 pointer_to_field :: proc() Int ->
     person := Person { age = 30, name = "Bob" }
@@ -224,13 +224,13 @@ pointer_to_nested_struct :: proc() Int ->
     line := Line { start = { x = 1, y = 2 }, end = { x = 3, y = 4 } }
     end := %line.end
     end^ = Point { x = 30, y = 40 }
-    end^.x += 1
+    end.x += 1
     return line.end.x * 100 + line.end.y
 
 pointer_to_field_through_pointer :: proc() Int ->
     line := Line { start = { x = 1, y = 2 }, end = { x = 3, y = 4 } }
     p := %line
-    q := %p^.end.x
+    q := %p.end.x
     q^ = 33
     return line.end.x
 
@@ -238,7 +238,7 @@ pointer_to_pointer_to_struct :: proc() Int ->
     person := Person { age = 1 }
     p := %person
     pp := %p
-    pp^^.age = 77
+    pp^.age = 77
     return person.age
 
 address_of_dereference :: proc() Int ->
@@ -267,7 +267,7 @@ pointer_to_field_of_element :: proc() Int ->
     p := %people[1].age
     p^ = 20
     q := %people[2]
-    q^.age += 100
+    q.age += 100
     return people[0].age * 10000 + people[1].age * 100 + people[2].age
 
 largest :: proc(values: []Int) ^Int ->
@@ -323,13 +323,13 @@ follow_pointers_in_structs :: proc() Int ->
     last := Node { value = 3 }
     middle := Node { value = 2, next = %last }
     first := Node { value = 1, next = %middle }
-    return first.next^.value * 10 + first.next^.next^.value
+    return first.next.value * 10 + first.next.next.value
 
 assign_through_pointers_in_structs :: proc() Int ->
     last := Node { value = 3 }
     first := Node { value = 1, next = %last }
-    first.next^.value = 30
-    first.next^.value += 1
+    first.next.value = 30
+    first.next.value += 1
     return last.value
 
 read_null_pointer :: proc() Int ->
@@ -342,7 +342,7 @@ assign_null_pointer :: proc() ->
 
 follow_null_pointer_in_struct :: proc() Int ->
     node := Node { value = 1 }
-    return node.next^.value
+    return node.next.value
 
 nil_pointer_variable :: proc() Bool ->
     p : ^Int = nil
@@ -426,8 +426,8 @@ sum_list :: proc(first: ^Node) Int ->
     for ->
         if current == nil ->
             break
-        total += current^.value
-        current = current^.next
+        total += current.value
+        current = current.next
     return total
 
 walk_list_until_nil :: proc() Int ->
@@ -439,3 +439,31 @@ walk_list_until_nil :: proc() Int ->
 read_explicit_nil_pointer :: proc() Int ->
     p : ^Int = nil
     return p^
+
+explicit_dereference_of_field :: proc() Int ->
+    person := Person { age = 30, name = "Bob" }
+    p := %person
+    p^.age += 1
+    return p^.age * 100 + p.age
+
+fields_of_pointer_parameter :: proc(p: ^Person) Int ->
+    p.age += 5
+    p.name = "Changed"
+    return p.age
+
+assign_field_of_pointer_parameter :: proc() Int ->
+    person := Person { age = 1, name = "Bob" }
+    return fields_of_pointer_parameter(%person) * 10 + person.age
+
+pointer_to_pointer_to_struct_with_caret :: proc() Int ->
+    person := Person { age = 1 }
+    p := %person
+    pp := %p
+    pp^.age = 66
+    return person.age
+
+follow_pointers_with_fields :: proc() Int ->
+    last := Node { value = 3 }
+    middle := Node { value = 2, next = %last }
+    first := Node { value = 1, next = %middle }
+    return first.next.next.value * 10 + first.next^.next.value

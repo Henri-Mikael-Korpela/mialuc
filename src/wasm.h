@@ -144,6 +144,10 @@ typedef enum {
     // A field is read or assigned through something that is not a variable, a parameter or an
     // element of an array, such as the result of a call. The subject is the name of the field.
     WASM_BUILD_STATUS_FIELD_BASE_INVALID,
+    // A field is assigned through a parameter or the iterator of a for statement, which cannot be
+    // assigned to. Through a pointer it can be, as the pointer is not changed. The subject is the
+    // name.
+    WASM_BUILD_STATUS_FIELD_TARGET_READ_ONLY,
     WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE,
     // An index, or the end of a slice, that is not an `Int`.
     WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
@@ -233,7 +237,9 @@ typedef struct {
  * A pointer, written `^Int`, is one 32-bit integer: the address in the memory of the module of what
  * it points to, which takes 8 bytes for each of its values, like an element of an array. So a
  * parameter that is a pointer is one WebAssembly parameter, and a caller from JavaScript passes the
- * address of what it wrote to the memory. `%x` is the address of a variable `x`, which is kept in
+ * address of what it wrote to the memory. A field of a pointer to a struct is accessed as a field
+ * of the struct, `p.age` for `p^.age`, wherever a pointer to a struct is met in a chain of fields.
+ * `%x` is the address of a variable `x`, which is kept in
  * the frame of its procedure, on the stack of the arrays, instead of in locals when its address is
  * taken somewhere. `p^` loads from the address that `p` is, and traps when it is zero, which is
  * what a pointer that was not given a value is. A pointer to a variable is good until the

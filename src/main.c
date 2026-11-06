@@ -696,8 +696,15 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 "is not a variable, a parameter or an element of an array.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case WASM_BUILD_STATUS_FIELD_TARGET_READ_ONLY:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is a parameter or an iterator, which cannot be "
+                "assigned to, so neither can its fields. A field of what a pointer points to can "
+                "be.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_STRUCT_EXPECTED:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a struct, so it has no fields.\n", path,
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a struct or a pointer to one, so it has no "
+                "fields.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_STRUCT_FIELD_DUPLICATE:

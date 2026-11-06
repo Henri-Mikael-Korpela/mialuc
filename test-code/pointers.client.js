@@ -30,7 +30,8 @@ console.log("Make a pointer point elsewhere, a and b:", change_where_pointer_poi
 // variable of the procedure that returns it points to nothing after it returns.
 console.log("Return one of two pointers, x and y:", return_pointer());
 
-// A pointer to a struct reaches its fields with `p^.age`, and the whole struct with `p^`.
+// A pointer to a struct reaches its fields with `p.age`, as if the pointer was followed first. That is
+// the recommended way. `p^.age` means the same, and `p^` is the whole struct object.
 console.log("Read a field, 30:", read_field_through_pointer());
 console.log("Assign a field, 31 + 1:", assign_field_through_pointer());
 console.log("A Str field:", Str(str_field_through_pointer()));
@@ -63,6 +64,14 @@ console.log("A slice of pointers, 1 + 10 and 2 + 10:", slice_of_pointers());
 // A struct can have a pointer to a struct of the same kind, which makes a chain.
 console.log("Follow two pointers in structs, 2 and 3:", follow_pointers_in_structs());
 console.log("Assign through a pointer in a struct, 30 + 1:", assign_through_pointers_in_structs());
+
+// A field of a pointer is written the same as a field of a struct object, so a pointer parameter can
+// be used like the struct object itself, and `p.age = 31` changes what `p` points to, not `p`.
+console.log("Fields of a pointer parameter, 6 and 6:", assign_field_of_pointer_parameter());
+console.log("With and without the caret, 31 and 31:", explicit_dereference_of_field());
+console.log("A pointer to a pointer is followed with one caret, then fields:",
+    pointer_to_pointer_to_struct_with_caret());
+console.log("Chained fields through pointers in structs, 3 and 3:", follow_pointers_with_fields());
 
 // A pointer that was not given a value is nil, and following it traps, which makes the call from
 // JavaScript throw a WebAssembly.RuntimeError.

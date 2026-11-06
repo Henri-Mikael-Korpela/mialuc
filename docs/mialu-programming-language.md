@@ -30,6 +30,7 @@
 - [Pointers](#pointers)
   - [Taking an address](#taking-an-address)
   - [Following a pointer](#following-a-pointer)
+  - [Fields of a pointer](#fields-of-a-pointer)
   - [Null and lifetime](#null-and-lifetime)
   - [Pointers in structs and arrays](#pointers-in-structs-and-arrays)
 - [Procedures](#procedures)
@@ -658,7 +659,7 @@ assign_field_of_struct_object :: proc() Int ->
     return p.age
 ```
 
-`assign_field_of_struct_object` returns 32. A field can be a struct itself, and then the dots follow each other, such as `info.address.area_name`. A field is read or assigned through a variable, a parameter, an element of an array, such as `persons[0].age`, or what a pointer points to, such as `p^.age`, and not through the value of a call: `birthday(p).age` is an error, and has to be written with a variable that is given the result first. The same rules as for the variables apply to the assignment: a parameter and the iterator of a for statement are not assigned to, so neither is a field of one.
+`assign_field_of_struct_object` returns 32. A field can be a struct itself, and then the dots follow each other, such as `info.address.area_name`. A field is read or assigned through a variable, a parameter, an element of an array, such as `persons[0].age`, or a [pointer](#pointers) to a struct, such as `p.age`, and not through the value of a call: `birthday(p).age` is an error, and has to be written with a variable that is given the result first. The same rules as for the variables apply to the assignment: a parameter and the iterator of a for statement are not assigned to, so neither is a field of one, unless it is a pointer, because then the field is a field of what it points to, and the pointer itself is not changed, see [Fields of a pointer](#fields-of-a-pointer).
 
 ### Structs in structs
 
@@ -741,7 +742,7 @@ pointer_with_explicit_type :: proc() Int ->
 - a variable of a procedure, such as `%x`,
 - a field of a variable, such as `%person.age` and `%line.end.y`, and a field of a field of a variable,
 - an element of an array or of an array slice, and a field of one, such as `%a[1]` and `%people[1].age`,
-- what a pointer points to, and a field of it, such as `%p^` and `%p^.age`. `%p^` is `p`, because following a pointer and then taking the address gives back the address that it was.
+- what a pointer points to, and a field of it, such as `%p^` and `%p.age`. `%p^` is `p`, because following a pointer and then taking the address gives back the address that it was.
 
 A parameter, the iterator of a for statement and a global variable have no address: the first two cannot be assigned to, so nothing would be changed through a pointer to them, and a global variable is a global of the module and not in its memory. A value that is computed has none either: a number, a string literal, a call, the result of an operator, and a struct literal. An array and an array slice cannot be pointed to, so `%a` is an error for an array `a`, though `%a[1]` is fine. All are errors at compile time.
 
@@ -763,7 +764,7 @@ see_changes_of_variable :: proc() Int ->
 
 ### Following a pointer
 
-`^` is written after an expression whose value is a pointer, and gives what the pointer points to. It is written after, so that a chain of pointers reads from left to right: `p^`, `pp^^` and `node.next^.value`. Following a pointer is an expression, and it can also be assigned to, with `=` and with the operators `+=`, `-=`, `*=` and `/=` for an `Int`, like a variable can:
+`^` is written after an expression whose value is a pointer, and gives what the pointer points to. It is written after, so that a chain of pointers reads from left to right: `p^` and `pp^^`. Following a pointer is an expression, and it can also be assigned to, with `=` and with the operators `+=`, `-=`, `*=` and `/=` for an `Int`, like a variable can:
 
 ```
 swap :: proc(a: ^Int, b: ^Int) ->
@@ -778,9 +779,28 @@ swap_through_pointers :: proc() Int ->
     return x * 10 + y
 ```
 
-`swap_through_pointers` returns 73. A procedure gets a copy of a pointer, like of any argument, but the copy points to the same variable, so this is how a procedure changes the variables of its caller. A pointer to a struct object gives the struct object with `p^`, and its fields with `p^.age`, which can be read and assigned to like the fields of a variable, such as `p^.age += 1`. The whole struct object is assigned with `p^ = Person { age = 5, name = "Zed" }`, and `copy := p^` copies it, after which a change of `copy` does not change the struct object that `p` points to. A pointer to a pointer is followed twice to get to the value, `pp^^`, and once to get to the pointer, so `pp^ = target` makes the pointer that `pp` points to point somewhere else.
+`swap_through_pointers` returns 73. A procedure gets a copy of a pointer, like of any argument, but the copy points to the same variable, so this is how a procedure changes the variables of its caller. A pointer to a struct object gives the struct object with `p^`, and its fields with `p.age`, see below. The whole struct object is assigned with `p^ = Person { age = 5, name = "Zed" }`, and `copy := p^` copies it, after which a change of `copy` does not change the struct object that `p` points to. A pointer to a pointer is followed twice to get to the value, `pp^^`, and once to get to the pointer, so `pp^ = target` makes the pointer that `pp` points to point somewhere else.
 
 The value that is assigned through a pointer must be of the type that the pointer points to, so `p^ = true` is an error for a `^Int`, and `^` can follow a pointer only: `x^` is an error for an `Int`. A call cannot be followed by anything, as for the fields and elements of a call, so a pointer that a procedure returns is stored in a variable before it is followed.
+
+### Fields of a pointer
+
+A field of a pointer to a struct is written with a dot, like the field of a struct object, and means the field of the struct object that the pointer points to: `p.age` is the same as `p^.age`. This is the recommended way to write it, because it reads the same for a pointer as for a struct object, so a procedure that takes a pointer to a struct and one that takes the struct object read alike, and a change from one to the other changes the type and not the uses. The field can be read and assigned to like the field of a variable, with `=` and with the operators for an `Int`, such as `p.age += 1`:
+
+```
+birthday :: proc(p: ^Person) ->
+    p.age += 1
+
+struct_as_pointer_parameter :: proc() Int ->
+    person := Person { age = 40, name = "Eve" }
+    birthday(%person)
+    birthday(%person)
+    return person.age
+```
+
+`struct_as_pointer_parameter` returns 42. Assigning to a field of a pointer changes what the pointer points to, and not the pointer, so the pointer can be a parameter, though a field of a parameter that is a struct object cannot be assigned to, because that would change the parameter. The dots can follow each other, also through several pointers, because the pointer is followed wherever one is met: for a field `next: ^Node` of `Node`, `first.next.next.value` is the field `value` of the node that the `next` of the node that the `next` of `first` points to points to. `p^.age` stays valid, and is the way to write the pointer being followed when that is wanted to be seen, and `pp^.age` is how a field of a pointer to a pointer to a struct is read: a pointer is followed once by a dot, so `pp.age` is an error. A field is not followed by `^` implicitly when it is the last thing that is written, so `node.next` is the pointer `next` and `node.next^` the node it points to.
+
+A pointer that is `nil` is followed by a field as it is by `^`, which traps, see [Null and lifetime](#null-and-lifetime). A field of a pointer can have its address taken, such as `%p.age`, which is the address of the field in what the pointer points to.
 
 ### Null and lifetime
 
@@ -812,8 +832,8 @@ sum_list :: proc(first: ^Node) Int ->
     for ->
         if current == nil ->
             break
-        total += current^.value
-        current = current^.next
+        total += current.value
+        current = current.next
     return total
 ```
 
@@ -839,7 +859,7 @@ follow_pointers_in_structs :: proc() Int ->
     last := Node { value = 3 }
     middle := Node { value = 2, next = %last }
     first := Node { value = 1, next = %middle }
-    return first.next^.value * 10 + first.next^.next^.value
+    return first.next.value * 10 + first.next.next.value
 ```
 
 `follow_pointers_in_structs` returns 23. A field that is left out of a struct literal is `nil` when it is a pointer. The elements of an [array](#arrays) can be pointers, and so can the elements of an array slice, so a procedure can take `targets: []^Int`, and an array of pointers is made with `[const]^Int { %a, %b }`. An element is followed with `pointers[0]^`, and a for statement over them gives each pointer, as in `for p in pointers ->` and then `p^`.
@@ -1107,9 +1127,9 @@ There is no shadowing of names so a name cannot be declared twice in the same sc
 - a `break` is not inside a loop or a scope, or a `continue` is not inside the block of a loop,
 - the label of a `break` or a `continue` is not the label of a statement that it is inside of, the label of a `continue` is not the one of a loop, or a statement has the label of a statement around it,
 - two fields of a struct have the same name,
-- the name that an assignment assigns to is not a variable or a global variable, but a parameter or a constant, or the iterator of a for statement, which includes a field that is assigned through a parameter or an iterator.
+- the name that an assignment assigns to is not a variable or a global variable, but a parameter or a constant, or the iterator of a for statement. A field that is assigned through a parameter or an iterator is an error as well, unless the parameter is a pointer, but only the target tells whether a name is a pointer, see [WebAssembly](#webassembly).
 
-Assigning through a pointer, as in `p^ = 1` or `p^.age = 1`, changes what `p` points to and not `p`, so `p` can be a parameter. A variable whose address is taken, as in `%x` and `%x.field`, is still a variable of the procedure: the analysis only notes that its address is taken, because a target may keep such a variable somewhere else than the others, see [WebAssembly](#webassembly).
+Assigning through a pointer, as in `p^ = 1` or `p.age = 1`, changes what `p` points to and not `p`, so `p` can be a parameter. A variable whose address is taken, as in `%x` and `%x.field`, is still a variable of the procedure: the analysis only notes that its address is taken, because a target may keep such a variable somewhere else than the others, see [WebAssembly](#webassembly).
 
 Scope resolution is about names only. Whether the value of a name has the right type is checked separately for the target, see below.
 
@@ -1242,7 +1262,7 @@ increment(8);
 
 A variable whose address is taken, as in `%x` or `%x.field`, is not in locals, because a local has no address, but in the frame of its procedure, after the elements of its array literals: each variable has a place of its own, also when it is in a block, in the order of the source, and takes 8 bytes for each of its values. The analysis found out which variables these are, see `Semantic_Binding`. The definition of such a variable stores its initial value in its place, with the last value on the stack stored first, using a local to hold each value while the address is pushed below it. A use loads the values from there, an assignment stores to there, and `%x` is the frame plus the offset of the variable, so that the variable and the pointer are the same memory. The address of a field is that plus 8 times the number of values before the field, and the address of an element is the address that a subscript computes, with the same trap for an index outside of the array. The address of a variable is good until its procedure returns and the frame is given back, after which a pointer to it points to the stack of whoever is called next.
 
-`p^` follows a pointer by holding it in a local, trapping if it is 0, and loading the values of what it points to from it, one `i64.load` or `i32.load` for each, with the offset of the field in front of it for `p^.age`. The trap is an `if` with `unreachable` after a test with `i32.eqz`, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, and is needed because address 0 is where the strings start, and a null pointer would read them instead of stopping the program. An address that is outside of the memory traps as well, which is what WebAssembly does for any load or store. An assignment through a pointer evaluates the pointer first, checks it and keeps it in a local while the value is evaluated, like the address of an element is kept, and then stores to it. The operators such as `p^ += 1` load from the pointer, apply the operator and store the result to the same address. Nothing else is done for a pointer: it is copied by copying the number, so a procedure gets a pointer to the same memory as its caller.
+`p^` follows a pointer by holding it in a local, trapping if it is 0, and loading the values of what it points to from it, one `i64.load` or `i32.load` for each, with the offset of the field in front of it for `p.age`, which is how a field of a pointer to a struct is read, written with or without the `^`. The pointer that is followed is the one before the last dot that is after a pointer, so `node.next.value` loads the pointer `node.next` first and then the field `value` from what it points to. The trap is an `if` with `unreachable` after a test with `i32.eqz`, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, and is needed because address 0 is where the strings start, and a null pointer would read them instead of stopping the program. An address that is outside of the memory traps as well, which is what WebAssembly does for any load or store. An assignment through a pointer evaluates the pointer first, checks it and keeps it in a local while the value is evaluated, like the address of an element is kept, and then stores to it. The operators such as `p^ += 1` load from the pointer, apply the operator and store the result to the same address. Nothing else is done for a pointer: it is copied by copying the number, so a procedure gets a pointer to the same memory as its caller.
 
 A module has a memory only when the program has a string literal, which includes the value of a global variable, an array type, which includes the array literals and the array slices, or a pointer: a pointer type, `%` or `^`. The strings are at the start of the memory, and the stack of the arrays is after them. A procedure cannot be called `memory`, whether the module has one or not, because that is the name of the export.
 
@@ -1251,7 +1271,8 @@ The target rejects a program that the parser accepts when:
 - a type, also the one of a global variable, is not `Int`, `Bool`, `Str`, a struct that is defined, a pointer to one of them, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
 - a struct contains itself, or has a field that is an array or an array slice,
 - a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field,
-- a field is accessed on a value that is not a struct, or does not exist, or is accessed through something that is not a variable, a parameter, an element of an array or what a pointer points to,
+- a field is accessed on a value that is not a struct or a pointer to one, or does not exist, or is accessed through something that is not a variable, a parameter, an element of an array or a pointer,
+- a field is assigned through a parameter or an iterator that is not a pointer,
 - a value that is assigned with `=` is not of the type of the variable, the field, the element or what the pointer points to,
 - `^` follows a value that is not a pointer,
 - the operand of `%` has no address: it is a value that is computed, a parameter, the iterator of a for statement, a global variable, an array or an array slice, or a variable of an array or array slice type,
