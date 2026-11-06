@@ -81,6 +81,13 @@
        through a variable, a parameter, an element of an array or what a pointer points to, and not
        through the result of a call. The grammar allows the lines of a literal between braces to be
        indented by any number of spaces, but the compiler requires a multiple of 4, as everywhere.
+     - The name of a type must be an enum too when it is the name of one. A member of an enum must
+       be a member that the enum has. The enum of a member that is written with a dot only must be
+       known from the place of the member, which is the type of the variable that it is the value
+       of, of what it is assigned to, of the result that it is returned as, of the parameter, the
+       field or the element that it is given to, or of what it is compared with. A member cannot be
+       the value of a variable that is defined without a type. Members are compared with `==` and
+       `not=` when they are of one enum, and have no order. A global variable is never an enum.
      - `nil` is a pointer of any type: it can be given to a variable, a field or an element of a
        pointer type, passed and returned where a pointer is wanted, and compared with `==` and
        `not=` with a pointer. It cannot be the value of a variable that is defined without a type,
@@ -127,16 +134,33 @@ foreign_procedure =
 
 (* A constant definition. It starts in the first column, so a line that starts with a space or a
    tab does not match here. `::` is two separate ':' characters for the compiler, so spaces may
-   be between them. The value is a procedure, a struct, or a string on one line. *)
+   be between them. The value is a procedure, a struct, an enum, the member of an enum such as
+   `Color.RED`, or a string on one line. *)
 constant_definition =
     name , ws , ":" , ws , ":" , ws ,
-    ( procedure | string_literal , ws , line_end | struct_definition ) ;
+    ( procedure | string_literal , ws , line_end | struct_definition | enum_definition |
+      enum_member_value ) ;
 
 (* A struct is a record type: `struct ->` and then its fields, one on each line, indented one level
    deeper, each of them `name: Type`. The type of a field can be `struct ->` again, followed by
    the fields of that struct one level deeper still, so a struct can be inside a struct. Like the
    blocks, the rules go down to the fourth level. *)
 struct_definition = "struct" , branch_end , struct_body_1 ;
+
+(* An enum is a type with a fixed set of members: `enum ->` and then its members, one on each line,
+   indented one level deeper, each of them a name. There is at least one member. The members are
+   numbered from zero, in the order they are written. Their names only have to differ from each
+   other, so two enums can have members of one name. A member is written with the name of its
+   enum, such as `Color.RED`, or with a dot only, as in `.RED`, where the compiler knows the enum
+   from the place that it is in. *)
+enum_definition = "enum" , branch_end , enum_body ;
+
+enum_body = { blank_line } , enum_member , { blank_line | enum_member } ;
+
+enum_member = indentation_1 , name , ws , line_end ;
+
+(* The value of a constant that is the member of an enum. *)
+enum_member_value = name , ws , "." , ws , name , ws , line_end ;
 
 struct_body_1 = { blank_line } , struct_field_1 , { blank_line | struct_field_1 } ;
 struct_field_1 =
@@ -413,8 +437,11 @@ operand = { "%" , ws } , operand_value ;
    struct literal by the brace. A name and the literals can have subscripts, fields and carets
    after them. *)
 operand_value =
-    integer_literal | string_literal | bool_literal | nil_literal | call |
+    integer_literal | string_literal | bool_literal | nil_literal | enum_literal | call |
     ( name | array_literal | struct_literal ) , { ws , postfix } ;
+
+(* The member of an enum that is written without the enum, such as `.RED`. *)
+enum_literal = "." , name ;
 
 (* What can follow a name or a literal: a subscript, a field, such as `p.age`, or a caret, which
    follows a pointer to give what it points to, as in `p^`. They can follow each other, as in
@@ -486,7 +513,7 @@ reserved_word = keyword | literal_word ;
 
 keyword =
     "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "struct" |
-    "not" | "and" | "or" | "foreign" | "import" ;
+    "enum" | "not" | "and" | "or" | "foreign" | "import" ;
 
 (* The words that are literals: the two values of a `Bool` and the null pointer. *)
 literal_word = "true" | "false" | "nil" ;

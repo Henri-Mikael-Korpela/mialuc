@@ -38,6 +38,9 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
     case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_DIVISION:
+    case AST_NODE_TYPE_ENUM_LITERAL:
+    case AST_NODE_TYPE_ENUM_MEMBER:
+    case AST_NODE_TYPE_ENUM_TYPE:
     case AST_NODE_TYPE_FIELD:
     case AST_NODE_TYPE_FIELD_ACCESS:
     case AST_NODE_TYPE_FIELD_INITIALIZER:
@@ -244,6 +247,17 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
             printf("DIVISION_ASSIGNMENT\n");
+            break;
+        case AST_NODE_TYPE_ENUM_LITERAL:
+            printf("ENUM_LITERAL %.*s\n", (int)node.payload.enum_literal.name.length,
+                   node.payload.enum_literal.name.bytes);
+            break;
+        case AST_NODE_TYPE_ENUM_MEMBER:
+            printf("ENUM_MEMBER %.*s\n", (int)node.payload.enum_member.name.length,
+                   node.payload.enum_member.name.bytes);
+            break;
+        case AST_NODE_TYPE_ENUM_TYPE:
+            printf("ENUM_TYPE\n");
             break;
         case AST_NODE_TYPE_FIELD:
             printf("FIELD %.*s\n", (int)node.payload.field.name.length,

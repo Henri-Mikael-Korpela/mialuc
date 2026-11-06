@@ -173,6 +173,11 @@
                     "match": "\\b(foreign|import)\\b"
                 },
                 {
+                    "name": "storage.type.enum.mialu",
+                    "comment": "The word that starts the definition of an enum, as in Color :: enum ->.",
+                    "match": "\\benum\\b"
+                },
+                {
                     "name": "storage.type.struct.mialu",
                     "comment": "The word that starts the definition of a struct or of a field that is a struct, as in Person :: struct ->.",
                     "match": "\\bstruct\\b"

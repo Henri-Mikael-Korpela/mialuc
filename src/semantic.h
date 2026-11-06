@@ -64,6 +64,8 @@ typedef enum {
     // The name that is called is not a procedure: a variable, a parameter or a constant string.
     SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE,
     SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE,
+    // Two members of one enum with the same name. The subject is the second one.
+    SEMANTIC_STATUS_ENUM_MEMBER_DUPLICATE,
     // Two fields of one struct with the same name. The subject is the second one.
     SEMANTIC_STATUS_FIELD_NAME_DUPLICATE,
     // A second `import foreign js`. The subject is the name of its object.
@@ -125,6 +127,13 @@ typedef struct {
  * the block ends. The iterator of a for statement is a variable that is in scope in the block of
  * the statement only, not in its range, and it cannot be assigned to. A name is looked up in the
  * innermost scope that uses it first, and then in the scopes around it, up to the module scope.
+ *
+ * A constant can be an enum, such as `Color :: enum -> ...`, which is a type like a struct: it
+ * has its name in the module scope, and is not counted among the constants either. The members of
+ * an enum are not names in a scope, and must only differ from each other in the enum. A constant
+ * can also be the member of an enum, such as `DEFAULT :: Color.RED`, which is a constant like the
+ * others, and the name of its enum is bound as the name in any use, to the constant of the enum.
+ * Whether that is an enum, and whether it has the member, is for the target to check.
  *
  * A constant can be a struct, such as `Person :: struct -> ...`. It has its name in the module
  * scope like any other constant, but it is a type and not a value, so it is not counted among the

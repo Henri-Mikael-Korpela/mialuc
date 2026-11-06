@@ -64,10 +64,16 @@ typedef struct {
 // not an address in memory: it is the index of the procedure in the table of the module, see
 // `wasm_procedure_table_index`. `nil` has the kind `WASM_VALUE_TYPE_NIL`, which is a pointer to
 // nothing in particular: it is accepted where any pointer is wanted, see `wasm_type_equals`, and no
-// variable has it as its type.
+// variable has it as its type. An enum is one 32-bit value, the number of the member, counted from
+// zero in the order of the definition, and its `definition` is the `AST_NODE_TYPE_ENUM_TYPE`. The
+// member of an enum that is written without the enum, such as `.RED`, has the kind
+// `WASM_VALUE_TYPE_ENUM_LITERAL`, which like `nil` is accepted where any enum is wanted and is
+// given a number when the enum is known, see `wasm_enum_literal_expected`.
 typedef enum {
     WASM_VALUE_TYPE_ARRAY,
     WASM_VALUE_TYPE_BOOL,
+    WASM_VALUE_TYPE_ENUM,
+    WASM_VALUE_TYPE_ENUM_LITERAL,
     WASM_VALUE_TYPE_INT,
     WASM_VALUE_TYPE_NIL,
     WASM_VALUE_TYPE_NONE,
@@ -303,6 +309,17 @@ static size_t          wasm_global_slot_index                 (Wasm_Builder cons
 static size_t          wasm_global_slot_count                 (Wasm_Builder const *builder);
 static void            wasm_build_global_section              (Wasm_Builder *builder);
 static bool            wasm_data_measure                      (Wasm_Builder *builder);
+static Ast_Node_Index  wasm_enum_literal_expected             (Wasm_Builder const *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index literal);
+static bool            wasm_enum_member_find                  (Wasm_Builder const *builder,
+                                                               Ast_Node_Index enum_node, Str name,
+                                                               size_t *number);
+static bool            wasm_enum_member_write                 (Wasm_Builder *builder,
+                                                               Ast_Node_Index enum_node,
+                                                               Str member_name);
+static Ast_Node_Index  wasm_enum_of_access                    (Wasm_Builder const *builder,
+                                                               Ast_Node_Index access);
 static void            wasm_build_table_section               (Wasm_Builder *builder);
 static void            wasm_build_element_section             (Wasm_Builder *builder);
 static void            wasm_write_signature                   (Wasm_Builder *builder,
@@ -758,8 +775,22 @@ static bool wasm_check_signatures(Wasm_Builder *builder, Ast_Node_Index module,
     for (size_t i = 0; i < definition_count; i += 1) {
         assert(definition != AST_NODE_INDEX_NONE);
 
-        // A string has no signature to check: it has no parameters, and its type is known.
+        // A string has no signature to check: it has no parameters, and its type is known. The
+        // member of an enum has a type that is known as well, but it must be a member of an enum.
         Ast_Node_Index value = builder->nodes[definition].first_child;
+        if (builder->nodes[value].node_type == AST_NODE_TYPE_FIELD_ACCESS) {
+            Ast_Node_Index enum_node = wasm_enum_of_access(builder, value);
+            Str member_name = builder->nodes[value].payload.field_access.name;
+            if (enum_node == AST_NODE_INDEX_NONE) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
+                                 builder->nodes[builder->nodes[value].first_child]
+                                     .payload.identifier.name);
+            }
+            size_t number = 0;
+            if (wasm_enum_member_find(builder, enum_node, member_name, &number) == false) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN, member_name);
+            }
+        }
         if (builder->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE) {
             size_t parameter_count = wasm_parameter_count(builder, value);
             Ast_Node_Index parameter = builder->nodes[value].first_child;
@@ -807,10 +838,12 @@ static Ast_Node_Index wasm_constant_find(Wasm_Builder const *builder, Ast_Node_I
     Ast_Node_Index current = from;
     // Every definition is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < builder->node_count && current != AST_NODE_INDEX_NONE; i += 1) {
-        // A struct is a constant too, but it is a type and not a function.
+        // A struct and an enum are constants too, but they are types and not functions.
         if (builder->nodes[current].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION &&
             builder->nodes[builder->nodes[current].first_child].node_type !=
-                AST_NODE_TYPE_STRUCT_TYPE) {
+                AST_NODE_TYPE_STRUCT_TYPE &&
+            builder->nodes[builder->nodes[current].first_child].node_type !=
+                AST_NODE_TYPE_ENUM_TYPE) {
             return current;
         }
         current = builder->nodes[current].next_sibling;
@@ -1196,6 +1229,15 @@ static void wasm_build_function_type(Wasm_Builder *builder, Ast_Node_Index defin
     assert(definition < builder->node_count);
 
     Ast_Node_Index value = builder->nodes[definition].first_child;
+    if (builder->nodes[value].node_type == AST_NODE_TYPE_FIELD_ACCESS) {
+        // A constant that is the member of an enum is a function without parameters that returns
+        // its number.
+        wasm_write_byte(&builder->writer, WASM_TYPE_FUNCTION);
+        wasm_write_unsigned(&builder->writer, 0);
+        wasm_write_unsigned(&builder->writer, 1);
+        wasm_write_byte(&builder->writer, WASM_TYPE_I32);
+        return;
+    }
     if (builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL) {
         // A constant string is a function without parameters that returns the string.
         wasm_write_byte(&builder->writer, WASM_TYPE_FUNCTION);
@@ -1493,6 +1535,15 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
         // the `end` to return.
         wasm_write_unsigned(&builder->writer, 0);
         wasm_build_code_section_body_string(builder, value);
+    } else if (builder->nodes[value].node_type == AST_NODE_TYPE_FIELD_ACCESS) {
+        // The same for the number of the member of an enum, which was checked.
+        wasm_write_unsigned(&builder->writer, 0);
+        Ast_Node_Index enum_node = wasm_enum_of_access(builder, value);
+        assert(enum_node != AST_NODE_INDEX_NONE);
+        if (wasm_enum_member_write(builder, enum_node,
+                                   builder->nodes[value].payload.field_access.name) == false) {
+            return false;
+        }
     } else {
         // The parameters are the first locals of the function already, and the variables come
         // after them.
@@ -2449,10 +2500,15 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
                                  statement_node->payload.variable_definition.name);
             }
 
-            // `nil` is a pointer of any type, so it does not say the type of a variable.
+            // `nil` is a pointer of any type, so it does not say the type of a variable. The same
+            // is true of the member of an enum that is written without the enum.
             if (wasm_variable_type(builder, statement).kind == WASM_VALUE_TYPE_NIL) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_NIL_TYPE_UNKNOWN,
                                  statement_node->payload.variable_definition.name);
+            }
+            if (wasm_variable_type(builder, statement).kind == WASM_VALUE_TYPE_ENUM_LITERAL) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_ENUM_TYPE_UNKNOWN,
+                                 builder->nodes[value].payload.enum_literal.name);
             }
 
             // There is no pointer to an array or to an array slice, and a variable in the frame is
@@ -2727,8 +2783,18 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
         }
         return wasm_type_pointee(pointer);
     }
-    case AST_NODE_TYPE_FIELD_ACCESS:
+    case AST_NODE_TYPE_FIELD_ACCESS: {
+        // `Color.RED` is a member of an enum, and any other access is a field.
+        Ast_Node_Index enum_node = wasm_enum_of_access(builder, expression);
+        if (enum_node != AST_NODE_INDEX_NONE) {
+            Wasm_Type member = wasm_type_make(WASM_VALUE_TYPE_ENUM);
+            member.definition = enum_node;
+            return member;
+        }
         return wasm_field_path(builder, expression).type;
+    }
+    case AST_NODE_TYPE_ENUM_LITERAL:
+        return wasm_type_make(WASM_VALUE_TYPE_ENUM_LITERAL);
     case AST_NODE_TYPE_SLICE: {
         Wasm_Type slice = wasm_expression_type(builder, node->first_child);
         if (wasm_type_is_sequence(slice) == false) {
@@ -2758,6 +2824,8 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     case AST_NODE_TYPE_CALL_STATEMENT:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+    case AST_NODE_TYPE_ENUM_MEMBER:
+    case AST_NODE_TYPE_ENUM_TYPE:
     case AST_NODE_TYPE_BREAK_STATEMENT:
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
     case AST_NODE_TYPE_FIELD:
@@ -2898,8 +2966,11 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
                        operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
     // Pointers have no order either, and are the same when they hold the same address. `nil` is
     // compared with a pointer of any type.
+    // The members of an enum are compared like addresses: they are the same when the numbers are.
     bool is_address = left_type.kind == WASM_VALUE_TYPE_POINTER ||
                       left_type.kind == WASM_VALUE_TYPE_PROCEDURE ||
+                      left_type.kind == WASM_VALUE_TYPE_ENUM ||
+                      left_type.kind == WASM_VALUE_TYPE_ENUM_LITERAL ||
                       left_type.kind == WASM_VALUE_TYPE_NIL;
     bool is_left_comparable = left_type.kind == WASM_VALUE_TYPE_INT ||
                               ((left_type.kind == WASM_VALUE_TYPE_BOOL || is_address) &&
@@ -3072,6 +3143,9 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_COMPARISON:
             // `Bool` values and addresses are compared as the 32-bit integers that they are.
             if (wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_BOOL ||
+                wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_ENUM ||
+                wasm_expression_type(builder, node->first_child).kind ==
+                    WASM_VALUE_TYPE_ENUM_LITERAL ||
                 wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_NIL ||
                 wasm_expression_type(builder, node->first_child).kind ==
                     WASM_VALUE_TYPE_PROCEDURE ||
@@ -3115,6 +3189,14 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             // The null pointer is the address 0, which is not the address of anything.
             wasm_write_i32_const(&builder->writer, 0);
             break;
+        case AST_NODE_TYPE_ENUM_LITERAL:
+            // The number of the member depends on the enum, which the place of the literal says.
+            if (wasm_enum_member_write(
+                    builder, wasm_enum_literal_expected(builder, definition, current),
+                    node->payload.enum_literal.name) == false) {
+                return false;
+            }
+            break;
         case AST_NODE_TYPE_INTEGER_LITERAL:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_CONST);
             wasm_write_signed(&builder->writer, node->payload.integer_literal.value);
@@ -3133,12 +3215,21 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
                 return false;
             }
             break;
-        case AST_NODE_TYPE_FIELD_ACCESS:
+        case AST_NODE_TYPE_FIELD_ACCESS: {
+            Ast_Node_Index access_enum = wasm_enum_of_access(builder, current);
+            if (access_enum != AST_NODE_INDEX_NONE) {
+                if (wasm_enum_member_write(builder, access_enum,
+                                           node->payload.field_access.name) == false) {
+                    return false;
+                }
+                break;
+            }
             if (wasm_build_code_section_body_field_access(builder, definition, current) ==
                 false) {
                 return false;
             }
             break;
+        }
         case AST_NODE_TYPE_STRUCT_LITERAL:
             if (wasm_build_code_section_body_struct_literal(builder, definition, current,
                                                             AST_NODE_INDEX_NONE) == false) {
@@ -3166,6 +3257,8 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_ATTRIBUTE:
         case AST_NODE_TYPE_BLOCK:
         case AST_NODE_TYPE_CALL_STATEMENT:
+        case AST_NODE_TYPE_ENUM_MEMBER:
+        case AST_NODE_TYPE_ENUM_TYPE:
         case AST_NODE_TYPE_FIELD:
         case AST_NODE_TYPE_FIELD_INITIALIZER:
         case AST_NODE_TYPE_STRUCT_TYPE:
@@ -3308,7 +3401,13 @@ static Wasm_Type wasm_binding_value_type(Wasm_Builder const *builder, Semantic_B
         if (builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL) {
             return wasm_type_make(WASM_VALUE_TYPE_STR);
         }
-        // A procedure is the pointer to it, and a struct is a type.
+        // The member of an enum is the enum.
+        if (builder->nodes[value].node_type == AST_NODE_TYPE_FIELD_ACCESS) {
+            Wasm_Type member = wasm_type_make(WASM_VALUE_TYPE_ENUM);
+            member.definition = wasm_enum_of_access(builder, value);
+            return member;
+        }
+        // A procedure is the pointer to it, and a struct and an enum are types.
         if (builder->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE) {
             Wasm_Type pointer = wasm_type_make(WASM_VALUE_TYPE_PROCEDURE);
             pointer.definition = wasm_signature_canonical(builder, value);
@@ -4289,6 +4388,9 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
         }
         break;
     case AST_NODE_TYPE_DEREFERENCE:
+    case AST_NODE_TYPE_ENUM_LITERAL:
+    case AST_NODE_TYPE_ENUM_MEMBER:
+    case AST_NODE_TYPE_ENUM_TYPE:
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
     case AST_NODE_TYPE_ADDRESS_OF:
@@ -4578,6 +4680,7 @@ static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
 
     switch (target.kind) {
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_ENUM:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_PROCEDURE:
     case WASM_VALUE_TYPE_STR:
@@ -4595,6 +4698,7 @@ static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
         return pointer;
     }
     case WASM_VALUE_TYPE_ARRAY:
+    case WASM_VALUE_TYPE_ENUM_LITERAL:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_NONE:
     case WASM_VALUE_TYPE_SLICE:
@@ -4643,6 +4747,252 @@ static Ast_Node_Index wasm_struct_find(Wasm_Builder const *builder, Str name) {
     }
 
     return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Returns the enum called `name`, which is the `AST_NODE_TYPE_ENUM_TYPE` that is the value of the
+ * constant of that name, or `AST_NODE_INDEX_NONE` when the module has no enum of that name.
+ */
+static Ast_Node_Index wasm_enum_find(Wasm_Builder const *builder, Str name) {
+    assert(name.bytes != NULL);
+
+    Ast_Node_Index definition = builder->nodes[builder->module].first_child;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node const *node = &builder->nodes[definition];
+        if (node->node_type == AST_NODE_TYPE_CONSTANT_DEFINITION &&
+            builder->nodes[node->first_child].node_type == AST_NODE_TYPE_ENUM_TYPE &&
+            str_equals(node->payload.constant_definition.name, name)) {
+            return node->first_child;
+        }
+        definition = node->next_sibling;
+    }
+
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Finds the member called `name` of the enum `enum_node`. Returns whether there is one, and then
+ * sets `*number` to its number, which is the count of the members before it.
+ */
+static bool wasm_enum_member_find(Wasm_Builder const *builder, Ast_Node_Index enum_node, Str name,
+                                  size_t *number) {
+    assert(builder->nodes[enum_node].node_type == AST_NODE_TYPE_ENUM_TYPE);
+
+    Ast_Node_Index member = builder->nodes[enum_node].first_child;
+    // Every member is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && member != AST_NODE_INDEX_NONE; i += 1) {
+        if (str_equals(builder->nodes[member].payload.enum_member.name, name)) {
+            *number = i;
+            return true;
+        }
+        member = builder->nodes[member].next_sibling;
+    }
+
+    return false;
+}
+
+/**
+ * Returns the enum that `access`, an `AST_NODE_TYPE_FIELD_ACCESS`, is a member of, as in
+ * `Color.RED`: the name before the dot is a constant that is an enum. Returns
+ * `AST_NODE_INDEX_NONE` when it is the access of a field, which is the usual meaning of the dot.
+ */
+static Ast_Node_Index wasm_enum_of_access(Wasm_Builder const *builder, Ast_Node_Index access) {
+    assert(builder->nodes[access].node_type == AST_NODE_TYPE_FIELD_ACCESS);
+
+    Ast_Node_Index base = builder->nodes[access].first_child;
+    if (builder->nodes[base].node_type != AST_NODE_TYPE_IDENTIFIER ||
+        builder->bindings[base].kind != SEMANTIC_BINDING_KIND_CONSTANT) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index value = builder->nodes[builder->bindings[base].target].first_child;
+    if (builder->nodes[value].node_type != AST_NODE_TYPE_ENUM_TYPE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return value;
+}
+
+/**
+ * Returns the node that has `child` as one of its children, or `AST_NODE_INDEX_NONE` when there is
+ * none, which is the case for the root of the tree. The nodes do not know their parents, and this
+ * is only asked for the few nodes whose meaning depends on the place they are in.
+ */
+static Ast_Node_Index wasm_parent_find(Wasm_Builder const *builder, Ast_Node_Index child) {
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        Ast_Node_Index sibling = builder->nodes[node].first_child;
+        // Every child is a distinct node, so there cannot be more than there are nodes.
+        for (size_t i = 0; i < builder->node_count && sibling != AST_NODE_INDEX_NONE; i += 1) {
+            if (sibling == child) {
+                return node;
+            }
+            sibling = builder->nodes[sibling].next_sibling;
+        }
+    }
+
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Returns the type of the struct literal `literal`: the struct that it names, or for a literal
+ * without a name the type of the field that it is the value of, which is found from the literal
+ * around it. The kind is `WASM_VALUE_TYPE_NONE` when there is none.
+ */
+static Wasm_Type wasm_struct_literal_type(Wasm_Builder const *builder, Ast_Node_Index literal) {
+    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_STRUCT_LITERAL);
+
+    // The names of the fields from the literal outwards, up to the literal that has a name.
+    Str names[AST_BLOCK_DEPTH_MAX];
+    size_t name_count = 0;
+    Wasm_Type type = wasm_type_make(WASM_VALUE_TYPE_NONE);
+    Ast_Node_Index current = literal;
+    for (size_t i = 0; i <= AST_BLOCK_DEPTH_MAX; i += 1) {
+        Str name = builder->nodes[current].payload.struct_literal.name;
+        if (name.bytes != NULL) {
+            type = wasm_type_of_name(builder, name);
+            break;
+        }
+
+        Ast_Node_Index initializer = wasm_parent_find(builder, current);
+        if (initializer == AST_NODE_INDEX_NONE ||
+            builder->nodes[initializer].node_type != AST_NODE_TYPE_FIELD_INITIALIZER ||
+            name_count == AST_BLOCK_DEPTH_MAX) {
+            return wasm_type_make(WASM_VALUE_TYPE_NONE);
+        }
+        names[name_count] = builder->nodes[initializer].payload.field_initializer.name;
+        name_count += 1;
+
+        current = wasm_parent_find(builder, initializer);
+        if (current == AST_NODE_INDEX_NONE ||
+            builder->nodes[current].node_type != AST_NODE_TYPE_STRUCT_LITERAL) {
+            return wasm_type_make(WASM_VALUE_TYPE_NONE);
+        }
+    }
+
+    for (size_t i = name_count; i > 0; i -= 1) {
+        size_t slot_offset = 0;
+        if (type.kind != WASM_VALUE_TYPE_STRUCT ||
+            wasm_struct_field_find(builder, type.definition, names[i - 1], &slot_offset, &type) ==
+                false) {
+            return wasm_type_make(WASM_VALUE_TYPE_NONE);
+        }
+    }
+    return type;
+}
+
+/**
+ * Returns the enum that the member `literal`, an `AST_NODE_TYPE_ENUM_LITERAL` such as `.RED`, is
+ * a member of, which is the one that the place it is in wants: the type of the variable that it is
+ * the value of, of what it is assigned to, of the result of the procedure it is returned from, of
+ * the parameter or the field or the element that it is given to, or of what it is compared with.
+ * Returns `AST_NODE_INDEX_NONE` when the place does not say, which is an error. `definition` is the
+ * constant that the literal is in.
+ */
+static Ast_Node_Index wasm_enum_literal_expected(Wasm_Builder const *builder,
+                                                 Ast_Node_Index definition,
+                                                 Ast_Node_Index literal) {
+    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_ENUM_LITERAL);
+
+    Ast_Node_Index parent = wasm_parent_find(builder, literal);
+    if (parent == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node const *parent_node = &builder->nodes[parent];
+    Wasm_Type expected = wasm_type_make(WASM_VALUE_TYPE_NONE);
+    switch (parent_node->node_type) {
+    case AST_NODE_TYPE_RETURN_STATEMENT: {
+        Str return_type = ast_procedure_return_type(
+            &builder->nodes[wasm_procedure_of(builder, definition)]);
+        if (return_type.bytes != NULL) {
+            expected = wasm_type_of_name(builder, return_type);
+        }
+        break;
+    }
+    case AST_NODE_TYPE_VARIABLE_DEFINITION:
+        // The type is the first child when the definition writes it, and the literal is the last.
+        if (parent_node->first_child != literal &&
+            wasm_node_is_type(builder, parent_node->first_child)) {
+            expected = wasm_type_of_node(builder, parent_node->first_child);
+        }
+        break;
+    case AST_NODE_TYPE_ASSIGNMENT:
+        if (parent_node->last_child == literal) {
+            expected = wasm_expression_type(builder, parent_node->first_child);
+        }
+        break;
+    case AST_NODE_TYPE_CALL: {
+        Ast_Node_Index callee = wasm_call_signature(builder, parent);
+        size_t position = 0;
+        Ast_Node_Index argument = parent_node->first_child;
+        while (argument != literal) {
+            position += 1;
+            argument = builder->nodes[argument].next_sibling;
+        }
+        if (callee != AST_NODE_INDEX_NONE &&
+            position < wasm_signature_parameter_count(builder, callee)) {
+            expected = wasm_type_of_node(builder,
+                                         wasm_signature_parameter_type(builder, callee, position));
+        }
+        break;
+    }
+    case AST_NODE_TYPE_COMPARISON: {
+        Ast_Node_Index other = parent_node->first_child;
+        if (other == literal) {
+            other = parent_node->last_child;
+        }
+        expected = wasm_expression_type(builder, other);
+        break;
+    }
+    case AST_NODE_TYPE_ARRAY_LITERAL:
+        // The first child is the type of the array, and the others are its elements.
+        if (parent_node->first_child != literal) {
+            Wasm_Type array_type = wasm_type_of_node(builder, parent_node->first_child);
+            if (wasm_type_is_sequence(array_type)) {
+                expected = wasm_type_element(array_type);
+            }
+        }
+        break;
+    case AST_NODE_TYPE_FIELD_INITIALIZER: {
+        Ast_Node_Index struct_literal = wasm_parent_find(builder, parent);
+        if (struct_literal != AST_NODE_INDEX_NONE) {
+            Wasm_Type struct_type = wasm_struct_literal_type(builder, struct_literal);
+            size_t slot_offset = 0;
+            if (struct_type.kind == WASM_VALUE_TYPE_STRUCT) {
+                (void)wasm_struct_field_find(builder, struct_type.definition,
+                                             parent_node->payload.field_initializer.name,
+                                             &slot_offset, &expected);
+            }
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
+    if (expected.kind != WASM_VALUE_TYPE_ENUM) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return expected.definition;
+}
+
+/**
+ * Writes the instruction that pushes the number of the member `member_name` of the enum
+ * `enum_node`, which is a 32-bit constant. Returns false after it recorded an error when the enum
+ * has no such member, or when it is not known, which is `AST_NODE_INDEX_NONE`.
+ */
+static bool wasm_enum_member_write(Wasm_Builder *builder, Ast_Node_Index enum_node,
+                                   Str member_name) {
+    if (enum_node == AST_NODE_INDEX_NONE) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_ENUM_TYPE_UNKNOWN, member_name);
+    }
+
+    size_t number = 0;
+    if (wasm_enum_member_find(builder, enum_node, member_name, &number) == false) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN, member_name);
+    }
+    wasm_write_i32_const(&builder->writer, (int64_t)number);
+    return true;
 }
 
 /**
@@ -4705,6 +5055,13 @@ static Wasm_Type wasm_type_of_plain_name(Wasm_Builder const *builder, Str type_n
     }
     if (str_equals(type_name, STR("Str"))) {
         return wasm_type_make(WASM_VALUE_TYPE_STR);
+    }
+
+    Ast_Node_Index enum_definition = wasm_enum_find(builder, type_name);
+    if (enum_definition != AST_NODE_INDEX_NONE) {
+        Wasm_Type enum_type = wasm_type_make(WASM_VALUE_TYPE_ENUM);
+        enum_type.definition = enum_definition;
+        return enum_type;
     }
 
     Ast_Node_Index definition = wasm_struct_find(builder, type_name);
@@ -4875,7 +5232,9 @@ static size_t wasm_struct_slots(Wasm_Builder const *builder, Ast_Node_Index stru
                 leaf = WASM_VALUE_TYPE_INT;
             } else if (str_equals(name, STR("Str"))) {
                 leaf = WASM_VALUE_TYPE_STR;
-            } else if (str_equals(name, STR("Bool")) == false) {
+            } else if (str_equals(name, STR("Bool")) == false &&
+                       wasm_enum_find(builder, name) == AST_NODE_INDEX_NONE) {
+                // An enum is one 32-bit value, like a `Bool`.
                 nested = wasm_struct_find(builder, name);
             }
         }
@@ -4923,6 +5282,8 @@ static size_t wasm_type_slot_count(Wasm_Builder const *builder, Wasm_Type type) 
     case WASM_VALUE_TYPE_ARRAY:
     case WASM_VALUE_TYPE_BOOL:
     case WASM_VALUE_TYPE_INT:
+    case WASM_VALUE_TYPE_ENUM:
+    case WASM_VALUE_TYPE_ENUM_LITERAL:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_POINTER:
     case WASM_VALUE_TYPE_PROCEDURE:
@@ -4956,6 +5317,8 @@ static byte wasm_type_slot_kind(Wasm_Builder const *builder, Wasm_Type type, siz
         return WASM_TYPE_I64;
     case WASM_VALUE_TYPE_ARRAY:
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_ENUM:
+    case WASM_VALUE_TYPE_ENUM_LITERAL:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_POINTER:
     case WASM_VALUE_TYPE_PROCEDURE:
@@ -5046,9 +5409,11 @@ static bool wasm_type_elements_equal(Wasm_Type first, Wasm_Type second) {
  * Returns whether the two types are the same type. Two structs are the same when they are the same
  * definition, a pointer is the same as another when it has as many carets and points to the same
  * type at the end of them, and an array or an array slice is the same as another when the elements
- * are. A pointer to a procedure is the same as another when they have the same signature, which
- * the definition of the type says, see `wasm_signature_canonical`. `nil` is the same as every
- * pointer, because it is a pointer of whatever type is wanted.
+ * are. An enum is the same as another when it is the same definition, and the member of an enum
+ * that is written without it is the same as every enum, like `nil` is for a pointer. A pointer to a
+ * procedure is the same as another when they have the same signature, which the definition of the
+ * type says, see `wasm_signature_canonical`. `nil` is the same as every pointer, because it is a
+ * pointer of whatever type is wanted.
  */
 static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
     if (first.kind != second.kind) {
@@ -5057,10 +5422,15 @@ static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
         bool is_second_pointer = second.kind == WASM_VALUE_TYPE_POINTER ||
                                  second.kind == WASM_VALUE_TYPE_PROCEDURE;
         return (is_first_pointer && second.kind == WASM_VALUE_TYPE_NIL) ||
-               (first.kind == WASM_VALUE_TYPE_NIL && is_second_pointer);
+               (first.kind == WASM_VALUE_TYPE_NIL && is_second_pointer) ||
+               (first.kind == WASM_VALUE_TYPE_ENUM &&
+                second.kind == WASM_VALUE_TYPE_ENUM_LITERAL) ||
+               (first.kind == WASM_VALUE_TYPE_ENUM_LITERAL &&
+                second.kind == WASM_VALUE_TYPE_ENUM);
     }
 
     switch (first.kind) {
+    case WASM_VALUE_TYPE_ENUM:
     case WASM_VALUE_TYPE_PROCEDURE:
     case WASM_VALUE_TYPE_STRUCT:
         return first.definition == second.definition;
@@ -5071,6 +5441,7 @@ static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
     case WASM_VALUE_TYPE_SLICE:
         return wasm_type_elements_equal(first, second);
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_ENUM_LITERAL:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_NONE:

@@ -462,6 +462,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_TYPE_KEYWORD_ELSE:
             printf("KEYWORD_ELSE\n");
             break;
+        case TOKEN_TYPE_KEYWORD_ENUM:
+            printf("KEYWORD_ENUM\n");
+            break;
         case TOKEN_TYPE_KEYWORD_FALSE:
             printf("KEYWORD_FALSE\n");
             break;
@@ -765,6 +768,16 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is reserved for the memory of the wasm module.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: the enum has no member '%.*s'.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_ENUM_TYPE_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: the enum of '.%.*s' is not known here, so write it, as in "
+                "'Color.%.*s', or give the member to something that has an enum type.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes,
+                subject_length, result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP:
         fprintf(stderr, "%s:%zu:%zu: an expression in '%.*s' has too many nested operators.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
@@ -774,7 +787,7 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is a struct, which the wasm target "
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is a struct or an enum, which the wasm target "
                 "cannot use as a value.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
@@ -868,6 +881,10 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     case SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a procedure, so it cannot be called.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_ENUM_MEMBER_DUPLICATE:
+        fprintf(stderr, "%s:%zu:%zu: the enum has the member '%.*s' twice.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is already defined.\n", path, position.line,

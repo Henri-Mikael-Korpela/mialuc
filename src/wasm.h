@@ -155,6 +155,13 @@ typedef enum {
     WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
     WASM_BUILD_STATUS_CONDITION_TYPE_INVALID,
     WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED,
+    // `.RED` where no enum is known to give it one: the value of a variable that has no written
+    // type, an operand that is compared with another member without an enum, an argument of a
+    // procedure that is not one, and so on. The subject is the name of the member.
+    WASM_BUILD_STATUS_ENUM_TYPE_UNKNOWN,
+    // A member that the enum does not have, as in `Color.PURPLE` and in `.PURPLE` where the enum is
+    // `Color`. The subject is the name of the member.
+    WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN,
     WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP,
     // A field is read or assigned through something that is not a variable, a parameter or an
     // element of an array, such as the result of a call. The subject is the name of the field.
@@ -259,6 +266,12 @@ typedef struct {
  * taken somewhere. `p^` loads from the address that `p` is, and traps when it is zero, which is
  * what a pointer that was not given a value is. A pointer to a variable is good until the
  * procedure that has the variable returns.
+ *
+ * An enum is one 32-bit integer as well: the number of the member, counted from zero in the order
+ * of the definition. A member, written `Color.RED` or `.RED`, is the `i32.const` of its number,
+ * and a constant that is a member is a function without parameters that returns it, like a
+ * constant string. An enum is a type and no function, like a struct is. Members are compared with
+ * `i32.eq` and `i32.ne`, and the default of an enum is 0.
  *
  * A pointer to a procedure, written `^proc(Int) Int`, is one 32-bit integer as well, but it is not
  * an address in memory: it is a slot of the one table of the module, which has every function of

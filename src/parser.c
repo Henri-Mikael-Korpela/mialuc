@@ -46,6 +46,8 @@ static void           parse_block_close         (Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_block_open          (Parser *parser, Ast_Node_Index statement);
 static Ast_Node_Index parse_branch              (Parser *parser, Ast_Node_Index statement);
 static Ast_Node_Index parse_definition          (Parser *parser);
+static Ast_Node_Index parse_enum_member_value   (Parser *parser);
+static Ast_Node_Index parse_enum_type           (Parser *parser, uint32_t indentation_level);
 static bool           parse_foreign_block       (Parser *parser, Ast_Node_Index module);
 static Ast_Node_Index parse_foreign_import      (Parser *parser);
 static bool           parse_foreign_target_expect(Parser *parser);
@@ -226,11 +228,17 @@ static Ast_Node_Index parse_definition(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
-    // The value is a string, a struct, or a procedure, which is what any other token here starts.
+    // The value is a string, a struct, an enum, the member of an enum, or a procedure, which is
+    // what any other token here starts.
     Ast_Node_Index value = AST_NODE_INDEX_NONE;
     if (parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_STRUCT) {
         // Like a procedure, a struct ends with its body.
         value = parse_struct_type(parser, INDENTATION_LEVEL_TOP);
+    } else if (parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_ENUM) {
+        // An enum ends with its members.
+        value = parse_enum_type(parser, INDENTATION_LEVEL_TOP);
+    } else if (parse_token_current(parser)->token_type == TOKEN_TYPE_IDENTIFIER) {
+        value = parse_enum_member_value(parser);
     } else if (parse_token_current(parser)->token_type == TOKEN_TYPE_STRING_LITERAL) {
         value = parse_string_literal(parser);
         // A procedure ends with its body, but a string is one line, so its end is checked here.
@@ -247,6 +255,95 @@ static Ast_Node_Index parse_definition(Parser *parser) {
 
     assert(parser->nodes[definition].first_child == value);
     return definition;
+}
+
+/**
+ * Parses the enum `enum ->` and its members, which are the lines below it, indented one level
+ * deeper than the line of the definition, each one a name. The enum must have a member. The
+ * current token is `enum`, and `indentation_level` is the level of the line it is on.
+ */
+static Ast_Node_Index parse_enum_type(Parser *parser, uint32_t indentation_level) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->token_type == TOKEN_TYPE_KEYWORD_ENUM);
+    assert(indentation_level < UINT32_MAX);
+
+    parse_token_advance(parser);
+    Ast_Node_Index root = parse_node_make(parser, AST_NODE_TYPE_ENUM_TYPE);
+    if (root == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_token_expect(parser, TOKEN_TYPE_ARROW, STR("'->'")) == false ||
+        parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    // Each member consumes at least its indentation token, so there are fewer members than
+    // tokens, which bounds the loop. It stops at the first line that is not a member.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        Token const *line_start = parse_token_current(parser);
+        if (line_start->token_type != TOKEN_TYPE_INDENTATION ||
+            line_start->payload.indentation.level <= INDENTATION_LEVEL_TOP) {
+            break;
+        }
+        if (line_start->payload.indentation.level != indentation_level + 1) {
+            return parse_fail(parser, STR("a member that is indented one level"));
+        }
+        parse_token_advance(parser);
+
+        Token const *member_name = parse_token_current(parser);
+        if (member_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+            return parse_fail(parser, STR("a member name"));
+        }
+        Ast_Node_Index member = parse_node_make(parser, AST_NODE_TYPE_ENUM_MEMBER);
+        if (member == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[member].payload.enum_member.name = member_name->payload.identifier.text;
+        parse_token_advance(parser);
+        parse_node_append_child(parser, root, member);
+        if (parse_line_end_expect(parser) == false) {
+            return AST_NODE_INDEX_NONE;
+        }
+    }
+
+    if (parser->nodes[root].first_child == AST_NODE_INDEX_NONE) {
+        return parse_fail(parser, STR("a member"));
+    }
+    return root;
+}
+
+/**
+ * Parses the value of a constant that is the member of an enum, `Color.RED`: the name of the enum,
+ * a dot and the name of the member, and then the end of the line. The node is the access of the
+ * field `RED`, whose child is the identifier `Color`, so it is the same tree that `Color.RED` has
+ * in an expression, and the nodes are in the order of the source.
+ */
+static Ast_Node_Index parse_enum_member_value(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+
+    Ast_Node_Index enum_name = parse_identifier(parser);
+    if (enum_name == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_token_expect(parser, TOKEN_TYPE_DOT, STR("'.' and the member of an enum")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    Token const *member_name = parse_token_current(parser);
+    if (member_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+        return parse_fail(parser, STR("the name of a member"));
+    }
+    Ast_Node_Index access = parse_node_make(parser, AST_NODE_TYPE_FIELD_ACCESS);
+    if (access == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[access].payload.field_access.name = member_name->payload.identifier.text;
+    parse_token_advance(parser);
+    parse_node_append_child(parser, access, enum_name);
+
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return access;
 }
 
 /**
@@ -1711,6 +1808,21 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
     if (next == TOKEN_TYPE_KEYWORD_TRUE || next == TOKEN_TYPE_KEYWORD_FALSE) {
         return parse_bool_literal(parser);
     }
+    if (next == TOKEN_TYPE_DOT) {
+        // `.RED` is the member of an enum that the place of the literal knows.
+        parse_token_advance(parser);
+        Token const *member_name = parse_token_current(parser);
+        if (member_name->token_type != TOKEN_TYPE_IDENTIFIER) {
+            return parse_fail(parser, STR("the name of a member of an enum after '.'"));
+        }
+        Ast_Node_Index literal = parse_node_make(parser, AST_NODE_TYPE_ENUM_LITERAL);
+        if (literal == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[literal].payload.enum_literal.name = member_name->payload.identifier.text;
+        parse_token_advance(parser);
+        return literal;
+    }
     if (next == TOKEN_TYPE_KEYWORD_NIL) {
         Ast_Node_Index nil = parse_node_make(parser, AST_NODE_TYPE_NIL_LITERAL);
         if (nil == AST_NODE_INDEX_NONE) {
@@ -1721,7 +1833,8 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
     }
 
     return parse_fail(parser, STR("an integer literal, a string literal, 'true', 'false', 'nil', "
-                                  "a name, a call, an array literal or a struct literal"));
+                                  "a name, a call, an array literal, a struct literal or a "
+                                  "member of an enum such as '.RED'"));
 }
 
 /**

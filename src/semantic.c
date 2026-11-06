@@ -42,6 +42,9 @@ static bool             semantic_call_resolve       (Semantic_Analyzer *analyzer
                                                      Ast_Node_Index call);
 static Semantic_Binding semantic_definition_find    (Semantic_Analyzer const *analyzer, Str name);
 static bool             semantic_definitions_check  (Semantic_Analyzer *analyzer);
+static bool             semantic_enum_member_resolve(Semantic_Analyzer *analyzer,
+                                                     Ast_Node_Index access);
+static bool             semantic_enum_members_check (Semantic_Analyzer *analyzer);
 static bool             semantic_fields_check       (Semantic_Analyzer *analyzer);
 static bool             semantic_fail               (Semantic_Analyzer *analyzer,
                                                      Semantic_Status status, Str subject);
@@ -110,6 +113,9 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
     if (is_ok) {
         is_ok = semantic_fields_check(&analyzer);
     }
+    if (is_ok) {
+        is_ok = semantic_enum_members_check(&analyzer);
+    }
 
     Ast_Node_Index definition = node_elements[root].first_child;
     // Every definition is a distinct node, so there cannot be more than there are nodes.
@@ -118,6 +124,8 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
             Ast_Node_Index value = node_elements[definition].first_child;
             if (node_elements[value].node_type == AST_NODE_TYPE_PROCEDURE) {
                 is_ok = semantic_procedure_resolve(&analyzer, definition);
+            } else if (node_elements[value].node_type == AST_NODE_TYPE_FIELD_ACCESS) {
+                is_ok = semantic_enum_member_resolve(&analyzer, value);
             }
         }
         definition = node_elements[definition].next_sibling;
@@ -215,6 +223,57 @@ static bool semantic_fields_check(Semantic_Analyzer *analyzer) {
         }
     }
 
+    return true;
+}
+
+/**
+ * Checks that no two members of an enum have the same name, in every enum of the module. Returns
+ * false after it recorded an error.
+ */
+static bool semantic_enum_members_check(Semantic_Analyzer *analyzer) {
+    for (size_t i = 0; i < analyzer->node_count; i += 1) {
+        if (analyzer->nodes[i].node_type != AST_NODE_TYPE_ENUM_TYPE) {
+            continue;
+        }
+
+        Ast_Node_Index member = analyzer->nodes[i].first_child;
+        // Every member is a distinct node, so there cannot be more than there are nodes.
+        for (size_t j = 0; j < analyzer->node_count && member != AST_NODE_INDEX_NONE; j += 1) {
+            Str name = analyzer->nodes[member].payload.enum_member.name;
+            Ast_Node_Index other = analyzer->nodes[member].next_sibling;
+            for (size_t k = 0; k < analyzer->node_count && other != AST_NODE_INDEX_NONE; k += 1) {
+                if (str_equals(analyzer->nodes[other].payload.enum_member.name, name)) {
+                    return semantic_fail(analyzer, SEMANTIC_STATUS_ENUM_MEMBER_DUPLICATE,
+                                         analyzer->nodes[other].payload.enum_member.name);
+                }
+                other = analyzer->nodes[other].next_sibling;
+            }
+            member = analyzer->nodes[member].next_sibling;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Binds the name of the enum in the value of a constant that is the member of an enum, such as
+ * `Color` in `DEFAULT :: Color.RED`, which is the child of `access`, to the constant that has the
+ * name. Only a constant can be one, so a global variable, which is not a type, and a name that
+ * nothing has are unknown names. Returns false after it recorded an error.
+ */
+static bool semantic_enum_member_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index access) {
+    assert(analyzer->nodes[access].node_type == AST_NODE_TYPE_FIELD_ACCESS);
+
+    Ast_Node_Index identifier = analyzer->nodes[access].first_child;
+    assert(analyzer->nodes[identifier].node_type == AST_NODE_TYPE_IDENTIFIER);
+
+    Str name = analyzer->nodes[identifier].payload.identifier.name;
+    Semantic_Binding binding = semantic_definition_find(analyzer, name);
+    if (binding.kind != SEMANTIC_BINDING_KIND_CONSTANT) {
+        return semantic_fail(analyzer, SEMANTIC_STATUS_IDENTIFIER_UNKNOWN, name);
+    }
+
+    analyzer->bindings[identifier] = binding;
     return true;
 }
 
@@ -686,9 +745,11 @@ static Semantic_Binding semantic_definition_find(Semantic_Analyzer const *analyz
         if (is_global) {
             global_count += 1;
         } else if (analyzer->nodes[analyzer->nodes[definition].first_child].node_type !=
-                   AST_NODE_TYPE_STRUCT_TYPE) {
-            // A struct is a type and becomes no function, so it takes no place among the
-            // constants.
+                       AST_NODE_TYPE_STRUCT_TYPE &&
+                   analyzer->nodes[analyzer->nodes[definition].first_child].node_type !=
+                       AST_NODE_TYPE_ENUM_TYPE) {
+            // A struct and an enum are types and become no function, so they take no place among
+            // the constants.
             constant_count += 1;
         }
         definition = analyzer->nodes[definition].next_sibling;

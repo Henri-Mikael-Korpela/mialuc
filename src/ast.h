@@ -29,6 +29,9 @@ typedef enum {
     AST_NODE_TYPE_DEREFERENCE,
     AST_NODE_TYPE_DIVISION,
     AST_NODE_TYPE_DIVISION_ASSIGNMENT,
+    AST_NODE_TYPE_ENUM_LITERAL,
+    AST_NODE_TYPE_ENUM_MEMBER,
+    AST_NODE_TYPE_ENUM_TYPE,
     AST_NODE_TYPE_FIELD,
     AST_NODE_TYPE_FIELD_ACCESS,
     AST_NODE_TYPE_FIELD_INITIALIZER,
@@ -161,8 +164,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   an expression of type `Bool` with the lowest precedence of the operators, so its operands are
  *   not comparisons. The operator is in the payload.
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: one child, the value that is bound to the name. It is
- *   an `AST_NODE_TYPE_PROCEDURE`, an `AST_NODE_TYPE_STRING_LITERAL` or an
- *   `AST_NODE_TYPE_STRUCT_TYPE`.
+ *   an `AST_NODE_TYPE_PROCEDURE`, an `AST_NODE_TYPE_STRING_LITERAL`, an
+ *   `AST_NODE_TYPE_STRUCT_TYPE`, an `AST_NODE_TYPE_ENUM_TYPE` or the member of an enum, which is an
+ *   `AST_NODE_TYPE_FIELD_ACCESS` of an `AST_NODE_TYPE_IDENTIFIER`, as in `DEFAULT :: Color.RED`.
  * - `AST_NODE_TYPE_CONTINUE_STATEMENT`: no children, or one `AST_NODE_TYPE_LABEL` when the
  *   statement names the loop to go on with. It ends the current pass of the innermost loop that it
  *   is in, or of the labeled loop, and goes on with the next one. The word is in the payload. It is
@@ -174,6 +178,15 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_DIVISION_ASSIGNMENT`: two children, the `AST_NODE_TYPE_IDENTIFIER` of the
  *   variable that is divided and gets the quotient, and the divisor, in that order. It is a
  *   statement of a procedure body.
+ * - `AST_NODE_TYPE_ENUM_LITERAL`: no children. A member of an enum whose enum is not written, as
+ *   in `.RED`, with the name of the member without the dot in the payload. The enum is the one
+ *   that the place the literal is given to has, which is for the target to tell. It is an
+ *   expression.
+ * - `AST_NODE_TYPE_ENUM_MEMBER`: no children. One member of an enum, with its name in the payload.
+ *   It is a child of an `AST_NODE_TYPE_ENUM_TYPE`.
+ * - `AST_NODE_TYPE_ENUM_TYPE`: one `AST_NODE_TYPE_ENUM_MEMBER` for each member, in the order of the
+ *   source, which is the order of their numbers, from zero. It is the value of an
+ *   `AST_NODE_TYPE_CONSTANT_DEFINITION` that defines an enum.
  * - `AST_NODE_TYPE_FIELD`: one child, the type of the field, which is an `AST_NODE_TYPE_TYPE_NAME`,
  *   an `AST_NODE_TYPE_POINTER_TYPE` or, for a field that is a struct of its own, an
  *   `AST_NODE_TYPE_STRUCT_TYPE`. The name of the
@@ -346,6 +359,14 @@ typedef struct {
         struct {
             Ast_Comparison_Operator operator;
         } comparison;
+        struct {
+            // Views the source text, like the other names. Without the dot.
+            Str name;
+        } enum_literal;
+        struct {
+            // Views the source text, like the other names.
+            Str name;
+        } enum_member;
         struct {
             // Views the source text, like the other names.
             Str name;

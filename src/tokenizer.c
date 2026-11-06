@@ -177,6 +177,8 @@ static Token_Type tokenizer_keyword_type(Str text) {
         return TOKEN_TYPE_KEYWORD_IF;
     } else if (str_equals(text, STR("else"))) {
         return TOKEN_TYPE_KEYWORD_ELSE;
+    } else if (str_equals(text, STR("enum"))) {
+        return TOKEN_TYPE_KEYWORD_ENUM;
     } else if (str_equals(text, STR("return"))) {
         return TOKEN_TYPE_KEYWORD_RETURN;
     } else if (str_equals(text, STR("struct"))) {

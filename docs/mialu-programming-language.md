@@ -34,6 +34,7 @@
   - [Fields](#fields)
   - [Structs in structs](#structs-in-structs)
   - [Structs in arrays](#structs-in-arrays)
+- [Enumerations](#enumerations)
 - [Pointers](#pointers)
   - [Taking an address](#taking-an-address)
   - [Following a pointer](#following-a-pointer)
@@ -108,7 +109,7 @@ Reserved words are categorized into used and unused keywords and literal words. 
 and
 break
 const continue
-else
+else enum
 for foreign
 if import in
 not
@@ -132,7 +133,7 @@ Mialu also defines the following unused keywords. They are reserved for possible
 abstract alias as async await
 case cast catch class
 defer delete distinct do dynamic
-enum extern
+extern
 final finally
 gen generate goto
 impl interface is
@@ -352,7 +353,7 @@ is_even :: proc(n: Int) Bool ->
     return n / 2 * 2 == n
 ```
 
-Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. `Int` is the only type that has an order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Strings cannot be compared.
+Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. `Int` is the only type that has an order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Strings cannot be compared.
 
 A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, see [Operators](#operators).
 
@@ -400,7 +401,7 @@ sum :: proc(a: Int, b: Int) Int ->
     return a + b
 ```
 
-A constant can also be a [struct](#structs), which is a type, and a string, which is written on its own line:
+A constant can also be a [struct](#structs) or an [enum](#enumerations), which are types, the [member of an enum](#enumerations), and a string, which is written on its own line:
 
 ```
 greeting :: "Hello, world"
@@ -985,6 +986,70 @@ create_array_of_struct_objects :: proc() Int ->
 
 An element is a struct object, so `persons[1]` can be assigned a whole struct object, a field of an element is read and assigned with `persons[1].age`, a [for statement](#for-statements) over the array goes through the struct objects, and a range of them can be copied.
 
+## Enumerations
+
+An enumeration, or enum, is a type with a fixed set of named members. It is a constant whose value is `enum ->` and below it the names of its members, one on each line, indented one level deeper:
+
+```
+Color :: enum ->
+    RED
+    GREEN
+    BLUE
+```
+
+`Color` is now a type, which can be written wherever a type is: for a variable, a parameter, a result, a field of a [struct](#structs), an element of an [array](#arrays) and what a [pointer](#pointers) points to. A name of a member does not have to be unique in the program, only in its enum, so another enum can have a `GREEN` as well. An enum has at least one member, and no two members have the same name.
+
+A member is written with the name of its enum and a dot, such as `Color.RED`:
+
+```
+create_enum_variable :: proc() Color ->
+    color := Color.RED
+    return color
+```
+
+A constant can be a member, which is written the same way. It is used like any constant, also in procedures that are above it:
+
+```
+DEFAULT_COLOR :: Color.RED
+
+return_enum_constant_outside_the_current_proc :: proc() Color ->
+    return DEFAULT_COLOR
+```
+
+The name of the enum can be left out where the enum is known, so that `.GREEN` is the member `GREEN` of the enum that the place wants. Those places are the type of a variable that has a written type, such as `color : Color = .BLUE`, what a variable, a field, an element or what a pointer points to is assigned, the result of a procedure that a `return` gives, a parameter that an argument is given to, a field of a struct literal, an element of an array literal, and what a member is compared with:
+
+```
+auto_deduce_enum_by_return_type :: proc() Color ->
+    return .GREEN
+
+enum_field_type_auto_detected_in_struct :: proc() Color ->
+    car_model := Car_Model {
+        color = .RED,
+        manufacturer = "Bord"
+    }
+    return car_model.color
+```
+
+Where nothing says the enum it is an error: `x := .RED` and `.RED == .GREEN` do not tell what `x` or the comparison are about, so one of them has to be written with the enum, as in `x := Color.RED`, or `x : Color = .RED`. A member that the enum does not have is an error as well.
+
+Two members of one enum are compared with `==` and `not=`, and are equal when they are the same member:
+
+```
+comparison_between_enum_values :: proc() Bool ->
+    return Color.RED == Color.BLUE
+```
+
+`comparison_between_enum_values` returns `false`. Members have no order, so `<`, `<=`, `>` and `>=` are errors, and so is a comparison of members of two enums. An enum is not converted to or from an `Int` or any other type. A variable of an enum type that is defined without a value is the first member of the enum, so `color : Color` is `Color.RED`, and so is a field of an enum type that a struct literal leaves out.
+
+Every member has a number, which is its place among the members, counted from 0, so `RED` is 0, `GREEN` is 1 and `BLUE` is 2. The number is only visible outside of the program, for example to JavaScript, see [WebAssembly](#webassembly). It is not a value that the language works with, so the order of the members is only a matter of how they are numbered there.
+
+Not everything can be done with an enum yet, which a later version of the language may allow:
+
+- An enum cannot be the type of a global variable, because its initial value is a literal, and no literal is a member.
+- A member has no value of its own, such as a number or a string, that is written in the definition.
+- A member cannot be the value of a variable without a type written, as above, and a member is not called or followed with `^`.
+
+
 ## Pointers
 
 A pointer is the address of a value: it says where the value is, so that the value can be read and changed by code that does not have the variable that holds it, such as another procedure. The type of a pointer is a caret, `^`, followed by the type of the value that it points to, so `^Int` is a pointer to an `Int`, `^Str` is a pointer to a `Str`, `^Bool` is a pointer to a `Bool` and `^Person` is a pointer to a [struct object](#struct-objects). What is pointed to can be a pointer again, with one more caret: `^^Int` is a pointer to a pointer to an `Int`. A pointer cannot point to an [array or an array slice](#arrays), because those are addresses of their elements already. The type of a pointer is written where any type is: for a variable, a parameter, a field of a struct, the elements of an array, as in `[const]^Int` and `[]^Int`, and the return type of a procedure. Spaces may be written after a caret, but the convention is none.
@@ -1389,11 +1454,14 @@ A variable whose address is taken, as in `%x` or `%x.field`, is not in locals, b
 A pointer to a procedure is one 32-bit integer (`i32`) as well, but it is not an address in the memory: it is the index of the procedure in the table of the module. The table has a slot for every function of the module, the imported ones too, put there by an element segment in the order of the function indexes, from slot 1 on. Slot 0 has no function, so the number 0, which is `nil` and what a pointer that was not given a value is, is the pointer that can be called to no effect but a trap. So the pointer to a procedure is its function index plus one, and the name of a procedure that is not called is `i32.const` of that. A call through a pointer is the arguments, then the pointer, and `call_indirect` with the type of the procedures that the pointer can point to and table 0. WebAssembly checks that the function in the slot has that type, and it traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the slot is empty, as it is for `nil`. The type is the type of the function of the first procedure that has the parameters and result of the pointer, and when there is none that comes first, a type of its own that the type section has after the types of the functions. The module has a table and an element segment only when the program uses a pointer to a procedure, which is when it has such a type or uses a procedure by its name without calling it. A pointer to a procedure can be kept in memory like any pointer, so `^^proc(Int) Int` and the elements of an array of them take 8 bytes each. JavaScript has no way to get a pointer to a procedure from the module, but it can pass the number of a slot, which is the function index plus one.
 
 
+An enum is one 32-bit integer (`i32`), which is the number of the member, counted from 0 in the order of the definition. So a parameter of an enum type is one WebAssembly parameter and a result is one result, which JavaScript passes and receives as a number, so `Color.GREEN` is 1. A member that is written `Color.GREEN` or `.GREEN` is `i32.const` of its number, which is worked out when the module is built, from the enum that the place of `.GREEN` wants. A constant that is a member is a function without parameters that returns the number, like a constant that is a string, and is exported under its name. Members are compared with `i32.eq` and `i32.ne`, and the default value of an enum type is `i32.const 0`. A field of an enum type is one value of a struct, and the elements of an array of enums and what a pointer to an enum points to take 8 bytes each, like those of any other type. An enum has no code of its own, as a struct has not, so it is not exported and is no function.
+
+
 A module has a memory only when the program has a string literal, which includes the value of a global variable, an array type, which includes the array literals and the array slices, or a pointer: a pointer type, `%` or `^`. The strings are at the start of the memory, and the stack of the arrays is after them. A procedure cannot be called `memory`, whether the module has one or not, because that is the name of the export.
 
 The target rejects a program that the parser accepts when:
 
-- a type, also the one of a global variable, is not `Int`, `Bool`, `Str`, a struct that is defined, a pointer to one of them, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
+- a type, also the one of a global variable, is not `Int`, `Bool`, `Str`, a struct or an enum that is defined, a pointer to one of them, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
 - a struct contains itself, or has a field that is an array or an array slice,
 - a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field,
 - a field is accessed on a value that is not a struct or a pointer to one, or does not exist, or is accessed through something that is not a variable, a parameter, an element of an array or a pointer,
@@ -1418,8 +1486,10 @@ The target rejects a program that the parser accepts when:
 - a call has a different number of arguments than the procedure has parameters, or an argument is not of the type of its parameter,
 - the call of a procedure without a return type is used as a value, and not as a statement,
 - an operand of an arithmetic operator is not an `Int`,
-- the operands of a comparison are not both `Int`, or not both `Bool` or both pointers of one type (or `nil`) for `==` and `not=`,
-- the value of a variable that is defined without a type is `nil`, which does not say the type of the variable,
+- the operands of a comparison are not both `Int`, or not both `Bool` or both pointers or both members of one enum (or `nil`) for `==` and `not=`,
+- the value of a variable that is defined without a type is `nil` or a member such as `.RED` that is written without its enum, which does not say the type of the variable,
+- a member such as `.RED` is where no enum is known, or the enum has no such member, or it is the member of a name that is not an enum,
+- the operands of a comparison are members of two enums, or members of an enum are compared with `<`, `<=`, `>` or `>=`,
 - an operand of `and`, `or` or `not` is not a `Bool`,
 - the condition of an if statement is not a `Bool`,
 - the first number or the end of a range is not an `Int`,
