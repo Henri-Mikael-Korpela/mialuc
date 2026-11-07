@@ -19,6 +19,18 @@
             "include": "#labels"
         },
         {
+            "include": "#type-definitions"
+        },
+        {
+            "include": "#procedure-types"
+        },
+        {
+            "include": "#array-brackets"
+        },
+        {
+            "include": "#type-positions"
+        },
+        {
             "include": "#reserved-words"
         },
         {
@@ -26,6 +38,9 @@
         },
         {
             "include": "#operators"
+        },
+        {
+            "include": "#primitive-types"
         }
     ],
     "repository": {
@@ -36,7 +51,9 @@
                     "name": "comment.line.documentation.mialu",
                     "match": "^[ \\t]*(///).*$",
                     "captures": {
-                        "1": { "name": "punctuation.definition.comment.mialu" }
+                        "1": {
+                            "name": "punctuation.definition.comment.mialu"
+                        }
                     }
                 },
                 {
@@ -50,7 +67,9 @@
             "name": "comment.line.double-slash.mialu",
             "match": "(//).*$",
             "captures": {
-                "1": { "name": "punctuation.definition.comment.mialu" }
+                "1": {
+                    "name": "punctuation.definition.comment.mialu"
+                }
             }
         },
         "strings": {
@@ -58,11 +77,15 @@
             "comment": "A string has no escape sequences, so a backslash is invalid, and it ends with its line.",
             "begin": "\"",
             "beginCaptures": {
-                "0": { "name": "punctuation.definition.string.begin.mialu" }
+                "0": {
+                    "name": "punctuation.definition.string.begin.mialu"
+                }
             },
             "end": "\"|(?=$)",
             "endCaptures": {
-                "0": { "name": "punctuation.definition.string.end.mialu" }
+                "0": {
+                    "name": "punctuation.definition.string.end.mialu"
+                }
             },
             "patterns": [
                 {
@@ -76,16 +99,24 @@
             "comment": "An attribute list: a # and one or more attributes, each of them a name between parentheses, as in #(static). It ends at the first thing that is not another attribute. The names are scoped as attribute names, so a theme can give them a color of their own, and they are not taken for calls or reserved words.",
             "begin": "#",
             "beginCaptures": {
-                "0": { "name": "punctuation.definition.attribute.mialu" }
+                "0": {
+                    "name": "punctuation.definition.attribute.mialu"
+                }
             },
             "end": "(?![ \\t]*\\()",
             "patterns": [
                 {
                     "match": "(\\()[ \\t]*([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(\\))",
                     "captures": {
-                        "1": { "name": "punctuation.definition.attribute.begin.mialu" },
-                        "2": { "name": "entity.other.attribute-name.mialu" },
-                        "3": { "name": "punctuation.definition.attribute.end.mialu" }
+                        "1": {
+                            "name": "punctuation.definition.attribute.begin.mialu"
+                        },
+                        "2": {
+                            "name": "entity.other.attribute-name.mialu"
+                        },
+                        "3": {
+                            "name": "punctuation.definition.attribute.end.mialu"
+                        }
                     }
                 }
             ]
@@ -160,8 +191,12 @@
                     "comment": "A break or a continue that names a statement, which is written without the @, as in break outer.",
                     "match": "\\b(break|continue)[ \\t]+([A-Za-z_][A-Za-z0-9_]*)",
                     "captures": {
-                        "1": { "name": "keyword.control.flow.mialu" },
-                        "2": { "name": "entity.name.label.mialu" }
+                        "1": {
+                            "name": "keyword.control.flow.mialu"
+                        },
+                        "2": {
+                            "name": "entity.name.label.mialu"
+                        }
                     }
                 }
             ]
@@ -245,6 +280,214 @@
                     "name": "constant.language.nil.mialu",
                     "comment": "The null pointer.",
                     "match": "\\bnil\\b"
+                }
+            ]
+        },
+        "primitive-types": {
+            "comment": "The primitive data types Bool, Int and Str, and the ones that are reserved for the future. They are colored wherever they are written, also when they are not in a place that the other rules recognize as a type.",
+            "patterns": [
+                {
+                    "name": "support.type.primitive.mialu",
+                    "match": "\\b(?:Bool|Int|Str|Byte|Rune|F32|F64|I8|I16|I32|I64|U8|U16|U32|U64)\\b"
+                }
+            ]
+        },
+        "type-definitions": {
+            "patterns": [
+                {
+                    "comment": "The name of a struct or an enum at its definition, as in Person :: struct ->. The type of the numbers of an enum, as in the Int of enum Int, is a type too.",
+                    "match": "^[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|foreign|import|enum|struct|union|match|case|type_info_of|const|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)[ \\t]*(::)(?=[ \\t]*(?:struct|enum)\\b)",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.type.mialu",
+                            "patterns": [
+                                {
+                                    "include": "#primitive-types"
+                                }
+                            ]
+                        },
+                        "2": {
+                            "name": "keyword.operator.type.mialu"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(enum)\\b[ \\t]+((?!(?:proc|return|if|else|for|in|break|continue|foreign|import|enum|struct|union|match|case|type_info_of|const|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "captures": {
+                        "1": {
+                            "name": "storage.type.enum.mialu"
+                        },
+                        "2": {
+                            "name": "entity.name.type.mialu",
+                            "patterns": [
+                                {
+                                    "include": "#primitive-types"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "comment": "The type that type_info_of gathers information about, as in type_info_of(Color).members.",
+                    "match": "\\b(type_info_of)\\b[ \\t]*(\\()[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|foreign|import|enum|struct|union|match|case|type_info_of|const|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.operator.type-info.mialu"
+                        },
+                        "3": {
+                            "name": "entity.name.type.mialu",
+                            "patterns": [
+                                {
+                                    "include": "#primitive-types"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "type-positions": {
+            "comment": "The places in which a name is a type: after the colon of a type separator, as in x: Int, after a ^ of a pointer type, after the ] of an array type or of a slice type, after the ) of a procedure, as its return type, and before the { of a struct literal, as in Person { age = 30 }. The colon of a slice, as in a[1:4], is inside brackets, where these rules are not in use, so its upper bound is not taken for a type. The colon rule comes before the operators, so it takes the colon as well.",
+            "patterns": [
+                {
+                    "match": "((?<!:):)(?![:=])([ \\t]*)((?!(?:proc|return|if|else|for|in|break|continue|foreign|import|enum|struct|union|match|case|type_info_of|const|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.operator.type.mialu"
+                        },
+                        "3": {
+                            "name": "entity.name.type.mialu",
+                            "patterns": [
+                                {
+                                    "include": "#primitive-types"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "match": "(?<=\\^)[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|foreign|import|enum|struct|union|match|case|type_info_of|const|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.type.mialu",
+                            "patterns": [
+                                {
+                                    "include": "#primitive-types"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "match": "(?<=\\])[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|foreign|import|enum|struct|union|match|case|type_info_of|const|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.type.mialu",
+                            "patterns": [
+                                {
+                                    "include": "#primitive-types"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "match": "(?<=\\))[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|foreign|import|enum|struct|union|match|case|type_info_of|const|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.type.mialu",
+                            "patterns": [
+                                {
+                                    "include": "#primitive-types"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "match": "\\b((?!(?:proc|return|if|else|for|in|break|continue|foreign|import|enum|struct|union|match|case|type_info_of|const|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)(?=[ \\t]*\\{)",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.type.mialu",
+                            "patterns": [
+                                {
+                                    "include": "#primitive-types"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "array-brackets": {
+            "comment": "A pair of brackets: the length of an array type, a subscript or the bounds of a slice. What is between them is an expression, so a name there is not a type, and the colon of a slice is not a type separator. The type after the closing bracket is found by the rules of the type positions.",
+            "begin": "\\[",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.section.brackets.mialu"
+                }
+            },
+            "end": "\\]",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.section.brackets.mialu"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#strings"
+                },
+                {
+                    "include": "#array-brackets"
+                },
+                {
+                    "include": "#reserved-words"
+                },
+                {
+                    "include": "#calls"
+                },
+                {
+                    "include": "#operators"
+                },
+                {
+                    "include": "#primitive-types"
+                }
+            ]
+        },
+        "procedure-types": {
+            "comment": "The parameters of a procedure, or of a pointer to one. A name that is not followed by a colon is a type, as in the Int of proc(Int) Int, and a name that is followed by one is the name of a parameter, as in the a of proc(a: Int) Int.",
+            "begin": "\\b(proc)\\b[ \\t]*(\\()",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.function.mialu"
+                }
+            },
+            "end": "\\)",
+            "patterns": [
+                {
+                    "include": "#procedure-types"
+                },
+                {
+                    "include": "#array-brackets"
+                },
+                {
+                    "include": "#type-positions"
+                },
+                {
+                    "match": "\\b((?!(?:proc|return|if|else|for|in|break|continue|foreign|import|enum|struct|union|match|case|type_info_of|const|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)\\b(?![ \\t]*:)",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.type.mialu",
+                            "patterns": [
+                                {
+                                    "include": "#primitive-types"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "include": "#operators"
                 }
             ]
         }

@@ -45,6 +45,15 @@
                     },
                     {
                         "scope": [
+                            "entity.name.type.mialu",
+                            "support.type.primitive.mialu"
+                        ],
+                        "settings": {
+                            "foreground": "#e5c07b"
+                        }
+                    },
+                    {
+                        "scope": [
                             "keyword.operator.address.mialu",
                             "keyword.operator.arithmetic.mialu",
                             "keyword.operator.assignment.compound.mialu",
