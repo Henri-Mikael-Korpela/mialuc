@@ -8,11 +8,13 @@ Compiler for the Mialu programming language. See the [language specification](do
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_C_COMPILER=gcc
 cmake --build build
 build/mialuc.exe run <source file>
-build/mialuc.exe build --target wasm <output file> <source file>
-build/mialuc.exe build --target wat <output file> <source file>
+build/mialuc.exe run --target x64-win32 <source file>
+build/mialuc.exe build --target wasm -o <output file> <source file>
+build/mialuc.exe build --target wat -o <output file> <source file>
+build/mialuc.exe build --target x64-win32 -o <output file> <source file>
 ```
 
-`run` prints the tokens, which include the comments (`//` and `///`, see comments in the specification), and the syntax tree of a source file, and then resolves its names (see scope resolution in the specification). `build` writes a program for a target: `wasm` is a WebAssembly binary module, and `wat` is the same module in the WebAssembly text format. See [build-wasm.ps1](build-wasm.ps1) and [run.ps1](run.ps1).
+`run` prints the tokens, which include the comments (`//` and `///`, see comments in the specification), and the syntax tree of a source file, and then resolves its names (see scope resolution in the specification). `build` writes a program for a target: `wasm` is a WebAssembly binary module, and `wat` is the same module in the WebAssembly text format, and `x64-win32` is an executable for Windows on x64, see [test-code/x64](test-code/x64). `run --target x64-win32` builds that executable, runs it and ends with its exit code. See [build-wasm.ps1](build-wasm.ps1) and [run.ps1](run.ps1).
 
 ## Playground
 

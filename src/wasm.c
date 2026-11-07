@@ -77,6 +77,7 @@ typedef struct {
 typedef enum {
     WASM_VALUE_TYPE_ARRAY,
     WASM_VALUE_TYPE_BOOL,
+    WASM_VALUE_TYPE_C_STR,
     WASM_VALUE_TYPE_ENUM,
     WASM_VALUE_TYPE_ENUM_LITERAL,
     WASM_VALUE_TYPE_INT,
@@ -272,8 +273,12 @@ static bool            wasm_build_code_section_body_return    (Wasm_Builder *bui
 static bool            wasm_build_code_section_body_variable  (Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index variable);
+static bool            wasm_expression_is_accepted            (Wasm_Builder const *builder,
+                                                               Wasm_Type target,
+                                                               Ast_Node_Index expression);
 static void            wasm_build_code_section_body_string    (Wasm_Builder *builder,
-                                                               Ast_Node_Index literal);
+                                                               Ast_Node_Index literal,
+                                                               bool is_c_str);
 static void            wasm_build_data_section                (Wasm_Builder *builder);
 static bool            wasm_build_export_section              (Wasm_Builder *builder,
                                                                Ast_Node_Index module,
@@ -290,6 +295,7 @@ static bool            wasm_check_signatures                  (Wasm_Builder *bui
                                                                size_t definition_count);
 static size_t          wasm_children_count                    (Wasm_Builder const *builder,
                                                                Ast_Node_Index parent);
+static bool            wasm_check_foreign_targets             (Wasm_Builder *builder);
 static bool            wasm_check_globals                     (Wasm_Builder *builder);
 static Ast_Node_Index  wasm_constant_find                     (Wasm_Builder const *builder,
                                                                Ast_Node_Index from);
@@ -314,6 +320,9 @@ static size_t          wasm_global_slot_index                 (Wasm_Builder cons
 static size_t          wasm_global_slot_count                 (Wasm_Builder const *builder);
 static void            wasm_build_global_section              (Wasm_Builder *builder);
 static bool            wasm_data_measure                      (Wasm_Builder *builder);
+static Wasm_Type       wasm_literal_expected_type             (Wasm_Builder const *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index literal);
 static Ast_Node_Index  wasm_enum_literal_expected             (Wasm_Builder const *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index literal);
@@ -602,6 +611,7 @@ static Ast_Node_Index  wasm_parent_find                       (Wasm_Builder cons
                                                                 Ast_Node_Index child);
 static bool            wasm_call_is_built_in                  (Wasm_Builder const *builder,
                                                                 Ast_Node_Index call);
+static size_t          wasm_string_size_bytes                 (Ast_Node const *literal);
 static size_t          wasm_string_address                    (Wasm_Builder const *builder,
                                                                Ast_Node_Index literal);
 static Wasm_Field_Path wasm_field_path                        (Wasm_Builder const *builder,
@@ -656,8 +666,12 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
 
     // The types are checked first, so that the sections below can rely on every type being known.
     // The size of the data is needed before the code is written, because the memory has to be
-    // big enough for it and comes before the code.
-    bool is_ok = wasm_data_measure(&builder);
+    // big enough for it and comes before the code. Foreign procedures that JavaScript cannot
+    // provide are rejected before anything counts on all of them being imported.
+    bool is_ok = wasm_check_foreign_targets(&builder);
+    if (is_ok) {
+        is_ok = wasm_data_measure(&builder);
+    }
     if (is_ok) {
         is_ok = wasm_check_structs(&builder);
     }
@@ -724,6 +738,40 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
 }
 
 /**
+ * Checks that every foreign procedure is declared in a `foreign js ->` block, because the module
+ * imports its foreign procedures from JavaScript and there is no C library to import from, and
+ * that the program does not call `str_to_c_str`, which the target does not have. Returns false after
+ * it recorded an error.
+ */
+static bool wasm_check_foreign_targets(Wasm_Builder *builder) {
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        if (builder->nodes[i].node_type == AST_NODE_TYPE_CALL &&
+            builder->bindings[i].kind == SEMANTIC_BINDING_KIND_NONE &&
+            str_equals(builder->nodes[i].payload.call.name, STR("str_to_c_str"))) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_BUILT_IN_UNSUPPORTED,
+                             builder->nodes[i].payload.call.name);
+        }
+    }
+
+    Ast_Node_Index definition =
+        wasm_constant_find(builder, builder->nodes[builder->module].first_child);
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
+        if (wasm_constant_is_foreign(builder, definition)) {
+            Ast_Node_Index procedure = builder->nodes[definition].first_child;
+            if (ast_procedure_foreign_target(builder->nodes, procedure) !=
+                AST_FOREIGN_TARGET_JS) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED,
+                                 builder->nodes[definition].payload.constant_definition.name);
+            }
+        }
+        definition = wasm_constant_find(builder, builder->nodes[definition].next_sibling);
+    }
+
+    return true;
+}
+
+/**
  * Measures the bytes of all the string literals, and decides from them and from the arrays whether
  * the module has a memory, and how big it is. The data is at the start of the memory, and the stack
  * of the arrays is after it, where it grows down from the end of the memory. Returns false after it
@@ -759,7 +807,7 @@ static bool wasm_data_measure(Wasm_Builder *builder) {
             has_literal = true;
             // Each literal is shorter than 4 GiB and there are fewer than 4 Gi of them, so the
             // sum fits in 64 bits.
-            size_bytes += builder->nodes[i].payload.string_literal.text.length;
+            size_bytes += wasm_string_size_bytes(&builder->nodes[i]);
         } else if (builder->nodes[i].node_type == AST_NODE_TYPE_ARRAY_TYPE) {
             has_array_type = true;
         } else if (builder->nodes[i].node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
@@ -1256,7 +1304,7 @@ static void wasm_build_global_section(Wasm_Builder *builder) {
             } else if (value_type.kind == WASM_VALUE_TYPE_STR) {
                 for (; scanned_end < value; scanned_end += 1) {
                     if (builder->nodes[scanned_end].node_type == AST_NODE_TYPE_STRING_LITERAL) {
-                        address += builder->nodes[scanned_end].payload.string_literal.text.length;
+                        address += wasm_string_size_bytes(&builder->nodes[scanned_end]);
                     }
                 }
                 size_t length_bytes = value_node->payload.string_literal.text.length;
@@ -1445,8 +1493,10 @@ static void wasm_build_import_section(Wasm_Builder *builder, Ast_Node_Index modu
     Ast_Node_Index child = builder->nodes[module].first_child;
     // Every child is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < builder->node_count && child != AST_NODE_INDEX_NONE; i += 1) {
-        if (builder->nodes[child].node_type == AST_NODE_TYPE_FOREIGN_IMPORT) {
-            module_name = builder->nodes[child].payload.foreign_import.module_name;
+        // The foreign procedures of the module are all `js`, see `wasm_check_foreign_targets`.
+        if (builder->nodes[child].node_type == AST_NODE_TYPE_FOREIGN_IMPORT &&
+            builder->nodes[child].payload.foreign_import.target == AST_FOREIGN_TARGET_JS) {
+            module_name = ast_foreign_import_name(&builder->nodes[child]);
             break;
         }
         child = builder->nodes[child].next_sibling;
@@ -1523,7 +1573,9 @@ static void wasm_build_data_section(Wasm_Builder *builder) {
         if (builder->nodes[i].node_type == AST_NODE_TYPE_STRING_LITERAL) {
             Str text = builder->nodes[i].payload.string_literal.text;
             wasm_write_bytes(&builder->writer, (byte const *)text.bytes, text.length);
-            written_bytes += text.length;
+            // The zero that ends the string for C, see `wasm_string_size_bytes`.
+            wasm_write_byte(&builder->writer, 0);
+            written_bytes += wasm_string_size_bytes(&builder->nodes[i]);
         }
     }
 
@@ -1693,7 +1745,7 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
         // A constant string has no locals. The string is the result, and is left on the stack for
         // the `end` to return.
         wasm_write_unsigned(&builder->writer, 0);
-        wasm_build_code_section_body_string(builder, value);
+        wasm_build_code_section_body_string(builder, value, false);
     } else if (builder->nodes[value].node_type == AST_NODE_TYPE_FIELD_ACCESS) {
         // The same for the number of the member of an enum, which was checked.
         wasm_write_unsigned(&builder->writer, 0);
@@ -1739,10 +1791,13 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
 }
 
 /**
- * Writes the instructions that push the string of `literal`: its address and then its length.
- * The address is where the string is in the data section, see `wasm_string_address`.
+ * Writes the instructions that push the string of `literal`: its address and then its length, or
+ * only its address when `is_c_str` is set, because a `C_Str` has no length: the zero after the
+ * bytes ends it. The address is where the string is in the data section, see
+ * `wasm_string_address`.
  */
-static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_Index literal) {
+static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_Index literal,
+                                                bool is_c_str) {
     assert(literal < builder->node_count);
     assert(builder->nodes[literal].node_type == AST_NODE_TYPE_STRING_LITERAL);
     assert(builder->has_memory);
@@ -1753,7 +1808,9 @@ static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_
 
     // Both are below 2 GiB, because `wasm_data_measure` checked the total.
     wasm_write_i32_const(&builder->writer, (int64_t)address);
-    wasm_write_i32_const(&builder->writer, (int64_t)length_bytes);
+    if (is_c_str == false) {
+        wasm_write_i32_const(&builder->writer, (int64_t)length_bytes);
+    }
 }
 
 /**
@@ -2185,7 +2242,7 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
         Ast_Node_Index type = wasm_signature_parameter_type(builder, callee, i);
         Wasm_Type parameter_type = wasm_type_of_node(builder, type);
         // An array is passed as an array slice, see `wasm_array_decay`.
-        if (wasm_type_accepts(parameter_type, wasm_expression_type(builder, argument)) == false) {
+        if (wasm_expression_is_accepted(builder, parameter_type, argument) == false) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         }
         argument = builder->nodes[argument].next_sibling;
@@ -2223,7 +2280,10 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
     // written already, so every name in it is known.
     Str return_type_name = builder->nodes[procedure].payload.procedure.return_type;
     Wasm_Type return_type = wasm_type_of_name(builder, return_type_name);
-    if (wasm_type_equals(wasm_expression_type(builder, value), return_type) == false) {
+    bool is_c_str_literal = return_type.kind == WASM_VALUE_TYPE_C_STR &&
+                            builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL;
+    if (is_c_str_literal == false &&
+        wasm_type_equals(wasm_expression_type(builder, value), return_type) == false) {
         Str name = builder->nodes[definition].payload.constant_definition.name;
         return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
     }
@@ -2316,7 +2376,7 @@ static bool wasm_build_code_section_body_variable_assignment(Wasm_Builder *build
         if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
             return false;
         }
-        if (wasm_type_accepts(variable_type, wasm_expression_type(builder, value)) == false) {
+        if (wasm_expression_is_accepted(builder, variable_type, value) == false) {
             return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, target_name);
         }
         if (variable_type.kind == WASM_VALUE_TYPE_SLICE) {
@@ -2585,7 +2645,7 @@ static bool wasm_build_code_section_body_variable(Wasm_Builder *builder,
         // The value was written, so every name in it is known. It must be of the type of the
         // variable, which is the type that was written when the definition has one, and deduced
         // otherwise.
-        if (wasm_type_accepts(variable_type, wasm_expression_type(builder, value)) == false) {
+        if (wasm_expression_is_accepted(builder, variable_type, value) == false) {
             Str name = builder->nodes[variable].payload.variable_definition.name;
             return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, name);
         }
@@ -3411,7 +3471,11 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             wasm_write_signed(&builder->writer, node->payload.integer_literal.value);
             break;
         case AST_NODE_TYPE_STRING_LITERAL:
-            wasm_build_code_section_body_string(builder, current);
+            // A literal where a `C_Str` is wanted is only the address of its bytes.
+            wasm_build_code_section_body_string(
+                builder, current,
+                wasm_literal_expected_type(builder, definition, current).kind ==
+                    WASM_VALUE_TYPE_C_STR);
             break;
         case AST_NODE_TYPE_ARRAY_LITERAL:
             if (wasm_build_code_section_body_array_literal(builder, definition, current) ==
@@ -4921,6 +4985,7 @@ static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
 
     switch (target.kind) {
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_C_STR:
     case WASM_VALUE_TYPE_ENUM:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_PROCEDURE:
@@ -5123,9 +5188,7 @@ static Wasm_Type wasm_struct_literal_type(Wasm_Builder const *builder, Ast_Node_
 
 /**
  * Returns the enum that the member `literal`, an `AST_NODE_TYPE_ENUM_LITERAL` such as `.RED`, is
- * a member of, which is the one that the place it is in wants: the type of the variable that it is
- * the value of, of what it is assigned to, of the result of the procedure it is returned from, of
- * the parameter or the field or the element that it is given to, or of what it is compared with.
+ * a member of, which is the one that the place it is in wants, see `wasm_literal_expected_type`.
  * Returns `AST_NODE_INDEX_NONE` when the place does not say, which is an error. `definition` is the
  * constant that the literal is in.
  */
@@ -5134,9 +5197,28 @@ static Ast_Node_Index wasm_enum_literal_expected(Wasm_Builder const *builder,
                                                  Ast_Node_Index literal) {
     assert(builder->nodes[literal].node_type == AST_NODE_TYPE_ENUM_LITERAL);
 
+    Wasm_Type expected = wasm_literal_expected_type(builder, definition, literal);
+    if (expected.kind != WASM_VALUE_TYPE_ENUM) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return expected.definition;
+}
+
+/**
+ * Returns the type that the place of `literal`, an enum literal such as `.RED` or a string literal,
+ * wants: the type of the variable that it is the value of, of what it is assigned to, of the result
+ * of the procedure it is returned from, of the parameter or the field or the element that it is
+ * given to, or of what it is compared with. Returns a type of the kind `WASM_VALUE_TYPE_NONE` when
+ * the place does not say. `definition` is the constant that the literal is in.
+ */
+static Wasm_Type wasm_literal_expected_type(Wasm_Builder const *builder,
+                                            Ast_Node_Index definition, Ast_Node_Index literal) {
+    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_ENUM_LITERAL ||
+           builder->nodes[literal].node_type == AST_NODE_TYPE_STRING_LITERAL);
+
     Ast_Node_Index parent = wasm_parent_find(builder, literal);
     if (parent == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
+        return wasm_type_make(WASM_VALUE_TYPE_NONE);
     }
 
     Ast_Node const *parent_node = &builder->nodes[parent];
@@ -5211,10 +5293,7 @@ static Ast_Node_Index wasm_enum_literal_expected(Wasm_Builder const *builder,
         break;
     }
 
-    if (expected.kind != WASM_VALUE_TYPE_ENUM) {
-        return AST_NODE_INDEX_NONE;
-    }
-    return expected.definition;
+    return expected;
 }
 
 /**
@@ -5238,8 +5317,8 @@ static bool wasm_enum_member_write(Wasm_Builder *builder, Ast_Node_Index enum_no
 }
 
 /**
- * Returns the type that `type_name` stands for, which is `Bool`, `Int`, `Str` or the name of a
- * struct, or a type of the kind `WASM_VALUE_TYPE_NONE` if the target does not have a type of that
+ * Returns the type that `type_name` stands for, which is `Bool`, `C_Str`, `Int`, `Str` or the name
+ * of a struct, or a type of the kind `WASM_VALUE_TYPE_NONE` if the target does not have a type of that
  * name. The text can have the carets of a pointer type before the name, such as `^Int`, which is
  * how a return type is kept, see `Ast_Node.payload.procedure`, and then the type is a pointer to
  * that. Spaces after a caret are skipped, because the source can have them.
@@ -5282,7 +5361,7 @@ static Wasm_Type wasm_type_of_name(Wasm_Builder const *builder, Str type_name) {
 
 /**
  * Returns the type that the name `type_name` stands for, which has no carets before it: `Bool`,
- * `Int`, `Str` or the name of a struct, or a type of the kind `WASM_VALUE_TYPE_NONE` if the target
+ * `C_Str`, `Int`, `Str` or the name of a struct, or a type of the kind `WASM_VALUE_TYPE_NONE` if the target
  * does not have a type of that name.
  */
 static Wasm_Type wasm_type_of_plain_name(Wasm_Builder const *builder, Str type_name) {
@@ -5291,6 +5370,9 @@ static Wasm_Type wasm_type_of_plain_name(Wasm_Builder const *builder, Str type_n
 
     if (str_equals(type_name, STR("Bool"))) {
         return wasm_type_make(WASM_VALUE_TYPE_BOOL);
+    }
+    if (str_equals(type_name, STR("C_Str"))) {
+        return wasm_type_make(WASM_VALUE_TYPE_C_STR);
     }
     if (str_equals(type_name, STR("Int"))) {
         return wasm_type_make(WASM_VALUE_TYPE_INT);
@@ -5524,6 +5606,7 @@ static size_t wasm_type_slot_count(Wasm_Builder const *builder, Wasm_Type type) 
     switch (type.kind) {
     case WASM_VALUE_TYPE_ARRAY:
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_C_STR:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_ENUM:
     case WASM_VALUE_TYPE_ENUM_LITERAL:
@@ -5562,6 +5645,7 @@ static byte wasm_type_slot_kind(Wasm_Builder const *builder, Wasm_Type type, siz
         return WASM_TYPE_I64;
     case WASM_VALUE_TYPE_ARRAY:
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_C_STR:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_POINTER:
     case WASM_VALUE_TYPE_PROCEDURE:
@@ -5684,6 +5768,7 @@ static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
     case WASM_VALUE_TYPE_SLICE:
         return wasm_type_elements_equal(first, second);
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_C_STR:
     case WASM_VALUE_TYPE_ENUM_LITERAL:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_NIL:
@@ -5695,6 +5780,22 @@ static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
     // Unreachable: every kind is handled above.
     assert(false);
     return false;
+}
+
+/**
+ * Returns whether the value of `expression` can be given where `target` is wanted: a value of the
+ * same type, see `wasm_type_accepts`, or a string literal where a `C_Str` is wanted, which is the
+ * address of its bytes, see `wasm_string_size_bytes`. No other `Str` is accepted there, because
+ * only a literal is known to be followed by a zero.
+ */
+static bool wasm_expression_is_accepted(Wasm_Builder const *builder, Wasm_Type target,
+                                        Ast_Node_Index expression) {
+    if (wasm_type_accepts(target, wasm_expression_type(builder, expression))) {
+        return true;
+    }
+
+    return target.kind == WASM_VALUE_TYPE_C_STR &&
+           builder->nodes[expression].node_type == AST_NODE_TYPE_STRING_LITERAL;
 }
 
 /**
@@ -6545,7 +6646,7 @@ static size_t wasm_type_info_address(Wasm_Builder const *builder, Ast_Node_Index
     size_t address = 0;
     for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
         if (builder->nodes[node].node_type == AST_NODE_TYPE_STRING_LITERAL) {
-            address += builder->nodes[node].payload.string_literal.text.length;
+            address += wasm_string_size_bytes(&builder->nodes[node]);
         }
     }
     address = (address + WASM_ELEMENT_SIZE_BYTES - 1) / WASM_ELEMENT_SIZE_BYTES *
@@ -6645,8 +6746,20 @@ static bool wasm_call_is_built_in(Wasm_Builder const *builder, Ast_Node_Index ca
 }
 
 /**
- * Returns the address in the data of the string literal `literal`, which is the length of the
- * string literals before it, because the data has them in the order of the nodes.
+ * Returns the number of bytes that the string literal `literal` takes in the data: its bytes and
+ * one zero after them. The zero is there for `C_Str`, which ends where a zero is, so that a literal
+ * is a `C_Str` where one is wanted without a copy. A `Str` has its length and ignores the zero.
+ */
+static size_t wasm_string_size_bytes(Ast_Node const *literal) {
+    assert(literal->node_type == AST_NODE_TYPE_STRING_LITERAL);
+
+    return literal->payload.string_literal.text.length + 1;
+}
+
+/**
+ * Returns the address in the data of the string literal `literal`, which is the size of the
+ * string literals before it, see `wasm_string_size_bytes`, because the data has them in the order
+ * of the nodes.
  */
 static size_t wasm_string_address(Wasm_Builder const *builder, Ast_Node_Index literal) {
     assert(literal < builder->node_count);
@@ -6655,7 +6768,7 @@ static size_t wasm_string_address(Wasm_Builder const *builder, Ast_Node_Index li
     size_t address = 0;
     for (Ast_Node_Index node = 0; node < literal; node += 1) {
         if (builder->nodes[node].node_type == AST_NODE_TYPE_STRING_LITERAL) {
-            address += builder->nodes[node].payload.string_literal.text.length;
+            address += wasm_string_size_bytes(&builder->nodes[node]);
         }
     }
 

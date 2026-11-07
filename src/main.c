@@ -11,11 +11,13 @@
 #include <mialu/ast.h>
 #include <mialu/common_types.h>
 #include <mialu/parser.h>
+#include <mialu/process.h>
 #include <mialu/semantic.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
 #include <mialu/wasm-text.h>
 #include <mialu/wasm.h>
+#include <mialu/x64.h>
 
 enum {
     // Larger sources are rejected. The tokenizer works on one buffer that is allocated once at
@@ -43,16 +45,18 @@ typedef enum {
 } Command_Mode;
 
 // Alphabetical, because nothing depends on the order. `COMMAND_TARGET_NONE` is for the modes
-// that do not write a program.
+// that do not write a program, and for `run` without a target, which shows the tokens and the
+// syntax tree.
 typedef enum {
     COMMAND_TARGET_NONE,
     COMMAND_TARGET_WASM,
     COMMAND_TARGET_WAT,
+    COMMAND_TARGET_X64_WIN32,
 } Command_Target;
 
 /**
- * What the command line asks for. `output_path` is NULL, and `target` is `COMMAND_TARGET_NONE`,
- * unless the mode is build. The paths are the C strings of `argv`, because they are only handed
+ * What the command line asks for. `output_path` is NULL unless the mode is build, and `target` is
+ * `COMMAND_TARGET_NONE` unless the mode is build or the mode is run with a target. The paths are the C strings of `argv`, because they are only handed
  * to `fopen`.
  */
 typedef struct {
@@ -78,9 +82,13 @@ typedef struct {
 } Buffers;
 
 static Command      main_command_parse                     (Array_Slice args);
+static Command_Target main_command_target_parse            (char const *name);
 static int32_t      main_run_command                       (Command command,
                                                             Buffers const *buffers);
 static int32_t      main_run_command_build                 (Command command, Buffers const *buffers,
+                                                            Str source, Parse_Result parse_result,
+                                                            Semantic_Result semantic_result);
+static int32_t      main_run_command_build_x64             (Command command, Buffers const *buffers,
                                                             Str source, Parse_Result parse_result,
                                                             Semantic_Result semantic_result);
 static void         main_run_command_print_tokens          (Array_Slice tokens);
@@ -94,6 +102,8 @@ static void         main_run_command_report_tokenize_error (char const *path, St
                                                             Tokenize_Result result);
 static void         main_run_command_report_wasm_error     (char const *path, Str source,
                                                             Wasm_Build_Result result);
+static void         main_run_command_report_x64_error      (char const *path, Str source,
+                                                            X64_Build_Result result);
 static void         main_run_command_report_wasm_text_error(char const *path,
                                                             Wasm_Text_Result result);
 static bool         main_run_command_write_file            (char const *path, Array_Slice bytes);
@@ -101,7 +111,8 @@ static Str_Position main_subject_position                  (Str source, Str subj
 
 /**
  * Has two modes. `run` reads a source file, tokenizes, parses and analyzes it, and prints the
- * tokens and the syntax tree. `build` does the same silently and writes the program for a target.
+ * tokens and the syntax tree, or, with a target that can run on this machine, builds the program
+ * and runs it. `build` does the same silently and writes the program for a target.
  * Everything that allocates is in `main` on purpose, so that the buffers are freed in one place on
  * every path.
  */
@@ -113,9 +124,11 @@ int main(int argc, char *argv[]) {
     if (command.mode == COMMAND_MODE_INVALID) {
         fprintf(stderr,
                 "Usage: %s run <source file>\n"
-                "       %s build --target wasm <output file> <source file>\n"
-                "       %s build --target wat <output file> <source file>\n",
-                argv[0], argv[0], argv[0]);
+                "       %s run --target x64-win32 <source file>\n"
+                "       %s build --target wasm -o <output file> <source file>\n"
+                "       %s build --target wat -o <output file> <source file>\n"
+                "       %s build --target x64-win32 -o <output file> <source file>\n",
+                argv[0], argv[0], argv[0], argv[0], argv[0]);
         return 2;
     }
 
@@ -160,10 +173,14 @@ int main(int argc, char *argv[]) {
  * Understands the command line:
  *
  *     mialuc run <source file>
- *     mialuc build --target wasm <output file> <source file>
- *     mialuc build --target wat <output file> <source file>
+ *     mialuc run --target x64-win32 <source file>
+ *     mialuc build --target wasm -o <output file> <source file>
+ *     mialuc build --target wat -o <output file> <source file>
+ *     mialuc build --target x64-win32 -o <output file> <source file>
  *
- * Returns a command with mode `COMMAND_MODE_INVALID` when it is anything else.
+ * The output file of a build can also be written without `-o`, right after the target, which is
+ * how it was written before there was a flag for it. Returns a command with mode
+ * `COMMAND_MODE_INVALID` when it is anything else.
  */
 static Command main_command_parse(Array_Slice args) {
     assert(args.elements != NULL);
@@ -182,36 +199,51 @@ static Command main_command_parse(Array_Slice args) {
     }
 
     if (strcmp(argv[1], "run") == 0) {
-        if (args.length != 3) {
-            return invalid;
+        if (args.length == 3) {
+            return (Command){
+                .source_path = argv[2],
+                .output_path = NULL,
+                .mode = COMMAND_MODE_RUN,
+                .target = COMMAND_TARGET_NONE,
+            };
         }
-        return (Command){
-            .source_path = argv[2],
-            .output_path = NULL,
-            .mode = COMMAND_MODE_RUN,
-            .target = COMMAND_TARGET_NONE,
-        };
+        // Only a program for the processor can be run, and it is not run in WebAssembly.
+        if (args.length == 5 && strcmp(argv[2], "--target") == 0 &&
+            main_command_target_parse(argv[3]) == COMMAND_TARGET_X64_WIN32) {
+            return (Command){
+                .source_path = argv[4],
+                .output_path = NULL,
+                .mode = COMMAND_MODE_RUN,
+                .target = COMMAND_TARGET_X64_WIN32,
+            };
+        }
+        return invalid;
     }
 
     if (strcmp(argv[1], "build") == 0) {
-        if (args.length != 6) {
+        if (args.length != 6 && args.length != 7) {
             return invalid;
         }
         if (strcmp(argv[2], "--target") != 0) {
             return invalid;
         }
-
-        // `wat` is the WebAssembly text format, which is the same module as `wasm` in a form
-        // that a person can read.
-        Command_Target target = COMMAND_TARGET_NONE;
-        if (strcmp(argv[3], "wasm") == 0) {
-            target = COMMAND_TARGET_WASM;
-        } else if (strcmp(argv[3], "wat") == 0) {
-            target = COMMAND_TARGET_WAT;
-        } else {
+        Command_Target target = main_command_target_parse(argv[3]);
+        if (target == COMMAND_TARGET_NONE) {
             return invalid;
         }
 
+        // The output file is after `-o`, or directly after the target.
+        if (args.length == 7) {
+            if (strcmp(argv[4], "-o") != 0) {
+                return invalid;
+            }
+            return (Command){
+                .source_path = argv[6],
+                .output_path = argv[5],
+                .mode = COMMAND_MODE_BUILD,
+                .target = target,
+            };
+        }
         return (Command){
             .source_path = argv[5],
             .output_path = argv[4],
@@ -221,6 +253,26 @@ static Command main_command_parse(Array_Slice args) {
     }
 
     return invalid;
+}
+
+/**
+ * Returns the target that `name` stands for, or `COMMAND_TARGET_NONE` if there is none. `wat` is
+ * the WebAssembly text format, which is the same module as `wasm` in a form that a person can
+ * read, and `x64-win32` is a program for Windows on x64.
+ */
+static Command_Target main_command_target_parse(char const *name) {
+    assert(name != NULL);
+
+    if (strcmp(name, "wasm") == 0) {
+        return COMMAND_TARGET_WASM;
+    }
+    if (strcmp(name, "wat") == 0) {
+        return COMMAND_TARGET_WAT;
+    }
+    if (strcmp(name, "x64-win32") == 0) {
+        return COMMAND_TARGET_X64_WIN32;
+    }
+    return COMMAND_TARGET_NONE;
 }
 
 /**
@@ -249,7 +301,10 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     }
     assert(result.tokens.length <= TOKEN_COUNT_MAX);
 
-    if (command.mode == COMMAND_MODE_RUN) {
+    // Run without a target shows what the front end made. With one it runs the program, whose
+    // output is the only output.
+    bool is_inspection = command.mode == COMMAND_MODE_RUN && command.target == COMMAND_TARGET_NONE;
+    if (is_inspection) {
         main_run_command_print_tokens(result.tokens);
     }
 
@@ -263,7 +318,7 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
 
     // The tree is printed before it is analyzed, so that a program with a bad name can be looked
     // at.
-    if (command.mode == COMMAND_MODE_RUN) {
+    if (is_inspection) {
         printf("\n");
         ast_print(parse_result.nodes, parse_result.root);
     }
@@ -282,7 +337,10 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
         assert(false);
         return 1;
     case COMMAND_MODE_RUN:
-        return 0;
+        if (is_inspection) {
+            return 0;
+        }
+        return main_run_command_build_x64(command, buffers, source, parse_result, semantic_result);
     }
 
     assert(false);
@@ -301,6 +359,11 @@ static int32_t main_run_command_build(Command command, Buffers const *buffers, S
     assert(parse_result.status == PARSE_STATUS_OK);
     assert(semantic_result.status == SEMANTIC_STATUS_OK);
 
+    if (command.target == COMMAND_TARGET_X64_WIN32) {
+        return main_run_command_build_x64(command, buffers, source, parse_result,
+                                          semantic_result);
+    }
+
     char const *path = command.source_path;
     Wasm_Build_Result build_result = wasm_build(parse_result.nodes, semantic_result.bindings,
                                                 parse_result.root, buffers->output);
@@ -312,6 +375,7 @@ static int32_t main_run_command_build(Command command, Buffers const *buffers, S
     Array_Slice output = build_result.bytes;
     switch (command.target) {
     case COMMAND_TARGET_NONE:
+    case COMMAND_TARGET_X64_WIN32:
         assert(false);
         return 1;
     case COMMAND_TARGET_WASM:
@@ -333,6 +397,57 @@ static int32_t main_run_command_build(Command command, Buffers const *buffers, S
         return 1;
     }
     return 0;
+}
+
+/**
+ * Builds the parsed and analyzed program for Windows on x64. A build writes the executable file to
+ * the output file, and a run writes it to a temporary file and runs it, and its exit code is the
+ * exit code of the compiler. Returns the exit code, which is 0 on success.
+ */
+static int32_t main_run_command_build_x64(Command command, Buffers const *buffers, Str source,
+                                          Parse_Result parse_result,
+                                          Semantic_Result semantic_result) {
+    assert(command.target == COMMAND_TARGET_X64_WIN32);
+    assert(parse_result.status == PARSE_STATUS_OK);
+    assert(semantic_result.status == SEMANTIC_STATUS_OK);
+
+    char const *path = command.source_path;
+    X64_Build_Result build_result = x64_build(parse_result.nodes, semantic_result.bindings,
+                                              parse_result.root, buffers->output);
+    if (build_result.status != X64_BUILD_STATUS_OK) {
+        main_run_command_report_x64_error(path, source, build_result);
+        return 1;
+    }
+
+    if (command.mode == COMMAND_MODE_BUILD) {
+        if (main_run_command_write_file(command.output_path, build_result.bytes) == false) {
+            fprintf(stderr, "%s: cannot write file.\n", command.output_path);
+            return 1;
+        }
+        return 0;
+    }
+
+    assert(command.mode == COMMAND_MODE_RUN);
+    // The program writes through the C library, which buffers, and the compiler may too.
+    (void)fflush(stdout);
+    Process_Result process_result = process_run_executable(build_result.bytes);
+    switch (process_result.status) {
+    case PROCESS_STATUS_FILE_FAILED:
+        fprintf(stderr, "%s: cannot write the program to the directory for temporary files.\n",
+                path);
+        return 1;
+    case PROCESS_STATUS_OK:
+        return process_result.exit_code;
+    case PROCESS_STATUS_START_FAILED:
+        fprintf(stderr, "%s: the system cannot start the program.\n", path);
+        return 1;
+    case PROCESS_STATUS_UNSUPPORTED:
+        fprintf(stderr, "%s: running a program is only supported on Windows.\n", path);
+        return 1;
+    }
+
+    assert(false);
+    return 1;
 }
 
 /**
@@ -677,6 +792,85 @@ static void main_run_command_report_parse_error(char const *path, Str source, Ar
     }
 }
 
+static void main_run_command_report_x64_error(char const *path, Str source,
+                                              X64_Build_Result result) {
+    assert(result.status != X64_BUILD_STATUS_OK);
+
+    // These are about the whole program, so they have no place in the source.
+    if (result.status == X64_BUILD_STATUS_OUTPUT_TOO_LARGE) {
+        fprintf(stderr, "%s: the program is larger than %d bytes.\n", path,
+                OUTPUT_SIZE_BYTES_MAX);
+        return;
+    }
+    if (result.status == X64_BUILD_STATUS_MAIN_INVALID && result.subject.bytes == NULL) {
+        fprintf(stderr, "%s: a program needs a procedure 'main :: proc() Int ->' to start with.\n",
+                path);
+        return;
+    }
+
+    Str_Position position = main_subject_position(source, result.subject);
+
+    // The cast is needed because `%.*s` takes an `int` precision.
+    int subject_length = (int)result.subject.length;
+    switch (result.status) {
+    case X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the call of '%.*s' has another number of arguments than the "
+                "procedure has parameters.\n", path, position.line, position.column,
+                subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: an argument of the call of '%.*s' is not of the type of its "
+                "parameter.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_CALL_RESULT_MISSING:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' returns nothing, so its call has no value.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED:
+        fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' is declared in a 'foreign js' "
+                "block, and the x64 target imports from 'foreign libc'.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_MAIN_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' must be 'main :: proc() Int ->', a procedure without "
+                "parameters that returns an Int, which is the exit code.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_OK:
+    case X64_BUILD_STATUS_OUTPUT_TOO_LARGE:
+        assert(false);
+        break;
+    case X64_BUILD_STATUS_PARAMETER_COUNT_UNSUPPORTED:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' has more than %d parameters, which the x64 target "
+                "does not support.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes, X64_PARAMETER_COUNT_MAX);
+        break;
+    case X64_BUILD_STATUS_PROCEDURE_COUNT_EXCEEDED:
+        fprintf(stderr, "%s:%zu:%zu: more than %d procedures.\n", path, position.line,
+                position.column, X64_PROCEDURE_COUNT_MAX);
+        break;
+    case X64_BUILD_STATUS_RETURN_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the value that '%.*s' returns is not of its return type.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_RETURN_TYPE_MISSING:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' has no return type, so it cannot return a value.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_TYPE_UNSUPPORTED:
+        fprintf(stderr, "%s:%zu:%zu: type '%.*s' is not supported by the x64 target, which has "
+                "Int and C_Str.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_UNSUPPORTED:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' has something that the x64 target does not build "
+                "yet.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    }
+}
+
 static void main_run_command_report_wasm_error(char const *path, Str source,
                                                Wasm_Build_Result result) {
     assert(result.status != WASM_BUILD_STATUS_OK);
@@ -737,6 +931,17 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is a parameter or an iterator, which cannot be "
                 "assigned to, so neither can its fields. A field of what a pointer points to can "
                 "be.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_BUILT_IN_UNSUPPORTED:
+        fprintf(stderr, "%s:%zu:%zu: the built-in procedure '%.*s' is not supported by the wasm "
+                "target.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED:
+        fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' is declared in a 'foreign "
+                "libc' block, which the wasm target cannot import from. It imports from "
+                "'foreign js'.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_STRUCT_EXPECTED:
@@ -941,12 +1146,13 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_FOREIGN_IMPORT_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: the program already imports foreign procedures, and can do "
-                "it once only.\n", path, position.line, position.column);
+        fprintf(stderr, "%s:%zu:%zu: the program already imports foreign procedures from "
+                "this target, and can do it once for each target.\n", path, position.line,
+                position.column);
         break;
     case SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING:
-        fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' needs an 'import foreign js' "
-                "above it.\n", path, position.line, position.column, subject_length,
+        fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' needs an 'import foreign' of "
+                "its target above it.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     case SEMANTIC_STATUS_GLOBAL_NOT_STATIC:

@@ -32,10 +32,14 @@
        global variable of the module, a variable can only be used below its definition, and no name
        may be declared twice, for example a variable may not have the name of a parameter. This is
        scope resolution, which the compiler does after parsing.
-     - A program that has a foreign block must have exactly one `import foreign js` above the
-       first of them, and no more. A foreign procedure takes and gives `Int`, `Bool`, `Str` or a
-       struct, as any other procedure does, and an array only as a slice. The name of the object
-       is not checked, because it is not known until the program runs.
+     - A program that has a foreign block must have one `import foreign` of the target of the
+       block above the first block of that target, and no more than one for each target. The
+       targets are `js` and `libc`. A foreign procedure takes and gives `Int`, `Bool`, `Str`,
+       `C_Str` or a struct, as any other procedure does, and an array only as a slice. The name
+       of the object of `js` is not checked, because it is not known until the program runs.
+     - `str_to_c_str` is a built-in procedure like `length_of`. It takes a `Str` and gives a
+       `C_Str`. The target decides what it supports, for example where the string may come from.
+       A `C_Str` is given a string literal, or another `C_Str`, and nothing else.
      - The only attribute is `static`, it cannot be given twice, and every global variable must
        have it, because a global variable has static storage duration. A global variable can be
        used in every procedure of the module, also above where it is defined, and it can be assigned
@@ -124,20 +128,23 @@ module = { blank_line | definition | foreign_import | foreign_block } , end_of_i
 (* A definition at file scope: a constant, or a global variable. *)
 definition = constant_definition | global_variable_definition ;
 
-(* `import foreign js "functions"` says that the procedures of the foreign blocks come from the
+(* `import foreign js "functions"` says that the procedures of the `foreign js` blocks come from the
    JavaScript object that has the name between the quotes, which the program that runs the module
-   passes to it when it instantiates it: the object `functions` in `{ functions: { ... } }`. `js`
-   is the only foreign target there is. Like a definition it starts in the first column. *)
+   passes to it when it instantiates it: the object `functions` in `{ functions: { ... } }`.
+   `import foreign libc` says that the procedures of the `foreign libc` blocks come from the C
+   library of the platform, which needs no name. Like a definition it starts in the first
+   column. *)
 foreign_import =
-    "import" , required_space , "foreign" , required_space , "js" , ws , string_literal , ws ,
-    line_end ;
+    "import" , required_space , "foreign" , required_space ,
+    ( "js" , ws , string_literal | "libc" ) , ws , line_end ;
 
-(* A foreign block lists procedures which are not in the program but in JavaScript: `foreign js ->`
-   and below it, one level deeper, one line for each. Such a procedure has `...` where the body of
+(* A foreign block lists procedures which are not in the program but in JavaScript or in the C
+   library: `foreign js ->` or `foreign libc ->`, and below it, one level deeper, one line for
+   each. Such a procedure has `...` where the body of
    a procedure would be, and it is called like any other. Its parameters and its return type are
    the ones that JavaScript receives and has to give back. Like a definition it starts in the
    first column, and the program may have any number of blocks. *)
-foreign_block = "foreign" , required_space , "js" , branch_end , foreign_body ;
+foreign_block = "foreign" , required_space , ( "js" | "libc" ) , branch_end , foreign_body ;
 
 foreign_body = { blank_line } , foreign_procedure , { blank_line | foreign_procedure } ;
 

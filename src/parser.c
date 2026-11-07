@@ -82,7 +82,7 @@ static Ast_Node_Index parse_enum_member_value   (Parser *parser);
 static Ast_Node_Index parse_enum_type           (Parser *parser, uint32_t indentation_level);
 static bool           parse_foreign_block       (Parser *parser, Ast_Node_Index module);
 static Ast_Node_Index parse_foreign_import      (Parser *parser);
-static bool           parse_foreign_target_expect(Parser *parser);
+static Ast_Foreign_Target parse_foreign_target_expect(Parser *parser);
 static Ast_Node_Index parse_else_branch         (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_if_statement        (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_bool_literal        (Parser *parser);
@@ -111,7 +111,7 @@ static void           parse_node_append_child   (Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_node_make           (Parser *parser, Ast_Node_Type node_type);
 static Ast_Node_Index parse_parameter           (Parser *parser);
 static Ast_Node_Index parse_procedure           (Parser *parser, uint32_t indentation_level,
-                                         bool is_foreign);
+                                                 bool is_foreign, Ast_Foreign_Target target);
 static bool           parse_procedure_body      (Parser *parser, Ast_Node_Index procedure,
                                                  uint32_t indentation_level);
 static bool           parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure);
@@ -341,7 +341,7 @@ static Ast_Node_Index parse_definition(Parser *parser) {
             return AST_NODE_INDEX_NONE;
         }
     } else {
-        value = parse_procedure(parser, INDENTATION_LEVEL_TOP, false);
+        value = parse_procedure(parser, INDENTATION_LEVEL_TOP, false, AST_FOREIGN_TARGET_JS);
     }
     if (value == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
@@ -450,9 +450,9 @@ static Ast_Node_Index parse_enum_member_value(Parser *parser) {
 }
 
 /**
- * Parses `import foreign js "name"`. The current token is `import`. The node has the name between
- * the quotes in its payload. `js` is the only target, so `foreign` and `js` are checked here and
- * not stored.
+ * Parses `import foreign js "name"` or `import foreign libc`. The current token is `import`. The
+ * node has the target in its payload, and the name between the quotes for `js`. `libc` is the C
+ * library of the platform, so it has no name to give, and the node keeps the word itself.
  */
 static Ast_Node_Index parse_foreign_import(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -467,17 +467,35 @@ static Ast_Node_Index parse_foreign_import(Parser *parser) {
     if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_FOREIGN, STR("'foreign'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_foreign_target_expect(parser) == false) {
+    Token const *target_token = parse_token_current(parser);
+    Ast_Foreign_Target target = parse_foreign_target_expect(parser);
+    if (parser->status != PARSE_STATUS_OK) {
         return AST_NODE_INDEX_NONE;
     }
+    parser->nodes[import].payload.foreign_import.target = target;
 
-    Token const *module_name = parse_token_current(parser);
-    if (module_name->kind != TOKEN_KIND_STRING_LITERAL) {
-        return parse_fail(parser, STR("the name of the object to import from, in quotes"));
+    // The length of a name fits in 32 bits, because the source is far smaller than 4 GiB.
+    switch (target) {
+    case AST_FOREIGN_TARGET_JS: {
+        Token const *module_name = parse_token_current(parser);
+        if (module_name->kind != TOKEN_KIND_STRING_LITERAL) {
+            return parse_fail(parser, STR("the name of the object to import from, in quotes"));
+        }
+        Str text = module_name->payload.string_literal.text;
+        assert(text.length <= UINT32_MAX);
+        parser->nodes[import].payload.foreign_import.name_bytes = text.bytes;
+        parser->nodes[import].payload.foreign_import.name_length = (uint32_t)text.length;
+        parse_token_advance(parser);
+        break;
     }
-    parser->nodes[import].payload.foreign_import.module_name =
-        module_name->payload.string_literal.text;
-    parse_token_advance(parser);
+    case AST_FOREIGN_TARGET_LIBC: {
+        Str text = target_token->payload.identifier.text;
+        assert(text.length <= UINT32_MAX);
+        parser->nodes[import].payload.foreign_import.name_bytes = text.bytes;
+        parser->nodes[import].payload.foreign_import.name_length = (uint32_t)text.length;
+        break;
+    }
+    }
 
     if (parse_line_end_expect(parser) == false) {
         return AST_NODE_INDEX_NONE;
@@ -486,28 +504,38 @@ static Ast_Node_Index parse_foreign_import(Parser *parser) {
 }
 
 /**
- * Consumes the name of the target of a foreign import or block, which must be `js`, because
- * JavaScript is the only language that Mialu can import from. It is an ordinary name and not a
- * keyword, so that programs can have a variable called `js`. Returns false after it recorded an
- * error.
+ * Consumes the name of the target of a foreign import or block, which is `js` or `libc`. They are
+ * ordinary names and not keywords, so that programs can have a variable called `js`. After an
+ * error is recorded, which is when the name is neither, the parser status is not
+ * `PARSE_STATUS_OK` and the target returned is meaningless.
  */
-static bool parse_foreign_target_expect(Parser *parser) {
+static Ast_Foreign_Target parse_foreign_target_expect(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
 
     Token const *target = parse_token_current(parser);
-    if (target->kind != TOKEN_KIND_IDENTIFIER ||
-        str_equals(target->payload.identifier.text, STR("js")) == false) {
-        // The false return value reports the failure, so the node index is not needed.
-        (void)parse_fail(parser, STR("'js', the only foreign target"));
-        return false;
+    if (target->kind == TOKEN_KIND_IDENTIFIER) {
+        Ast_Foreign_Target result = AST_FOREIGN_TARGET_JS;
+        bool is_target = false;
+        if (str_equals(target->payload.identifier.text, STR("js"))) {
+            is_target = true;
+        } else if (str_equals(target->payload.identifier.text, STR("libc"))) {
+            result = AST_FOREIGN_TARGET_LIBC;
+            is_target = true;
+        }
+        if (is_target) {
+            parse_token_advance(parser);
+            return result;
+        }
     }
 
-    parse_token_advance(parser);
-    return true;
+    // The status reports the failure, so the node index is not needed.
+    (void)parse_fail(parser, STR("'js' or 'libc', the foreign targets"));
+    return AST_FOREIGN_TARGET_JS;
 }
 
 /**
- * Parses `foreign js ->` and the procedures below it, one on each line, indented one level:
+ * Parses `foreign js ->` or `foreign libc ->` and the procedures below it, one on each line,
+ * indented one level:
  * `name :: proc(parameters) Type -> ...`. Each becomes a constant definition that is appended to
  * `module`, like any other, so the block has no node of its own. The current token is the
  * indentation of the `foreign` line. Returns false after it recorded an error.
@@ -525,7 +553,8 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
 
     assert(parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_FOREIGN);
     parse_token_advance(parser);
-    if (parse_foreign_target_expect(parser) == false) {
+    Ast_Foreign_Target target = parse_foreign_target_expect(parser);
+    if (parser->status != PARSE_STATUS_OK) {
         return false;
     }
     if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false) {
@@ -574,7 +603,8 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
             return false;
         }
 
-        Ast_Node_Index procedure = parse_procedure(parser, INDENTATION_LEVEL_TOP + 1, true);
+        Ast_Node_Index procedure =
+            parse_procedure(parser, INDENTATION_LEVEL_TOP + 1, true, target);
         if (procedure == AST_NODE_INDEX_NONE) {
             return false;
         }
@@ -710,10 +740,11 @@ static bool parse_attributes(Parser *parser, Ast_Node_Index definition) {
 /**
  * Parses a procedure: `proc(parameters) Type ->` and its body. With `is_foreign` the body is the
  * `...` that stands for code which is not in the program, and nothing else is on the line, as in a
- * `foreign js ->` block. Without it the body is the indented statements below.
+ * `foreign js ->` block, whose target is `target`. Without it the body is the indented statements
+ * below, and `target` is not used.
  */
 static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level,
-                                      bool is_foreign) {
+                                      bool is_foreign, Ast_Foreign_Target target) {
     assert(indentation_level < UINT32_MAX);
     assert(parser->status == PARSE_STATUS_OK);
 
@@ -751,6 +782,7 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
         if (parse_token_expect(parser, TOKEN_KIND_ELLIPSIS, STR("'...'")) == false) {
             return AST_NODE_INDEX_NONE;
         }
+        parser->nodes[body].payload.foreign_body.target = target;
         parse_node_append_child(parser, procedure, body);
         if (parse_line_end_expect(parser) == false) {
             return AST_NODE_INDEX_NONE;

@@ -153,17 +153,21 @@ static bool semantic_definitions_check(Semantic_Analyzer *analyzer) {
     assert(analyzer->nodes[analyzer->module].node_type == AST_NODE_TYPE_MODULE);
 
     Ast_Node_Index definition = analyzer->nodes[analyzer->module].first_child;
-    bool has_foreign_import = false;
+    // Whether the import of each foreign target was seen, indexed by `Ast_Foreign_Target`, which
+    // has two targets.
+    bool has_foreign_import[2] = {false, false};
     for (size_t i = 0; i < analyzer->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
-        // An `import foreign` has no name. There is one at most, and it must come before the
-        // foreign procedures that it is for.
+        // An `import foreign` has no name. There is one at most for each target, and it must come
+        // before the foreign procedures that it is for.
         if (analyzer->nodes[definition].node_type == AST_NODE_TYPE_FOREIGN_IMPORT) {
-            Str module_name = analyzer->nodes[definition].payload.foreign_import.module_name;
-            if (has_foreign_import) {
+            Ast_Foreign_Target target = analyzer->nodes[definition].payload.foreign_import.target;
+            assert((size_t)target < 2);
+
+            if (has_foreign_import[target]) {
                 return semantic_fail(analyzer, SEMANTIC_STATUS_FOREIGN_IMPORT_DUPLICATE,
-                                     module_name);
+                                     ast_foreign_import_name(&analyzer->nodes[definition]));
             }
-            has_foreign_import = true;
+            has_foreign_import[target] = true;
             definition = analyzer->nodes[definition].next_sibling;
             continue;
         }
@@ -172,7 +176,8 @@ static bool semantic_definitions_check(Semantic_Analyzer *analyzer) {
         if (analyzer->nodes[definition].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION) {
             Ast_Node_Index value = analyzer->nodes[definition].first_child;
             if (analyzer->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE &&
-                ast_procedure_is_foreign(analyzer->nodes, value) && has_foreign_import == false) {
+                ast_procedure_is_foreign(analyzer->nodes, value) &&
+                has_foreign_import[ast_procedure_foreign_target(analyzer->nodes, value)] == false) {
                 return semantic_fail(analyzer, SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING, name);
             }
         }
@@ -894,6 +899,6 @@ static bool semantic_fail(Semantic_Analyzer *analyzer, Semantic_Status status, S
 bool semantic_is_built_in_procedure(Str name) {
     assert(name.bytes != NULL);
 
-    return str_equals(name, STR("length_of"));
+    return str_equals(name, STR("length_of")) || str_equals(name, STR("str_to_c_str"));
 }
 

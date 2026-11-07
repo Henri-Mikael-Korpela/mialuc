@@ -234,7 +234,7 @@
                 },
                 {
                     "name": "keyword.control.import.mialu",
-                    "comment": "The words of import foreign js \"name\" and of foreign js ->, which declare the procedures that come from JavaScript.",
+                    "comment": "The words of import foreign js \"name\", import foreign libc and of foreign js -> and foreign libc ->, which declare the procedures that come from JavaScript or the C library.",
                     "match": "\\b(foreign|import)\\b"
                 },
                 {
@@ -284,11 +284,11 @@
             ]
         },
         "primitive-types": {
-            "comment": "The primitive data types Bool, Int and Str, and the ones that are reserved for the future. They are colored wherever they are written, also when they are not in a place that the other rules recognize as a type.",
+            "comment": "The primitive data types Bool, C_Str, Int and Str, and the ones that are reserved for the future. They are colored wherever they are written, also when they are not in a place that the other rules recognize as a type.",
             "patterns": [
                 {
                     "name": "support.type.primitive.mialu",
-                    "match": "\\b(?:Bool|Int|Str|Byte|Rune|F32|F64|I8|I16|I32|I64|U8|U16|U32|U64)\\b"
+                    "match": "\\b(?:Bool|C_Str|Int|Str|Byte|Rune|F32|F64|I8|I16|I32|I64|U8|U16|U32|U64)\\b"
                 }
             ]
         },

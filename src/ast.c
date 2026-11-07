@@ -126,6 +126,21 @@ bool ast_procedure_is_foreign(Ast_Node const *nodes, Ast_Node_Index procedure) {
     return last != AST_NODE_INDEX_NONE && nodes[last].node_type == AST_NODE_TYPE_FOREIGN_BODY;
 }
 
+Ast_Foreign_Target ast_procedure_foreign_target(Ast_Node const *nodes, Ast_Node_Index procedure) {
+    assert(nodes != NULL);
+    assert(ast_procedure_is_foreign(nodes, procedure));
+
+    return nodes[nodes[procedure].last_child].payload.foreign_body.target;
+}
+
+Str ast_foreign_import_name(Ast_Node const *import) {
+    assert(import != NULL);
+    assert(import->node_type == AST_NODE_TYPE_FOREIGN_IMPORT);
+
+    return str_make(import->payload.foreign_import.name_bytes,
+                    import->payload.foreign_import.name_length);
+}
+
 Str ast_definition_name(Ast_Node const *definition) {
     assert(definition != NULL);
     assert(definition->node_type == AST_NODE_TYPE_CONSTANT_DEFINITION ||
@@ -135,6 +150,22 @@ Str ast_definition_name(Ast_Node const *definition) {
         return definition->payload.global_variable_definition.name;
     }
     return definition->payload.constant_definition.name;
+}
+
+/**
+ * Returns the word that names `target` in a program: `js` or `libc`.
+ */
+static char const *ast_foreign_target_name(Ast_Foreign_Target target) {
+    switch (target) {
+    case AST_FOREIGN_TARGET_JS:
+        return "js";
+    case AST_FOREIGN_TARGET_LIBC:
+        return "libc";
+    }
+
+    // Unreachable: every target is handled above.
+    assert(false);
+    return "";
 }
 
 /**
@@ -280,12 +311,15 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
                    node.payload.for_statement.name.bytes);
             break;
         case AST_NODE_TYPE_FOREIGN_BODY:
-            printf("FOREIGN_BODY\n");
+            printf("FOREIGN_BODY %s\n", ast_foreign_target_name(node.payload.foreign_body.target));
             break;
         case AST_NODE_TYPE_FOREIGN_IMPORT:
-            printf("FOREIGN_IMPORT \"%.*s\"\n",
-                   (int)node.payload.foreign_import.module_name.length,
-                   node.payload.foreign_import.module_name.bytes);
+            if (node.payload.foreign_import.target == AST_FOREIGN_TARGET_JS) {
+                printf("FOREIGN_IMPORT js \"%.*s\"\n", (int)node.payload.foreign_import.name_length,
+                       node.payload.foreign_import.name_bytes);
+            } else {
+                printf("FOREIGN_IMPORT libc\n");
+            }
             break;
         case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
             printf("GLOBAL_VARIABLE_DEFINITION %.*s\n",

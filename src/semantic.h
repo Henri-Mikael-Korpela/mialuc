@@ -68,9 +68,11 @@ typedef enum {
     SEMANTIC_STATUS_ENUM_MEMBER_DUPLICATE,
     // Two fields of one struct with the same name. The subject is the second one.
     SEMANTIC_STATUS_FIELD_NAME_DUPLICATE,
-    // A second `import foreign js`. The subject is the name of its object.
+    // A second `import foreign` of one target, `js` or `libc`. The subject is the name of its
+    // object for `js`, and the word `libc` for `libc`.
     SEMANTIC_STATUS_FOREIGN_IMPORT_DUPLICATE,
-    // A foreign procedure without an `import foreign js` before it. The subject is its name.
+    // A foreign procedure without an `import foreign` of its target before it. The subject is its
+    // name.
     SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING,
     // A global variable without the `static` attribute. The subject is its name.
     SEMANTIC_STATUS_GLOBAL_NOT_STATIC,
@@ -142,10 +144,11 @@ typedef struct {
  * and of the fields of a literal or an access are not looked up here, because whether they stand
  * for something is for the target to check.
  *
- * Foreign procedures, which a `foreign js ->` block declares, are constants like the others and
- * are called the same way. They need an `import foreign js "name"` that says where they come from,
- * once and above all of them, because the object that it names is where the target looks for every
- * one of them.
+ * Foreign procedures, which a `foreign js ->` or `foreign libc ->` block declares, are constants
+ * like the others and are called the same way. They need an `import foreign js "name"` or `import
+ * foreign libc`, the one of their own target, that says where they come from, once for each target
+ * and above all of its procedures, because the object that `js` names is where the target looks for
+ * every one of them.
  *
  * The name in a call, such as `f(1)`, must stand for a constant that is a procedure, or for a
  * variable, a parameter or a global variable, which holds a pointer to a procedure. A name is
@@ -189,8 +192,8 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
 
 /**
  * Returns whether `name` is the name of a built-in procedure, which is called like any procedure
- * but is not defined in the program. Today that is only `length_of`. The analysis does not bind the
- * call of a built-in procedure to a definition, so its binding keeps the kind
+ * but is not defined in the program. Today those are `length_of` and `str_to_c_str`. The analysis
+ * does not bind the call of a built-in procedure to a definition, so its binding keeps the kind
  * `SEMANTIC_BINDING_KIND_NONE`, and the target knows what the call means from the name. A
  * definition of the program with the same name is called instead, because a name has one meaning
  * and the program's own is looked up first.

@@ -82,6 +82,15 @@ typedef enum {
     AST_COMPARISON_OPERATOR_NOT_EQUAL,
 } Ast_Comparison_Operator;
 
+// The language that the code of a foreign procedure is in, and so who provides it. Alphabetical,
+// because nothing depends on the order.
+typedef enum {
+    // JavaScript, for the WebAssembly target: `foreign js ->`.
+    AST_FOREIGN_TARGET_JS,
+    // The C library of the platform, for the native targets: `foreign libc ->`.
+    AST_FOREIGN_TARGET_LIBC,
+} Ast_Foreign_Target;
+
 // How the length of an array type is given. Alphabetical, because nothing depends on the order.
 typedef enum {
     // An integer literal between the brackets, as in `[5]Int`. It is in the payload.
@@ -214,14 +223,16 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   of the range come before the block, so the iterator is not in scope in the range. It is a
  *   statement of a procedure body.
  * - `AST_NODE_TYPE_FOREIGN_BODY`: no children. The `...` that takes the place of the statements of a
- *   procedure that is declared in a `foreign js ->` block: its code is not in the program but is
- *   provided from outside. It is the only child after the parameters of such an
- *   `AST_NODE_TYPE_PROCEDURE`, see `ast_procedure_is_foreign`.
+ *   procedure that is declared in a `foreign js ->` or `foreign libc ->` block: its code is not in
+ *   the program but is provided from outside. The target of the block is in the payload. It is the
+ *   only child after the parameters of such an `AST_NODE_TYPE_PROCEDURE`, see
+ *   `ast_procedure_is_foreign`.
  * - `AST_NODE_TYPE_FOREIGN_IMPORT`: no children. `import foreign js "functions"`: the program
  *   gets the foreign procedures that its `foreign js ->` blocks declare from the JavaScript object
- *   that has the name between the quotes, which is in the payload. `js` is the only target
- *   there is, so the node does not store it. It is a child of the `AST_NODE_TYPE_MODULE`, and not
- *   a definition: it has no name.
+ *   that has the name between the quotes. `import foreign libc` is the same for the `foreign libc
+ *   ->` blocks, which get theirs from the C library of the platform, so it names no object. The
+ *   target and the name are in the payload, see `ast_foreign_import_name`. It is a child of the
+ *   `AST_NODE_TYPE_MODULE`, and not a definition: it has no name.
  * - `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`: a global variable, which is defined at file scope.
  *   Its children are one `AST_NODE_TYPE_ATTRIBUTE` for each attribute of its attribute list, in the
  *   order of the source, then the type, an `AST_NODE_TYPE_TYPE_NAME` or an
@@ -415,10 +426,18 @@ typedef struct {
             Str name;
         } for_statement;
         struct {
-            // The bytes between the quotes, as a view of the source text: the name of the object
-            // that the foreign procedures are properties of. It is valid UTF-8, and `bytes` is
-            // never NULL.
-            Str module_name;
+            Ast_Foreign_Target target;
+        } foreign_body;
+        struct {
+            // What the node names, as a view of the source text, taken apart so that the target
+            // fits next to it: use `ast_foreign_import_name` to get it back as a `Str`. For `js`
+            // it is the bytes between the quotes, the name of the object that the foreign
+            // procedures are properties of, valid UTF-8. For `libc` there is no object, so it is
+            // the word `libc`, which is what an error about the import can point at.
+            char const *name_bytes;
+            // The source is far smaller than 4 GiB, see `SOURCE_SIZE_BYTES_MAX` in main.c.
+            uint32_t name_length;
+            Ast_Foreign_Target target;
         } foreign_import;
         struct {
             // Views the source text. `bytes` is NULL for a literal that has no name.
@@ -497,10 +516,21 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type);
 Str ast_procedure_return_type(Ast_Node const *procedure);
 
 /**
- * Returns whether `procedure`, an `AST_NODE_TYPE_PROCEDURE`, is declared in a `foreign js ->` block:
- * it has no statements but the `...` that stands for its body, which is the last child.
+ * Returns whether `procedure`, an `AST_NODE_TYPE_PROCEDURE`, is declared in a `foreign` block: it
+ * has no statements but the `...` that stands for its body, which is the last child.
  */
 bool ast_procedure_is_foreign(Ast_Node const *nodes, Ast_Node_Index procedure);
+
+/**
+ * Returns the target of the foreign block that declares `procedure`, an `AST_NODE_TYPE_PROCEDURE`
+ * for which `ast_procedure_is_foreign` holds.
+ */
+Ast_Foreign_Target ast_procedure_foreign_target(Ast_Node const *nodes, Ast_Node_Index procedure);
+
+/**
+ * Returns the text that the `AST_NODE_TYPE_FOREIGN_IMPORT` node `import` names, see the payload.
+ */
+Str ast_foreign_import_name(Ast_Node const *import);
 
 /**
  * Returns the name of `definition`, which must be an `AST_NODE_TYPE_CONSTANT_DEFINITION` or an

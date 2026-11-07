@@ -11,6 +11,7 @@
 - [Primitive data types](#primitive-data-types)
   - [Booleans](#booleans)
   - [Integers](#integers)
+  - [C strings](#c-strings)
   - [Strings](#strings)
 - [Operators](#operators)
   - [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators)
@@ -57,8 +58,10 @@
 - [Attributes](#attributes)
 - [Foreign procedures](#foreign-procedures)
   - [Foreign procedures in WebAssembly](#foreign-procedures-in-webassembly)
+  - [Foreign procedures in the C library](#foreign-procedures-in-the-c-library)
 - [Compilation targets](#compilation-targets)
   - [WebAssembly](#webassembly)
+  - [x64 for Windows](#x64-for-windows)
 - [Possible future features](#possible-future-features)
   - [Parametric polymorphism](#parametric-polymorphism)
 - [Rejected ideas](#rejected-ideas)
@@ -201,6 +204,7 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 | Type  | Description                                                  |
 |-------|--------------------------------------------------------------|
 | `Bool` | A boolean value, which is `true` or `false`. See [Booleans](#booleans). |
+| `C_Str` | A null-terminated C string, the address of bytes that end with a zero. It is for passing text to and from code written in C, to a parameter of type `char *` or `char const *`. See [C strings](#c-strings). |
 | `Int` | A signed 64-bit integer. Written as a decimal number, such as `42`. See [Integers](#integers). |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
 
@@ -237,6 +241,33 @@ count : Int = 42
 The arithmetic operators `+`, `-`, `*` and `/` take two `Int` values and give an `Int`, see [Operators](#operators), and so do the assignment operators `+=`, `-=`, `*=` and `/=`, see [Assignment](#assignment). Addition, subtraction and multiplication wrap around on overflow, so the largest `Int` plus 1 is the smallest. Division truncates toward zero, so `(0 - 7) / 2` is -3. Dividing by zero, or dividing the smallest `Int` by -1, whose result does not fit, is an error at run time, see [WebAssembly](#webassembly).
 
 An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an error, and an operand of arithmetic that is not an `Int` is an error. The integer types `I8`, `I16`, `I32`, `I64` and `U8`, `U16`, `U32`, `U64` are reserved for possible future use, see [Primitive data types](#primitive-data-types).
+
+### C strings
+
+A `C_Str` is a string as the C programming language has it: the address of the first of some bytes, and the string ends at the first byte that is zero, so it has no length of its own. Code written in C uses them as `char *` and `char const *`. A `C_Str` is for the border to such code, as in [foreign procedures](#foreign-procedures), and a [`Str`](#strings), which has a length, is the one to use in Mialu code. Nothing can be done with a `C_Str` but to keep it in a variable or a parameter, pass it on, return it, and hand it to a foreign procedure.
+
+A string literal can be given where a `C_Str` is wanted, as an argument, as the value of a variable that is declared a `C_Str`, as an assigned value or as a returned one. It is the bytes of the literal followed by the zero that every string literal has after it, so no copy is made:
+
+```
+import foreign libc
+
+foreign libc ->
+    puts :: proc(content: C_Str) -> ...
+
+greet :: proc() ->
+    text : C_Str = "Hello, world!"
+    puts(text)
+```
+
+Any other `Str` is not a `C_Str`, because only a literal is known to have a zero after its bytes. The built-in procedure `str_to_c_str` makes a `C_Str` of a `Str`:
+
+```
+main :: proc() Int ->
+    puts(str_to_c_str("Hello, world!"))
+    return 0
+```
+
+`str_to_c_str` copies the bytes of its argument and a zero after them to temporary storage, and gives the address of the copy. Temporary storage is a stack of strings that belongs to the program: a copy is made on top of it, and all the copies that a procedure made are given back when that procedure returns. So the `C_Str` that `str_to_c_str` gives is good until the procedure that called it returns, and it must not be returned from that procedure or kept anywhere that outlives it. Temporary storage has a fixed size, and a program that makes more copies than fit in it is stopped. A name `str_to_c_str` that the program defines itself is called instead of the built-in one. Which targets have it, and what they allow as the argument, is in [Compilation targets](#compilation-targets).
 
 ### Strings
 
@@ -1569,7 +1600,7 @@ The attributes are built into the language. The only one that Mialu has so far i
 
 ## Foreign procedures
 
-A program can call procedures that are not written in Mialu but in another language, which is JavaScript for now. They are called foreign procedures, and the language that they are in is the foreign target. Two things are needed: an import, which says where the procedures come from, and a foreign block, which lists the ones that the program uses, with their parameters and return types:
+A program can call procedures that are not written in Mialu but in another language, which is JavaScript or the C library. They are called foreign procedures, and the language that they are in is the foreign target. Two things are needed: an import, which says where the procedures come from, and a foreign block, which lists the ones that the program uses, with their parameters and return types:
 
 ```
 import foreign js "functions"
@@ -1581,9 +1612,9 @@ print_hello :: proc() ->
     alert("Hello, world!")
 ```
 
-`import foreign js "functions"` is written in the first column, like a definition. `foreign` and `import` are [keywords](#keywords). `js` is the foreign target, and it is the only one there is. The text in quotes is the name of the object that the procedures are properties of. It is a name and not a path, and Mialu does not check that it exists, because that is only known when the program runs. A program imports once, above the first foreign block, and a second `import foreign` is an error.
+`import foreign js "functions"` is written in the first column, like a definition. `foreign` and `import` are [keywords](#keywords). `js` is the foreign target, JavaScript, and the other is `libc`, the C library of the platform, which is imported with `import foreign libc` and needs no name, because there is one C library. `js` and `libc` are not keywords. The text in quotes is the name of the object that the procedures of `js` are properties of. It is a name and not a path, and Mialu does not check that it exists, because that is only known when the program runs. A program imports once for each target, above the first foreign block of that target, and a second `import foreign` of one target is an error, as is a block without the import of its target.
 
-A foreign block is `foreign js ->` in the first column, and below it, indented one level, the procedures, one on each line. A program can have any number of blocks. A foreign procedure is written like a procedure, but where its body would be it has `...`, which stands for the code that is somewhere else:
+A foreign block is `foreign js ->` or `foreign libc ->` in the first column, and below it, indented one level, the procedures, one on each line. A program can have any number of blocks. A foreign procedure is written like a procedure, but where its body would be it has `...`, which stands for the code that is somewhere else:
 
 ```
 foreign js ->
@@ -1613,13 +1644,28 @@ const { instance } = await WebAssembly.instantiate(bytes, imports);
 
 The function gets the parameters as the target passes them everywhere: an `Int` is a `BigInt`, a `Bool` is the number 0 or 1, a pointer is one number, the address of what it points to in the memory of the module, and a `Str` is two numbers, the address of its bytes in the memory of the module and their count, which is how the function above reads the message. The memory is the one that the module exports as `memory`, which a program has when it has a string or an array type. A function that returns something returns it in the same way, so a procedure that returns an `Int` is a function that returns a `BigInt`, and one that returns a `Str` returns an array of the address and the length. If the object does not have the function, `WebAssembly.instantiate` rejects with a `LinkError` that names it.
 
+### Foreign procedures in the C library
+
+A foreign procedure of `libc` is a function of the C library of the platform, which the program links to and calls by the name of the procedure, as C code does. The types of the parameters and the result are the ones that the function has in C: a `C_Str` for a `char *` or a `char const *`, and an `Int` for an integer of 64 bits. The compiler trusts the declaration. A C function that returns an `int` has 32 bits, and the other 32 bits of an `Int` that is declared as its result are not defined, so such a function is declared without a result, or its result is not used.
+
+```
+import foreign libc
+
+foreign libc ->
+    printf :: proc(content: C_Str) -> ...
+
+main :: proc() Int ->
+    printf("Hello, world!")
+    return 0
+```
+
 ## Compilation targets
 
-The compiler has two modes: `run` prints the tokens and the syntax tree of a program, after which it resolves the names, and `build --target <target> <output file> <source file>` writes a program for a target.
+The compiler has two modes: `run` without a target prints the tokens and the syntax tree of a program, after which it resolves the names, and `build --target <target> -o <output file> <source file>` writes a program for a target. The output file can also be written without `-o`, directly after the target. `run --target <target> <source file>` builds the program for a target that can run on this machine, runs it, and ends with the exit code of the program. The targets are `wasm`, `wat` and `x64-win32`, and `x64-win32` is the only one that `run` takes.
 
 ### WebAssembly
 
-The `wasm` target writes a WebAssembly binary module. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool` and `Str` are the basic types that the target supports, and then the structs, the pointers to any of them, and the arrays and array slices of any of them.
+The `wasm` target writes a WebAssembly binary module. It imports its foreign procedures from JavaScript, so a procedure of a `foreign libc` block is an error, and so is a call of `str_to_c_str`. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool` and `Str` are the basic types that the target supports, and then the structs, the pointers to any of them, and the arrays and array slices of any of them.
 
 `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`. The arithmetic is the one of [Integers](#integers), with the signed `i64` instructions. Division traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
 
@@ -1631,6 +1677,8 @@ The `wasm` target writes a WebAssembly binary module. Every constant definition 
 const [address, length] = instance.exports.get_name();
 new TextDecoder().decode(new Uint8Array(instance.exports.memory.buffer, address, length));
 ```
+
+A `C_Str` is one 32-bit integer (`i32`): the address in the memory of the module of bytes that end with a zero. So a parameter of that type is one WebAssembly parameter, and a caller from JavaScript reads the bytes from the address up to the first zero. A zero is written after every string literal in the data section, which is why a string literal can be a `C_Str` without a copy. A `Str` that is not a literal is not accepted where a `C_Str` is wanted, and a literal given to a `C_Str` is only its address, without the length. A string literal is only accepted as a `C_Str` for an argument, a variable, an assignment and a result, so a `C_Str` cannot be given a value as an element of an array, a field of a struct or a global variable.
 
 A global variable is a mutable global of the module, or two when it is a `Str`, which are the address and the length of the string, in the order of the definitions in the source. They are not exported. The initial value is the constant expression of the global, which WebAssembly evaluates once when the module is instantiated, which is why it is a literal. The bytes of a string literal that is the value of a global variable are in the data section, as the bytes of the other string literals are. A use of a global variable is a `global.get` for each of its globals, and an assignment such as `x += 2` pushes it with `global.get`, then the value, adds them and stores the result with `global.set`. So a global variable keeps its value from one call of the exported functions to the next, for as long as the instance lives.
 
@@ -1722,6 +1770,22 @@ A for statement with a range becomes a `block` that holds a `loop`, and the stat
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 
 There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree and the module as text, and runs JavaScript against it, also the functions that the program imports with `import foreign js`, which are written in a section of their own. See the README.
+
+
+### x64 for Windows
+
+The `x64-win32` target writes an executable file for Windows on x64 (a PE32+ file for the console), which needs nothing but Windows to run:
+
+```
+mialuc build --target x64-win32 -o ./printf-test.exe test-code/x64/foreign-functions-libc.mu
+mialuc run --target x64-win32 test-code/x64/foreign-functions-libc.mu
+```
+
+The program starts at a few instructions of the compiler that call `main`, which has to be `main :: proc() Int ->`, and pass its result to the function `exit` of the C library, so that the output of the program is written out before it ends and its result is the exit code of the process. A foreign procedure of a `foreign libc` block is imported by name from `msvcrt.dll`, which is part of every installation of Windows, and a procedure of a `foreign js` block is an error. A call of a procedure follows the calling convention of Windows on x64, so that the C library can be called: the first four arguments are in `rcx`, `rdx`, `r8` and `r9`, the result is in `rax`, and the caller makes the 32 bytes of space for the callee, with the stack a multiple of 16 bytes.
+
+`Int` is a 64-bit integer, and a `C_Str` is the 64-bit address of its bytes. A string literal is the address of its bytes in the read-only data of the program, which end with a zero. The target does not build much yet, and rejects the rest: procedures of up to four parameters of the types `Int` and `C_Str`, whose statements are calls and `return`, and whose expressions are integer literals, string literals, parameters, and calls whose arguments are such expressions or `str_to_c_str`. A `Str` has no value yet, so the argument of `str_to_c_str` must be a string literal.
+
+`str_to_c_str` copies its argument and the zero after it to temporary storage, which is a section of 64 KiB of the program that is zeroed when it is loaded and not in the file. The first 8 bytes of it say how much of the rest is in use. A copy is made at the end of what is in use and takes its size, rounded up to 8 bytes, and a procedure that makes copies saves how much was in use when it started and sets it back when it returns, so its copies are given back. A copy that does not fit stops the program with a breakpoint, and so does a `str_to_c_str` that is returned, which the target rejects, because the copy is gone when the procedure returns.
 
 ## Possible future features
 
