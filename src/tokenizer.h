@@ -95,12 +95,12 @@ typedef enum {
 } Token_Kind;
 
 typedef struct {
-    Token_Kind token_kind;
+    Token_Kind kind;
     // The byte offset of the token in the source, so that later stages can say where an error
     // is. It fits in the 4 bytes of padding after the enum, and sources are far below 4 GiB.
     uint32_t source_offset;
     // This union is named, because unnamed unions are C11 and the project uses C99.
-    // Only the member that matches `token_kind` is meaningful.
+    // Only the member that matches `kind` is meaningful.
     union {
         struct {
             // The number of indentation levels, where one level is four spaces. Zero for a line

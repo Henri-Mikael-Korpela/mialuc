@@ -394,7 +394,7 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
     for (size_t i = 0; i < tokens.length; i += 1) {
         Token token = token_elements[i];
 
-        switch (token.token_kind) {
+        switch (token.kind) {
         case TOKEN_KIND_ARROW:
             printf("ARROW\n");
             break;

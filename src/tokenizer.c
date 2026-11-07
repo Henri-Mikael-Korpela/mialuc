@@ -313,7 +313,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                 // Every non-blank line gets an indentation token, even at level zero, because
                 // there is no separate end-of-line token to tell where a line starts.
                 token_elements[result.tokens.length] = (Token){
-                    .token_kind = TOKEN_KIND_INDENTATION,
+                    .kind = TOKEN_KIND_INDENTATION,
                     .source_offset = (uint32_t)offset,
                     .payload.indentation.level =
                         (uint32_t)(space_count / INDENTATION_SPACES_PER_LEVEL),
@@ -389,7 +389,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             }
 
             token_elements[result.tokens.length] = (Token){
-                .token_kind = is_documentation ? TOKEN_KIND_DOCUMENTATION_COMMENT
+                .kind = is_documentation ? TOKEN_KIND_DOCUMENTATION_COMMENT
                                                : TOKEN_KIND_COMMENT,
                 .source_offset = (uint32_t)offset,
                 .payload.comment.text = str_make(source.bytes + offset, end - offset),
@@ -436,7 +436,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             assert(source.bytes[end] == '"');
             token_elements[result.tokens.length] = (Token){
-                .token_kind = TOKEN_KIND_STRING_LITERAL,
+                .kind = TOKEN_KIND_STRING_LITERAL,
                 .source_offset = (uint32_t)offset,
                 .payload.string_literal.text = str_make(source.bytes + offset + 1,
                                                         end - offset - 1),
@@ -479,7 +479,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             }
 
             token_elements[result.tokens.length] = (Token){
-                .token_kind = TOKEN_KIND_INTEGER_LITERAL,
+                .kind = TOKEN_KIND_INTEGER_LITERAL,
                 .source_offset = (uint32_t)offset,
                 .payload.integer_literal.value = value,
             };
@@ -512,7 +512,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             // such as `cannot` is not affected, and `not =` with a space is a name and an `=`.
             if (str_equals(text, STR("not")) && end < source.length && source.bytes[end] == '=') {
                 token_elements[result.tokens.length] = (Token){
-                    .token_kind = TOKEN_KIND_NOT_EQUALS,
+                    .kind = TOKEN_KIND_NOT_EQUALS,
                     .source_offset = (uint32_t)offset,
                 };
                 result.tokens.length += 1;
@@ -525,7 +525,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             Token_Kind token_kind = tokenizer_keyword_type(text);
 
             token_elements[result.tokens.length] = (Token){
-                .token_kind = token_kind,
+                .kind = token_kind,
                 .source_offset = (uint32_t)offset,
                 .payload.identifier.text = text,
             };
@@ -557,7 +557,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             }
 
             token_elements[result.tokens.length] = (Token){
-                .token_kind = TOKEN_KIND_LABEL,
+                .kind = TOKEN_KIND_LABEL,
                 .source_offset = (uint32_t)offset,
                 .payload.identifier.text = name,
             };
@@ -576,7 +576,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             }
 
             token_elements[result.tokens.length] = (Token){
-                .token_kind = token_kind,
+                .kind = token_kind,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -584,7 +584,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         }
         else if (character == (char)TOKEN_KIND_HASH) {
             token_elements[result.tokens.length] = (Token){
-                .token_kind = TOKEN_KIND_HASH,
+                .kind = TOKEN_KIND_HASH,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -599,7 +599,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                  character == (char)TOKEN_KIND_CARET ||
                  character == (char)TOKEN_KIND_PERCENT) {
             token_elements[result.tokens.length] = (Token){
-                .token_kind = (Token_Kind)character,
+                .kind = (Token_Kind)character,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -607,7 +607,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         }
         else if (character == (char)TOKEN_KIND_COMMA) {
             token_elements[result.tokens.length] = (Token){
-                .token_kind = TOKEN_KIND_COMMA,
+                .kind = TOKEN_KIND_COMMA,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -615,7 +615,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         }
         else if (character == (char)TOKEN_KIND_PARENTHESIS_LEFT) {
             token_elements[result.tokens.length] = (Token){
-                .token_kind = TOKEN_KIND_PARENTHESIS_LEFT,
+                .kind = TOKEN_KIND_PARENTHESIS_LEFT,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -623,7 +623,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         }
         else if (character == (char)TOKEN_KIND_PARENTHESIS_RIGHT) {
             token_elements[result.tokens.length] = (Token){
-                .token_kind = TOKEN_KIND_PARENTHESIS_RIGHT,
+                .kind = TOKEN_KIND_PARENTHESIS_RIGHT,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -631,7 +631,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         }
         else if (character == (char)TOKEN_KIND_TYPE_SEPARATOR) {
             token_elements[result.tokens.length] = (Token){
-                .token_kind = TOKEN_KIND_TYPE_SEPARATOR,
+                .kind = TOKEN_KIND_TYPE_SEPARATOR,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -651,7 +651,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             }
 
             token_elements[result.tokens.length] = (Token){
-                .token_kind = token_kind,
+                .kind = token_kind,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -664,7 +664,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             if (offset + 2 < source.length && source.bytes[offset + 1] == '.' &&
                 source.bytes[offset + 2] == '.') {
                 token_elements[result.tokens.length] = (Token){
-                    .token_kind = TOKEN_KIND_ELLIPSIS,
+                    .kind = TOKEN_KIND_ELLIPSIS,
                     .source_offset = (uint32_t)offset,
                 };
                 result.tokens.length += 1;
@@ -676,7 +676,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                             source.bytes[offset + 2] == '<';
             if (is_range == false) {
                 token_elements[result.tokens.length] = (Token){
-                    .token_kind = TOKEN_KIND_DOT,
+                    .kind = TOKEN_KIND_DOT,
                     .source_offset = (uint32_t)offset,
                 };
                 result.tokens.length += 1;
@@ -692,7 +692,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             }
 
             token_elements[result.tokens.length] = (Token){
-                .token_kind = token_kind,
+                .kind = token_kind,
                 .source_offset = (uint32_t)offset,
             };
             result.tokens.length += 1;
@@ -711,7 +711,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
     // to look at the token that follows the last real one.
     assert(result.tokens.length <= token_count_max);
     token_elements[result.tokens.length] = (Token){
-        .token_kind = TOKEN_KIND_END,
+        .kind = TOKEN_KIND_END,
         .source_offset = (uint32_t)source.length,
     };
     result.tokens.length += 1;
@@ -730,7 +730,7 @@ Array_Slice tokens_without_comments(Array_Slice tokens, Array_Slice code_buffer)
     Token *code_elements = code_buffer.elements;
     Array_Slice code = array_slice_make(code_buffer.elements, 0);
     for (size_t i = 0; i < tokens.length; i += 1) {
-        Token_Kind token_kind = token_elements[i].token_kind;
+        Token_Kind token_kind = token_elements[i].kind;
         if (token_kind != TOKEN_KIND_COMMENT && token_kind != TOKEN_KIND_DOCUMENTATION_COMMENT) {
             code_elements[code.length] = token_elements[i];
             code.length += 1;
