@@ -285,7 +285,7 @@
         "use strict";
 
         /*
-         * The examples. The Mialu program of each is the file in test-code that the server
+         * The examples. The Mialu program of each is the file in test-code/wasm that the server
          * serves, so that there is one copy of it, and the JavaScript that calls it is the file
          * next to it with the same name, such as sum.mu and sum.client.js.
          */
@@ -879,11 +879,11 @@
         // Counts loads, so that a slow answer for an example that was replaced is ignored.
         let exampleLoadCount = 0;
 
-        // Returns the text of a file of test-code, or throws when the server does not have it.
+        // Returns the text of a file of test-code/wasm, or throws when the server does not have it.
         async function fetchExample(file) {
-            const response = await fetch(`/test-code/${file}`);
+            const response = await fetch(`/test-code/wasm/${file}`);
             if (response.ok === false) {
-                throw new Error(`The server answered ${response.status} for test-code/${file}.`);
+                throw new Error(`The server answered ${response.status} for test-code/wasm/${file}.`);
             }
             return response.text();
         }

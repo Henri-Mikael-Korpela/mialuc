@@ -1133,7 +1133,7 @@ is_three :: proc(token: Token) Bool ->
     return token.kind == .INTEGER_LITERAL and token.integer_literal.value == 3
 ```
 
-The object that is compared and the object that is used must be the same place: the same variable or parameter, or the same field of one, or the same pointer followed, such as `token`, `line.token` and `p`. An element of an array, such as `tokens[0]`, is never taken as the same place as another element, so it is read through a variable first, as in `token := tokens[0]` in the example of `first_token_text` in `test-code/unions.mu`.
+The object that is compared and the object that is used must be the same place: the same variable or parameter, or the same field of one, or the same pointer followed, such as `token`, `line.token` and `p`. An element of an array, such as `tokens[0]`, is never taken as the same place as another element, so it is read through a variable first, as in `token := tokens[0]` in the example of `first_token_text` in `test-code/wasm/unions.mu`.
 
 The compiler does not take any of these as a proof, and the use of a field of a case there is an error:
 

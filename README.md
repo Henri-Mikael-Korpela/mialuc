@@ -40,7 +40,7 @@ docker compose up --build
 
 The first run builds the image, which takes a minute. Open http://localhost:8008/playground.html when the log says the server is running. Stop it with Ctrl+C, or run `docker compose down` if it runs in the background (`docker compose up --build -d`). The port is reachable from your computer only.
 
-Run the JavaScript with Ctrl+Enter; the console output is on the right, with two tabs below it: "Parsed code", the syntax tree as a hierarchy that can be folded, and "WebAssembly text". The examples in the list at the top are the programs in [test-code](test-code): each is a Mialu file and the JavaScript next to it that calls it, such as `sum.mu` and `sum.client.js`.
+Run the JavaScript with Ctrl+Enter; the console output is on the right, with two tabs below it: "Parsed code", the syntax tree as a hierarchy that can be folded, and "WebAssembly text". The examples in the list at the top are the programs in [test-code/wasm](test-code/wasm): each is a Mialu file and the JavaScript next to it that calls it, such as `sum.mu` and `sum.client.js`.
 
 A program that imports JavaScript functions with `import foreign js "functions"`, such as the `foreign functions` example, gets them from the "JavaScript imports" section under the JavaScript one, which is the file next to the program that ends in `.imports.js`. Its code defines `imports`, an object with a property of the name in the import, which has a function for each foreign procedure: `const imports = { functions: { alert: (address, length) => { ... } } }`. The code can use `Str`, which reads a string from the address and the length that a `Str` parameter is, as in `Str(address, length)`, and `instance`, whose `instance.exports.memory` is the memory of the program. The section stays empty for a program that imports nothing.
 
@@ -53,7 +53,7 @@ The image contains a copy of the sources, so run `docker compose up --build` aga
 [grammar.ebnf](grammar.ebnf) describes what the compiler accepts, in EBNF that works on characters. To check that a source file matches it:
 
 ```
-python scripts/verify_grammar.py test-code/main-function.mu
+python scripts/verify_grammar.py test-code/wasm/main-function.mu
 ```
 
 The script uses only the Python standard library, so there is nothing to install. It prints `OK`, or the line and column where the file stops matching and what the grammar expected there. It exits with 0 when every file matches, 1 when a file does not, and 2 when the grammar or the arguments are wrong.

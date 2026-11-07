@@ -18,7 +18,7 @@ there even when the analysis rejects the program, and null when the source does 
 
 A program that does not compile is a normal answer, so it comes with status 200 too.
 
-The directory test-code of the project is served under /test-code/, so that the playground can
+The directory test-code/wasm of the project is served under /test-code/wasm/, so that the playground can
 offer the example programs that are kept there: a Mialu file, such as sum.mu, and the JavaScript
 that calls it, such as sum.client.js. A program that imports JavaScript functions, such as
 foreign-functions.mu, has a third file with them, such as foreign-functions.imports.js.
@@ -39,8 +39,8 @@ PORT_DEFAULT = 8008
 HOST = os.environ.get("MIALU_HOST", "127.0.0.1")
 
 ROOT_DIRECTORY = Path(__file__).resolve().parents[2]
-EXAMPLES_DIRECTORY = ROOT_DIRECTORY / "test-code"
-EXAMPLES_ROUTE = "/test-code/"
+EXAMPLES_DIRECTORY = ROOT_DIRECTORY / "test-code" / "wasm"
+EXAMPLES_ROUTE = "/test-code/wasm/"
 # The name of the executable depends on the platform that CMake built it for.
 COMPILER_PATHS = [ROOT_DIRECTORY / "build" / "mialuc.exe", ROOT_DIRECTORY / "build" / "mialuc"]
 

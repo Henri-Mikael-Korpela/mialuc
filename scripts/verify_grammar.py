@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Checks that Mialu source files are accepted by the EBNF grammar in grammar.ebnf.
 
-    python scripts/verify_grammar.py test-code/main-function.mu
+    python scripts/verify_grammar.py test-code/wasm/main-function.mu
 
 The script has no dependencies besides the Python standard library. It reads the grammar, which
 is written in ISO 14977 EBNF with the extensions listed at the top of grammar.ebnf, and then
