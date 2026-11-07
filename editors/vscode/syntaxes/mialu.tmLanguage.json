@@ -284,11 +284,11 @@
             ]
         },
         "primitive-types": {
-            "comment": "The primitive data types Bool, C_Str, Int and Str, and the ones that are reserved for the future. They are colored wherever they are written, also when they are not in a place that the other rules recognize as a type.",
+            "comment": "The primitive data types Bool, Byte, C_Str, Int and Str, and the ones that are reserved for the future. They are colored wherever they are written, also when they are not in a place that the other rules recognize as a type.",
             "patterns": [
                 {
                     "name": "support.type.primitive.mialu",
-                    "match": "\\b(?:Bool|C_Str|Int|Str|Byte|Rune|F32|F64|I8|I16|I32|I64|U8|U16|U32|U64)\\b"
+                    "match": "\\b(?:Bool|Byte|C_Str|Int|Str|Rune|F32|F64|I8|I16|I32|I64|U8|U16|U32|U64)\\b"
                 }
             ]
         },

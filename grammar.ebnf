@@ -34,8 +34,8 @@
        scope resolution, which the compiler does after parsing.
      - A program that has a foreign block must have one `import foreign` of the target of the
        block above the first block of that target, and no more than one for each target. The
-       targets are `js` and `libc`. A foreign procedure takes and gives `Int`, `Bool`, `Str`,
-       `C_Str` or a struct, as any other procedure does, and an array only as a slice. The name
+       targets are `js` and `libc`. A foreign procedure takes and gives `Int`, `Bool`, `Byte`,
+       `Str`, `C_Str` or a struct, as any other procedure does, and an array only as a slice. The name
        of the object of `js` is not checked, because it is not known until the program runs.
      - `str_to_c_str` is a built-in procedure like `length_of`. It takes a `Str` and gives a
        `C_Str`. The target decides what it supports, for example where the string may come from.
@@ -53,6 +53,10 @@
        compiler, up to 32 blocks inside each other, and the grammar needs more rules for it.
      - `length_of` is a built-in procedure, so it is a call of a name that nothing in the program
        defines. It takes one array or array slice.
+     - `byte_to_int` and `int_to_byte` are built-in procedures like `length_of`. `byte_to_int`
+       takes a `Byte` and gives an `Int`, and `int_to_byte` takes an `Int` and gives a `Byte`.
+       An integer literal from 0 to 255 is a `Byte` where a `Byte` is wanted, and any other
+       `Int` is not one, so `b : Byte = 256` is an error. A `Byte` has no arithmetic.
      - The name of a call must be a procedure, or a variable, a parameter or a global variable that
        holds a pointer to a procedure, and the arguments must match the parameters in number and in
        type. A call of a procedure that returns nothing can only be a statement. The name of a
@@ -68,9 +72,10 @@
        inside of. A statement cannot have the label of a statement around it. Labels are separate
        from the names of variables.
      - The condition of an if statement must be a `Bool`, so a number or a string is not one, and
-       the operands of a comparison must both be `Int`, or both `Bool` for `==` and `not=`. A
+       the operands of a comparison must both be `Int`, or both `Byte` (or an integer literal
+       from 0 to 255, which is a `Byte` there), or both `Bool` for `==` and `not=`. A
        variable defined in a block can only be used in that block. All are checked after parsing.
-     - The elements of an array and of an array slice must be `Int`, `Bool`, `Str` or a struct, an
+     - The elements of an array and of an array slice must be `Int`, `Bool`, `Byte`, `Str` or a struct, an
        array literal must have as many elements as the length of its type when that is a number,
        and a variable of an array type must be given an array literal. What is subscripted, sliced or gone through by a for
        statement must be an array or an array slice, and an index must be an `Int`. An array can
@@ -78,7 +83,7 @@
        cannot tell a name that is an array from any other. A for statement with a range and one
        with elements both have an expression after `in`, and the range operator tells them apart.
      - The name of the type of a variable, a parameter or a field, and the name of a struct literal,
-       must be `Int`, `Bool`, `Str` or a struct that is defined, also after the carets of a pointer
+       must be `Int`, `Bool`, `Byte`, `Str` or a struct that is defined, also after the carets of a pointer
        type. A field of a struct cannot be an array, and a struct cannot contain itself, directly or
        through other structs, but it can have a pointer to its own struct. The fields of
        a struct have different names. In a struct literal every field must be a field of the

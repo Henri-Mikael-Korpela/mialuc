@@ -11,6 +11,7 @@
 - [Primitive data types](#primitive-data-types)
   - [Booleans](#booleans)
   - [Integers](#integers)
+  - [Bytes](#bytes)
   - [C strings](#c-strings)
   - [Strings](#strings)
 - [Operators](#operators)
@@ -204,6 +205,7 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 | Type  | Description                                                  |
 |-------|--------------------------------------------------------------|
 | `Bool` | A boolean value, which is `true` or `false`. See [Booleans](#booleans). |
+| `Byte` | An unsigned 8-bit integer, from 0 to 255. It is the unit of memory and of binary data. See [Bytes](#bytes). |
 | `C_Str` | A null-terminated C string, the address of bytes that end with a zero. It is for passing text to and from code written in C, to a parameter of type `char *` or `char const *`. See [C strings](#c-strings). |
 | `Int` | A signed 64-bit integer. Written as a decimal number, such as `42`. See [Integers](#integers). |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
@@ -212,7 +214,6 @@ The following primitive data types are reserved for possible future use:
 
 | Category | Types |
 | -------- | ----- |
-| Byte | `Byte` |
 | Character | `Rune` |
 | Floating point number | `F32 F64` |
 | Signed integer | `I8 I16 I32 I64` |
@@ -241,6 +242,38 @@ count : Int = 42
 The arithmetic operators `+`, `-`, `*` and `/` take two `Int` values and give an `Int`, see [Operators](#operators), and so do the assignment operators `+=`, `-=`, `*=` and `/=`, see [Assignment](#assignment). Addition, subtraction and multiplication wrap around on overflow, so the largest `Int` plus 1 is the smallest. Division truncates toward zero, so `(0 - 7) / 2` is -3. Dividing by zero, or dividing the smallest `Int` by -1, whose result does not fit, is an error at run time, see [WebAssembly](#webassembly).
 
 An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an error, and an operand of arithmetic that is not an `Int` is an error. The integer types `I8`, `I16`, `I32`, `I64` and `U8`, `U16`, `U32`, `U64` are reserved for possible future use, see [Primitive data types](#primitive-data-types).
+
+### Bytes
+
+A `Byte` is an unsigned 8-bit integer: it holds the numbers from 0 to 255. It is the type of binary data, such as the contents of a buffer, and of the individual bytes of memory. An integer literal from 0 to 255 is a `Byte` where a `Byte` is wanted: as the value of a variable that is declared a `Byte`, as an assigned value, as an argument, as a returned value, as an element of an array literal, as the value of a field in a struct literal and as the other operand of a comparison with a `Byte`. A literal that is not from 0 to 255 is not a `Byte`, so it is an error there, and so is any other `Int`, because nothing is converted:
+
+```
+level : Byte = 200
+next_byte :: proc(b: Byte) Byte ->
+    return int_to_byte(byte_to_int(b) + 1)
+```
+
+A variable that is defined with a `Byte` type and no value is 0. A variable that is defined without a type is a `Byte` when it is given a `Byte`, such as the result of `int_to_byte`, and an integer literal alone makes an `Int`, so `x := 200` is an `Int`.
+
+The built-in procedures `byte_to_int` and `int_to_byte` convert between the two. `byte_to_int` takes a `Byte` and gives the `Int` of the same number, from 0 to 255. `int_to_byte` takes an `Int` and gives the `Byte` of the same number, and it is an error at run time, as dividing by zero is, for a number that is not from 0 to 255, because a `Byte` could not hold it, see [WebAssembly](#webassembly). Both take one argument, and a procedure with the same name that the program defines is called instead of the built-in one.
+
+Two `Byte` values are compared with all six comparison operators, and the comparison is of the numbers from 0 to 255, so a `Byte` is never negative, see [Comparison operators](#comparison-operators). A `Byte` has no arithmetic: `a + b` for two bytes is an error, and the arithmetic is done on `Int` values, as in `byte_to_int(a) + byte_to_int(b)`. A `Byte` is not a `Bool` and not a condition.
+
+An [array](#arrays) of `Byte` takes one byte of memory for each element, so `[4]Byte` is four bytes, and a [slice](#array-slices) of one is a view of bytes. A [struct](#structs) can have a field of type `Byte`, and a [pointer](#pointers) can point to one, written `^Byte`:
+
+```
+sum_of_bytes :: proc(bytes: []Byte) Int ->
+    total := 0
+    for b in bytes ->
+        total += byte_to_int(b)
+    return total
+
+main :: proc() Int ->
+    a := [4]Byte { 72, 105, 33, 10 }
+    return sum_of_bytes(a)
+```
+
+`main` returns 220.
 
 ### C strings
 
@@ -421,7 +454,7 @@ is_even :: proc(n: Int) Bool ->
     return n / 2 * 2 == n
 ```
 
-Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. `Int` is the only type that has an order, so `<`, `<=`, `>` and `>=` are defined for `Int` only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Strings cannot be compared.
+Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. `Int` and `Byte` are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an integer literal from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Strings cannot be compared.
 
 A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, see [Operators](#operators).
 
@@ -822,7 +855,7 @@ A `break` that is not inside a loop or a scope, and a `continue` that is not ins
 
 ## Arrays
 
-An array is a fixed number of values of one type, which are called its elements. The elements are one after the other, and the number of them is the length of the array. The length is known when the program is compiled, and it never changes. An array lives on the stack of the procedure that defines it: it takes no allocation, and it is gone when the procedure returns. The type of an array is its length between square brackets, followed by the type of its elements, so `[5]Int` is an array of five `Int` values. Elements are numbered from zero, so the elements of `[5]Int` have the indexes 0, 1, 2, 3 and 4. The elements can be `Int`, `Bool` or `Str` values, [struct objects](#structs-in-arrays) or [pointers](#pointers-in-structs-and-arrays), and not arrays.
+An array is a fixed number of values of one type, which are called its elements. The elements are one after the other, and the number of them is the length of the array. The length is known when the program is compiled, and it never changes. An array lives on the stack of the procedure that defines it: it takes no allocation, and it is gone when the procedure returns. The type of an array is its length between square brackets, followed by the type of its elements, so `[5]Int` is an array of five `Int` values. Elements are numbered from zero, so the elements of `[5]Int` have the indexes 0, 1, 2, 3 and 4. The elements can be `Int`, `Bool`, `Byte` or `Str` values, [struct objects](#structs-in-arrays) or [pointers](#pointers-in-structs-and-arrays), and not arrays.
 
 ### Array literals
 
@@ -962,7 +995,7 @@ Person :: struct ->
     name: Str
 ```
 
-The type of a field can be `Int`, `Bool`, `Str`, another struct or a [pointer](#pointers), and it cannot be an [array or an array slice](#arrays). The fields of a struct have different names, and a struct cannot contain itself, since it would never end: not directly, as in a field `next: Person` of `Person`, and not through other structs. A pointer to the struct is not the struct, so a field `next: ^Person` is fine. A struct is a type and not a value, so its name is written where a type is, and in a struct literal, but `x := Person` is an error. Like any constant, a struct can be defined below the procedures that use it.
+The type of a field can be `Int`, `Bool`, `Byte`, `Str`, another struct or a [pointer](#pointers), and it cannot be an [array or an array slice](#arrays). The fields of a struct have different names, and a struct cannot contain itself, since it would never end: not directly, as in a field `next: Person` of `Person`, and not through other structs. A pointer to the struct is not the struct, so a field `next: ^Person` is fine. A struct is a type and not a value, so its name is written where a type is, and in a struct literal, but `x := Person` is an error. Like any constant, a struct can be defined below the procedures that use it.
 
 #### Struct objects
 
@@ -1665,7 +1698,7 @@ The compiler has two modes: `run` without a target prints the tokens and the syn
 
 ### WebAssembly
 
-The `wasm` target writes a WebAssembly binary module. It imports its foreign procedures from JavaScript, so a procedure of a `foreign libc` block is an error, and so is a call of `str_to_c_str`. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool` and `Str` are the basic types that the target supports, and then the structs, the pointers to any of them, and the arrays and array slices of any of them.
+The `wasm` target writes a WebAssembly binary module. It imports its foreign procedures from JavaScript, so a procedure of a `foreign libc` block is an error, and so is a call of `str_to_c_str`. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool`, `Byte` and `Str` are the basic types that the target supports, and then the structs, the pointers to any of them, and the arrays and array slices of any of them.
 
 `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`. The arithmetic is the one of [Integers](#integers), with the signed `i64` instructions. Division traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
 
@@ -1701,6 +1734,8 @@ A for statement that goes through the elements of an array or a slice is the sam
 
 A struct is made of the values of its fields, one after the other, in the order of its definition, where a field that is a struct takes its own fields in its place, and nothing else: it has no header and no padding. So a `Person` is three values, the `i64` of the age and the `i32` address and `i32` length of the name. A parameter of a struct type is that many parameters, a variable is that many locals, and a procedure that returns a struct has that many results, which JavaScript receives as an array, in the order of the fields. Reading a field of a variable or a parameter is a `local.get` for each of its values, with no cost for the rest of the struct, and assigning to a field is a `local.set`; a struct literal pushes the values of the fields in the order of the struct, with the default value, which is zero, for the ones that it does not give. The values of a struct literal are written in the order of the fields of the struct, so a string in a literal can have its address in the data section before one that comes before it in the source, which the address of a string allows, since it is the length of the strings before it in the source. A struct in an array is in memory, with 8 bytes for each of its values, so `Person` takes 24 bytes there. The field of an element is read with a load at the address of the element plus 8 times the number of values before the field, and is assigned with a store there. An assignment of a whole struct to an element is a store of each of its values, with the last on the stack stored first, using a local to hold each value while the address is pushed below it. A default value is `i64.const 0` or `i32.const 0` for each value. A struct is not a function: the definition of one is a constant that has no code and no export.
 
+A `Byte` is one 32-bit integer (`i32`) whose value is from 0 to 255, so a parameter of the type is one WebAssembly parameter and a result is one result, which JavaScript passes and receives as a plain number and not as a `BigInt`. An integer literal that is a `Byte` is `i32.const`. Bytes are compared with the unsigned instructions `i32.lt_u`, `i32.le_u`, `i32.gt_u` and `i32.ge_u`, and with `i32.eq` and `i32.ne`. `byte_to_int` is `i64.extend_i32_u`. `int_to_byte` keeps the number in a local, compares it with 255 as an unsigned 64-bit number with `i64.gt_u`, which also finds a negative number, traps with `unreachable` when it is above, and otherwise is `i32.wrap_i64` of the number. The default value is `i32.const 0`. The elements of an array of `Byte` and what a pointer to a `Byte` points to take one byte of memory, not 8 as the others do: an element is read with `i32.load8_u` and written with `i32.store8`, the address of an element is the address of the array plus the index with no scaling, and a `for` statement moves its address up by 1. So a `Uint8Array` of the memory of the module is the array: `new Uint8Array(memory.buffer, 0, 3).set([1, 2, 3])` and then `sum_of_bytes(0, 3)`. The elements of the array literals in the frame of a procedure, and its variables, are each rounded up to a multiple of 8 bytes, so that what comes after them is aligned. A `Byte` that is a field of a struct is one value of the struct, and in memory it takes the 8 bytes of any value, from which `i32.load8_u` and `i32.store8` use the first.
+
 A pointer is one 32-bit integer (`i32`): the address in the memory of the module of what it points to, so a parameter that is a pointer is one WebAssembly parameter, and a result that is a pointer is one result, which JavaScript passes and receives as a number. `nil` is `i32.const 0`, which is also what a pointer that is not given a value is, and is not the address of anything that a program can point to. Two pointers or a pointer and `nil` are compared with `i32.eq` and `i32.ne`, as two `Bool` values are. What a pointer points to is in memory like an element of an array: 8 bytes for each of its values, aligned, so a `Str` takes 16 bytes and a struct takes 8 for each of its values, and the first four bytes of the 8 hold a 32-bit value. A field that is a pointer is one value of the struct, and so is an element of an array that is a pointer. A caller from JavaScript can point to what it wrote to the memory of the module, as it does for the elements of a slice:
 
 ```js
@@ -1727,7 +1762,8 @@ The target rejects a program that the parser accepts when:
 - the type written after `enum` is not `Int`,
 - `type_info_of` is asked about a type that is not an enum, or is not followed by `.name` or `.members` right away, or is the initial value of a global variable with anything more than one of them after it,
 - `length_of` has other than one argument, or an argument that is not an array or an array slice,
-- a type, also the one of a global variable, is not `Int`, `Bool`, `Str`, a struct or an enum that is defined, a pointer to one of them, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
+- `byte_to_int` has other than one argument, or an argument that is not a `Byte`, and `int_to_byte` has other than one argument, or an argument that is not an `Int`,
+- a type, also the one of a global variable, is not `Int`, `Bool`, `Byte`, `Str`, a struct or an enum that is defined, a pointer to one of them, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
 - a struct contains itself, or has a field that is an array or an array slice,
 - a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field,
 - a field is accessed on a value that is not a struct or a pointer to one, or does not exist, or is accessed through something that is not a variable, a parameter, an element of an array or a pointer,

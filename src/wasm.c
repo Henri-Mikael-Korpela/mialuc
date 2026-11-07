@@ -26,6 +26,8 @@ enum {
     // also the alignment of a load or a store of an element, as a power of two.
     WASM_ELEMENT_SIZE_BYTES = 8,
     WASM_ELEMENT_SIZE_SHIFT = 3,
+    // The largest number a `Byte` holds.
+    WASM_BYTE_MAX = 255,
     // An element of the members of an enum is an `Enum_Member_Type_Info`, which has the name of the
     // member, a `Str` of two slots, and its number, an `Int` of one. Every slot takes 8 bytes in
     // memory, see `wasm_type_stride_bytes`.
@@ -73,10 +75,14 @@ typedef struct {
 // `definition` is the `AST_NODE_TYPE_ENUM_TYPE`. The
 // member of an enum that is written without the enum, such as `.RED`, has the kind
 // `WASM_VALUE_TYPE_ENUM_LITERAL`, which like `nil` is accepted where any enum is wanted and is
-// given a number when the enum is known, see `wasm_enum_literal_expected`.
+// given a number when the enum is known, see `wasm_enum_literal_expected`. A byte is one 32-bit value
+// from 0 to 255 in a local, a global or a field, and one byte in an array, an array slice or what a
+// pointer points to, see `wasm_type_stride_bytes`. An integer literal from 0 to 255 is a byte where
+// one is wanted, see `wasm_value_is_accepted`.
 typedef enum {
     WASM_VALUE_TYPE_ARRAY,
     WASM_VALUE_TYPE_BOOL,
+    WASM_VALUE_TYPE_BYTE,
     WASM_VALUE_TYPE_C_STR,
     WASM_VALUE_TYPE_ENUM,
     WASM_VALUE_TYPE_ENUM_LITERAL,
@@ -618,6 +624,17 @@ static Wasm_Field_Path wasm_field_path                        (Wasm_Builder cons
                                                                Ast_Node_Index access);
 static byte            wasm_load_opcode                       (byte kind);
 static byte            wasm_store_opcode                      (byte kind);
+static byte            wasm_comparison_opcode_byte            (Ast_Comparison_Operator operator);
+static byte            wasm_type_load_opcode                  (Wasm_Builder const *builder,
+                                                               Wasm_Type type, size_t slot);
+static byte            wasm_type_store_opcode                 (Wasm_Builder const *builder,
+                                                               Wasm_Type type, size_t slot);
+static bool            wasm_is_byte_literal                   (Wasm_Builder const *builder,
+                                                               Ast_Node_Index expression);
+static bool            wasm_value_is_accepted                 (Wasm_Builder const *builder,
+                                                               Wasm_Type target,
+                                                               Ast_Node_Index value);
+static size_t          wasm_frame_round_up                    (size_t bytes);
 
 Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,
                              Array_Slice output_buffer) {
@@ -1194,7 +1211,7 @@ static bool wasm_check_globals(Wasm_Builder *builder) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
                                  wasm_type_subject(builder, type));
             }
-            if (wasm_type_equals(wasm_expression_type(builder, value), global_type) == false) {
+            if (wasm_value_is_accepted(builder, global_type, value) == false) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
                                  builder->nodes[global].payload.global_variable_definition.name);
             }
@@ -1318,6 +1335,12 @@ static void wasm_build_global_section(Wasm_Builder *builder) {
                                       (int64_t)(slot == 0 ? address : length_bytes));
                     wasm_write_byte(&builder->writer, WASM_OPCODE_END);
                 }
+            } else if (value_type.kind == WASM_VALUE_TYPE_BYTE) {
+                wasm_write_byte(&builder->writer, WASM_TYPE_I32);
+                wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
+                wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
+                wasm_write_signed(&builder->writer, value_node->payload.integer_literal.value);
+                wasm_write_byte(&builder->writer, WASM_OPCODE_END);
             } else if (value_type.kind == WASM_VALUE_TYPE_BOOL) {
                 wasm_write_byte(&builder->writer, WASM_TYPE_I32);
                 wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
@@ -2209,15 +2232,22 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
 
     Str name = builder->nodes[call].payload.call.name;
 
-    // `length_of` takes one array or array slice. The argument was written already, and an array
-    // was made into a slice of all its elements, so the length is on the stack either way.
+    // A built-in procedure takes one argument, which was written already. `length_of` takes an
+    // array or an array slice, and an array was made into a slice of all its elements, so the
+    // length is on the stack either way. `byte_to_int` takes a `Byte` and `int_to_byte` an `Int`.
     if (wasm_call_is_built_in(builder, call)) {
         if (wasm_children_count(builder, call) != 1) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
         }
         Wasm_Type argument_type =
             wasm_expression_type(builder, builder->nodes[call].first_child);
-        if (wasm_type_is_sequence(argument_type) == false) {
+        bool is_argument_valid = wasm_type_is_sequence(argument_type);
+        if (str_equals(name, STR("byte_to_int"))) {
+            is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_BYTE;
+        } else if (str_equals(name, STR("int_to_byte"))) {
+            is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_INT;
+        }
+        if (is_argument_valid == false) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         }
         return true;
@@ -2283,7 +2313,7 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
     bool is_c_str_literal = return_type.kind == WASM_VALUE_TYPE_C_STR &&
                             builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL;
     if (is_c_str_literal == false &&
-        wasm_type_equals(wasm_expression_type(builder, value), return_type) == false) {
+        wasm_value_is_accepted(builder, return_type, value) == false) {
         Str name = builder->nodes[definition].payload.constant_definition.name;
         return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
     }
@@ -2495,7 +2525,7 @@ static bool wasm_build_code_section_body_field_assignment(Wasm_Builder *builder,
                 false) {
                 return false;
             }
-            if (wasm_type_equals(path.type, wasm_expression_type(builder, value)) == false) {
+            if (wasm_value_is_accepted(builder, path.type, value) == false) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
                                  field_name);
             }
@@ -2576,7 +2606,7 @@ static bool wasm_build_code_section_body_place_store(Wasm_Builder *builder,
         if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
             return false;
         }
-        if (wasm_type_equals(type, wasm_expression_type(builder, value)) == false) {
+        if (wasm_value_is_accepted(builder, type, value) == false) {
             if (builder->nodes[target].node_type == AST_NODE_TYPE_FIELD_ACCESS) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
                                  builder->nodes[target].payload.field_access.name);
@@ -3001,8 +3031,12 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     case AST_NODE_TYPE_OR:
         return wasm_type_make(WASM_VALUE_TYPE_BOOL);
     case AST_NODE_TYPE_CALL: {
-        // A built-in procedure returns the length of an array, which is an `Int`.
+        // A built-in procedure returns an `Int`, the length of an array or the number of a byte,
+        // except `int_to_byte`, which returns a `Byte`.
         if (wasm_call_is_built_in(builder, expression)) {
+            if (str_equals(builder->nodes[expression].payload.call.name, STR("int_to_byte"))) {
+                return wasm_type_make(WASM_VALUE_TYPE_BYTE);
+            }
             return wasm_type_make(WASM_VALUE_TYPE_INT);
         }
         // The type of what the procedure returns, which is none for a procedure without a result,
@@ -3220,6 +3254,21 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
         return true;
     }
 
+    // Bytes have an order, like numbers. The other operand is a `Byte` too, or an integer literal
+    // from 0 to 255, which is a `Byte` there.
+    if (left_type.kind == WASM_VALUE_TYPE_BYTE || right_type.kind == WASM_VALUE_TYPE_BYTE) {
+        if (left_type.kind != WASM_VALUE_TYPE_BYTE && wasm_is_byte_literal(builder, left) == false) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, left));
+        }
+        if (right_type.kind != WASM_VALUE_TYPE_BYTE &&
+            wasm_is_byte_literal(builder, right) == false) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, right));
+        }
+        return true;
+    }
+
     Ast_Comparison_Operator operator = node->payload.comparison.operator;
     bool is_equality = operator == AST_COMPARISON_OPERATOR_EQUAL ||
                        operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
@@ -3274,6 +3323,31 @@ static byte wasm_comparison_opcode(Ast_Comparison_Operator operator) {
     // Unreachable: every operator is handled above.
     assert(false);
     return WASM_OPCODE_I64_EQ;
+}
+
+/**
+ * Returns the instruction that compares two `Byte` values with `operator`, which are 32-bit
+ * integers from 0 to 255, so the comparison is unsigned.
+ */
+static byte wasm_comparison_opcode_byte(Ast_Comparison_Operator operator) {
+    switch (operator) {
+    case AST_COMPARISON_OPERATOR_EQUAL:
+        return WASM_OPCODE_I32_EQ;
+    case AST_COMPARISON_OPERATOR_GREATER:
+        return WASM_OPCODE_I32_GT_U;
+    case AST_COMPARISON_OPERATOR_GREATER_EQUAL:
+        return WASM_OPCODE_I32_GE_U;
+    case AST_COMPARISON_OPERATOR_LESS:
+        return WASM_OPCODE_I32_LT_U;
+    case AST_COMPARISON_OPERATOR_LESS_EQUAL:
+        return WASM_OPCODE_I32_LE_U;
+    case AST_COMPARISON_OPERATOR_NOT_EQUAL:
+        return WASM_OPCODE_I32_NE;
+    }
+
+    // Unreachable: every operator is handled above.
+    assert(false);
+    return WASM_OPCODE_I32_EQ;
 }
 
 /**
@@ -3376,6 +3450,27 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             break;
         case AST_NODE_TYPE_CALL: {
             Semantic_Binding callee_binding = builder->bindings[current];
+            if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
+                str_equals(node->payload.call.name, STR("byte_to_int"))) {
+                // A byte is a 32-bit integer from 0 to 255, and an `Int` is a 64-bit one.
+                wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_U);
+                break;
+            }
+            if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
+                str_equals(node->payload.call.name, STR("int_to_byte"))) {
+                // A number above 255 is too large for a byte, and a negative one is above it as
+                // an unsigned number, so one comparison finds both. The program stops for them.
+                size_t number = wasm_scratch_local_index(builder, procedure,
+                                                         WASM_SCRATCH_TEMPORARY_64);
+                wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_TEE, number);
+                wasm_write_byte(&builder->writer, WASM_OPCODE_I64_CONST);
+                wasm_write_signed(&builder->writer, WASM_BYTE_MAX);
+                wasm_write_byte(&builder->writer, WASM_OPCODE_I64_GT_U);
+                wasm_structured_trap(builder);
+                wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, number);
+                wasm_write_byte(&builder->writer, WASM_OPCODE_I32_WRAP_I64);
+                break;
+            }
             if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE) {
                 // `length_of`: the address and the length of the slice are on the stack, and
                 // only the length stays, as a 64-bit `Int`. The address is below it, so the length
@@ -3413,6 +3508,13 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             wasm_write_signed(&builder->writer, node->payload.bool_literal.value ? 1 : 0);
             break;
         case AST_NODE_TYPE_COMPARISON:
+            // Bytes are compared as the unsigned 32-bit integers that they are.
+            if (wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_BYTE ||
+                wasm_expression_type(builder, node->last_child).kind == WASM_VALUE_TYPE_BYTE) {
+                wasm_write_byte(&builder->writer,
+                                wasm_comparison_opcode_byte(node->payload.comparison.operator));
+                break;
+            }
             // `Bool` values and addresses are compared as the 32-bit integers that they are.
             if (wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_BOOL ||
                 wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_NIL ||
@@ -3467,6 +3569,14 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             }
             break;
         case AST_NODE_TYPE_INTEGER_LITERAL:
+            // A literal where a `Byte` is wanted is a 32-bit value, and the check of the place
+            // that wants it rejects a number that does not fit.
+            if (wasm_is_byte_literal(builder, current) &&
+                wasm_literal_expected_type(builder, definition, current).kind ==
+                    WASM_VALUE_TYPE_BYTE) {
+                wasm_write_i32_const(&builder->writer, node->payload.integer_literal.value);
+                break;
+            }
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_CONST);
             wasm_write_signed(&builder->writer, node->payload.integer_literal.value);
             break;
@@ -3936,10 +4046,13 @@ static void wasm_write_i32_const(Wasm_Writer *writer, int64_t number) {
 static void wasm_write_memory_instruction(Wasm_Writer *writer, byte opcode,
                                           uint64_t offset_bytes) {
     assert(opcode == WASM_OPCODE_I64_LOAD || opcode == WASM_OPCODE_I64_STORE ||
-           opcode == WASM_OPCODE_I32_LOAD || opcode == WASM_OPCODE_I32_STORE);
+           opcode == WASM_OPCODE_I32_LOAD || opcode == WASM_OPCODE_I32_STORE ||
+           opcode == WASM_OPCODE_I32_LOAD8_U || opcode == WASM_OPCODE_I32_STORE8);
 
     wasm_write_byte(writer, opcode);
-    if (opcode == WASM_OPCODE_I32_LOAD || opcode == WASM_OPCODE_I32_STORE) {
+    if (opcode == WASM_OPCODE_I32_LOAD8_U || opcode == WASM_OPCODE_I32_STORE8) {
+        wasm_write_unsigned(writer, 0);
+    } else if (opcode == WASM_OPCODE_I32_LOAD || opcode == WASM_OPCODE_I32_STORE) {
         wasm_write_unsigned(writer, 2);
     } else {
         wasm_write_unsigned(writer, WASM_ELEMENT_SIZE_SHIFT);
@@ -4096,6 +4209,15 @@ static bool wasm_variable_is_in_memory(Wasm_Builder const *builder, Ast_Node_Ind
 }
 
 /**
+ * Returns `bytes` rounded up to a multiple of the size of a slot, so that whatever comes after
+ * it in the frame is aligned, also after an array of bytes.
+ */
+static size_t wasm_frame_round_up(size_t bytes) {
+    return (bytes + WASM_ELEMENT_SIZE_BYTES - 1) / WASM_ELEMENT_SIZE_BYTES *
+           WASM_ELEMENT_SIZE_BYTES;
+}
+
+/**
  * Returns the offset from the start of the frame of `procedure` of the variable `variable`, which
  * must be kept in the frame, see `wasm_variable_is_in_memory`. The variables come after the
  * elements of the array literals, one after the other in the order of the source, also the ones in
@@ -4121,7 +4243,7 @@ static size_t wasm_variable_frame_offset(Wasm_Builder const *builder, Ast_Node_I
         if (type.kind == WASM_VALUE_TYPE_NONE) {
             continue;
         }
-        offset_bytes += wasm_type_stride_bytes(builder, type);
+        offset_bytes += wasm_frame_round_up(wasm_type_stride_bytes(builder, type));
     }
 
     return offset_bytes;
@@ -4190,8 +4312,8 @@ static size_t wasm_frame_literal_offset(Wasm_Builder const *builder, Ast_Node_In
 
         // The first child is the type, which is not an element.
         size_t element_count = wasm_children_count(builder, node) - 1;
-        offset_bytes += element_count *
-                        wasm_type_stride_bytes(builder, wasm_type_element(array_type));
+        offset_bytes += wasm_frame_round_up(
+            element_count * wasm_type_stride_bytes(builder, wasm_type_element(array_type)));
     }
 
     return offset_bytes;
@@ -4430,7 +4552,7 @@ static bool wasm_build_code_section_body_child(Wasm_Builder *builder, Ast_Node_I
                              wasm_type_subject(builder, type));
         }
         Wasm_Type element = wasm_type_element(array_type);
-        if (wasm_type_equals(element, wasm_expression_type(builder, child)) == false) {
+        if (wasm_value_is_accepted(builder, element, child) == false) {
             return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
                              wasm_expression_subject(builder, definition, child));
         }
@@ -4974,7 +5096,7 @@ static Wasm_Type wasm_type_make(Wasm_Value_Type kind) {
 
 /**
  * Returns the type of a pointer to a value of the type `target`, which is a pointer with one more
- * caret when `target` is a pointer already. Only an `Int`, a `Bool`, a `Str`, a struct, a pointer
+ * caret when `target` is a pointer already. Only an `Int`, a `Bool`, a `Byte`, a `Str`, a struct, a pointer
  * or a pointer to a procedure is pointed to: there is no pointer to an array or to an array slice,
  * so those, and a type that the target does not have, give a type of the kind
  * `WASM_VALUE_TYPE_NONE`.
@@ -4985,6 +5107,7 @@ static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
 
     switch (target.kind) {
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_BYTE:
     case WASM_VALUE_TYPE_C_STR:
     case WASM_VALUE_TYPE_ENUM:
     case WASM_VALUE_TYPE_INT:
@@ -5214,6 +5337,7 @@ static Ast_Node_Index wasm_enum_literal_expected(Wasm_Builder const *builder,
 static Wasm_Type wasm_literal_expected_type(Wasm_Builder const *builder,
                                             Ast_Node_Index definition, Ast_Node_Index literal) {
     assert(builder->nodes[literal].node_type == AST_NODE_TYPE_ENUM_LITERAL ||
+           builder->nodes[literal].node_type == AST_NODE_TYPE_INTEGER_LITERAL ||
            builder->nodes[literal].node_type == AST_NODE_TYPE_STRING_LITERAL);
 
     Ast_Node_Index parent = wasm_parent_find(builder, literal);
@@ -5361,7 +5485,7 @@ static Wasm_Type wasm_type_of_name(Wasm_Builder const *builder, Str type_name) {
 
 /**
  * Returns the type that the name `type_name` stands for, which has no carets before it: `Bool`,
- * `C_Str`, `Int`, `Str` or the name of a struct, or a type of the kind `WASM_VALUE_TYPE_NONE` if the target
+ * `Byte`, `C_Str`, `Int`, `Str` or the name of a struct, or a type of the kind `WASM_VALUE_TYPE_NONE` if the target
  * does not have a type of that name.
  */
 static Wasm_Type wasm_type_of_plain_name(Wasm_Builder const *builder, Str type_name) {
@@ -5370,6 +5494,9 @@ static Wasm_Type wasm_type_of_plain_name(Wasm_Builder const *builder, Str type_n
 
     if (str_equals(type_name, STR("Bool"))) {
         return wasm_type_make(WASM_VALUE_TYPE_BOOL);
+    }
+    if (str_equals(type_name, STR("Byte"))) {
+        return wasm_type_make(WASM_VALUE_TYPE_BYTE);
     }
     if (str_equals(type_name, STR("C_Str"))) {
         return wasm_type_make(WASM_VALUE_TYPE_C_STR);
@@ -5559,7 +5686,8 @@ static size_t wasm_struct_slots(Wasm_Builder const *builder, Ast_Node_Index stru
             } else if (wasm_enum_find(builder, name) != AST_NODE_INDEX_NONE) {
                 // An enum is a number, which is an `Int`.
                 leaf = WASM_VALUE_TYPE_INT;
-            } else if (str_equals(name, STR("Bool")) == false) {
+            } else if (str_equals(name, STR("Bool")) == false &&
+                       str_equals(name, STR("Byte")) == false) {
                 nested = wasm_struct_find(builder, name);
             }
         }
@@ -5606,6 +5734,7 @@ static size_t wasm_type_slot_count(Wasm_Builder const *builder, Wasm_Type type) 
     switch (type.kind) {
     case WASM_VALUE_TYPE_ARRAY:
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_BYTE:
     case WASM_VALUE_TYPE_C_STR:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_ENUM:
@@ -5645,6 +5774,7 @@ static byte wasm_type_slot_kind(Wasm_Builder const *builder, Wasm_Type type, siz
         return WASM_TYPE_I64;
     case WASM_VALUE_TYPE_ARRAY:
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_BYTE:
     case WASM_VALUE_TYPE_C_STR:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_POINTER:
@@ -5669,9 +5799,13 @@ static byte wasm_type_slot_kind(Wasm_Builder const *builder, Wasm_Type type, siz
 /**
  * Returns the number of bytes that an element of `element` type takes in memory: 8 for each slot,
  * whether it is a 32-bit one or a 64-bit one, so that every slot is aligned and the offset of a
- * slot is its index times 8.
+ * slot is its index times 8. A `Byte` is the exception, and takes one byte, so that an array of
+ * bytes is as small as the bytes in it.
  */
 static size_t wasm_type_stride_bytes(Wasm_Builder const *builder, Wasm_Type element) {
+    if (element.kind == WASM_VALUE_TYPE_BYTE) {
+        return 1;
+    }
     return wasm_type_slot_count(builder, element) * WASM_ELEMENT_SIZE_BYTES;
 }
 
@@ -5768,6 +5902,7 @@ static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
     case WASM_VALUE_TYPE_SLICE:
         return wasm_type_elements_equal(first, second);
     case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_BYTE:
     case WASM_VALUE_TYPE_C_STR:
     case WASM_VALUE_TYPE_ENUM_LITERAL:
     case WASM_VALUE_TYPE_INT:
@@ -5793,9 +5928,36 @@ static bool wasm_expression_is_accepted(Wasm_Builder const *builder, Wasm_Type t
     if (wasm_type_accepts(target, wasm_expression_type(builder, expression))) {
         return true;
     }
+    if (wasm_value_is_accepted(builder, target, expression)) {
+        return true;
+    }
 
     return target.kind == WASM_VALUE_TYPE_C_STR &&
            builder->nodes[expression].node_type == AST_NODE_TYPE_STRING_LITERAL;
+}
+
+/**
+ * Returns whether `expression` is an integer literal that is a `Byte` where one is wanted: its
+ * number is from 0 to 255.
+ */
+static bool wasm_is_byte_literal(Wasm_Builder const *builder, Ast_Node_Index expression) {
+    assert(expression < builder->node_count);
+
+    return builder->nodes[expression].node_type == AST_NODE_TYPE_INTEGER_LITERAL &&
+           builder->nodes[expression].payload.integer_literal.value >= 0 &&
+           builder->nodes[expression].payload.integer_literal.value <= WASM_BYTE_MAX;
+}
+
+/**
+ * Returns whether the value of `value` is of the type `target` exactly, or is an integer literal
+ * from 0 to 255 where a `Byte` is wanted. Nothing else is converted to a `Byte`.
+ */
+static bool wasm_value_is_accepted(Wasm_Builder const *builder, Wasm_Type target,
+                                   Ast_Node_Index value) {
+    if (wasm_type_equals(target, wasm_expression_type(builder, value))) {
+        return true;
+    }
+    return target.kind == WASM_VALUE_TYPE_BYTE && wasm_is_byte_literal(builder, value);
 }
 
 /**
@@ -6430,6 +6592,28 @@ static byte wasm_store_opcode(byte kind) {
 }
 
 /**
+ * Returns the instruction that loads the slot `slot` of a value of `type` from memory: a byte is
+ * loaded as one byte, and any other slot by its WebAssembly type.
+ */
+static byte wasm_type_load_opcode(Wasm_Builder const *builder, Wasm_Type type, size_t slot) {
+    if (type.kind == WASM_VALUE_TYPE_BYTE) {
+        return WASM_OPCODE_I32_LOAD8_U;
+    }
+    return wasm_load_opcode(wasm_type_slot_kind(builder, type, slot));
+}
+
+/**
+ * Returns the instruction that stores the slot `slot` of a value of `type` to memory, see
+ * `wasm_type_load_opcode`.
+ */
+static byte wasm_type_store_opcode(Wasm_Builder const *builder, Wasm_Type type, size_t slot) {
+    if (type.kind == WASM_VALUE_TYPE_BYTE) {
+        return WASM_OPCODE_I32_STORE8;
+    }
+    return wasm_store_opcode(wasm_type_slot_kind(builder, type, slot));
+}
+
+/**
  * Writes the instructions that push the slots of a value of `type` that is in memory, from the
  * local `address` plus `offset_bytes`. Each slot is 8 bytes there, see `wasm_type_stride_bytes`.
  */
@@ -6439,7 +6623,7 @@ static void wasm_slots_load(Wasm_Builder *builder, Wasm_Type type, size_t addres
     for (size_t slot = 0; slot < slot_count; slot += 1) {
         wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, address);
         wasm_write_memory_instruction(
-            &builder->writer, wasm_load_opcode(wasm_type_slot_kind(builder, type, slot)),
+            &builder->writer, wasm_type_load_opcode(builder, type, slot),
             offset_bytes + slot * WASM_ELEMENT_SIZE_BYTES);
     }
 }
@@ -6454,8 +6638,7 @@ static void wasm_slots_load_from_stack(Wasm_Builder *builder, Ast_Node_Index pro
                                        Wasm_Type type, size_t offset_bytes) {
     if (wasm_type_slot_count(builder, type) == 1) {
         wasm_write_memory_instruction(
-            &builder->writer, wasm_load_opcode(wasm_type_slot_kind(builder, type, 0)),
-            offset_bytes);
+            &builder->writer, wasm_type_load_opcode(builder, type, 0), offset_bytes);
         return;
     }
 
@@ -6482,7 +6665,8 @@ static void wasm_slots_store(Wasm_Builder *builder, Ast_Node_Index procedure, Wa
         wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, held);
         wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, address);
         wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, held);
-        wasm_write_memory_instruction(&builder->writer, wasm_store_opcode(kind),
+        wasm_write_memory_instruction(&builder->writer,
+                                      wasm_type_store_opcode(builder, type, slot - 1),
                                       offset_bytes + (slot - 1) * WASM_ELEMENT_SIZE_BYTES);
     }
 }
@@ -6510,6 +6694,9 @@ static void wasm_scale_write(Wasm_Builder *builder, size_t stride_bytes) {
     assert(stride_bytes > 0);
     assert(stride_bytes <= INT32_MAX);
 
+    if (stride_bytes == 1) {
+        return;
+    }
     if (stride_bytes == WASM_ELEMENT_SIZE_BYTES) {
         wasm_write_i32_const(&builder->writer, WASM_ELEMENT_SIZE_SHIFT);
         wasm_write_byte(&builder->writer, WASM_OPCODE_I32_SHL);
@@ -7105,7 +7292,7 @@ static bool wasm_build_code_section_body_struct_literal(Wasm_Builder *builder,
                     false) {
                     return false;
                 }
-                if (wasm_type_equals(field_type, wasm_expression_type(builder, value)) == false) {
+                if (wasm_value_is_accepted(builder, field_type, value) == false) {
                     return wasm_fail(builder, WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
                                      given_name);
                 }

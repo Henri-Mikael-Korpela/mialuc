@@ -899,6 +899,7 @@ static bool semantic_fail(Semantic_Analyzer *analyzer, Semantic_Status status, S
 bool semantic_is_built_in_procedure(Str name) {
     assert(name.bytes != NULL);
 
-    return str_equals(name, STR("length_of")) || str_equals(name, STR("str_to_c_str"));
+    return str_equals(name, STR("byte_to_int")) || str_equals(name, STR("int_to_byte")) ||
+           str_equals(name, STR("length_of")) || str_equals(name, STR("str_to_c_str"));
 }
 
