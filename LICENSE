@@ -1,44 +1,17 @@
-Mialu Programming Language Implementation License
+Copyright (c) 2026 Henri Korpela. All rights reserved.
 
-Copyright (c) 2026 Henri Korpela. All rights reserved except as granted below.
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
 
-1. Permission
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
 
-   Permission is granted to anyone to obtain a copy of this software and its
-   associated documentation files (the "Software"), and to use, compile, run,
-   study and redistribute unmodified copies of the Software, free of charge,
-   provided that this license and the copyright notice above are included
-   in every copy.
-
-2. No derivative works
-
-   The Software is not intended to be modified or built upon. You may not
-   modify, adapt, translate, or create derivative works of the Software, nor
-   distribute any modified version of it, without prior written permission
-   from the copyright holder.
-
-3. Ownership and attribution
-
-   The Software remains the property of the copyright holder. You may not
-   claim the Software, or any copy of it, as your own work, remove or alter
-   the copyright notice or this license, or represent yourself as its author
-   or owner.
-
-4. No warranty
-
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-
-5. Limitation of liability
-
-   IN NO EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
-   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-   USE OR OTHER DEALINGS IN THE SOFTWARE, INCLUDING ANY DAMAGE, INJURY OR
-   OTHER HARM, DIRECT OR INDIRECT, CAUSED BY THE SOFTWARE OR PROGRAMS
-   COMPILED OR RUN WITH IT. YOU USE THE SOFTWARE AT YOUR OWN RISK.
-
-6. Termination
-
-   This license terminates automatically if you breach any of its terms.
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
