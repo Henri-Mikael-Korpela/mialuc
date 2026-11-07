@@ -1,3 +1,7 @@
+// Structs: struct objects and their fields, nested structs, default values, passing objects
+// to procedures by value, and structs in arrays.
+
+/// A struct with two fields. A struct object has all fields, and the ones that are left out are the default.
 Person :: struct ->
     age: Int
     name: Str
@@ -43,6 +47,7 @@ create_array_of_struct_objects :: proc() Int ->
     }
     return persons[0].age
 
+/// A field can be a struct that is written inside its parent, which has no name of its own.
 Info :: struct ->
     name: Str
     age: Int
@@ -63,6 +68,7 @@ create_nested_struct_object :: proc() Str ->
     }
     return info.address.area_name
 
+/// The default of `Int` is 0, of `Bool` is false and of `Str` is the empty string.
 default_values_of_struct_object :: proc() Int ->
     p := Person { }
     return p.age
@@ -102,6 +108,7 @@ assign_field_with_operators :: proc() Int ->
     p.age /= 2
     return p.age
 
+/// Assigning a struct object copies it, so the two do not share fields.
 struct_object_is_a_value :: proc() Int ->
     p := Person { age = 1, name = "Bob" }
     q := p
@@ -115,6 +122,7 @@ assign_whole_struct_object :: proc() Int ->
     q.age = 3
     return p.age * 10 + q.age
 
+/// A struct object is passed by value.
 pass_struct_object_to_proc :: proc() Int ->
     p := Person { age = 41, name = "Bob" }
     return next_age(p) + next_age(Person { age = 9 })
@@ -140,6 +148,7 @@ Point :: struct ->
     x: Int
     y: Int
 
+/// A struct can contain other structs, but not itself.
 Line :: struct ->
     start: Point
     end: Point
@@ -253,6 +262,7 @@ nested_struct_in_array_element :: proc() Int ->
     lines[1].end.y = lines[0].end.x + 1
     return lines[0].end.y * 10 + lines[1].end.y
 
+/// Reading a field of an element that does not exist traps.
 element_out_of_bounds_field :: proc(index: Int) Int ->
     people := [const]Person { Person { age = 1 } }
     return people[index].age

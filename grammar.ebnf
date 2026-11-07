@@ -529,8 +529,10 @@ field_initializers = field_initializer , { gap , "," , gap , field_initializer }
 
 field_initializer = name , ws , "=" , ws , ( struct_fields | expression ) ;
 
-(* Spaces and line breaks between the parts of a literal between braces. *)
-gap = { " " | "\t" | "\r" | "\n" } ;
+(* Spaces and line breaks between the parts of a literal between braces, and comments. A comment of
+   two slashes can be anywhere in it, and the lines in between can be comments of their own, also
+   documentation comments, which still have to start a line. *)
+gap = { " " | "\t" | "\r" | "\n" | comment | "\n" , ws , documentation_comment } ;
 
 (* The name of a procedure, and the values to give to its parameters between parentheses, which
    are separated by commas and can be none. A call is an expression, and a line that is only a call
@@ -586,10 +588,28 @@ ws = { " " | "\t" | "\r" } ;
 
 required_space = ( " " | "\t" | "\r" ) , ws ;
 
-(* A line with nothing on it but spaces. It carries no indentation, so its width does not matter. *)
-blank_line = ws , line_end ;
+(* A line with nothing on it but spaces, or with only a comment. It carries no indentation, so its
+   width does not matter. A documentation comment, which starts with three slashes, is only
+   allowed on lines of its own. Lines of it in a row are one documentation comment for the
+   compiler, and a blank line or any other line ends it. The grammar does not need to tell them
+   apart, so it sees them as lines. *)
+blank_line = ws , ( documentation_comment , line_break | line_end ) ;
+
+(* The end of a line, with a comment before it if there is one. A comment of two slashes goes on
+   to the end of the line, and it can be after code. It cannot start with a third slash, because
+   that is a documentation comment. The compiler keeps comments as tokens and leaves them out
+   when it parses, so they can be on any line. *)
+line_end = [ comment , ws ] , line_break ;
+
+comment = "//" , [ comment_start , { comment_character } ] ;
+
+comment_start = comment_character - "/" ;
+
+documentation_comment = "///" , { comment_character } , ws ;
+
+comment_character = any_character - ( "\n" | "\r" ) ;
 
 (* The last line of a file does not need a line feed. *)
-line_end = "\n" | end_of_input ;
+line_break = "\n" | end_of_input ;
 
 end_of_input = ? end of input ? ;

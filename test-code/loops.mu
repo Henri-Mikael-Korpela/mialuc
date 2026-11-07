@@ -1,9 +1,14 @@
+// For statements and loops without a range: exclusive and inclusive ranges, bounds that are
+// expressions, and `break` and `continue` in loops that are inside each other.
+
+/// `..<` does not include the last number.
 for_in_exclusive_range :: proc() Int ->
     x := 1
     for i in 0..<10 ->
         x += 1
     return x
 
+/// `..<=` includes the last number.
 for_in_inclusive_range :: proc() Int ->
     x := 1
     for i in 0..<=10 ->
@@ -54,6 +59,7 @@ smallest :: proc() Int ->
 largest :: proc(n: Int) Int ->
     return n * 2
 
+/// A range whose end is not above its first number runs zero times.
 count_empty_range :: proc(n: Int) Int ->
     count := 0
     for i in n..<n ->
@@ -74,6 +80,7 @@ negative_range :: proc() Int ->
         total += i * i
     return total
 
+/// The end of a range is evaluated once, before the first pass.
 end_is_read_once :: proc(n: Int) Int ->
     end := n
     count := 0
@@ -146,6 +153,7 @@ first_square_above :: proc(limit: Int) Int ->
         if n * n > limit ->
             return n
 
+/// A loop without a range, which ends with a `break` or a `return`.
 collatz_steps :: proc(start: Int) Int ->
     n := start
     steps := 0
@@ -194,6 +202,7 @@ continue_in_inclusive_range :: proc() Int ->
         total += i
     return total
 
+/// `break` leaves only the innermost loop.
 break_inner_loop_only :: proc(n: Int) Int ->
     pairs := 0
     for row in 0..<n ->

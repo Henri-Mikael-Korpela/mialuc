@@ -1,8 +1,13 @@
+// Enumerations: members numbered from zero, comparing them, using them in structs, arrays,
+// pointers and pointers to procedures, and writing the member without the name of the enum.
+
+/// The members of an enum are numbered from zero, in the order that they are written.
 Color :: enum Int ->
     RED
     GREEN
     BLUE
 
+/// A constant can be a member of an enum.
 DEFAULT_COLOR :: Color.RED
 
 create_enum_variable :: proc() Color ->
@@ -18,6 +23,7 @@ auto_deduce_enum_by_return_type :: proc() Color ->
 comparison_between_enum_values :: proc() Bool ->
     return Color.RED == Color.BLUE
 
+/// An enum can be the type of a field.
 Car_Model :: struct ->
     color: Color
     manufacturer: Str
@@ -52,6 +58,7 @@ Weekday :: enum Int ->
     SATURDAY
     SUNDAY
 
+/// The number of a member is its place in the enum.
 members_are_numbered_from_zero :: proc() Int ->
     first : Color = Color.RED
     last : Color = Color.BLUE
@@ -62,6 +69,7 @@ members_are_numbered_from_zero :: proc() Int ->
         count += 10
     return count
 
+/// A variable of an enum that is not given a value is the first member.
 default_value_is_the_first_member :: proc() Bool ->
     color : Color
     return color == Color.RED
@@ -80,6 +88,7 @@ assign_enum_variable_with_qualified_member :: proc() Color ->
     color = Color.BLUE
     return color
 
+/// Two enums can have members of the same name, because the enum tells them apart.
 same_member_names_in_two_enums :: proc() Int ->
     color : Color = .GREEN
     light : Light = .GREEN
@@ -119,6 +128,7 @@ weekend_and_weekdays :: proc() Int ->
         result += 100
     return result
 
+/// Walks through the members with a chain of comparisons and wraps around at the end.
 next_day :: proc(day: Weekday) Weekday ->
     if day == .MONDAY ->
         return .TUESDAY
@@ -193,6 +203,7 @@ enum_in_a_struct_literal_without_a_name :: proc() Color ->
     }
     return frame.pixel.color
 
+/// A pointer to an enum can be followed and assigned through, like any pointer.
 set_color :: proc(target: ^Color, color: Color) ->
     target^ = color
 

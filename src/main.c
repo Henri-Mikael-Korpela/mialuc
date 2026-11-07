@@ -69,6 +69,8 @@ typedef struct {
 typedef struct {
     Array_Slice source;
     Array_Slice tokens;
+    // The tokens without the comments, which is what the parser takes.
+    Array_Slice code_tokens;
     Array_Slice nodes;
     Array_Slice bindings;
     Array_Slice output;
@@ -122,6 +124,7 @@ int main(int argc, char *argv[]) {
         .source = array_slice_make(malloc(SOURCE_SIZE_BYTES_MAX * sizeof(byte)),
                                    SOURCE_SIZE_BYTES_MAX),
         .tokens = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Token)), TOKEN_COUNT_MAX),
+        .code_tokens = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Token)), TOKEN_COUNT_MAX),
         // A node needs at least one token, so as many nodes as tokens always suffice.
         .nodes = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Ast_Node)), TOKEN_COUNT_MAX),
         // The analysis has one binding for each node.
@@ -135,7 +138,8 @@ int main(int argc, char *argv[]) {
 
     int32_t exit_code = 1;
     if (buffers.source.elements == NULL || buffers.tokens.elements == NULL ||
-        buffers.nodes.elements == NULL || buffers.bindings.elements == NULL ||
+        buffers.code_tokens.elements == NULL || buffers.nodes.elements == NULL ||
+        buffers.bindings.elements == NULL ||
         buffers.output.elements == NULL || buffers.output_text.elements == NULL) {
         fprintf(stderr, "Out of memory.\n");
     } else {
@@ -146,6 +150,7 @@ int main(int argc, char *argv[]) {
     free(buffers.output.elements);
     free(buffers.bindings.elements);
     free(buffers.nodes.elements);
+    free(buffers.code_tokens.elements);
     free(buffers.tokens.elements);
     free(buffers.source.elements);
     return exit_code;
@@ -248,9 +253,11 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
         main_run_command_print_tokens(result.tokens);
     }
 
-    Parse_Result parse_result = parse(result.tokens, buffers->nodes);
+    // The comments are tokens for the sake of tools, but the parser does not look at them.
+    Array_Slice code_tokens = tokens_without_comments(result.tokens, buffers->code_tokens);
+    Parse_Result parse_result = parse(code_tokens, buffers->nodes);
     if (parse_result.status != PARSE_STATUS_OK) {
-        main_run_command_report_parse_error(path, source, result.tokens, parse_result);
+        main_run_command_report_parse_error(path, source, code_tokens, parse_result);
         return 1;
     }
 
@@ -417,6 +424,14 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
             break;
         case TOKEN_KIND_DOT:
             printf("DOT\n");
+            break;
+        case TOKEN_KIND_COMMENT:
+            printf("COMMENT %.*s\n", (int)token.payload.comment.text.length,
+                   token.payload.comment.text.bytes);
+            break;
+        case TOKEN_KIND_DOCUMENTATION_COMMENT:
+            printf("DOCUMENTATION_COMMENT %.*s\n", (int)token.payload.comment.text.length,
+                   token.payload.comment.text.bytes);
             break;
         case TOKEN_KIND_ELLIPSIS:
             printf("ELLIPSIS\n");
@@ -590,6 +605,13 @@ static void main_run_command_report_tokenize_error(char const *path, Str source,
     switch (result.status) {
     case TOKENIZE_STATUS_OK:
         assert(false);
+        break;
+    case TOKENIZE_STATUS_COMMENT_ENCODING_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: a comment must be valid UTF-8.\n", path, line, column);
+        break;
+    case TOKENIZE_STATUS_DOCUMENTATION_COMMENT_TRAILING:
+        fprintf(stderr, "%s:%zu:%zu: a documentation comment '///' must be on lines of its own, "
+                "after code on a line use '//'.\n", path, line, column);
         break;
     case TOKENIZE_STATUS_INDENTATION_TAB:
         fprintf(stderr, "%s:%zu:%zu: indentation must use spaces, not tabs.\n", path, line,

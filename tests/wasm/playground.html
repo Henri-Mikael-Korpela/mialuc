@@ -293,6 +293,7 @@
             arithmetic: "arithmetic",
             arrays: "arrays",
             "boolean logic": "boolean-logic",
+            comments: "comments",
             conditions: "conditions",
             enumerations: "enums",
             "control flow": "control-flow",
@@ -334,6 +335,7 @@
          */
         const HIGHLIGHT_RULES = {
             mialu: [
+                ["comment", /\/\/.*/],
                 ["string", /"[^"\\\n]*"/],
                 ["attribute", /#(?:[ \t]*\([ \t]*[A-Za-z_]\w*[ \t]*\))+/],
                 ["label", /@[A-Za-z_]\w*/],

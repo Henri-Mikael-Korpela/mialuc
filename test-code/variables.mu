@@ -1,7 +1,11 @@
+// Variables: defining them with a deduced or written type, and assigning to them again.
+
+/// The type of a variable is deduced from its value.
 foo :: proc() Int ->
     x := 4
     return x
 
+/// The type of a variable can be written.
 foo2 :: proc() Int ->
     x : Int = 5
     return x
@@ -19,6 +23,7 @@ assignment_twice :: proc() Int ->
 
 assignment_uses_old_value :: proc() Int ->
     x := 4
+    // The right side is evaluated with the old value, and then it is assigned.
     x = x * 2 + 1
     return x
 
@@ -29,6 +34,7 @@ assignment_from_other_variable :: proc() Int ->
     b = 0
     return a
 
+/// Swaps two variables with a third. Returns the first and the second as two digits.
 swap :: proc() Int ->
     a := 3
     b := 7
@@ -47,6 +53,7 @@ assignment_of_string :: proc() Str ->
     text = "after"
     return text
 
+/// A parameter is a value, so changing the copy of it does not change the argument.
 assignment_to_parameter_copy :: proc(n: Int) Int ->
     result := n
     result = result + 1
@@ -66,6 +73,7 @@ assignment_in_loop :: proc() Int ->
         x = x * 2
     return x
 
+/// A variable with a type but no value gets the default value.
 assignment_after_declared_type :: proc() Int ->
     x : Int
     x = 9

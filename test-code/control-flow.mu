@@ -1,3 +1,7 @@
+// Scopes and labels: leaving a scope, a loop or an if statement early with `break`, and
+// going on with the next pass of a loop with `continue`, also by the label of an outer one.
+
+/// A line with only `->` starts a scope, a block of its own. `break` leaves the innermost one.
 break_early :: proc() Int ->
     x := 1
     ->
@@ -8,6 +12,7 @@ break_early :: proc() Int ->
         x += 2
     return x
 
+/// A scope can have a label, as in `@my_block ->`, and `break my_block` leaves it.
 break_early_with_label :: proc() Int ->
     x := 1
     ->
@@ -20,12 +25,14 @@ break_early_with_label :: proc() Int ->
         x += 5
     return x
 
+/// A scope is a block of its own, which ends where its indentation does.
 scope_without_break :: proc() Int ->
     x := 1
     ->
         x += 10
     return x
 
+/// The variable of a scope is gone after it, so the name can be used again.
 scopes_with_same_variable_name :: proc() Int ->
     total := 0
     ->
@@ -47,6 +54,7 @@ break_leaves_innermost_scope :: proc(n: Int) Int ->
         x += 100
     return x
 
+/// A label leaves a scope that is not the innermost one.
 break_outer_scope_by_label :: proc(n: Int) Int ->
     x := 0
     @outer ->
@@ -73,6 +81,7 @@ break_inner_scope_by_label :: proc(n: Int) Int ->
     x += 10000
     return x
 
+/// Scopes one after the other can each have a label, and `break first` leaves only `first`.
 label_by_the_innermost_name_only :: proc(n: Int) Int ->
     x := 0
     @first ->
@@ -158,6 +167,7 @@ scope_in_branch_of_if :: proc(n: Int) Int ->
             break
     return x
 
+/// An if statement can have a label too, and `break check` leaves all of its branches.
 break_labeled_if :: proc(n: Int) Int ->
     x := 0
     @check if n > 5 ->
@@ -207,6 +217,7 @@ plain_break_passes_labeled_if :: proc(n: Int) Int ->
         total += 1
     return total
 
+/// `continue` with a label goes on with the next pass of that loop.
 continue_labeled_for :: proc(n: Int) Int ->
     total := 0
     @rows for row in 0..<n ->
@@ -227,6 +238,7 @@ break_labeled_for :: proc(n: Int) Int ->
     total += 1000
     return total
 
+/// A loop without a range can be left by its label.
 break_labeled_endless_loop :: proc(target: Int) Int ->
     i := 0
     @outer for ->

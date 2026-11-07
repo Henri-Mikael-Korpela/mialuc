@@ -1,8 +1,14 @@
+// A struct whose fields depend on an enum member, with `union match`. The compiler only lets a
+// program use the fields of a case where the matched field is known to be that case.
+
+/// The enum that decides which fields of a `Token` exist.
 Token_Kind :: enum Int ->
     IDENTIFIER
     INTEGER_LITERAL
     OPERATOR_ADD
 
+/// `union match kind` makes the fields below each `case` exist only when `kind` is that member.
+/// The cases are anonymous, so their fields are read as `token.identifier`.
 Token :: struct ->
     kind: Token_Kind
     union match kind ->
@@ -56,6 +62,7 @@ value_of_integer_token :: proc() Int ->
         return token.integer_literal.value
     return 0
 
+/// The field of a case can only be used inside an if statement that compares the kind.
 value_of_token :: proc(token: Token) Int ->
     if token.kind == .INTEGER_LITERAL ->
         return token.integer_literal.value
@@ -79,6 +86,7 @@ assign_field_of_matched_union :: proc() Int ->
         return token.integer_literal.value
     return 0
 
+/// The kind changes by assigning a whole object that has the other kind.
 change_the_kind_by_assigning_an_object :: proc() Int ->
     token := Token { kind = .IDENTIFIER, identifier = { text = "x" } }
     token = Token { kind = .INTEGER_LITERAL, integer_literal = { value = 9 } }
@@ -86,9 +94,11 @@ change_the_kind_by_assigning_an_object :: proc() Int ->
         return token.integer_literal.value
     return 0
 
+/// `and` counts as an if statement here: the field is only read when the kind matches.
 kind_and_field_in_one_condition :: proc(token: Token) Bool ->
     return token.kind == .INTEGER_LITERAL and token.integer_literal.value == 3
 
+/// The default kind is the first member of the enum.
 omitted_kind_is_the_first_member :: proc() Int ->
     token := Token { identifier = { text = "first" } }
     if token.kind == .IDENTIFIER ->

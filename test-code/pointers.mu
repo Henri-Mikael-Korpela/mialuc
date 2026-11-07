@@ -1,3 +1,7 @@
+// Pointers: taking an address with `%`, following one with `^`, pointers to variables,
+// fields, elements and pointers, `nil`, and linked structs.
+
+/// `%x` is the address of `x`, and its type is deduced as `^Int`.
 pointer_with_implicit_type :: proc() Int ->
     x := 4
     p := %x
@@ -10,11 +14,13 @@ pointer_with_explicit_type :: proc() Int ->
     p^ += 1
     return x
 
+/// `p^` follows the pointer to the value it points to.
 read_through_pointer :: proc() Int ->
     x := 20
     p := %x
     return p^ + 1
 
+/// Assigning to `p^` changes the variable that the pointer points to.
 assign_through_pointer :: proc() Int ->
     x := 1
     p := %x
@@ -59,6 +65,7 @@ pointer_as_parameter :: proc() Int ->
     increment(%x)
     return x
 
+/// Swaps two integers through pointers, which a procedure could not do with values.
 swap :: proc(a: ^Int, b: ^Int) ->
     temp := a^
     a^ = b^
@@ -118,6 +125,7 @@ pointer_to_variable_in_block :: proc() Int ->
         total += square
     return total
 
+/// A pointer can point to another pointer.
 pointer_to_pointer :: proc() Int ->
     x := 1
     p := %x
@@ -149,6 +157,7 @@ return_pointer :: proc() Int ->
     p^ = 50
     return x * 100 + y
 
+/// A struct to point to.
 Person :: struct ->
     age: Int
     name: Str
@@ -270,6 +279,7 @@ pointer_to_field_of_element :: proc() Int ->
     q.age += 100
     return people[0].age * 10000 + people[1].age * 100 + people[2].age
 
+/// Returns a pointer to an element, which stays valid as long as the array is.
 largest :: proc(values: []Int) ^Int ->
     best := 0
     index := 0
@@ -315,6 +325,7 @@ slice_of_pointers :: proc() Int ->
     add_to_all(targets, 10)
     return a * 100 + b
 
+/// A struct can have a pointer to its own struct, which is how a linked list is made.
 Node :: struct ->
     value: Int
     next: ^Node
@@ -332,6 +343,7 @@ assign_through_pointers_in_structs :: proc() Int ->
     first.next.value += 1
     return last.value
 
+/// Following `nil` traps, and so does a pointer that is not assigned.
 read_null_pointer :: proc() Int ->
     p : ^Int
     return p^
@@ -365,6 +377,7 @@ assign_nil_to_pointer :: proc() Int ->
         return x + 10
     return x
 
+/// Pointers are equal when they point to the same address, not when the values are equal.
 compare_pointers :: proc() Int ->
     x := 1
     y := 1
@@ -420,6 +433,7 @@ count_non_nil :: proc() Int ->
             count += 1
     return count
 
+/// Walks a linked list until the pointer is `nil`.
 sum_list :: proc(first: ^Node) Int ->
     total := 0
     current := first

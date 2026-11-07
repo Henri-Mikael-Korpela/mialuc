@@ -4,6 +4,12 @@
     "scopeName": "source.mialu",
     "patterns": [
         {
+            "include": "#documentation-comments"
+        },
+        {
+            "include": "#comments"
+        },
+        {
             "include": "#strings"
         },
         {
@@ -23,6 +29,30 @@
         }
     ],
     "repository": {
+        "documentation-comments": {
+            "comment": "A documentation comment is a line of its own that starts with three slashes. Lines of it in a row are one comment for the compiler, and each line is colored here on its own. Three slashes after code are an error, which is also marked here.",
+            "patterns": [
+                {
+                    "name": "comment.line.documentation.mialu",
+                    "match": "^[ \\t]*(///).*$",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.comment.mialu" }
+                    }
+                },
+                {
+                    "name": "invalid.illegal.documentation-comment.mialu",
+                    "match": "///.*$"
+                }
+            ]
+        },
+        "comments": {
+            "comment": "Two slashes start a comment that goes on to the end of the line, also after code. There are no comments in the middle of a line. It is included before the strings, but a string that has two slashes in it is not a comment, because the string starts first.",
+            "name": "comment.line.double-slash.mialu",
+            "match": "(//).*$",
+            "captures": {
+                "1": { "name": "punctuation.definition.comment.mialu" }
+            }
+        },
         "strings": {
             "name": "string.quoted.double.mialu",
             "comment": "A string has no escape sequences, so a backslash is invalid, and it ends with its line.",

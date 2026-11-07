@@ -22,6 +22,7 @@ static bool   char_is_lower     (char character);
 static bool   char_is_upper     (char character);
 static bool   char_is_whitespace(char character);
 static size_t utf8_sequence_size(Str text, size_t offset);
+static bool   tokenizer_comment_line_end(Str source, size_t offset, size_t *end);
 static Token_Kind tokenizer_keyword_type(Str text);
 static bool   tokenizer_operator_types(char character, Token_Kind *plain_type,
                                        Token_Kind *equals_type);
@@ -114,6 +115,34 @@ static bool char_is_whitespace(char character) {
         character == '\r' ||
         character == '\n'
     );
+}
+
+/**
+ * Finds where the line that has a comment at `offset` ends, which is where its line break or the
+ * end of `source` is, and sets `*end` to that. A `
+` ends the line too, so that a comment does
+ * not hold the carriage return of a Windows line break. Returns false when a character on the way
+ * is not valid UTF-8, with `*end` at its start. The check is made here, because comments are views
+ * of the source, and a `Str` is promised to be UTF-8.
+ */
+static bool tokenizer_comment_line_end(Str source, size_t offset, size_t *end) {
+    assert(offset <= source.length);
+    assert(end != NULL);
+
+    // Bounded by `source.length`, since each iteration consumes at least one byte.
+    size_t position = offset;
+    while (position < source.length && source.bytes[position] != '\n' &&
+           source.bytes[position] != '\n') {
+        size_t sequence_size = utf8_sequence_size(source, position);
+        if (sequence_size == 0) {
+            *end = position;
+            return false;
+        }
+        position += sequence_size;
+    }
+
+    *end = position;
+    return true;
 }
 
 /**
@@ -229,6 +258,8 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
     // which happens once per line. So the loop ends after at most twice `source.length` steps.
     size_t offset = 0;
     bool is_line_start = true;
+    // Whether the next token is a comment that begins its line, which a `///` must.
+    bool is_comment_line = false;
     Token_Kind plain_type = TOKEN_KIND_END;
     Token_Kind equals_type = TOKEN_KIND_END;
     while (offset < source.length) {
@@ -254,8 +285,17 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                             source.bytes[end] == '\r';
             is_line_start = false;
 
+            bool is_comment_only = end + 1 < source.length && source.bytes[end] == '/' &&
+                                   source.bytes[end + 1] == '/';
+
             if (is_blank) {
                 // Blank lines carry no indentation, so trailing spaces on them are harmless.
+                offset = end;
+            } else if (is_comment_only) {
+                // A line of only a comment is not part of the structure of the code, so it gets no
+                // indentation token, and any indentation is fine. A token would otherwise be left
+                // alone on a line when the comment is dropped.
+                is_comment_line = true;
                 offset = end;
             } else if (has_tab) {
                 result.status = TOKENIZE_STATUS_INDENTATION_TAB;
@@ -297,6 +337,65 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.status = TOKENIZE_STATUS_TOKEN_LIMIT;
             result.error_offset = offset;
             return result;
+        }
+        // A comment is `//` and everything up to the end of the line. It is a token, so that tools
+        // can see it, and it is dropped before parsing. It comes before the operators, because it
+        // starts with the `/` of one. `///` is a documentation comment, which goes on over the
+        // following lines for as long as each of them starts with `///` after its indentation.
+        else if (character == '/' && offset + 1 < source.length &&
+                 source.bytes[offset + 1] == '/') {
+            bool is_documentation = offset + 2 < source.length && source.bytes[offset + 2] == '/';
+            if (is_documentation && is_comment_line == false) {
+                result.status = TOKENIZE_STATUS_DOCUMENTATION_COMMENT_TRAILING;
+                result.error_offset = offset;
+                return result;
+            }
+            is_comment_line = false;
+
+            size_t end = 0;
+            if (tokenizer_comment_line_end(source, offset, &end) == false) {
+                result.status = TOKENIZE_STATUS_COMMENT_ENCODING_INVALID;
+                result.error_offset = end;
+                return result;
+            }
+
+            // Each iteration takes a whole line of at least three bytes, so it is bounded by
+            // `source.length`.
+            while (is_documentation) {
+                size_t next = end;
+                if (next < source.length && source.bytes[next] == '\n') {
+                    next += 1;
+                }
+                if (next >= source.length || source.bytes[next] != '\n') {
+                    break;
+                }
+                next += 1;
+                while (next < source.length &&
+                       (source.bytes[next] == ' ' || source.bytes[next] == '\t')) {
+                    next += 1;
+                }
+                bool is_next_documentation = next + 2 < source.length &&
+                                             source.bytes[next] == '/' &&
+                                             source.bytes[next + 1] == '/' &&
+                                             source.bytes[next + 2] == '/';
+                if (is_next_documentation == false) {
+                    break;
+                }
+                if (tokenizer_comment_line_end(source, next, &end) == false) {
+                    result.status = TOKENIZE_STATUS_COMMENT_ENCODING_INVALID;
+                    result.error_offset = end;
+                    return result;
+                }
+            }
+
+            token_elements[result.tokens.length] = (Token){
+                .token_kind = is_documentation ? TOKEN_KIND_DOCUMENTATION_COMMENT
+                                               : TOKEN_KIND_COMMENT,
+                .source_offset = (uint32_t)offset,
+                .payload.comment.text = str_make(source.bytes + offset, end - offset),
+            };
+            result.tokens.length += 1;
+            offset = end;
         }
         // A string is everything up to the next quote on the same line. It is not null-terminated
         // anywhere, because the token only keeps where its bytes are and how many there are.
@@ -620,4 +719,23 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
     assert(result.tokens.length <= token_buffer.length);
     assert(result.status == TOKENIZE_STATUS_OK);
     return result;
+}
+
+Array_Slice tokens_without_comments(Array_Slice tokens, Array_Slice code_buffer) {
+    assert(tokens.elements != NULL);
+    assert(code_buffer.elements != NULL);
+    assert(code_buffer.length >= tokens.length);
+
+    Token const *token_elements = tokens.elements;
+    Token *code_elements = code_buffer.elements;
+    Array_Slice code = array_slice_make(code_buffer.elements, 0);
+    for (size_t i = 0; i < tokens.length; i += 1) {
+        Token_Kind token_kind = token_elements[i].token_kind;
+        if (token_kind != TOKEN_KIND_COMMENT && token_kind != TOKEN_KIND_DOCUMENTATION_COMMENT) {
+            code_elements[code.length] = token_elements[i];
+            code.length += 1;
+        }
+    }
+
+    return code;
 }

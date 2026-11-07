@@ -1,7 +1,12 @@
+// Arrays and array slices: literals, element access, slicing, copying ranges, going through
+// the elements with a for statement, and `length_of`. Indexes that are out of bounds trap.
+
+/// The length of an array is deduced from the literal.
 array_element_access_with_deduced_length :: proc() Int ->
     a := [const]Int { 1, 2, 3, 4, 5 }
     return a[0]
 
+/// Or it can be written.
 array_element_access_with_explicit_length :: proc() Int ->
     a := [5]Int { 1, 2, 3, 4, 5 }
     return a[0]
@@ -11,12 +16,14 @@ array_element_assignment :: proc() Int ->
     a[0] = 10
     return a[0]
 
+/// Takes an array slice, so it works for an array of any length.
 sum :: proc(elements: []Int) Int ->
     total := 0
     for x in elements ->
         total += x
     return total
 
+/// A range of elements is assigned from another range of the same length.
 array_element_range_assignment :: proc() Int ->
     a := [const]Int { 1, 2, 3, 4, 5 }
     a[0:3] = [const]Int { 10, 20, 30 }
@@ -175,19 +182,23 @@ return_from_nested_block :: proc(limit: Int) Int ->
             return x
     return 0
 
+/// An index that is not below the length traps.
 element_out_of_bounds :: proc(index: Int) Int ->
     a := [const]Int { 1, 2, 3 }
     return a[index]
 
+/// A slice whose bounds are not in the array traps.
 slice_out_of_bounds :: proc(low: Int, high: Int) Int ->
     a := [const]Int { 1, 2, 3 }
     return sum(a[low:high])
 
+/// Copying ranges of different lengths traps.
 copy_with_different_lengths :: proc() Int ->
     a := [const]Int { 1, 2, 3 }
     a[0:2] = a[0:3]
     return a[0]
 
+/// `length_of` gives the number of elements.
 length_of_array :: proc() Int ->
     a := [const]Int { 1, 2, 3, 4, 5 }
     return length_of(a)

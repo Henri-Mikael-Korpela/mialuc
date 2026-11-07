@@ -1,3 +1,6 @@
+// Pointers to procedures: assigning a procedure to a variable, passing it to another
+// procedure, keeping it in arrays and structs, and the traps when it is `nil`.
+
 add :: proc(a: Int, b: Int) Int ->
     return a + b
 
@@ -28,6 +31,7 @@ increment :: proc(p: ^Int) ->
 decrement :: proc(p: ^Int) ->
     p^ -= 1
 
+/// The name of a procedure that is not called is a pointer to it.
 pointer_with_deduced_type :: proc() Int ->
     f := double
     return f(21)
@@ -68,6 +72,7 @@ choose_in_a_loop :: proc() Int ->
         total += f(i)
     return total
 
+/// Pointers to procedures with the same parameter types and the same result type can be assigned to each other.
 the_same_signature_is_the_same_type :: proc() Int ->
     f : ^proc(Int, Int) Int = add
     f = subtract
@@ -75,6 +80,7 @@ the_same_signature_is_the_same_type :: proc() Int ->
     f = g
     return f(6, 7)
 
+/// Calls the procedure that it is given, which makes it a higher-order procedure.
 apply :: proc(f: ^proc(Int) Int, n: Int) Int ->
     return f(n)
 
@@ -127,6 +133,7 @@ pointers_in_arguments_of_calls :: proc() Int ->
     g := double
     return f(g(1), f(g(2), g(3)))
 
+/// A pointer to a procedure can be compared with `nil`.
 compare_with_nil :: proc() Int ->
     f : ^proc(Int) Int = nil
     g := double
@@ -155,10 +162,12 @@ compare_pointers :: proc() Int ->
         result += 10
     return result
 
+/// Calling `nil` traps, which stops the program.
 call_nil :: proc() Int ->
     f : ^proc(Int) Int = nil
     return f(1)
 
+/// A pointer to a procedure is `nil` until it is assigned.
 call_default :: proc() Int ->
     f : ^proc(Int) Int
     return f(1)
@@ -205,6 +214,7 @@ slice_of_procedures :: proc() Int ->
     functions := [const]^proc(Int) Int { double, triple, double }
     return run_all(functions, 5) * 100 + run_all(functions[1:3], 5)
 
+/// A struct can have a field that is a pointer to a procedure.
 Operation :: struct ->
     name: Str
     apply: ^proc(Int, Int) Int
@@ -231,6 +241,7 @@ use_struct_in_a_procedure :: proc(operation: Operation) Int ->
 struct_as_argument :: proc() Int ->
     return use_struct_in_a_procedure(Operation { name = "subtract", apply = subtract })
 
+/// A pointer to a variable that holds a pointer to a procedure.
 pointer_to_pointer_to_procedure :: proc() Int ->
     f : ^proc(Int) Int = double
     p := %f

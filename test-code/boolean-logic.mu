@@ -1,3 +1,5 @@
+// Booleans: comparisons, the operators `and`, `or` and `not`, and how tightly each binds.
+
 always_true :: proc() Bool ->
     return true
 
@@ -30,6 +32,7 @@ either :: proc(a: Bool, b: Bool) Bool ->
         return true
     return b
 
+/// True when exactly one of the two is true, written with comparisons only.
 exclusive_or :: proc(a: Bool, b: Bool) Bool ->
     return a not= b
 
@@ -53,6 +56,7 @@ grade :: proc(score: Int) Int ->
     else ->
         return 1
 
+/// The rule of the Gregorian calendar, written with early returns.
 is_leap_year :: proc(year: Int) Bool ->
     by_4 := year / 4 * 4 == year
     by_100 := year / 100 * 100 == year
@@ -63,6 +67,7 @@ is_leap_year :: proc(year: Int) Bool ->
         return false
     return by_4
 
+/// The same as `negate`, written with the keyword `not`.
 logical_not :: proc(value: Bool) Bool ->
     return not value
 
@@ -84,9 +89,11 @@ in_range_keywords :: proc(n: Int, low: Int, high: Int) Bool ->
 out_of_range :: proc(n: Int, low: Int, high: Int) Bool ->
     return n < low or n > high
 
+/// `not a > b` is `not (a > b)`, because `not` binds looser than a comparison.
 not_binds_looser_than_comparison :: proc(a: Int, b: Int) Bool ->
     return not a == b
 
+/// `a or b and c` is `a or (b and c)`.
 and_binds_tighter_than_or :: proc(a: Bool, b: Bool, c: Bool) Bool ->
     return a or b and c
 
@@ -99,6 +106,7 @@ fizz_or_buzz :: proc(n: Int) Bool ->
 fizz_buzz_only :: proc(n: Int) Bool ->
     return n / 3 * 3 == n and not n / 5 * 5 == n
 
+/// Several conditions in one expression: returns a code for why someone can or cannot enter.
 can_enter :: proc(age: Int, has_ticket: Bool, is_banned: Bool) Int ->
     if age >= 18 and has_ticket and not is_banned ->
         return 1

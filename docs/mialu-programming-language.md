@@ -5,6 +5,7 @@
 - [Introduction](#introduction)
 - [Source code representation](#source-code-representation)
 - [Lines, spaces and indentation](#lines-spaces-and-indentation)
+- [Comments](#comments)
 - [Reserved words](#reserved-words)
 - [Identifiers](#identifiers)
 - [Primitive data types](#primitive-data-types)
@@ -103,9 +104,34 @@ A line that is indented deeper than the previous one starts a block, and a line 
 
 The reason for using indentation-based approach for blocks is to both make the code more readable and to reduce the amount of vertical space, which is a problem in languages that use curly brackets (and especially if you use language like C# where a general convention is to set each curly bracket on its own line).
 
-Indentation is made of spaces only. Tabs are not allowed in indentation. Each level of indentation is exactly 4 spaces, so the number of leading spaces on a line must be a multiple of 4. Blank lines, including lines of only spaces, are ignored.
+Indentation is made of spaces only. Tabs are not allowed in indentation. Each level of indentation is exactly 4 spaces, so the number of leading spaces on a line must be a multiple of 4. Blank lines, including lines of only spaces, are ignored, and so are lines of only a [comment](#comments).
 
 Mialu doesn't need semicolons (`;`) to separate statements. Each statement is on its own line, and a line can have at most one statement.
+
+## Comments
+
+A comment is text for the reader of the code, which does not change what the program does. There are two kinds, and both are made of lines, because Mialu is line-based:
+
+```
+// A comment on a line of its own.
+
+/// A documentation comment describes the definition below it.
+/// It can go on over many lines, and each of them starts with three slashes.
+foo :: proc() Int ->
+    // A comment inside a block.
+    x := 4 // A comment can also follow code on the same line.
+    return x
+```
+
+- `//` starts a comment that goes on to the end of the line. It can be on a line of its own or after code.
+- `///` starts a documentation comment. It must be on a line of its own, with nothing but spaces before it, because it documents the definition that comes after it, so a `///` after code is an error. A documentation comment is the lines in a row that each start with `///` (after their indentation). A blank line, a line of code, or a `//` comment ends it, and a new `///` after that starts another one.
+- There are no comments that start and end in the middle of a line, and none that nest. This keeps a comment from hiding code that is on the same line, and a reader never has to look for where a comment ends.
+- A line that has only a comment is like a blank line for the structure of the code. It does not have to be indented by a multiple of 4 spaces, it does not end a block, and it can be between the lines of a block or of a multi-line literal.
+- Comments hold UTF-8 text, as all source code does. The compiler reports a comment that has bytes that are not valid UTF-8.
+
+The compiler does not ignore comments: the tokenizer makes each comment a token (`COMMENT` for `//` and `DOCUMENTATION_COMMENT` for a documentation comment), which holds the text exactly as it is in the source, including the slashes. A documentation comment of many lines is one token, which holds the lines with their line breaks. The parser leaves the comment tokens out, so a comment never changes the syntax tree or the program that is built. The tokens are there for tools, such as formatters and generators of documentation, which need to know where the comments are. `mialuc run` prints them with the other tokens.
+
+The reason for `///` is that documentation should be found by tools and not guessed from the `//` comments around it, so it has a form of its own, which is also the form that editors can color apart. What a documentation comment is attached to is not yet used by the compiler.
 
 ## Reserved words
 

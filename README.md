@@ -12,7 +12,7 @@ build/mialuc.exe build --target wasm <output file> <source file>
 build/mialuc.exe build --target wat <output file> <source file>
 ```
 
-`run` prints the tokens and the syntax tree of a source file, and then resolves its names (see scope resolution in the specification). `build` writes a program for a target: `wasm` is a WebAssembly binary module, and `wat` is the same module in the WebAssembly text format. See [build-wasm.ps1](build-wasm.ps1) and [run.ps1](run.ps1).
+`run` prints the tokens, which include the comments (`//` and `///`, see comments in the specification), and the syntax tree of a source file, and then resolves its names (see scope resolution in the specification). `build` writes a program for a target: `wasm` is a WebAssembly binary module, and `wat` is the same module in the WebAssembly text format. See [build-wasm.ps1](build-wasm.ps1) and [run.ps1](run.ps1).
 
 ## Playground
 

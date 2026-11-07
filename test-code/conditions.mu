@@ -1,3 +1,5 @@
+// If statements: with an else branch, with else if, nested, and with variables of a block.
+
 foo_with_if :: proc() Int ->
     x := 4
     if x > 5 ->
@@ -11,6 +13,7 @@ foo_with_if_else :: proc() Int ->
     else ->
         return 2
 
+/// A chain of `else if` branches, of which only the first true one runs.
 foo_with_if_else_if :: proc() Int ->
     x := 4
     if x > 5 ->
@@ -48,6 +51,7 @@ compare_foo :: proc(a: Int, b: Int) Int ->
             return 0 - 2
     return 1
 
+/// A variable defined in a branch exists only in that branch.
 foo_with_block_variables :: proc(n: Int) Int ->
     total := 10
     if n >= 5 ->

@@ -40,6 +40,13 @@ typedef enum {
     // above the ASCII range so that it cannot be the value of a single-character token:
     TOKEN_KIND_ARROW = 256,
     TOKEN_KIND_ASTERISK_EQUALS,
+    // `//` and the rest of the line, which can follow code on the same line or stand alone. The
+    // parser never sees it, see `tokens_without_comments`.
+    TOKEN_KIND_COMMENT,
+    // One or more lines in a row that each start with `///`, as a single token. A line without it,
+    // a blank line and a comment of the other kind all end it, and it is always alone on its
+    // lines. The parser never sees it either.
+    TOKEN_KIND_DOCUMENTATION_COMMENT,
     // `...`, which stands where the body of a procedure would be, for a procedure that is defined
     // elsewhere.
     TOKEN_KIND_ELLIPSIS,
@@ -101,6 +108,13 @@ typedef struct {
             uint32_t level;
         } indentation;
         struct {
+            // The bytes of the comment as they are in the source, as a view of it, from the first
+            // slash to the end of the last line, without the final line break. So a documentation
+            // comment of several lines has the line breaks, the indentation and the `///` of the
+            // lines after the first in it. They are valid UTF-8, which the tokenizer checks.
+            Str text;
+        } comment;
+        struct {
             Str text;
         } identifier;
         struct {
@@ -123,6 +137,13 @@ STATIC_ASSERT(sizeof(Token) == 24, token_size_is_24_bytes);
 
 typedef enum {
     TOKENIZE_STATUS_OK,
+    // A comment has bytes that are not valid UTF-8. `error_offset` is where the first bad
+    // character starts.
+    TOKENIZE_STATUS_COMMENT_ENCODING_INVALID,
+    // A `///` that has code before it on its line. It documents the code after it, so it has to be
+    // on lines of its own, and a note about the code on the same line is a `//` comment.
+    // `error_offset` is where the `///` starts.
+    TOKENIZE_STATUS_DOCUMENTATION_COMMENT_TRAILING,
     TOKENIZE_STATUS_INDENTATION_TAB,
     TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID,
     TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE,
@@ -154,12 +175,23 @@ typedef struct {
 
 /**
  * Splits `source` into tokens written to `token_buffer`, which holds `Token` elements. Skips
- * whitespace. Stops at the first character that cannot start a token, since the language has no
+ * whitespace. Comments are tokens too. A line with only a comment has no indentation token, and
+ * so no rule about the indentation applies to it, because it is not part of the structure of the
+ * code. Stops at the first character that cannot start a token, since the language has no
  * error recovery yet. One element of `token_buffer` is reserved for the `TOKEN_KIND_END` token,
  * so
  * at most `token_buffer.length - 1` other tokens fit, and the buffer must hold at least one
  * element.
  */
 Tokenize_Result tokenize(Str source, Array_Slice token_buffer);
+
+/**
+ * Copies the tokens of `tokens`, which holds `Token` elements, to `code_buffer` in the same order
+ * but without the comments, and returns the filled start of it. This is what the parser takes: a
+ * comment can stand between any two tokens, so lookahead in the parser would have to skip them
+ * everywhere. The tokens of `tokens` are kept, for tools that want the comments. `code_buffer`
+ * holds `Token` elements and must have room for `tokens.length` of them.
+ */
+Array_Slice tokens_without_comments(Array_Slice tokens, Array_Slice code_buffer);
 
 #endif
