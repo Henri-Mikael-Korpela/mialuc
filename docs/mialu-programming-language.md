@@ -245,35 +245,11 @@ An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an err
 
 ### Bytes
 
-A `Byte` is an unsigned 8-bit integer: it holds the numbers from 0 to 255. It is the type of binary data, such as the contents of a buffer, and of the individual bytes of memory. An integer literal from 0 to 255 is a `Byte` where a `Byte` is wanted: as the value of a variable that is declared a `Byte`, as an assigned value, as an argument, as a returned value, as an element of an array literal, as the value of a field in a struct literal and as the other operand of a comparison with a `Byte`. A literal that is not from 0 to 255 is not a `Byte`, so it is an error there, and so is any other `Int`, because nothing is converted:
+A `Byte` is an unsigned 8-bit integer: it holds the numbers from 0 to 255. It can be used to represent individual bytes of memory. The default value for `Byte` is `0`.
 
-```
-level : Byte = 200
-next_byte :: proc(b: Byte) Byte ->
-    return int_to_byte(byte_to_int(b) + 1)
-```
+The built-in procedures `byte_to_int` and `int_to_byte` allow conversion between bytes and integers.
 
-A variable that is defined with a `Byte` type and no value is 0. A variable that is defined without a type is a `Byte` when it is given a `Byte`, such as the result of `int_to_byte`, and an integer literal alone makes an `Int`, so `x := 200` is an `Int`.
-
-The built-in procedures `byte_to_int` and `int_to_byte` convert between the two. `byte_to_int` takes a `Byte` and gives the `Int` of the same number, from 0 to 255. `int_to_byte` takes an `Int` and gives the `Byte` of the same number, and it is an error at run time, as dividing by zero is, for a number that is not from 0 to 255, because a `Byte` could not hold it, see [WebAssembly](#webassembly). Both take one argument, and a procedure with the same name that the program defines is called instead of the built-in one.
-
-Two `Byte` values are compared with all six comparison operators, and the comparison is of the numbers from 0 to 255, so a `Byte` is never negative, see [Comparison operators](#comparison-operators). A `Byte` has no arithmetic: `a + b` for two bytes is an error, and the arithmetic is done on `Int` values, as in `byte_to_int(a) + byte_to_int(b)`. A `Byte` is not a `Bool` and not a condition.
-
-An [array](#arrays) of `Byte` takes one byte of memory for each element, so `[4]Byte` is four bytes, and a [slice](#array-slices) of one is a view of bytes. A [struct](#structs) can have a field of type `Byte`, and a [pointer](#pointers) can point to one, written `^Byte`:
-
-```
-sum_of_bytes :: proc(bytes: []Byte) Int ->
-    total := 0
-    for b in bytes ->
-        total += byte_to_int(b)
-    return total
-
-main :: proc() Int ->
-    a := [4]Byte { 72, 105, 33, 10 }
-    return sum_of_bytes(a)
-```
-
-`main` returns 220.
+A `Byte` has no arithmetic: `a + b` for two bytes is an error, and the arithmetic is done on `Int` values, as in `byte_to_int(a) + byte_to_int(b)`.
 
 ### C strings
 
