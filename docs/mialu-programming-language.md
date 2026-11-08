@@ -336,7 +336,7 @@ An assignment changes the value of a variable that is defined already. It is a s
 
 > **Lessons learnt from C** In C, assignment is an expression. While it can be useful in certain conditions and loops, it has often produced logical errors due to the fact that people have mistyped equality operator `==`, typing in `=` instead. This, combined with implicit conversions in C, leads into situations where an assignment expression ends up having a truthy value more than necessary. In Mialu, this mistake cannot happen because assignment is never an expression.
 
-The plain assignment `=` gives the variable a new value of its type, whatever the type is: `x = 5` for an `Int`, and `p = Person { age = 30 }` for a struct object, which replaces all of its fields. The value must be of the type of the variable, so `x = true` is an error for an `Int`. An array is not assigned to as a whole.
+The plain assignment `=` gives the variable a new value of its type, whatever the type is: `x = 5` for an `Int`, and `p = Person { age = 30, name = "Bob" }` for a struct object, which replaces all of its fields. The value must be of the type of the variable, so `x = true` is an error for an `Int`. An array is not assigned to as a whole.
 
 ```
 foo :: proc() Int ->
@@ -968,19 +968,17 @@ Person :: struct ->
     name: Str
 ```
 
-The type of a field can be `Int`, `Bool`, `Byte`, `Str`, another struct or a [pointer](#pointers), and it cannot be an [array or an array slice](#arrays). The fields of a struct have different names, and a struct cannot contain itself, since it would never end: not directly, as in a field `next: Person` of `Person`, and not through other structs. A pointer to the struct is not the struct, so a field `next: ^Person` is fine. A struct is a type and not a value, so its name is written where a type is, and in a struct literal, but `x := Person` is an error. Like any constant, a struct can be defined below the procedures that use it.
+The type of a field can be `Int`, `Bool`, `Byte`, `Str`, another struct or a [pointer](#pointers) but it cannot be an [array or an array slice](#arrays).
 
-#### Struct objects
+The fields of a struct must have names unique to the fieldset. A struct cannot contain itself, since it would never end, as in a field `next: Person` of `Person`, and not through other structs. A pointer to the struct is not the struct, so a field `next: ^Person` is fine because it's a pointer whose size can be determined without the knowing the full struct definition.
 
-A value of a struct type is called a struct object. It is made with a struct literal: the name of the struct and then the fields that are given a value between braces, each of them the name of the field, `=` and an expression of the type of the field, separated by commas:
+A value of a struct type is called a struct object. It is constructed by a struct literal: the name of the struct and then the fields that are given a value between braces, each of them the name of the field:
 
 ```
-create_struct_object :: proc() Str ->
-    p := Person { age = 30, name = "Bob" }
-    return p.name
+p := Person { age = 30, name = "Bob" }
 ```
 
-The fields can be given in any order, and each field at most once. A comma can come after the last one, which is the convention when the fields are on lines of their own. The literal can be spread over several lines, as long as every line is indented by a multiple of 4 spaces like any line:
+The fields can be given in any order, and each field at most once. A comma can come after the last one (trailing comma), which is the convention when the fields are on lines of their own. The literal can be spread over several lines, as long as every line is indented by a multiple of 4 spaces like any line:
 
 ```
 p := Person {
@@ -989,7 +987,7 @@ p := Person {
 }
 ```
 
-A field that is not given a value has the default value of its type. The default is 0 for an `Int`, `false` for a `Bool`, the empty string `""` for a `Str`, and for a field that is a struct the default value of each of its fields. So `Person { }` is a person whose age is 0 and whose name is empty, and `Person { name = "Bob" }` has age 0. The values are expressions, so they can be calls and arithmetic, and they are evaluated in the order of the fields in the definition of the struct, and not in the order in which they are written. A field that does not exist in the struct, a field that is given a value twice and a value that is not of the type of its field are errors.
+Either every field is given a value or none is. A literal with empty braces, `Person {}`, gives each field its default value: 0 for an `Int`, `false` for a `Bool`, the empty string `""` for a `Str`, `nil` for a [pointer](#null-and-lifetime), and for a field that is a struct the default value of each of its fields. So `Person {}` is a person whose age is 0 and whose name is empty. As soon as one field is given a value, the rest of the fields must be given one too, because otherwise someone may forget to set a field: `Person { name = "Bob" }` is an error because `age` is missing, and has to be written `Person { age = 0, name = "Bob" }`. The values are expressions, so they can be calls and arithmetic, and they are evaluated in the order of the fields in the definition of the struct, and not in the order in which they are written. A field that does not exist in the struct, a field that is given a value twice and a value that is not of the type of its field are errors.
 
 A struct object is a value, like an `Int`: nothing is shared. Defining a variable from another variable, assigning one to another, passing one to a procedure and returning one all make a copy, so changing a field of the copy does not change the original:
 
@@ -1071,7 +1069,7 @@ create_nested_struct_object :: proc() Str ->
     return info.address.area_name
 ```
 
-A field that is a struct and is left out has the default value of each of its own fields. The fields of an anonymous struct are read like any other, with the dots one after the other: `info.address.area_name`.
+A field that is a struct cannot be left out of a literal that gives other fields a value, and it is given `{}` to have the default value of each of its own fields. A nested literal follows the same rule as any other: it gives either all the fields of its struct or none. The fields of an anonymous struct are read like any other, with the dots one after the other: `info.address.area_name`.
 
 #### Structs in arrays
 
@@ -1142,7 +1140,7 @@ create_tokens :: proc() Token ->
     return tokens[0]
 ```
 
-The fields of the cases that the token is not in are not given a value, and have the default value of their type. When the field that is matched is left out, it has the default value of an enum, which is the first member, so the literal is in the first case. These are errors:
+The fields of the cases that the token is not in are not given a value, and have the default value of their type. The field that is matched is not in a case, so it is given a value like any other field, but with empty braces, `Token {}`, it has the default value of an enum, which is the first member, so the literal is in the first case. Every field of the case that the literal is in must be given a value, as `identifier` is for `.IDENTIFIER` above. These are errors:
 
 ```
 bad :: proc() ->
@@ -1152,7 +1150,7 @@ bad :: proc() ->
     c := Token { kind = k, identifier = { text = "x" } }
 ```
 
-`a` gives the field of another case, `b` leaves the kind out, so it is `IDENTIFIER` and the field is of another case, and `c` gives a kind that the compiler cannot see in the literal.
+`a` gives the field of another case, `b` gives a field and leaves the kind out, which no literal that gives a field can do, and `c` gives a kind that the compiler cannot see in the literal.
 
 ##### Using the fields of a union
 
@@ -1240,7 +1238,7 @@ comparison_between_enum_values :: proc() Bool ->
     return Color.RED == Color.BLUE
 ```
 
-`comparison_between_enum_values` returns `false`. Members have no order, so `<`, `<=`, `>` and `>=` are errors, and so is a comparison of members of two enums. An enum is not converted to or from an `Int` or any other type. A variable of an enum type that is defined without a value is the first member of the enum, so `color : Color` is `Color.RED`, and so is a field of an enum type that a struct literal leaves out.
+`comparison_between_enum_values` returns `false`. Members have no order, so `<`, `<=`, `>` and `>=` are errors, and so is a comparison of members of two enums. An enum is not converted to or from an `Int` or any other type. A variable of an enum type that is defined without a value is the first member of the enum, so `color : Color` is `Color.RED`, and so is a field of an enum type of a struct literal with empty braces.
 
 Every member has a number of the type after `enum`, which is its place among the members, counted from 0, so `RED` is 0, `GREEN` is 1 and `BLUE` is 2. The number is only visible outside of the program, for example to JavaScript, see [WebAssembly](#webassembly). It is not a value that the language works with, so an enum is not an `Int`, and the order of the members is only a matter of how they are numbered there.
 
@@ -1383,7 +1381,7 @@ A pointer that is `nil` is followed by a field as it is by `^`, which traps, see
 
 ### Null and lifetime
 
-`nil` is the null pointer, a pointer that points to nothing, like `NULL` in C. It is a [literal word](#literal-words), and a value of every pointer type: it is a `^Int` where a `^Int` is wanted, a `^Person` where that is, and so on, so it can be the value of a variable that has a pointer type, an argument, a returned value, a field of a struct literal and an element of an array literal. A pointer that is defined with a type and without a value, as in `p : ^Int`, is `nil` as well, and so is a field of a struct that is left out of a struct literal.
+`nil` is the null pointer, a pointer that points to nothing, like `NULL` in C. It is a [literal word](#literal-words), and a value of every pointer type: it is a `^Int` where a `^Int` is wanted, a `^Person` where that is, and so on, so it can be the value of a variable that has a pointer type, an argument, a returned value, a field of a struct literal and an element of an array literal. A pointer that is defined with a type and without a value, as in `p : ^Int`, is `nil` as well, and so is a field of a struct whose literal has empty braces, `Node {}`. A field that is a pointer is written out in any other literal, as `next = nil`.
 
 ```
 read_or_default :: proc(p: ^Int, default: Int) Int ->
@@ -1435,13 +1433,13 @@ Node :: struct ->
     next: ^Node
 
 follow_pointers_in_structs :: proc() Int ->
-    last := Node { value = 3 }
+    last := Node { value = 3, next = nil }
     middle := Node { value = 2, next = %last }
     first := Node { value = 1, next = %middle }
     return first.next.value * 10 + first.next.next.value
 ```
 
-`follow_pointers_in_structs` returns 23. A field that is left out of a struct literal is `nil` when it is a pointer. The elements of an [array](#arrays) can be pointers, and so can the elements of an array slice, so a procedure can take `targets: []^Int`, and an array of pointers is made with `[const]^Int { %a, %b }`. An element is followed with `pointers[0]^`, and a for statement over them gives each pointer, as in `for p in pointers ->` and then `p^`.
+`follow_pointers_in_structs` returns 23. A field that is a pointer is `nil` in a struct literal with empty braces, and is written as `next = nil` in any other. The elements of an [array](#arrays) can be pointers, and so can the elements of an array slice, so a procedure can take `targets: []^Int`, and an array of pointers is made with `[const]^Int { %a, %b }`. An element is followed with `pointers[0]^`, and a for statement over them gives each pointer, as in `for p in pointers ->` and then `p^`.
 
 ## Procedures
 
@@ -1705,7 +1703,7 @@ An array is made into a slice where one is wanted by writing its length after it
 
 A for statement that goes through the elements of an array or a slice is the same three structured instructions as one with a range, with two 32-bit locals after the iterator: the address of the next element and the address after the last one. Before the loop the end is stored, which is the address plus the length times 8. The loop begins with a test that leaves the `block` with `br_if` when the next address is not below the end. The iterator is loaded from the next address, and the address moves up by 8 before the statements of the block, so what comes after the second `block`, where `continue` goes, is only the `br` back to the start of the `loop`.
 
-A struct is made of the values of its fields, one after the other, in the order of its definition, where a field that is a struct takes its own fields in its place, and nothing else: it has no header and no padding. So a `Person` is three values, the `i64` of the age and the `i32` address and `i32` length of the name. A parameter of a struct type is that many parameters, a variable is that many locals, and a procedure that returns a struct has that many results, which JavaScript receives as an array, in the order of the fields. Reading a field of a variable or a parameter is a `local.get` for each of its values, with no cost for the rest of the struct, and assigning to a field is a `local.set`; a struct literal pushes the values of the fields in the order of the struct, with the default value, which is zero, for the ones that it does not give. The values of a struct literal are written in the order of the fields of the struct, so a string in a literal can have its address in the data section before one that comes before it in the source, which the address of a string allows, since it is the length of the strings before it in the source. A struct in an array is in memory, with 8 bytes for each of its values, so `Person` takes 24 bytes there. The field of an element is read with a load at the address of the element plus 8 times the number of values before the field, and is assigned with a store there. An assignment of a whole struct to an element is a store of each of its values, with the last on the stack stored first, using a local to hold each value while the address is pushed below it. A default value is `i64.const 0` or `i32.const 0` for each value. A struct is not a function: the definition of one is a constant that has no code and no export.
+A struct is made of the values of its fields, one after the other, in the order of its definition, where a field that is a struct takes its own fields in its place, and nothing else: it has no header and no padding. So a `Person` is three values, the `i64` of the age and the `i32` address and `i32` length of the name. A parameter of a struct type is that many parameters, a variable is that many locals, and a procedure that returns a struct has that many results, which JavaScript receives as an array, in the order of the fields. Reading a field of a variable or a parameter is a `local.get` for each of its values, with no cost for the rest of the struct, and assigning to a field is a `local.set`; a struct literal pushes the values of the fields in the order of the struct, with the default value, which is zero, for every field when its braces are empty. The values of a struct literal are written in the order of the fields of the struct, so a string in a literal can have its address in the data section before one that comes before it in the source, which the address of a string allows, since it is the length of the strings before it in the source. A struct in an array is in memory, with 8 bytes for each of its values, so `Person` takes 24 bytes there. The field of an element is read with a load at the address of the element plus 8 times the number of values before the field, and is assigned with a store there. An assignment of a whole struct to an element is a store of each of its values, with the last on the stack stored first, using a local to hold each value while the address is pushed below it. A default value is `i64.const 0` or `i32.const 0` for each value. A struct is not a function: the definition of one is a constant that has no code and no export.
 
 A `Byte` is one 32-bit integer (`i32`) whose value is from 0 to 255, so a parameter of the type is one WebAssembly parameter and a result is one result, which JavaScript passes and receives as a plain number and not as a `BigInt`. An integer literal that is a `Byte` is `i32.const`. Bytes are compared with the unsigned instructions `i32.lt_u`, `i32.le_u`, `i32.gt_u` and `i32.ge_u`, and with `i32.eq` and `i32.ne`. `byte_to_int` is `i64.extend_i32_u`. `int_to_byte` keeps the number in a local, compares it with 255 as an unsigned 64-bit number with `i64.gt_u`, which also finds a negative number, traps with `unreachable` when it is above, and otherwise is `i32.wrap_i64` of the number. The default value is `i32.const 0`. The elements of an array of `Byte` and what a pointer to a `Byte` points to take one byte of memory, not 8 as the others do: an element is read with `i32.load8_u` and written with `i32.store8`, the address of an element is the address of the array plus the index with no scaling, and a `for` statement moves its address up by 1. So a `Uint8Array` of the memory of the module is the array: `new Uint8Array(memory.buffer, 0, 3).set([1, 2, 3])` and then `sum_of_bytes(0, 3)`. The elements of the array literals in the frame of a procedure, and its variables, are each rounded up to a multiple of 8 bytes, so that what comes after them is aligned. A `Byte` that is a field of a struct is one value of the struct, and in memory it takes the 8 bytes of any value, from which `i32.load8_u` and `i32.store8` use the first.
 
@@ -1738,7 +1736,7 @@ The target rejects a program that the parser accepts when:
 - `byte_to_int` has other than one argument, or an argument that is not a `Byte`, and `int_to_byte` has other than one argument, or an argument that is not an `Int`,
 - a type, also the one of a global variable, is not `Int`, `Bool`, `Byte`, `Str`, a struct or an enum that is defined, a pointer to one of them, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
 - a struct contains itself, or has a field that is an array or an array slice,
-- a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field,
+- a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field, or the literal gives a value to some fields and not to all of them,
 - a field is accessed on a value that is not a struct or a pointer to one, or does not exist, or is accessed through something that is not a variable, a parameter, an element of an array or a pointer,
 - a field is assigned through a parameter or an iterator that is not a pointer,
 - a value that is assigned with `=` is not of the type of the variable, the field, the element or what the pointer points to,

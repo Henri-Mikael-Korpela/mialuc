@@ -244,7 +244,7 @@ pointer_to_field_through_pointer :: proc() Int ->
     return line.end.x
 
 pointer_to_pointer_to_struct :: proc() Int ->
-    person := Person { age = 1 }
+    person := Person { age = 1, name = "" }
     p := %person
     pp := %p
     pp^.age = 77
@@ -272,7 +272,7 @@ pointer_to_slice_element :: proc() Int ->
     return a[3]
 
 pointer_to_field_of_element :: proc() Int ->
-    people := [const]Person { Person { age = 1 }, Person { age = 2 }, Person { age = 3 } }
+    people := [const]Person { Person { age = 1, name = "" }, Person { age = 2, name = "" }, Person { age = 3, name = "" } }
     p := %people[1].age
     p^ = 20
     q := %people[2]
@@ -331,13 +331,13 @@ Node :: struct ->
     next: ^Node
 
 follow_pointers_in_structs :: proc() Int ->
-    last := Node { value = 3 }
+    last := Node { value = 3, next = nil }
     middle := Node { value = 2, next = %last }
     first := Node { value = 1, next = %middle }
     return first.next.value * 10 + first.next.next.value
 
 assign_through_pointers_in_structs :: proc() Int ->
-    last := Node { value = 3 }
+    last := Node { value = 3, next = nil }
     first := Node { value = 1, next = %last }
     first.next.value = 30
     first.next.value += 1
@@ -353,7 +353,7 @@ assign_null_pointer :: proc() ->
     p^ = 1
 
 follow_null_pointer_in_struct :: proc() Int ->
-    node := Node { value = 1 }
+    node := Node { value = 1, next = nil }
     return node.next.value
 
 nil_pointer_variable :: proc() Bool ->
@@ -470,14 +470,14 @@ assign_field_of_pointer_parameter :: proc() Int ->
     return fields_of_pointer_parameter(%person) * 10 + person.age
 
 pointer_to_pointer_to_struct_with_caret :: proc() Int ->
-    person := Person { age = 1 }
+    person := Person { age = 1, name = "" }
     p := %person
     pp := %p
     pp^.age = 66
     return person.age
 
 follow_pointers_with_fields :: proc() Int ->
-    last := Node { value = 3 }
+    last := Node { value = 3, next = nil }
     middle := Node { value = 2, next = %last }
     first := Node { value = 1, next = %middle }
     return first.next.next.value * 10 + first.next^.next.value

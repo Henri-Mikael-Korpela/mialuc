@@ -168,7 +168,7 @@ Pixel :: struct ->
     x: Int
 
 enum_fields_are_set_by_default :: proc() Int ->
-    pixel := Pixel { x = 5 }
+    pixel := Pixel { }
     result := pixel.x
     if pixel.color == Color.RED ->
         result += 10

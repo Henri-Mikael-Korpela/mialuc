@@ -202,6 +202,10 @@ typedef enum {
     WASM_BUILD_STATUS_STRUCT_EXPECTED,
     // A field that is given a value twice in one struct literal. The subject is the second one.
     WASM_BUILD_STATUS_STRUCT_FIELD_DUPLICATE,
+    // A field that a struct literal does not give a value, while it gives one to another field. A
+    // literal with no fields, `Person {}`, gives every field its default value. The subject is the
+    // name of the field.
+    WASM_BUILD_STATUS_STRUCT_FIELD_MISSING,
     // A value that is not of the type of the field that it is given to or assigned to.
     WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
     // A field that the struct does not have, in a struct literal or an access.

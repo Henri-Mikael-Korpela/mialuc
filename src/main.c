@@ -953,6 +953,11 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is given a value twice.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case WASM_BUILD_STATUS_STRUCT_FIELD_MISSING:
+        fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is not given a value. Either every field is "
+                "given a value, or the braces are empty and every field has its default value.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: the value of the field '%.*s' is not of the type of the "
                 "field.\n", path, position.line, position.column, subject_length,

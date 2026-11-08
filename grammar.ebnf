@@ -89,7 +89,9 @@
        through other structs, but it can have a pointer to its own struct. The fields of
        a struct have different names. In a struct literal every field must be a field of the
        struct, must be given a value at most once, and must be given a value of its type, and the
-       literal `{ ... }` without a name is for a field that is a struct. A field is accessed
+       literal `{ ... }` without a name is for a field that is a struct. A literal with empty
+       braces gives every field its default value, and any other literal must give a value to every
+       field, except the fields of the cases of a union match that it does not choose. A field is accessed
        through a variable, a parameter, an element of an array or what a pointer points to, and not
        through the result of a call. The grammar allows the lines of a literal between braces to be
        indented by any number of spaces, but the compiler requires a multiple of 4, as everywhere.
@@ -530,8 +532,9 @@ array_literal =
 elements = expression , { gap , "," , gap , expression } , [ gap , "," ] ;
 
 (* A struct literal is the name of a struct and the fields that are given a value, between braces,
-   in any order, as in `Person { name = "Bob", age = 30 }`. The fields that are left out get their
-   default value. The fields are separated by commas, and can be on lines of their own, and a
+   in any order, as in `Person { name = "Bob", age = 30 }`. Empty braces, `Person {}`, give every
+   field its default value, and otherwise every field has to be given a value, which the compiler
+   checks, as the grammar does not know the fields of a struct. The fields are separated by commas, and can be on lines of their own, and a
    comma can come after the last one. A field that is a struct can be given its value without a
    name, `{ x = 1, y = 2 }`, since the field says which struct it is. *)
 struct_literal = name , ws , struct_fields ;

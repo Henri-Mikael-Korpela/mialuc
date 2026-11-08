@@ -314,7 +314,7 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_STRING_LITERAL`: no children.
  * - `AST_NODE_TYPE_STRUCT_LITERAL`: one `AST_NODE_TYPE_FIELD_INITIALIZER` for each field that is
  *   given a value, in the order of the source, which is not necessarily the order of the fields of
- *   the struct. `Person { age = 30 }` is a struct literal. The name of the struct is in the
+ *   the struct. `Person { age = 30, name = "Bob" }` is a struct literal. The name of the struct is in the
  *   payload, with `bytes` NULL for the literal `{ ... }` of a field that is a struct, which gets
  *   its type from the field. It is an expression.
  * - `AST_NODE_TYPE_STRUCT_TYPE`: one `AST_NODE_TYPE_FIELD` for each field, in the order of the

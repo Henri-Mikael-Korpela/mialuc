@@ -1,7 +1,7 @@
 // Structs: struct objects and their fields, nested structs, default values, passing objects
 // to procedures by value, and structs in arrays.
 
-/// A struct with two fields. A struct object has all fields, and the ones that are left out are the default.
+/// A struct with two fields. A struct literal gives either all of the fields a value, or none with `{}`, so that no field is forgotten, and then every field is the default.
 Person :: struct ->
     age: Int
     name: Str
@@ -68,7 +68,8 @@ create_nested_struct_object :: proc() Str ->
     }
     return info.address.area_name
 
-/// The default of `Int` is 0, of `Bool` is false and of `Str` is the empty string.
+/// With empty braces every field is the default: 0 for `Int`, false for `Bool` and the empty
+/// string for `Str`.
 default_values_of_struct_object :: proc() Int ->
     p := Person { }
     return p.age
@@ -77,8 +78,8 @@ default_str_of_struct_object :: proc() Str ->
     p : Person
     return p.name
 
-partially_initialized_struct_object :: proc() Int ->
-    p := Person { name = "Zed" }
+explicitly_initialized_struct_object :: proc() Int ->
+    p := Person { age = 0, name = "Zed" }
     return p.age
 
 order_of_initializers_is_free :: proc() Int ->
@@ -125,7 +126,7 @@ assign_whole_struct_object :: proc() Int ->
 /// A struct object is passed by value.
 pass_struct_object_to_proc :: proc() Int ->
     p := Person { age = 41, name = "Bob" }
-    return next_age(p) + next_age(Person { age = 9 })
+    return next_age(p) + next_age(Person { age = 9, name = "Ann" })
 
 next_age :: proc(person: Person) Int ->
     return person.age + 1
@@ -165,7 +166,7 @@ struct_in_struct :: proc() Int ->
     return dx * dx + dy * dy
 
 default_of_nested_struct :: proc() Int ->
-    line := Line { label = "empty" }
+    line := Line { start = { x = 0, y = 0 }, end = { x = 0, y = 0 }, label = "empty" }
     return line.start.x + line.end.y
 
 assign_nested_fields :: proc() Int ->
@@ -182,7 +183,7 @@ Flags :: struct ->
     point: Point
 
 mixed_field_types :: proc() Int ->
-    f := Flags { count = 3 }
+    f := Flags { enabled = false, count = 3, name = "", point = { } }
     if f.enabled ->
         return 100
     f.enabled = true
@@ -230,7 +231,7 @@ assign_fields_of_elements :: proc() Int ->
     return people[0].age * 100 + people[1].age
 
 assign_element_that_is_a_struct :: proc() Int ->
-    people := [const]Person { Person { age = 1 }, Person { age = 2 } }
+    people := [const]Person { Person { age = 1, name = "" }, Person { age = 2, name = "" } }
     people[1] = Person { age = 20, name = "Zoe" }
     first := people[0]
     people[0] = people[1]
@@ -258,11 +259,11 @@ copy_range_of_struct_objects :: proc() Int ->
     return b[2].x * 1000 + b[0].y * 100 + a[0].x * 10 + a[2].x
 
 nested_struct_in_array_element :: proc() Int ->
-    lines := [const]Line { Line { end = Point { x = 7, y = 8 } }, Line { } }
+    lines := [const]Line { Line { start = { }, end = Point { x = 7, y = 8 }, label = "" }, Line { } }
     lines[1].end.y = lines[0].end.x + 1
     return lines[0].end.y * 10 + lines[1].end.y
 
 /// Reading a field of an element that does not exist traps.
 element_out_of_bounds_field :: proc(index: Int) Int ->
-    people := [const]Person { Person { age = 1 } }
+    people := [const]Person { Person { age = 1, name = "" } }
     return people[index].age

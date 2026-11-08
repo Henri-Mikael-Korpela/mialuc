@@ -32,7 +32,7 @@ console.log("Integer literal 3 and another value, true and false:",
     Boolean(kind_and_field_in_one_condition(1, 0, 0, 4)));
 
 // A kind that is left out is the first member, as for any enum.
-console.log("The kind that is left out is IDENTIFIER, 1:", omitted_kind_is_the_first_member());
+console.log("Empty braces give the first kind, IDENTIFIER, 1:", omitted_kind_is_the_first_member());
 
 // A field of a pointer to a token is accessed the same way.
 console.log("Through a pointer to a token:", use_pointer_to_token());

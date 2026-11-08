@@ -231,7 +231,7 @@ assign_procedure_field :: proc() Int ->
     return f(6, 7)
 
 procedure_field_is_nil_by_default :: proc() Bool ->
-    operation := Operation { name = "none" }
+    operation := Operation { name = "none", apply = nil }
     return operation.apply == nil
 
 use_struct_in_a_procedure :: proc(operation: Operation) Int ->

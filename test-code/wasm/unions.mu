@@ -98,9 +98,9 @@ change_the_kind_by_assigning_an_object :: proc() Int ->
 kind_and_field_in_one_condition :: proc(token: Token) Bool ->
     return token.kind == .INTEGER_LITERAL and token.integer_literal.value == 3
 
-/// The default kind is the first member of the enum.
+/// The default kind is the first member of the enum. With empty braces every field is the default.
 omitted_kind_is_the_first_member :: proc() Int ->
-    token := Token { identifier = { text = "first" } }
+    token := Token { }
     if token.kind == .IDENTIFIER ->
         return 1
     return 0

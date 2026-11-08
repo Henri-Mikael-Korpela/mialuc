@@ -102,7 +102,7 @@ brightness :: proc() Int ->
     return byte_to_int(p.red) + byte_to_int(p.green) + byte_to_int(p.blue) + p.alpha
 
 pixels_in_array :: proc() Int ->
-    a := [2]Pixel { Pixel { red = 1 }, Pixel { red = 2, blue = 9 } }
+    a := [2]Pixel { Pixel { red = 1, green = 0, blue = 0, alpha = 0 }, Pixel { red = 2, green = 0, blue = 9, alpha = 0 } }
     a[0].blue = 100
     return byte_to_int(a[0].blue) + byte_to_int(a[1].red) + byte_to_int(a[1].blue)
 

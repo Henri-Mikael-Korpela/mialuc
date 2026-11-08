@@ -531,6 +531,10 @@ static Ast_Node_Index  wasm_union_enum                        (Wasm_Builder cons
 static Str             wasm_union_enum_member_name            (Wasm_Builder const *builder,
                                                                Ast_Node_Index expression,
                                                                Ast_Node_Index enum_node);
+static Str             wasm_union_literal_member              (Wasm_Builder const *builder,
+                                                               Ast_Node_Index literal,
+                                                               Ast_Node_Index union_match,
+                                                               Ast_Node_Index enum_node);
 static bool            wasm_union_block_changes               (Wasm_Builder const *builder,
                                                                Ast_Node_Index block,
                                                                Ast_Node_Index container,
@@ -7201,10 +7205,37 @@ static bool wasm_build_code_section_body_field_access(Wasm_Builder *builder,
 }
 
 /**
+ * Returns the name of the member of the enum `enum_node` that the struct literal `literal` gives
+ * to the field that the union match `union_match` is matched against. It is the first member of the
+ * enum when the literal leaves the field out, since that is the default value of an enum. Returns a
+ * `Str` whose `bytes` is NULL when the field is given something other than a member written out.
+ */
+static Str wasm_union_literal_member(Wasm_Builder const *builder, Ast_Node_Index literal,
+                                     Ast_Node_Index union_match, Ast_Node_Index enum_node) {
+    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_STRUCT_LITERAL);
+    assert(builder->nodes[union_match].node_type == AST_NODE_TYPE_UNION_MATCH);
+
+    Str matched_name = builder->nodes[union_match].payload.union_match.discriminant;
+    Ast_Node_Index matched = builder->nodes[literal].first_child;
+    // Every initializer is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && matched != AST_NODE_INDEX_NONE; i += 1) {
+        if (str_equals(builder->nodes[matched].payload.field_initializer.name, matched_name)) {
+            return wasm_union_enum_member_name(builder, builder->nodes[matched].first_child,
+                                               enum_node);
+        }
+        matched = builder->nodes[matched].next_sibling;
+    }
+
+    return builder->nodes[builder->nodes[enum_node].first_child].payload.enum_member.name;
+}
+
+/**
  * Writes the instructions for the struct literal `literal`, such as `Person { name = "Bob" }`: the
  * values of the fields of the struct, in the order of the struct, which is the order of the slots
- * of its type, whatever the order of the literal is. A field that is not given a value gets the
- * default value of its type. `expected` is the struct that a literal without a name is the value
+ * of its type, whatever the order of the literal is. A literal with no fields, `Person {}`, gives
+ * every field the default value of its type. Otherwise every field of the struct must be given a
+ * value, except the fields of the cases of a union match that the literal does not choose.
+ * `expected` is the struct that a literal without a name is the value
  * of, which is the type of the field it is given to, and is `AST_NODE_INDEX_NONE` for a literal
  * with a name. Every field must be one of the struct and be given a value once, and the value must
  * be of the type of the field. Returns false after it recorded an error.
@@ -7262,25 +7293,9 @@ static bool wasm_build_code_section_body_struct_literal(Wasm_Builder *builder,
             Ast_Node_Index enum_node = wasm_union_enum(builder, struct_node, union_match);
             assert(enum_node != AST_NODE_INDEX_NONE);
 
-            Str matched_name = builder->nodes[union_match].payload.union_match.discriminant;
-            Ast_Node_Index matched = builder->nodes[literal].first_child;
-            // Every initializer is a distinct node, so there cannot be more than there are nodes.
-            for (size_t j = 0; j < builder->node_count && matched != AST_NODE_INDEX_NONE; j += 1) {
-                if (str_equals(builder->nodes[matched].payload.field_initializer.name,
-                               matched_name)) {
-                    break;
-                }
-                matched = builder->nodes[matched].next_sibling;
-            }
-
-            Str given_member = builder->nodes[builder->nodes[enum_node].first_child]
-                                   .payload.enum_member.name;
-            if (matched != AST_NODE_INDEX_NONE) {
-                given_member = wasm_union_enum_member_name(
-                    builder, builder->nodes[matched].first_child, enum_node);
-                if (given_member.bytes == NULL) {
-                    return wasm_fail(builder, WASM_BUILD_STATUS_UNION_KIND_NOT_CONSTANT, name);
-                }
+            Str given_member = wasm_union_literal_member(builder, literal, union_match, enum_node);
+            if (given_member.bytes == NULL) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_UNION_KIND_NOT_CONSTANT, name);
             }
             Str case_member =
                 builder->nodes[builder->nodes[union_match].first_child].payload.union_case.member;
@@ -7305,6 +7320,27 @@ static bool wasm_build_code_section_body_struct_literal(Wasm_Builder *builder,
         }
 
         if (given == AST_NODE_INDEX_NONE) {
+            // `Person {}` gives every field its default value, but once a field is given a value
+            // the others must be as well, so that none is forgotten. A field in a case of a union
+            // match is only required when its case is the one that the literal chooses. When the
+            // member is not written out the case is not known, and the field is not required.
+            if (builder->nodes[literal].first_child != AST_NODE_INDEX_NONE) {
+                Ast_Node_Index union_match = wasm_field_union_match(builder, field);
+                bool is_required = true;
+                if (union_match != AST_NODE_INDEX_NONE) {
+                    Ast_Node_Index enum_node = wasm_union_enum(builder, struct_node, union_match);
+                    assert(enum_node != AST_NODE_INDEX_NONE);
+                    Str given_member =
+                        wasm_union_literal_member(builder, literal, union_match, enum_node);
+                    Str case_member = builder->nodes[builder->nodes[union_match].first_child]
+                                          .payload.union_case.member;
+                    is_required = given_member.bytes != NULL &&
+                                  str_equals(given_member, case_member);
+                }
+                if (is_required) {
+                    return wasm_fail(builder, WASM_BUILD_STATUS_STRUCT_FIELD_MISSING, field_name);
+                }
+            }
             wasm_default_write(builder, field_type);
         } else {
             Ast_Node_Index value = builder->nodes[given].first_child;

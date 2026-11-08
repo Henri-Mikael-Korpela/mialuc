@@ -6,7 +6,7 @@ console.log("Assigned field:", assign_field_of_struct_object());
 console.log("Late initialization, with a default and then a value:", Str(late_initialization_of_struct_object()));
 console.log("Defaults, an Int and a Str:", default_values_of_struct_object(),
     JSON.stringify(Str(default_str_of_struct_object())));
-console.log("Only the name is given, so the age is:", partially_initialized_struct_object());
+console.log("The age is given as 0, so the age is:", explicitly_initialized_struct_object());
 console.log("The order of the fields does not matter:", order_of_initializers_is_free());
 console.log("Without a trailing comma:", struct_object_without_trailing_comma());
 console.log("Initializers are expressions, for 3:", initializers_are_expressions(3));
