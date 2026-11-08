@@ -1305,8 +1305,10 @@ static void x64_write_zeros(X64_Writer *writer, size_t count) {
     }
 }
 
-// The numbers of the format are little-endian, whatever the machine that builds them is, so they
-// are written one byte at a time.
+/**
+ * The numbers of the format are little-endian, whatever the machine that builds them is, so they
+ * are written one byte at a time.
+ */
 static void x64_write_u16(X64_Writer *writer, uint16_t number) {
     x64_write_byte(writer, (byte)(number & 0xFF));
     x64_write_byte(writer, (byte)(number >> 8));
