@@ -268,7 +268,7 @@ A `C_Str` (short for "C string") represents a null-terminated string. Unlike `St
 
 A `C_Str` is for interoperating with existing C code, as in [foreign procedures](#foreign-procedures), the equivalent type in C being `char*` or `char const*` Nothing can be done with a `C_Str` but to keep it in a variable or a parameter, pass it on, return it, and hand it to a foreign procedure.
 
-A `Str` is never converted to a `C_Str` implicitly, not even a string literal: `text : C_Str = "Hello, world!"` and `puts("Hello, world!")` are errors, because a `Str` has a length and no promise of a zero after its bytes. The built-in procedure `str_to_c_str` makes a `C_Str` of a `Str`, and the `C_Str` it gives can be kept in a variable, passed on or returned:
+A `Str` is never converted to a `C_Str` implicitly and there is no `C_Str` literal. The built-in procedure `str_to_c_str` makes a `C_Str` of a `Str`, and the `C_Str` it gives can be kept in a variable, passed on or returned. Example:
 
 ```
 import foreign libc
@@ -285,7 +285,9 @@ main :: proc() Int ->
     return 0
 ```
 
-`str_to_c_str` copies the bytes of its argument and a zero after them to temporary storage, and gives the address of the copy. Temporary storage is a stack of strings that belongs to the program: a copy is made on top of it, and all the copies that a procedure made are given back when that procedure returns. So the `C_Str` that `str_to_c_str` gives is good until the procedure that called it returns, and it must not be returned from that procedure or kept anywhere that outlives it. Temporary storage has a fixed size, and a program that makes more copies than fit in it is stopped. A name `str_to_c_str` that the program defines itself is called instead of the built-in one. Which targets have it, and what they allow as the argument, is in [Compilation targets](#compilation-targets).
+`str_to_c_str` copies the bytes of its argument and a zero after them to temporary storage, and gives the address of the copy. Temporary storage is a stack of strings that belongs to the program: a copy is made on top of it, and all the copies that a procedure made are given back when that procedure returns. So the `C_Str` that `str_to_c_str` gives is good until the procedure that called it returns, and it must not be returned from that procedure or kept anywhere that outlives it. Temporary storage has a fixed size, and a program that makes more copies than fit in it is stopped.
+
+See [Compilation targets](#compilation-targets) for which targets have it, and what they allow as the argument.
 
 ## Operators
 
