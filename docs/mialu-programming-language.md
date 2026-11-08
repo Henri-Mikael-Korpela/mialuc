@@ -12,7 +12,6 @@
   - [Booleans](#booleans)
   - [Integers](#integers)
   - [Bytes](#bytes)
-  - [C strings](#c-strings)
   - [Strings](#strings)
 - [Operators](#operators)
   - [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators)
@@ -206,9 +205,9 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 |-------|--------------------------------------------------------------|
 | `Bool` | A boolean value, which is `true` or `false`. See [Booleans](#booleans). |
 | `Byte` | An unsigned 8-bit integer, from 0 to 255. It is the unit of memory and of binary data. See [Bytes](#bytes). |
-| `C_Str` | A null-terminated C string, the address of bytes that end with a zero. It is for passing text to and from code written in C, to a parameter of type `char *` or `char const *`. See [C strings](#c-strings). |
 | `Int` | A signed 64-bit integer. Written as a decimal number, such as `42`. See [Integers](#integers). |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
+| `C_Str` | A null-terminated C string, the address of bytes that end with a zero. It is for passing text to and from code written in C, to a parameter of type `char *` or `char const *`. See [C strings](#c-strings). |
 
 The following primitive data types are reserved for possible future use:
 
@@ -251,33 +250,6 @@ The built-in procedures `byte_to_int` and `int_to_byte` allow conversion between
 
 A `Byte` has no arithmetic: `a + b` for two bytes is an error, and the arithmetic is done on `Int` values, as in `byte_to_int(a) + byte_to_int(b)`.
 
-### C strings
-
-A `C_Str` is a string as the C programming language has it: the address of the first of some bytes, and the string ends at the first byte that is zero, so it has no length of its own. Code written in C uses them as `char *` and `char const *`. A `C_Str` is for the border to such code, as in [foreign procedures](#foreign-procedures), and a [`Str`](#strings), which has a length, is the one to use in Mialu code. Nothing can be done with a `C_Str` but to keep it in a variable or a parameter, pass it on, return it, and hand it to a foreign procedure.
-
-A string literal can be given where a `C_Str` is wanted, as an argument, as the value of a variable that is declared a `C_Str`, as an assigned value or as a returned one. It is the bytes of the literal followed by the zero that every string literal has after it, so no copy is made:
-
-```
-import foreign libc
-
-foreign libc ->
-    puts :: proc(content: C_Str) -> ...
-
-greet :: proc() ->
-    text : C_Str = "Hello, world!"
-    puts(text)
-```
-
-Any other `Str` is not a `C_Str`, because only a literal is known to have a zero after its bytes. The built-in procedure `str_to_c_str` makes a `C_Str` of a `Str`:
-
-```
-main :: proc() Int ->
-    puts(str_to_c_str("Hello, world!"))
-    return 0
-```
-
-`str_to_c_str` copies the bytes of its argument and a zero after them to temporary storage, and gives the address of the copy. Temporary storage is a stack of strings that belongs to the program: a copy is made on top of it, and all the copies that a procedure made are given back when that procedure returns. So the `C_Str` that `str_to_c_str` gives is good until the procedure that called it returns, and it must not be returned from that procedure or kept anywhere that outlives it. Temporary storage has a fixed size, and a program that makes more copies than fit in it is stopped. A name `str_to_c_str` that the program defines itself is called instead of the built-in one. Which targets have it, and what they allow as the argument, is in [Compilation targets](#compilation-targets).
-
 ### Strings
 
 A string literal is the text between a pair of double quotes, on one line:
@@ -291,6 +263,29 @@ A `Str` is encoded in UTF-8: its bytes are always a valid UTF-8 encoding of text
 A string is length-based, not null-terminated. It is its bytes together with the number of them, so the length is known without looking for an end, and a string can hold a zero byte. The length counts bytes, not characters: `"héllo"` has a length of 6, because `é` takes two bytes. The empty string `""` has a length of zero. A string is immutable, and does not own its bytes: a string literal is a view of bytes that are part of the program, so returning one from a procedure is safe.
 
 The compiler rejects a string literal that is not valid UTF-8. A string cannot contain a double quote or a line break, because they would end it, and cannot contain a backslash. There are no escape sequences.
+
+A `C_Str` (short for "C string") represents a null-terminated string. Unlike `Str`, it doesn't store length, it must determined by a null-terminator, which is a byte with value `0`.
+
+A `C_Str` is for interoperating with existing C code, as in [foreign procedures](#foreign-procedures), the equivalent type in C being `char*` or `char const*` Nothing can be done with a `C_Str` but to keep it in a variable or a parameter, pass it on, return it, and hand it to a foreign procedure.
+
+A `Str` is never converted to a `C_Str` implicitly, not even a string literal: `text : C_Str = "Hello, world!"` and `puts("Hello, world!")` are errors, because a `Str` has a length and no promise of a zero after its bytes. The built-in procedure `str_to_c_str` makes a `C_Str` of a `Str`, and the `C_Str` it gives can be kept in a variable, passed on or returned:
+
+```
+import foreign libc
+
+foreign libc ->
+    puts :: proc(content: C_Str) -> ...
+
+greet :: proc() ->
+    text : C_Str = str_to_c_str("Hello, world!")
+    puts(text)
+
+main :: proc() Int ->
+    puts(str_to_c_str("Hello, world!"))
+    return 0
+```
+
+`str_to_c_str` copies the bytes of its argument and a zero after them to temporary storage, and gives the address of the copy. Temporary storage is a stack of strings that belongs to the program: a copy is made on top of it, and all the copies that a procedure made are given back when that procedure returns. So the `C_Str` that `str_to_c_str` gives is good until the procedure that called it returns, and it must not be returned from that procedure or kept anywhere that outlives it. Temporary storage has a fixed size, and a program that makes more copies than fit in it is stopped. A name `str_to_c_str` that the program defines itself is called instead of the built-in one. Which targets have it, and what they allow as the argument, is in [Compilation targets](#compilation-targets).
 
 ## Operators
 
@@ -1674,7 +1669,7 @@ The compiler has two modes: `run` without a target prints the tokens and the syn
 
 ### WebAssembly
 
-The `wasm` target writes a WebAssembly binary module. It imports its foreign procedures from JavaScript, so a procedure of a `foreign libc` block is an error, and so is a call of `str_to_c_str`. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool`, `Byte` and `Str` are the basic types that the target supports, and then the structs, the pointers to any of them, and the arrays and array slices of any of them.
+The `wasm` target writes a WebAssembly binary module. It imports its foreign procedures from JavaScript, so a procedure of a `foreign libc` block is an error, and so is a call of `str_to_c_str` whose argument is not a string literal. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool`, `Byte` and `Str` are the basic types that the target supports, and then the structs, the pointers to any of them, and the arrays and array slices of any of them.
 
 `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`. The arithmetic is the one of [Integers](#integers), with the signed `i64` instructions. Division traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
 
@@ -1687,7 +1682,7 @@ const [address, length] = instance.exports.get_name();
 new TextDecoder().decode(new Uint8Array(instance.exports.memory.buffer, address, length));
 ```
 
-A `C_Str` is one 32-bit integer (`i32`): the address in the memory of the module of bytes that end with a zero. So a parameter of that type is one WebAssembly parameter, and a caller from JavaScript reads the bytes from the address up to the first zero. A zero is written after every string literal in the data section, which is why a string literal can be a `C_Str` without a copy. A `Str` that is not a literal is not accepted where a `C_Str` is wanted, and a literal given to a `C_Str` is only its address, without the length. A string literal is only accepted as a `C_Str` for an argument, a variable, an assignment and a result, so a `C_Str` cannot be given a value as an element of an array, a field of a struct or a global variable.
+A `C_Str` is one 32-bit integer (`i32`): the address in the memory of the module of bytes that end with a zero. So a parameter of that type is one WebAssembly parameter, and a caller from JavaScript reads the bytes from the address up to the first zero. A zero is written after every string literal in the data section. `str_to_c_str` is only accepted with a string literal as its argument, and it is then only the address of the literal, `i32.const`, without the length and without a copy. Nothing else is a `C_Str`, so a `C_Str` cannot be given a value as an element of an array, a field of a struct or a global variable.
 
 A global variable is a mutable global of the module, or two when it is a `Str`, which are the address and the length of the string, in the order of the definitions in the source. They are not exported. The initial value is the constant expression of the global, which WebAssembly evaluates once when the module is instantiated, which is why it is a literal. The bytes of a string literal that is the value of a global variable are in the data section, as the bytes of the other string literals are. A use of a global variable is a `global.get` for each of its globals, and an assignment such as `x += 2` pushes it with `global.get`, then the value, adds them and stores the result with `global.set`. So a global variable keeps its value from one call of the exported functions to the next, for as long as the instance lives.
 
@@ -1795,7 +1790,7 @@ mialuc run --target x64-win32 test-code/x64/foreign-functions-libc.mu
 
 The program starts at a few instructions of the compiler that call `main`, which has to be `main :: proc() Int ->`, and pass its result to the function `exit` of the C library, so that the output of the program is written out before it ends and its result is the exit code of the process. A foreign procedure of a `foreign libc` block is imported by name from `msvcrt.dll`, which is part of every installation of Windows, and a procedure of a `foreign js` block is an error. A call of a procedure follows the calling convention of Windows on x64, so that the C library can be called: the first four arguments are in `rcx`, `rdx`, `r8` and `r9`, the result is in `rax`, and the caller makes the 32 bytes of space for the callee, with the stack a multiple of 16 bytes.
 
-`Int` is a 64-bit integer, and a `C_Str` is the 64-bit address of its bytes. A string literal is the address of its bytes in the read-only data of the program, which end with a zero. The target does not build much yet, and rejects the rest: procedures of up to four parameters of the types `Int` and `C_Str`, whose statements are calls and `return`, and whose expressions are integer literals, string literals, parameters, and calls whose arguments are such expressions or `str_to_c_str`. A `Str` has no value yet, so the argument of `str_to_c_str` must be a string literal.
+`Int` is a 64-bit integer, and a `C_Str` is the 64-bit address of its bytes. A string literal is the address of its bytes in the read-only data of the program, which end with a zero. The target does not build much yet, and rejects the rest: procedures of up to four parameters of the types `Int` and `C_Str`, whose statements are calls and `return`, and whose expressions are integer literals, parameters, and calls whose arguments are such expressions or `str_to_c_str`. A string literal is only accepted as the argument of `str_to_c_str`. A `Str` has no value yet, so the argument of `str_to_c_str` must be a string literal.
 
 `str_to_c_str` copies its argument and the zero after it to temporary storage, which is a section of 64 KiB of the program that is zeroed when it is loaded and not in the file. The first 8 bytes of it say how much of the rest is in use. A copy is made at the end of what is in use and takes its size, rounded up to 8 bytes, and a procedure that makes copies saves how much was in use when it started and sets it back when it returns, so its copies are given back. A copy that does not fit stops the program with a breakpoint, and so does a `str_to_c_str` that is returned, which the target rejects, because the copy is gone when the procedure returns.
 

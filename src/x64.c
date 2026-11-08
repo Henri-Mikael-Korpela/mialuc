@@ -130,15 +130,11 @@ typedef struct {
     size_t node_count;
     // The place in the file of the start of the code, and of the data that precedes it.
     size_t text_start;
-    // The string literal that was found last, and the place of its bytes among the strings, so that
-    // finding the next, which is nearly always the one after it, does not count from the start.
-    size_t string_cursor_offset;
     size_t procedure_count;
     uint32_t text_rva;
     // Where the section of the temporary storage is in memory, see
     // `X64_TEMPORARY_STORAGE_SIZE_BYTES`.
     uint32_t data_rva;
-    Ast_Node_Index string_cursor_node;
     Ast_Node_Index module;
     // The definition of the procedure that is being written, which a message about it names.
     Ast_Node_Index definition;
@@ -183,7 +179,6 @@ static void         x64_rdata_write              (X64_Builder *builder);
 static X64_Type     x64_return_type              (Ast_Node const *procedure);
 static bool         x64_return_write             (X64_Builder *builder, Ast_Node_Index procedure,
                                                   Ast_Node_Index statement);
-static size_t       x64_string_offset            (X64_Builder *builder, Ast_Node_Index literal);
 static X64_Type     x64_type_of_name             (Str name);
 static void         x64_write_byte               (X64_Writer *writer, byte content);
 static void         x64_write_bytes              (X64_Writer *writer, byte const *content,
@@ -194,8 +189,6 @@ static void         x64_write_u64                (X64_Writer *writer, uint64_t n
 static void         x64_write_zeros              (X64_Writer *writer, size_t count);
 static void         x64_write_call_import        (X64_Builder *builder, uint32_t import_slot);
 static void         x64_write_call_local         (X64_Builder *builder, size_t target_offset);
-static void         x64_write_load_address       (X64_Builder *builder, uint8_t register_number,
-                                                  size_t string_offset);
 static void         x64_write_load_integer       (X64_Builder *builder, uint8_t register_number,
                                                   int64_t number);
 static void         x64_write_load_slot          (X64_Builder *builder, uint8_t register_number,
@@ -251,11 +244,9 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Ind
         .layout = {0},
         .node_count = nodes.length,
         .text_start = 0,
-        .string_cursor_offset = 0,
         .procedure_count = 0,
         .text_rva = 0,
         .data_rva = 0,
-        .string_cursor_node = 0,
         .module = root,
         .definition = AST_NODE_INDEX_NONE,
         .status = X64_BUILD_STATUS_OK,
@@ -277,8 +268,6 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Ind
         is_ok = x64_code_write(&builder);
         if (is_ok) {
             builder.writer.length = builder.text_start;
-            builder.string_cursor_node = 0;
-            builder.string_cursor_offset = 0;
             is_ok = x64_code_write(&builder);
         }
         if (is_ok) {
@@ -863,10 +852,6 @@ static bool x64_expression_load(X64_Builder *builder, Ast_Node_Index expression,
         x64_write_load_integer(builder, register_number, node->payload.integer_literal.value);
         return true;
     }
-    if (node->node_type == AST_NODE_TYPE_STRING_LITERAL) {
-        x64_write_load_address(builder, register_number, x64_string_offset(builder, expression));
-        return true;
-    }
     if (node->node_type == AST_NODE_TYPE_IDENTIFIER &&
         builder->bindings[expression].kind == SEMANTIC_BINDING_KIND_PARAMETER) {
         x64_write_load_slot(builder, register_number, builder->bindings[expression].position);
@@ -890,10 +875,6 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
     Ast_Node const *node = &builder->nodes[expression];
     if (node->node_type == AST_NODE_TYPE_INTEGER_LITERAL) {
         return X64_TYPE_INT;
-    }
-    if (node->node_type == AST_NODE_TYPE_STRING_LITERAL) {
-        // The only string there is for now, see `x64_build`.
-        return X64_TYPE_C_STR;
     }
     if (node->node_type == AST_NODE_TYPE_IDENTIFIER &&
         builder->bindings[expression].kind == SEMANTIC_BINDING_KIND_PARAMETER) {
@@ -976,29 +957,6 @@ static X64_Type x64_parameter_type(X64_Builder const *builder, Ast_Node_Index pr
 
     return x64_type_of_name(
         builder->nodes[builder->nodes[parameter].first_child].payload.type_name.name);
-}
-
-/**
- * Returns the place of the bytes of the string literal `literal` among the strings, which are in
- * the order of the nodes, each with the zero that ends it.
- */
-static size_t x64_string_offset(X64_Builder *builder, Ast_Node_Index literal) {
-    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_STRING_LITERAL);
-
-    if (literal < builder->string_cursor_node) {
-        builder->string_cursor_node = 0;
-        builder->string_cursor_offset = 0;
-    }
-    // The cursor is at a literal or before the next one, so counting on from it finds the place.
-    while (builder->string_cursor_node < literal) {
-        if (builder->nodes[builder->string_cursor_node].node_type == AST_NODE_TYPE_STRING_LITERAL) {
-            builder->string_cursor_offset +=
-                builder->nodes[builder->string_cursor_node].payload.string_literal.text.length + 1;
-        }
-        builder->string_cursor_node += 1;
-    }
-
-    return builder->string_cursor_offset;
 }
 
 /**
@@ -1142,26 +1100,6 @@ static void x64_write_load_integer(X64_Builder *builder, uint8_t register_number
     x64_write_byte(&builder->writer, (byte)(0x48 | (register_number >> 3)));
     x64_write_byte(&builder->writer, (byte)(0xB8 | (register_number & 7)));
     x64_write_u64(&builder->writer, (uint64_t)number);
-}
-
-/**
- * Writes `lea register, [rip + distance]` for the string at `string_offset` among the strings.
- * The distance is counted from the end of the instruction, which is 4 bytes after the place where
- * it is written.
- */
-static void x64_write_load_address(X64_Builder *builder, uint8_t register_number,
-                                   size_t string_offset) {
-    assert(register_number < 16);
-
-    x64_write_byte(&builder->writer, (byte)(0x48 | ((register_number >> 3) << 2)));
-    x64_write_byte(&builder->writer, 0x8D);
-    // The register in the middle bits, and the mode that is an address relative to the next
-    // instruction.
-    x64_write_byte(&builder->writer, (byte)(0x05 | ((register_number & 7) << 3)));
-    uint64_t end_rva = (uint64_t)builder->text_rva +
-                       (builder->writer.length + 4 - builder->text_start);
-    uint64_t target_rva = X64_RDATA_RVA + builder->layout.strings_offset + string_offset;
-    x64_write_u32(&builder->writer, (uint32_t)(target_rva - end_rva));
 }
 
 /**

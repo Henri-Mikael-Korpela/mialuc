@@ -79,8 +79,8 @@ typedef struct {
  * code of the process.
  *
  * `Int` is a 64-bit integer, and `C_Str` is the 64-bit address of bytes that end with a zero. A
- * string literal is a `C_Str`, and it is the only string there is for now, because `Str` is not
- * built. The program is held in `.rdata` and `.text`, so a literal is a `C_Str` without a copy.
+ * string literal is a `Str`, which the target does not build, so it is only the argument of
+ * `str_to_c_str`, which makes the `C_Str`.
  *
  * A foreign procedure that a `foreign libc ->` block declares is imported from `msvcrt.dll`, which
  * every installation of Windows has, by the name of the procedure. The compiler trusts the

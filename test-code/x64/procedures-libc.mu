@@ -13,6 +13,6 @@ say :: proc(text: C_Str, number: Int) Int ->
     return number
 
 main :: proc() Int ->
-    puts("string literal")
+    puts(str_to_c_str("string literal"))
     puts(str_to_c_str("temporary string in main"))
-    return say("argument", 7)
+    return say(str_to_c_str("argument"), 7)

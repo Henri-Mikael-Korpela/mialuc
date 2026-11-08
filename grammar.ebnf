@@ -39,7 +39,8 @@
        of the object of `js` is not checked, because it is not known until the program runs.
      - `str_to_c_str` is a built-in procedure like `length_of`. It takes a `Str` and gives a
        `C_Str`. The target decides what it supports, for example where the string may come from.
-       A `C_Str` is given a string literal, or another `C_Str`, and nothing else.
+       A `C_Str` is given the result of `str_to_c_str`, or another `C_Str`, and nothing else: a
+       string literal is a `Str` and is not converted to a `C_Str` implicitly.
      - The only attribute is `static`, it cannot be given twice, and every global variable must
        have it, because a global variable has static storage duration. A global variable can be
        used in every procedure of the module, also above where it is defined, and it can be assigned

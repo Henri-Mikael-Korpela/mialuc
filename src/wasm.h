@@ -151,8 +151,8 @@ typedef enum {
     // An array as the type of a parameter, or an array or an array slice as the type of a global
     // variable. The subject is the type of the elements.
     WASM_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
-    // A call of a built-in procedure that the target does not have, which is `str_to_c_str`: the
-    // temporary storage that it needs is not built for WebAssembly. The subject is its name.
+    // A call of `str_to_c_str` whose argument is not a string literal: the temporary storage that
+    // a copy needs is not built for WebAssembly. The subject is its name.
     WASM_BUILD_STATUS_BUILT_IN_UNSUPPORTED,
     WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH,
     WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH,

@@ -757,14 +757,19 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
 /**
  * Checks that every foreign procedure is declared in a `foreign js ->` block, because the module
  * imports its foreign procedures from JavaScript and there is no C library to import from, and
- * that the program does not call `str_to_c_str`, which the target does not have. Returns false after
+ * that `str_to_c_str` is only given string literals. Returns false after
  * it recorded an error.
  */
 static bool wasm_check_foreign_targets(Wasm_Builder *builder) {
     for (size_t i = 0; i < builder->node_count; i += 1) {
+        // `str_to_c_str` is the address of a string literal, which has a zero after its bytes. A
+        // string that is not a literal has none, so the target cannot make a `C_Str` of it.
         if (builder->nodes[i].node_type == AST_NODE_TYPE_CALL &&
             builder->bindings[i].kind == SEMANTIC_BINDING_KIND_NONE &&
-            str_equals(builder->nodes[i].payload.call.name, STR("str_to_c_str"))) {
+            str_equals(builder->nodes[i].payload.call.name, STR("str_to_c_str")) &&
+            (builder->nodes[i].first_child == AST_NODE_INDEX_NONE ||
+             builder->nodes[builder->nodes[i].first_child].node_type !=
+                 AST_NODE_TYPE_STRING_LITERAL)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_BUILT_IN_UNSUPPORTED,
                              builder->nodes[i].payload.call.name);
         }
@@ -2246,6 +2251,8 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
             is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_BYTE;
         } else if (str_equals(name, STR("int_to_byte"))) {
             is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_INT;
+        } else if (str_equals(name, STR("str_to_c_str"))) {
+            is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_STR;
         }
         if (is_argument_valid == false) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
@@ -2310,10 +2317,7 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
     // written already, so every name in it is known.
     Str return_type_name = builder->nodes[procedure].payload.procedure.return_type;
     Wasm_Type return_type = wasm_type_of_name(builder, return_type_name);
-    bool is_c_str_literal = return_type.kind == WASM_VALUE_TYPE_C_STR &&
-                            builder->nodes[value].node_type == AST_NODE_TYPE_STRING_LITERAL;
-    if (is_c_str_literal == false &&
-        wasm_value_is_accepted(builder, return_type, value) == false) {
+    if (wasm_value_is_accepted(builder, return_type, value) == false) {
         Str name = builder->nodes[definition].payload.constant_definition.name;
         return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
     }
@@ -3037,6 +3041,9 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
             if (str_equals(builder->nodes[expression].payload.call.name, STR("int_to_byte"))) {
                 return wasm_type_make(WASM_VALUE_TYPE_BYTE);
             }
+            if (str_equals(builder->nodes[expression].payload.call.name, STR("str_to_c_str"))) {
+                return wasm_type_make(WASM_VALUE_TYPE_C_STR);
+            }
             return wasm_type_make(WASM_VALUE_TYPE_INT);
         }
         // The type of what the procedure returns, which is none for a procedure without a result,
@@ -3451,6 +3458,11 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_CALL: {
             Semantic_Binding callee_binding = builder->bindings[current];
             if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
+                str_equals(node->payload.call.name, STR("str_to_c_str"))) {
+                // The address of the literal is on the stack already, see the string literal.
+                break;
+            }
+            if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
                 str_equals(node->payload.call.name, STR("byte_to_int"))) {
                 // A byte is a 32-bit integer from 0 to 255, and an `Int` is a 64-bit one.
                 wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_U);
@@ -3581,11 +3593,17 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             wasm_write_signed(&builder->writer, node->payload.integer_literal.value);
             break;
         case AST_NODE_TYPE_STRING_LITERAL:
-            // A literal where a `C_Str` is wanted is only the address of its bytes.
-            wasm_build_code_section_body_string(
-                builder, current,
-                wasm_literal_expected_type(builder, definition, current).kind ==
-                    WASM_VALUE_TYPE_C_STR);
+            // The literal that `str_to_c_str` is given is only the address of its bytes.
+            {
+                Ast_Node_Index parent = wasm_parent_find(builder, current);
+                wasm_build_code_section_body_string(
+                    builder, current,
+                    parent != AST_NODE_INDEX_NONE &&
+                        builder->nodes[parent].node_type == AST_NODE_TYPE_CALL &&
+                        wasm_call_is_built_in(builder, parent) &&
+                        str_equals(builder->nodes[parent].payload.call.name,
+                                   STR("str_to_c_str")));
+            }
             break;
         case AST_NODE_TYPE_ARRAY_LITERAL:
             if (wasm_build_code_section_body_array_literal(builder, definition, current) ==
@@ -5919,21 +5937,15 @@ static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
 
 /**
  * Returns whether the value of `expression` can be given where `target` is wanted: a value of the
- * same type, see `wasm_type_accepts`, or a string literal where a `C_Str` is wanted, which is the
- * address of its bytes, see `wasm_string_size_bytes`. No other `Str` is accepted there, because
- * only a literal is known to be followed by a zero.
+ * same type, see `wasm_type_accepts`, or an integer literal where a `Byte` is wanted. A `Str` is
+ * never accepted where a `C_Str` is wanted, also a literal: `str_to_c_str` makes the `C_Str`.
  */
 static bool wasm_expression_is_accepted(Wasm_Builder const *builder, Wasm_Type target,
                                         Ast_Node_Index expression) {
     if (wasm_type_accepts(target, wasm_expression_type(builder, expression))) {
         return true;
     }
-    if (wasm_value_is_accepted(builder, target, expression)) {
-        return true;
-    }
-
-    return target.kind == WASM_VALUE_TYPE_C_STR &&
-           builder->nodes[expression].node_type == AST_NODE_TYPE_STRING_LITERAL;
+    return wasm_value_is_accepted(builder, target, expression);
 }
 
 /**
@@ -6934,8 +6946,8 @@ static bool wasm_call_is_built_in(Wasm_Builder const *builder, Ast_Node_Index ca
 
 /**
  * Returns the number of bytes that the string literal `literal` takes in the data: its bytes and
- * one zero after them. The zero is there for `C_Str`, which ends where a zero is, so that a literal
- * is a `C_Str` where one is wanted without a copy. A `Str` has its length and ignores the zero.
+ * one zero after them. The zero is there for `C_Str`, which ends where a zero is, so that
+ * `str_to_c_str` of a literal needs no copy. A `Str` has its length and ignores the zero.
  */
 static size_t wasm_string_size_bytes(Ast_Node const *literal) {
     assert(literal->node_type == AST_NODE_TYPE_STRING_LITERAL);
