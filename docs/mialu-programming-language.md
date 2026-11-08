@@ -33,16 +33,9 @@
   - [Array slices](#array-slices)
   - [Length of an array](#length-of-an-array)
 - [Custom data types](#custom-data-types)
-  - [Structs](#structs)
-    - [Struct objects](#struct-objects)
-    - [Fields](#fields)
-    - [Structs in structs](#structs-in-structs)
-    - [Structs in arrays](#structs-in-arrays)
-    - [Unions](#unions)
-      - [Union objects](#union-objects)
-      - [Using the fields of a union](#using-the-fields-of-a-union)
-      - [Storage of a union](#storage-of-a-union)
   - [Enumerations](#enumerations)
+  - [Structs](#structs)
+  - [Unions](#unions)
 - [Static reflection](#static-reflection)
   - [Information about an enum](#information-about-an-enum)
 - [Pointers](#pointers)
@@ -958,6 +951,51 @@ fill_with_length :: proc() Int ->
 
 Besides the [primitive data types](#primitive-data-types), a program can define data types of its own: [structs](#structs), which group values of other types into one, and [enumerations](#enumerations), which are a fixed set of named members. A custom data type is a [constant](#constants) with a name, and it is used wherever a type is written.
 
+### Enumerations
+
+An enumeration, or enum, is a type with a fixed set of named members with values. You define it by writing
+
+- a constant denoted by `enum`,
+- an integer type (like `Int`) for values of its members and
+- `->` to mark the beginning of enum members on each subsequent line, indented one level deeper:
+
+```
+Color :: enum Int ->
+    RED
+    GREEN
+    BLUE
+```
+
+Enum members must have name but values are optional. An enum must have at least one member, and no two members have the same name. If the first enum member does not have a value, it has value `0`. Every subsequent member without an explicit value continues from the previous member value by `1` so in the example above, RED = 0, GREEN = 1 and BLUE = 2.
+
+The integer types that are reserved for the future, such as `I8` and `U32`, will be the others. 
+
+A member can be referenced by writing the name of its enum and a dot, such as `Color.RED`:
+
+```
+color := Color.RED
+DEFAULT_COLOR :: Color.RED
+```
+
+For convenience, the name of the enum can be automatically deduced and therefore left out in certain cases:
+
+- In a constant or variable initialization if explicit enum type is given:
+    - Example: `color : Color = .BLUE`
+- In a return statement with enum type as the return type:
+    - Example return statement: `return .GREEN`
+- In a struct object initialization:
+    - Example: `car_model := Car_Model { color = .RED, }`
+
+Enum members don't have any order, so comparsing enum values with `<`, `<=`, `>` and `>=` results in an error. An enum is not converted to or from an `Int` or any other type.
+
+The default value for any enum is the first member of the enum.
+
+In the future, the language spec and implementation will address the following issues:
+
+- An enum cannot be the type of a global variable, because its initial value is a literal, and no literal is a member.
+- A member has no value of its own, such as a number or a string, that is written in the definition.
+- A member cannot be the value of a variable without a type written, as above, and a member is not called or followed with `^`.
+
 ### Structs
 
 A struct is a record type: a name for a fixed set of fields, each with a name and a type. A struct is defined as a [constant](#constants) whose value is `struct ->` followed by its fields, one on each line, indented one level deeper than the line of the definition. A field is its name, a colon and its type:
@@ -987,49 +1025,31 @@ p := Person {
 }
 ```
 
-Either every field is given a value or none is. A literal with empty braces, `Person {}`, gives each field its default value: 0 for an `Int`, `false` for a `Bool`, the empty string `""` for a `Str`, `nil` for a [pointer](#null-and-lifetime), and for a field that is a struct the default value of each of its fields. So `Person {}` is a person whose age is 0 and whose name is empty. As soon as one field is given a value, the rest of the fields must be given one too, because otherwise someone may forget to set a field: `Person { name = "Bob" }` is an error because `age` is missing, and has to be written `Person { age = 0, name = "Bob" }`. The values are expressions, so they can be calls and arithmetic, and they are evaluated in the order of the fields in the definition of the struct, and not in the order in which they are written. A field that does not exist in the struct, a field that is given a value twice and a value that is not of the type of its field are errors.
+Either every field is given a value or none is. A literal with empty braces, `Person {}`, gives each field its default value. 
+A variable can still be defined with a struct type and without a value, such as `p : Person`, and then it has the default value, see [Variables](#variables). This will be removed in the future, though.
 
-A struct object is a value, like an `Int`: nothing is shared. Defining a variable from another variable, assigning one to another, passing one to a procedure and returning one all make a copy, so changing a field of the copy does not change the original:
+> **Rationale** As soon as one field is given a value, the rest of the fields must be given one too, because otherwise someone may forget to set a field.
 
-```
-struct_object_is_a_value :: proc() Int ->
-    p := Person { age = 1, name = "Bob" }
-    q := p
-    q.age = 99
-    return p.age * 100 + q.age
-```
+A field that
+    
+- does not exist in the struct or
+- is given a value twice and/or
+- is not given a value of the type of its field
 
-`struct_object_is_a_value` returns 199. A struct can be a parameter and a returned value: `proc(person: Person) Person ->`. Two struct types are different types also when they have the same fields, so a `Person` is not accepted where a `Point` is wanted.
+result in an error.
 
-A variable can be defined with a struct type and without a value, such as `p : Person`, and then it has the default value, see [Variables](#variables). A new value can be assigned to it later with `=`, which is how a variable can get one of several values depending on a condition:
+Two struct types are different types even if they share the same fields of the same type.
 
-```
-late_initialization_of_struct_object :: proc(flag: Bool) Str ->
-    p : Person
-    if flag ->
-        p = Person { age = 30, name = "Bob" }
-    else ->
-        p = Person { age = 40, name = "Alice" }
-    return p.name
-```
-
-#### Fields
-
-A field of a struct object is read by writing a dot and its name after the object, such as `p.age`. Fields are assigned to like variables, with `=` and with the operators `+=`, `-=`, `*=` and `/=` for an `Int`:
+A field of a struct object is read by writing a dot and its name after the object, such as `p.age`. Example:
 
 ```
-assign_field_of_struct_object :: proc() Int ->
-    p := Person { age = 30, name = "Bob" }
-    p.age = 31
-    p.age += 1
-    return p.age
+p := Person { age = 30, name = "Bob" }
+p.age = 31
 ```
 
-`assign_field_of_struct_object` returns 32. A field can be a struct itself, and then the dots follow each other, such as `info.address.area_name`. A field is read or assigned through a variable, a parameter, an element of an array, such as `persons[0].age`, or a [pointer](#pointers) to a struct, such as `p.age`, and not through the value of a call: `birthday(p).age` is an error, and has to be written with a variable that is given the result first. The same rules as for the variables apply to the assignment: a parameter and the iterator of a for statement are not assigned to, so neither is a field of one, unless it is a pointer, because then the field is a field of what it points to, and the pointer itself is not changed, see [Fields of a pointer](#fields-of-a-pointer).
+A field is read or assigned through a variable, a parameter, an element of an array, like `persons[0].age`, or a [pointer](#pointers) to a struct, such as `p.age`, and not through the value of a call: `birthday(p).age`. This results in an error, and has to be written with a variable that is given the result first.
 
-#### Structs in structs
-
-A field can be a struct that is defined by name:
+A field can be of another struct type:
 
 ```
 Point :: struct ->
@@ -1041,7 +1061,7 @@ Line :: struct ->
     end: Point
 ```
 
-or a struct that is defined where the field is, which is written `struct ->` as the type of the field, with its fields one level deeper than the field:
+or an anonymous struct, which is defined where the field is:
 
 ```
 Info :: struct ->
@@ -1053,7 +1073,7 @@ Info :: struct ->
         district: Str
 ```
 
-A struct that is defined where the field is has no name of its own, so it is an anonymous struct: it can only be the type of that field. Its fields can be structs defined in the same way, as deep as the nesting of the source allows. The value of a field that is a struct is a struct literal, which does not need the name of the struct when the field says which struct it is, and which is the only place where a literal without a name is allowed:
+A struct that is defined where the field cannot be referred to by name. Fields can still be accessed via dot operator, like in the following example:
 
 ```
 create_nested_struct_object :: proc() Str ->
@@ -1069,27 +1089,23 @@ create_nested_struct_object :: proc() Str ->
     return info.address.area_name
 ```
 
-A field that is a struct cannot be left out of a literal that gives other fields a value, and it is given `{}` to have the default value of each of its own fields. A nested literal follows the same rule as any other: it gives either all the fields of its struct or none. The fields of an anonymous struct are read like any other, with the dots one after the other: `info.address.area_name`.
-
-#### Structs in arrays
-
-The elements of an [array](#arrays) can be struct objects, and so can the elements of an array slice. The array literal gives them with struct literals, which can be on lines of their own with a comma after the last one:
+The elements of an [array](#arrays) or array slice can be struct objects. Example:
 
 ```
-create_array_of_struct_objects :: proc() Int ->
-    persons := [const]Person {
-        Person { age = 30, name = "Bob", },
-        Person { age = 25, name = "Alice", },
-        Person { age = 40, name = "Charlie", },
-    }
-    return persons[0].age
+persons := [const]Person {
+    Person { age = 30, name = "Bob", },
+    Person { age = 25, name = "Alice", },
+    Person { age = 40, name = "Charlie", },
+}
 ```
 
-An element is a struct object, so `persons[1]` can be assigned a whole struct object, a field of an element is read and assigned with `persons[1].age`, a [for statement](#for-statements) over the array goes through the struct objects, and a range of them can be copied.
+### Unions
 
-#### Unions
+Union is a type consisting of members whose storage overlaps. Only one of the members is used at a time. A union is only as big as necessary to store its largest member, not as big as the combination of all its members.
 
-Some data has fields that only make sense for one of several kinds of it. A token of a program is an identifier, which has a text, or an integer literal, which has a value, or an operator, which has neither. A union match puts such fields in a struct. It is written `union match` and the name of a field of the struct, `->`, and below it, one level deeper, a `case` for each member of the enum of that field, written with a dot and the member as the enum literal `.IDENTIFIER` is. The fields of a case are one level deeper still, and they are written like any other field of a struct, also the ones that are [structs of their own](#structs-in-structs):
+In Mialu, a union is not a separate named type but a group of fields in a [struct](#structs). It is tagged: an enum field called tagger of the containing struct says which member is used at a given time.
+
+Because the tagger is always there, a program never has to guess which member is stored, and the compiler can check it instead. This check is based on a `match` construct. It is denoted by `union match`, followed by the field name and by `case`s for each value of the field of the enumeration type. Example:
 
 ```
 Token_Kind :: enum Int ->
@@ -1108,150 +1124,21 @@ Token :: struct ->
                 value: Int
 ```
 
-A `Token` has the field `kind`, which every token has, and either `identifier` or `integer_literal`, depending on its kind. A token whose kind is `OPERATOR_ADD` has neither, because a member does not need a case. The union match is anonymous: it has no name, and its fields are fields of the struct, so they are read as `token.identifier` and not through a name for the union. The word `union` stands for the group of fields that are in cases and `match` says what they are matched against, which is the field after it. A struct can have more than one union match, for different fields or for the same one, as long as the names of all of its fields differ. It is in a struct that is defined by name, or in one that is defined as the type of a field.
+> **Lessons learnt from C** In C, a union can be read as the wrong member and give garbage. Here a field of a case is only read or assigned where the compiler can tell that the kind is that case, and a literal can only give the fields of the case that its kind names. A mistake is an error at compile time and not a bug at runtime.
 
-The field that is matched must be a field of the struct that the union match is in, it must have an enum for its type, and it cannot be a field of a case. Every case must be a member of that enum. Every union match has at least one case and every case at least one field. A field of a case has the same types as any other field, but a struct cannot contain itself through a case either.
-
-The point of a union match is that the compiler makes sure that a field is only used while it exists. The kind is known when the program is compiled, so a field of another case is an error and not a value that is meant for something else.
-
-##### Union objects
-
-A struct object is made with the struct literal as usual, and a field of a case can only be given a value when the field that is matched is given the member of that case. The member must be written out in the literal, as `.IDENTIFIER` or `Token_Kind.IDENTIFIER`, and not be a variable or any other expression, because the case has to be known when the program is compiled:
+A field of a case is read or assigned only where the compiler can tell from the program which member it is. The compiler can narrow this down using `if` statement whose condition compares the field that is matched of that object with the member of the case using `==`, with the member on either side. Example narrowing for the token example above:
 
 ```
-create_tokens :: proc() Token ->
-    tokens := [const]Token {
-        Token {
-            kind = .IDENTIFIER,
-            identifier = {
-                text = "x",
-            },
-        },
-        Token {
-            kind = .OPERATOR_ADD,
-        },
-        Token {
-            kind = .INTEGER_LITERAL,
-            integer_literal = {
-                value = 16,
-            },
-        },
-    }
-    return tokens[0]
+if token.kind == .INTEGER_LITERAL ->
+    return token.integer_literal.value
+else if token.kind == .IDENTIFIER ->
+    return 1
+return 0
 ```
-
-The fields of the cases that the token is not in are not given a value, and have the default value of their type. The field that is matched is not in a case, so it is given a value like any other field, but with empty braces, `Token {}`, it has the default value of an enum, which is the first member, so the literal is in the first case. Every field of the case that the literal is in must be given a value, as `identifier` is for `.IDENTIFIER` above. These are errors:
-
-```
-bad :: proc() ->
-    a := Token { kind = .IDENTIFIER, integer_literal = { value = 1 } }
-    b := Token { integer_literal = { value = 1 } }
-    k := Token_Kind.IDENTIFIER
-    c := Token { kind = k, identifier = { text = "x" } }
-```
-
-`a` gives the field of another case, `b` gives a field and leaves the kind out, which no literal that gives a field can do, and `c` gives a kind that the compiler cannot see in the literal.
-
-##### Using the fields of a union
-
-A field of a case is read or assigned only where the compiler can tell from the program that the object is in that case. That is the block of an if statement, or of one of its `else if`, whose condition compares the field that is matched of that object with the member of the case using `==`, with the member on either side. An `and` in the condition can have the comparison as one of its operands, and then the operands after it are in the case as well. Both operands of an `and` are always evaluated, see [Logical operators](#logical-operators), so when the object is in another case the field is read and has the default value of its type, which does not change the result, because the comparison before it is false. The block can use the field, and the fields of the fields, however deep:
-
-```
-value_of_token :: proc(token: Token) Int ->
-    if token.kind == .INTEGER_LITERAL ->
-        return token.integer_literal.value
-    else if token.kind == .IDENTIFIER ->
-        return 1
-    return 0
-
-is_three :: proc(token: Token) Bool ->
-    return token.kind == .INTEGER_LITERAL and token.integer_literal.value == 3
-```
-
-The object that is compared and the object that is used must be the same place: the same variable or parameter, or the same field of one, or the same pointer followed, such as `token`, `line.token` and `p`. An element of an array, such as `tokens[0]`, is never taken as the same place as another element, so it is read through a variable first, as in `token := tokens[0]` in the example of `first_token_text` in `test-code/wasm/unions.mu`.
-
-The compiler does not take any of these as a proof, and the use of a field of a case there is an error:
-
-- an `else` branch, or a comparison with `not=`, or any other condition, since the object could be in any of several other cases;
-- a block of an if statement for another member;
-- a block in which the object, a place that contains it, or the field that is matched is assigned to, or has its address taken, anywhere in the block, since the case could change;
-- an object that is not the one that is compared.
-
-A kind can be changed in the usual way, by assigning the whole struct object, `token = Token { kind = .INTEGER_LITERAL, integer_literal = { value = 9 } }`, and then the object is matched again with an if statement. Procedures that are called with a pointer to the object are not followed, so a call inside a block can change the kind of an object that is reached through a pointer, after which the fields of the case are the defaults of their type; the program stays well defined, but a later use of the field is not a use of the case.
-
-The other fields of the struct, such as `kind`, are always available.
-
-##### Storage of a union
-
-The cases do not share their storage: a struct with a union match has all the fields of all of its cases, and the compiler decides which of them can be used. So a union match makes the struct as large as all its cases together, and not as large as the largest of them. A future version may let the cases share the place of their fields, which the programs would not notice, since only the fields of the case that the compiler has proved are used. For the [WebAssembly](#webassembly) target the values of a token are the values of `kind`, then the ones of all the fields of the cases in the order of the source, so JavaScript sees a token as that many values.
-
-### Enumerations
-
-An enumeration, or enum, is a type with a fixed set of named members. It is a constant whose value is `enum`, the type of the numbers of its members and `->`, and below it the names of its members, one on each line, indented one level deeper:
-
-```
-Color :: enum Int ->
-    RED
-    GREEN
-    BLUE
-```
-
-The type after `enum` is the type of the number that every member has, which is its place among the members, counted from 0. It is always written, so that what an enum is made of does not depend on a default. The only type that can be written for now is `Int`, and the integer types that are reserved for the future, such as `I8` and `U32`, will be the others. `Color` is now a type, which can be written wherever a type is: for a variable, a parameter, a result, a field of a [struct](#structs), an element of an [array](#arrays) and what a [pointer](#pointers) points to. A name of a member does not have to be unique in the program, only in its enum, so another enum can have a `GREEN` as well. An enum has at least one member, and no two members have the same name.
-
-A member is written with the name of its enum and a dot, such as `Color.RED`:
-
-```
-create_enum_variable :: proc() Color ->
-    color := Color.RED
-    return color
-```
-
-A constant can be a member, which is written the same way. It is used like any constant, also in procedures that are above it:
-
-```
-DEFAULT_COLOR :: Color.RED
-
-return_enum_constant_outside_the_current_proc :: proc() Color ->
-    return DEFAULT_COLOR
-```
-
-The name of the enum can be left out where the enum is known, so that `.GREEN` is the member `GREEN` of the enum that the place wants. Those places are the type of a variable that has a written type, such as `color : Color = .BLUE`, what a variable, a field, an element or what a pointer points to is assigned, the result of a procedure that a `return` gives, a parameter that an argument is given to, a field of a struct literal, an element of an array literal, and what a member is compared with:
-
-```
-auto_deduce_enum_by_return_type :: proc() Color ->
-    return .GREEN
-
-enum_field_type_auto_detected_in_struct :: proc() Color ->
-    car_model := Car_Model {
-        color = .RED,
-        manufacturer = "Bord"
-    }
-    return car_model.color
-```
-
-Where nothing says the enum it is an error: `x := .RED` and `.RED == .GREEN` do not tell what `x` or the comparison are about, so one of them has to be written with the enum, as in `x := Color.RED`, or `x : Color = .RED`. A member that the enum does not have is an error as well.
-
-Two members of one enum are compared with `==` and `not=`, and are equal when they are the same member:
-
-```
-comparison_between_enum_values :: proc() Bool ->
-    return Color.RED == Color.BLUE
-```
-
-`comparison_between_enum_values` returns `false`. Members have no order, so `<`, `<=`, `>` and `>=` are errors, and so is a comparison of members of two enums. An enum is not converted to or from an `Int` or any other type. A variable of an enum type that is defined without a value is the first member of the enum, so `color : Color` is `Color.RED`, and so is a field of an enum type of a struct literal with empty braces.
-
-Every member has a number of the type after `enum`, which is its place among the members, counted from 0, so `RED` is 0, `GREEN` is 1 and `BLUE` is 2. The number is only visible outside of the program, for example to JavaScript, see [WebAssembly](#webassembly). It is not a value that the language works with, so an enum is not an `Int`, and the order of the members is only a matter of how they are numbered there.
-
-Not everything can be done with an enum yet, which a later version of the language may allow:
-
-- An enum cannot be the type of a global variable, because its initial value is a literal, and no literal is a member.
-- A member has no value of its own, such as a number or a string, that is written in the definition.
-- A member cannot be the value of a variable without a type written, as above, and a member is not called or followed with `^`.
-
 
 ## Static reflection
 
-Reflection is a program looking at its own types. Static reflection does it while the program is compiled: the information is worked out by the compiler, and nothing is looked up when the program runs. The operator `type_info_of` takes the name of a type between parentheses and gives the information about it, as a struct object. What the information is depends on the type that is asked about, and each kind of type has a struct of its own for it. The `type_info_of` word is a [keyword](#reserved-words), because it is an operator and not a procedure: its operand is a type, which is not a value.
+Reflection is about a program looking at its own types. Static reflection does it while the program is compiled: the information is worked out by the compiler, and nothing is looked up when the program runs. The operator `type_info_of` takes the name of a type between parentheses and gives the information about it, as a struct object. What the information is depends on the type that is asked about, and each kind of type has a struct of its own for it. The `type_info_of` word is a [keyword](#reserved-words), because it is an operator and not a procedure: its operand is a type, which is not a value.
 
 ### Information about an enum
 
