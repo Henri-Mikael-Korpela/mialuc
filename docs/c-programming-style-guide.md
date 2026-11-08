@@ -2,13 +2,14 @@
 
 ## Purpose
 
-This document describes how to use the C programming language and associated tooling in this project. This document is useful for not only developers, but for AI agents as well to keep code more consistent.
+This document describes how to use the C programming language and associated tooling. This document is useful for not only developers, but for AI agents as well to keep code more consistent.
 
 Do not run any formatter that works against these rules.
 
 ## C Standard
 
-The project is written in **C99** (ISO/IEC 9899:1999). CMake builds it with `-std=c99`, GNU extensions off, and `-Wpedantic -Werror`, so any use of a newer or non-standard feature fails the build.
+- The project is written in **C99** (ISO/IEC 9899:1999). CMake builds it with `-std=c99`, GNU extensions off, and `-Wpedantic -Werror`, so any use of a newer or non-standard feature fails the build.
+- C99 has no `static_assert`; use the `STATIC_ASSERT` macro from `static_assert.h`.
 
 ## Indentation, lines and spacing
 
@@ -28,7 +29,7 @@ The project is written in **C99** (ISO/IEC 9899:1999). CMake builds it with `-st
     - macros and constants
     - types
     - function declarations
-    - function definitions.
+    - function definitions
 
 Put `main` at the top of the file when it is the entry point, and the most important functions first.
 
@@ -50,9 +51,10 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 
 ## Naming
 
-- Use `snake_case` for functions, variables, parameters and file names
+- Use `snake_case` for functions, variables, parameters and file names.
 - Use Ada case for types (`Header_Flags`, `Task_Completion`: each word capitalized, words joined by underscores; a one-word type is just capitalized, like `Event`).
-- Use `SCREAMING_SNAKE_CASE` for macros and constants. The rule is for types we define, not for raylib, raygui, SQLite or libc types.
+- Use `SCREAMING_SNAKE_CASE` for macros and constants.
+    - The rule is for types we define, not for third-party or libc types.
 - Do not abbreviate names (except for loop indexes `i`, `j`, and widely understood terms such as `x`, `y`).
 - Use proper capitalization for acronyms (`HTTP_Response`, not `Http_Response`) where they appear in type names.
 - Add units or qualifiers to variable names, and put them last, so that related names sort together and read in order of significance: `latency_ms_max` rather than `max_latency_ms`; `width_pixels`, `cell_height_pixels`.
@@ -63,26 +65,23 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 - Struct and type names are in the order of the most significant part first.
 - Do not overload names with different meanings. Do not use the name `data`, `info`, `value` or `tmp` when a precise name exists.
 
-## Strings
-
-- Prefer length-based strings, `Str` from `<mialu/str.h>`, over C strings (`char *`, `const char *`): pass text as a `Str`, return it as a `Str`, and slice, trim, split, compare and parse it with the `str_` functions, which cannot run past the end because they never look for a terminator. A `Str` does not own its bytes; it is a view into a literal (`STR("text")`), a buffer or a message.
-- Use a C string only where something outside the project requires one: raylib, raygui, SQLite, the C library and the operating system (paths for `fopen`, host names for `getaddrinfo`, text that is formatted with `snprintf` or drawn on screen). Convert at that boundary, once, with `str_from_cstr` on the way in and `str_to_cstr` or `str_copy_truncated` on the way out, and do not let the C string travel further into the program than the call that needs it.
-- A fixed `char` array that a library writes into or reads from, such as a raygui text box's buffer, stays a `char` array, and is turned into a `Str` as soon as the program reads it.
-- Build text in a `Str_Builder` over a buffer the caller owns, rather than with `strcat` or by hand with `strlen` arithmetic.
-
-## Variables
+## Global and local variables
 
 - Initialize every variable at declaration.
 - Declare variables at the smallest possible scope, and as close as possible to where they are used, to reduce the chance of use before initialization.
+- Do not use global mutable state. Pass state explicitly through a context struct.
 
 ## Constants
 
 - Use `static const` or `enum` for constants rather than `#define` where possible. Use `#define` only for macros that must be macros. Give every constant a unit or comment.
 - Place `const` after type name (e.g. `int const`).
 
-## Globals
+## Strings
 
-- Do not use global mutable state. Pass state explicitly through a context struct.
+- Prefer length-based strings (a pointer plus a length) over C strings (`char *`, `const char *`): pass text as a length-based string, return it as one, and slice, trim, split, compare and parse it with functions that cannot run past the end because they never look for a terminator. A length-based string does not own its bytes; it is a view into a literal, a buffer or a message.
+- Use a C string only where something outside the code requires one: third-party libraries, the C library and the operating system (paths for `fopen`, host names for `getaddrinfo`, text that is formatted with `snprintf`). Convert at that boundary, once, on the way in and on the way out, and do not let the C string travel further into the program than the call that needs it.
+- A fixed `char` array that a library writes into or reads from stays a `char` array, and is turned into a length-based string as soon as the program reads it.
+- Build text in a string builder over a buffer the caller owns, rather than with `strcat` or by hand with `strlen` arithmetic.
 
 ## Scopes
 
@@ -93,21 +92,18 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 ## Data types
 
 - Use explicitly sized types (`int32_t`, `uint32_t`, `uint64_t`, `size_t` only for sizes and indexes of memory). Avoid `int`, `long` and `unsigned` where the range matters.
-  - Where an external API forces `int` or `float`, convert at the boundary.
+    - Where an external API forces `int` or `float`, convert at the boundary.
 - Use `bool` for booleans, never `int`.
-- Use custom type `byte` to represent bytes instead of `char`, `unsigned char` or `uint8_t`.
+- Define and use a custom type `byte` using `typedef` to represent bytes instead of `char`, `unsigned char` or `uint8_t`.
 
-## Conditional statements
+## Control flow
 
 - If statements must have their bodies in curly brackets. No single line if statement body without curly brackets.
 - Split compound conditions into nested `if` statements where that makes each branch clear. Prefer positive conditions (`if (index < length)`) over negations.
 - State invariants positively. For `else` branches, make sure the case is handled or deliberately asserted unreachable.
 - Handle every case in a `switch` explicitly. Do not add a `default:` that hides a missing case; assert unreachable instead.
-- When matching against an enumeration in a `switch` statement, sort enumeration keys alphabetically unless performance matters. If it's likely one key should come before another key, comment this and explain performance-related reason for this.
-- Do not use of ternary operator unless mandatory.
-
-## Control flow
-
+- When matching against an enumeration in a `switch` statement, sort enumeration keys alphabetically unless performance matters. If it's likely one key should come before another key, comment this and explain the performance-related reason for this.
+- Do not use the ternary operator unless mandatory.
 - Use only simple, explicit control flow. Do not use `goto` (other than a single cleanup label where unavoidable), `setjmp`/`longjmp`, or recursion. All executions that should be bounded must be bounded.
 - Put a fixed upper bound on every loop and every queue or buffer, so that a runaway loop cannot occur. A loop that must run forever, such as the main loop, should be the only exception and should say so.
 - Use `while (true)` for infinite loops, not `for (;;)` or `while (1)`.
@@ -124,7 +120,7 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 ## Structs
 
 - Put a declaration of each struct field on its own line, and order fields from largest to smallest alignment so that padding is minimal. Assert the struct size with `static_assert` when layout matters.
-- Put each field in struct object initialization on its own line. Use trailing comma for each line, because this helps when one uses line-based change review tool like Git.
+- Put each field in struct object initialization on its own line. Use a trailing comma for each line, because this helps when one uses a line-based change review tool like Git.
 
 ## Assertions
 
@@ -154,14 +150,18 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 
 - Do not rely on undefined behavior. Be careful with signed overflow, shifts, strict aliasing, uninitialized reads and pointer arithmetic. Use unsigned types for wraparound arithmetic.
 
-# Other project management
+# Project-specific guidelines
 
-## Version control
+## Strings
 
-- Write descriptive commit messages that explain the reason for the change, not only what changed.
+- The length-based string is `Str` from `str.h`, built from a literal with `STR("text")` or from a pointer and a length with `str_make`.
+- Mialu's own C string type, `C_Str`, is part of the language being implemented, not of the C code style.
 
-## Dependencies and tooling
+## Types
 
-- Avoid global dependencies, keep them to a minimum.
-- Keep the build in CMake, and keep tooling small and consistent. Prefer a shell script or CMake target over adding a new language or tool.
-- Keep raylib and raygui local to the project in `external/`.
+- `byte` is defined in `common_types.h`.
+
+## Build and tooling
+
+- The build is CMake.
+- Keep tooling small and consistent. Prefer a shell script or CMake target over adding a new language or tool.

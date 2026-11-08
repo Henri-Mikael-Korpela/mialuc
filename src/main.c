@@ -762,7 +762,7 @@ static void main_run_command_report_tokenize_error(char const *path, Str source,
         char character = source.bytes[result.error_offset];
         // The cast is needed because `%x` takes an `unsigned`, and a plain `char` may be signed.
         fprintf(stderr, "%s:%zu:%zu: unexpected character '%c' (0x%02x).\n", path, line, column,
-                character, (unsigned)(uint8_t)character);
+                character, (unsigned)(byte)character);
         break;
     }
     }

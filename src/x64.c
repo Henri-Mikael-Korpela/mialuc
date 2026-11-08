@@ -152,13 +152,13 @@ static void         x64_epilogue_write           (X64_Builder *builder, bool is_
 static bool         x64_procedure_uses_temporary (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
 static bool         x64_str_to_c_str_write       (X64_Builder *builder, Ast_Node_Index call,
-                                                  uint8_t register_number);
-static void         x64_write_move_from_r10      (X64_Builder *builder, uint8_t register_number);
+                                                  byte register_number);
+static void         x64_write_move_from_r10      (X64_Builder *builder, byte register_number);
 static void         x64_write_rip_displacement   (X64_Builder *builder, uint64_t target_rva);
 static bool         x64_code_write               (X64_Builder *builder);
 static void         x64_dos_header_write         (byte *header);
 static bool         x64_expression_load          (X64_Builder *builder, Ast_Node_Index expression,
-                                                  uint8_t register_number);
+                                                  byte register_number);
 static X64_Type     x64_expression_type          (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
 static bool         x64_fail                     (X64_Builder *builder, X64_Build_Status status,
@@ -189,18 +189,18 @@ static void         x64_write_u64                (X64_Writer *writer, uint64_t n
 static void         x64_write_zeros              (X64_Writer *writer, size_t count);
 static void         x64_write_call_import        (X64_Builder *builder, uint32_t import_slot);
 static void         x64_write_call_local         (X64_Builder *builder, size_t target_offset);
-static void         x64_write_load_integer       (X64_Builder *builder, uint8_t register_number,
+static void         x64_write_load_integer       (X64_Builder *builder, byte register_number,
                                                   int64_t number);
-static void         x64_write_load_slot          (X64_Builder *builder, uint8_t register_number,
+static void         x64_write_load_slot          (X64_Builder *builder, byte register_number,
                                                   size_t position);
-static void         x64_write_store_slot         (X64_Builder *builder, uint8_t register_number,
+static void         x64_write_store_slot         (X64_Builder *builder, byte register_number,
                                                   size_t position);
 static void         x64_store_u16                (byte *destination, uint16_t number);
 static void         x64_store_u32                (byte *destination, uint32_t number);
 static void         x64_store_u64                (byte *destination, uint64_t number);
 
 // The registers that carry the arguments, in the order of the arguments.
-static uint8_t const X64_ARGUMENT_REGISTERS[X64_PARAMETER_COUNT_MAX] = {
+static byte const X64_ARGUMENT_REGISTERS[X64_PARAMETER_COUNT_MAX] = {
     X64_REGISTER_RCX,
     X64_REGISTER_RDX,
     X64_REGISTER_R8,
@@ -846,7 +846,7 @@ static bool x64_arguments_write(X64_Builder *builder, Ast_Node_Index call,
  * in `rax` and is moved from there. Returns false after it recorded an error.
  */
 static bool x64_expression_load(X64_Builder *builder, Ast_Node_Index expression,
-                                uint8_t register_number) {
+                                byte register_number) {
     Ast_Node const *node = &builder->nodes[expression];
     if (node->node_type == AST_NODE_TYPE_INTEGER_LITERAL) {
         x64_write_load_integer(builder, register_number, node->payload.integer_literal.value);
@@ -971,7 +971,7 @@ static X64_Type x64_parameter_type(X64_Builder const *builder, Ast_Node_Index pr
  * false after it recorded an error.
  */
 static bool x64_str_to_c_str_write(X64_Builder *builder, Ast_Node_Index call,
-                                   uint8_t register_number) {
+                                   byte register_number) {
     assert(x64_call_is_str_to_c_str(builder, call));
 
     Str name = builder->nodes[call].payload.call.name;
@@ -1040,7 +1040,7 @@ static bool x64_str_to_c_str_write(X64_Builder *builder, Ast_Node_Index call,
 /**
  * Writes `mov register, r10`.
  */
-static void x64_write_move_from_r10(X64_Builder *builder, uint8_t register_number) {
+static void x64_write_move_from_r10(X64_Builder *builder, byte register_number) {
     assert(register_number < 16);
 
     // The prefix has the extension of the source register, `r10`, and of the destination if it is
@@ -1091,7 +1091,7 @@ static bool x64_fail(X64_Builder *builder, X64_Build_Status status, Str subject)
  * Writes `mov register, number`, with the 64-bit constant in the instruction. A shorter one exists
  * for a small number, but one form keeps the code simple.
  */
-static void x64_write_load_integer(X64_Builder *builder, uint8_t register_number,
+static void x64_write_load_integer(X64_Builder *builder, byte register_number,
                                    int64_t number) {
     assert(register_number < 16);
 
@@ -1106,7 +1106,7 @@ static void x64_write_load_integer(X64_Builder *builder, uint8_t register_number
  * Writes `mov register, [rbp + offset]` for the argument at `position`, which the procedure kept in
  * the space that its caller made.
  */
-static void x64_write_load_slot(X64_Builder *builder, uint8_t register_number, size_t position) {
+static void x64_write_load_slot(X64_Builder *builder, byte register_number, size_t position) {
     assert(register_number < 16);
     assert(position < X64_PARAMETER_COUNT_MAX);
 
@@ -1122,7 +1122,7 @@ static void x64_write_load_slot(X64_Builder *builder, uint8_t register_number, s
  * Writes `mov [rbp + offset], register`, which keeps the argument at `position` in the space that
  * the caller made for it.
  */
-static void x64_write_store_slot(X64_Builder *builder, uint8_t register_number, size_t position) {
+static void x64_write_store_slot(X64_Builder *builder, byte register_number, size_t position) {
     assert(register_number < 16);
     assert(position < X64_PARAMETER_COUNT_MAX);
 

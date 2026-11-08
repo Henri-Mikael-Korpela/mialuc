@@ -1318,8 +1318,11 @@ static void wasm_build_global_section(Wasm_Builder *builder) {
                                               wasm_children_count(builder, enum_node) *
                                                   WASM_ENUM_MEMBER_INFO_SLOT_COUNT *
                                                   WASM_ELEMENT_SIZE_BYTES;
-                        wasm_write_signed(&builder->writer,
-                                          (int64_t)(slot == 0 ? name_address : name.length));
+                        int64_t name_part = (int64_t)name.length;
+                        if (slot == 0) {
+                            name_part = (int64_t)name_address;
+                        }
+                        wasm_write_signed(&builder->writer, name_part);
                     }
                     wasm_write_byte(&builder->writer, WASM_OPCODE_END);
                 }
@@ -1336,8 +1339,11 @@ static void wasm_build_global_section(Wasm_Builder *builder) {
                     wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
                     wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
                     // Both are below 2 GiB, because `wasm_data_measure` checked the total.
-                    wasm_write_signed(&builder->writer,
-                                      (int64_t)(slot == 0 ? address : length_bytes));
+                    int64_t data_part = (int64_t)length_bytes;
+                    if (slot == 0) {
+                        data_part = (int64_t)address;
+                    }
+                    wasm_write_signed(&builder->writer, data_part);
                     wasm_write_byte(&builder->writer, WASM_OPCODE_END);
                 }
             } else if (value_type.kind == WASM_VALUE_TYPE_BYTE) {
@@ -1350,7 +1356,11 @@ static void wasm_build_global_section(Wasm_Builder *builder) {
                 wasm_write_byte(&builder->writer, WASM_TYPE_I32);
                 wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
                 wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
-                wasm_write_signed(&builder->writer, value_node->payload.bool_literal.value ? 1 : 0);
+                int64_t bool_value = 0;
+                if (value_node->payload.bool_literal.value) {
+                    bool_value = 1;
+                }
+                wasm_write_signed(&builder->writer, bool_value);
                 wasm_write_byte(&builder->writer, WASM_OPCODE_END);
             } else {
                 wasm_write_byte(&builder->writer, WASM_TYPE_I64);
@@ -1975,7 +1985,10 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             if (is_labeled) {
                 wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
             }
-            Ast_Node_Index label_owner = is_labeled ? child : AST_NODE_INDEX_NONE;
+            Ast_Node_Index label_owner = AST_NODE_INDEX_NONE;
+            if (is_labeled) {
+                label_owner = child;
+            }
             wasm_frame_push(builder, frames, &frame_count, child, label_owner);
         } else if (child_node->node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
                    child_node->node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
@@ -2179,7 +2192,11 @@ static void wasm_build_code_section_body_jump(Wasm_Builder *builder,
             Ast_Node_Type passed = builder->nodes[frames[i - 1].statement].node_type;
             bool is_loop_passed = passed == AST_NODE_TYPE_FOR_STATEMENT ||
                                   passed == AST_NODE_TYPE_LOOP_STATEMENT;
-            label += is_loop_passed ? 3 : 1;
+            if (is_loop_passed) {
+                label += 3;
+            } else {
+                label += 1;
+            }
         }
         i -= 1;
     }
@@ -3517,7 +3534,11 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         }
         case AST_NODE_TYPE_BOOL_LITERAL:
             wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
-            wasm_write_signed(&builder->writer, node->payload.bool_literal.value ? 1 : 0);
+            if (node->payload.bool_literal.value) {
+                wasm_write_signed(&builder->writer, 1);
+            } else {
+                wasm_write_signed(&builder->writer, 0);
+            }
             break;
         case AST_NODE_TYPE_COMPARISON:
             // Bytes are compared as the unsigned 32-bit integers that they are.

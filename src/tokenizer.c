@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include <mialu/common_types.h>
 #include <mialu/tokenizer.h>
 
 enum {
@@ -39,11 +40,11 @@ static size_t utf8_sequence_size(Str text, size_t offset) {
     assert(offset < text.length);
 
     // The sequence is a lead byte, and then this many continuation bytes, which are 0x80 to 0xBF.
-    uint8_t lead = (uint8_t)text.bytes[offset];
+    byte lead = (byte)text.bytes[offset];
     size_t continuation_count = 0;
     // The range of the byte after the lead, which is narrower than the others for some leads.
-    uint8_t second_low = 0x80;
-    uint8_t second_high = 0xBF;
+    byte second_low = 0x80;
+    byte second_high = 0xBF;
 
     if (lead < 0x80) {
         return 1;
@@ -77,9 +78,9 @@ static size_t utf8_sequence_size(Str text, size_t offset) {
         return 0;
     }
     for (size_t i = 1; i <= continuation_count; i += 1) {
-        uint8_t byte_value = (uint8_t)text.bytes[offset + i];
-        uint8_t low = 0x80;
-        uint8_t high = 0xBF;
+        byte byte_value = (byte)text.bytes[offset + i];
+        byte low = 0x80;
+        byte high = 0xBF;
         if (i == 1) {
             low = second_low;
             high = second_high;
