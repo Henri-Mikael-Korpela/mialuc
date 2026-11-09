@@ -36,8 +36,8 @@
   - [Enumerations](#enumerations)
   - [Structs](#structs)
   - [Unions](#unions)
-- [Static reflection](#static-reflection)
-  - [Information about an enum](#information-about-an-enum)
+- [Reflection](#reflection)
+  - [Enumeration type info](#enumeration-type-info)
 - [Pointers](#pointers)
   - [Taking an address](#taking-an-address)
   - [Following a pointer](#following-a-pointer)
@@ -1136,11 +1136,13 @@ else if token.kind == .IDENTIFIER ->
 return 0
 ```
 
-## Static reflection
+## Reflection
 
-Reflection is about a program looking at its own types. Static reflection does it while the program is compiled: the information is worked out by the compiler, and nothing is looked up when the program runs. The operator `type_info_of` takes the name of a type between parentheses and gives the information about it, as a struct object. What the information is depends on the type that is asked about, and each kind of type has a struct of its own for it. The `type_info_of` word is a [keyword](#reserved-words), because it is an operator and not a procedure: its operand is a type, which is not a value.
+Reflection is about a program looking at its own types. Mialu uses static reflection, which does it at compile-time.
 
-### Information about an enum
+Static reflection is based on obtaining information about types. For this purpose, there's an operator `type_info_of` takes the name of a type between parentheses and gives the information about it, as a struct object. What the information is depends on the type that is asked about, and each kind of type has a struct of its own for it.
+
+### Enumeration type info
 
 For an [enum](#enumerations), `type_info_of` gives an `Enum_Type_Info`. It has these fields:
 
