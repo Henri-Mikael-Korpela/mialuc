@@ -33,3 +33,5 @@ Add `--check` to only test whether it is up to date. The script uses only the Py
 ```
 powershell -File scripts/bump-version.ps1 0.2.0
 ```
+
+After the version is bumped and committed, `scripts/deploy-release.ps1` tags the commit of main as `v<version>` and pushes it, which starts the release workflow. It refuses to run with uncommitted changes, off main, behind `origin/main`, or when the tag exists, and asks before pushing unless it is given `-Yes`.
