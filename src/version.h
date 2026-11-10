@@ -7,7 +7,7 @@
  * in the preprocessor; they have no side effects and use no arguments.
  */
 #define MIALU_VERSION_MAJOR 0
-#define MIALU_VERSION_MINOR 1
+#define MIALU_VERSION_MINOR 2
 #define MIALU_VERSION_PATCH 0
 
 #define MIALU_VERSION_STRING_HELPER(text) #text
@@ -15,7 +15,7 @@
     MIALU_VERSION_STRING_HELPER(major) "." MIALU_VERSION_STRING_HELPER(minor) "." \
     MIALU_VERSION_STRING_HELPER(patch)
 
-// "0.1.0"
+// "0.2.0"
 #define MIALU_VERSION_STRING \
     MIALU_VERSION_STRING_FROM(MIALU_VERSION_MAJOR, MIALU_VERSION_MINOR, MIALU_VERSION_PATCH)
 
