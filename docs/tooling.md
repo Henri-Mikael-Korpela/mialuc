@@ -25,3 +25,11 @@ Add `--check` to only test whether it is up to date. The script uses only the Py
 ## Editor support
 
 [editors/vscode](../editors/vscode) is a VS Code extension that highlights the reserved words, the operators, labels, attribute lists such as `#(static)`, strings and calls in `.mu` files. See its [README](../editors/vscode/README.md) for how to install it.
+
+## Versioning
+
+`scripts/bump-version.ps1 <version>` sets the version of the compiler, a semantic version such as `0.2.0`, in [src/version.h](../src/version.h) and in the language specification. It uses PowerShell, so it needs nothing to install on Windows.
+
+```
+powershell -File scripts/bump-version.ps1 0.2.0
+```
