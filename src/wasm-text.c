@@ -559,6 +559,7 @@ static bool wasm_text_format_functions(Wasm_Text_Formatter *formatter, Wasm_Text
         bool is_type_ok = wasm_text_format_function_type(formatter);
         // The types were formatted already, so formatting one again cannot fail.
         assert(is_type_ok);
+        (void)is_type_ok;
 
         formatter->offset = code_cursor;
         formatter->limit = code.end;
@@ -1276,6 +1277,7 @@ static size_t wasm_text_type_find(Wasm_Text_Formatter *formatter, uint32_t type_
     for (uint32_t i = formatter->type_cursor_index; i < type_index; i += 1) {
         byte form = wasm_text_read_byte(formatter);
         assert(form == WASM_TYPE_FUNCTION);
+        (void)form;
         uint32_t parameter_count = wasm_text_read_unsigned_32(formatter);
         formatter->offset += parameter_count;
         uint32_t result_count = wasm_text_read_unsigned_32(formatter);
