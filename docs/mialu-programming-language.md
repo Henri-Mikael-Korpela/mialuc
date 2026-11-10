@@ -66,6 +66,8 @@ This document describes the Mialu programming language, its syntax, semantics an
 
 Mialu is a procedural programming language with straight-foward and familiar syntax, built with simplicity and performance in mind. It is influenced by multiple programming languages including, but not limited to, C, C++, Go, Odin and Python, fully embracing the fact that it comes after many of them, so it has learned from their mistakes and successes.
 
+The fact that there's no mention of functional programming, object-oriented programming or metaprogramming does not mean the author is unfamiliar with or blissfully ignorant of such concepts. The author has made an intention choice to not focus on such paradigms that much in the design of this language. In the future, the overall reasoning will become more evident as the language progresses and new posts documenting certain design decisions emerge.
+
 Where does the name Mialu come from? It comes from the first syllables of my children's names, Miriam, Amira and Lukas. That's my personal touch to such a technical tool.
 
 ## Source code representation
@@ -1675,7 +1677,7 @@ A for statement with a range becomes a `block` that holds a `loop`, and the stat
 
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 
-There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree and the module as text, and runs JavaScript against it, also the functions that the program imports with `import foreign js`, which are written in a section of their own. See the README.
+There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree and the module as text, and runs JavaScript against it, also the functions that the program imports with `import foreign js`, which are written in a section of their own. See [Playground](playground.md).
 
 
 ### x64 for Windows
