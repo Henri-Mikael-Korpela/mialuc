@@ -13,7 +13,7 @@ the compiler, build/mialuc.exe, which must be built first, and answers with JSON
     {"error": null, "ast": "<syntax tree>", "wasm": "<module in base64>", "wat": "<module text>"}
     {"error": "<what the compiler printed>", "ast": "<syntax tree or null>", "wasm": null, "wat": null}
 
-The syntax tree is the one that `mialuc run` prints, one node per line, indented by depth. It is
+The syntax tree is the one that `mialuc dump-ast` prints, one node per line, indented by depth. It is
 there even when the analysis rejects the program, and null when the source does not parse.
 
 A program that does not compile is a normal answer, so it comes with status 200 too.
@@ -133,9 +133,9 @@ def compile_source(source):
 
 
 def parse_tree(compiler_path, directory):
-    """Returns the syntax tree that `mialuc run` prints for the source, or None without one."""
+    """Returns the syntax tree that `mialuc dump-ast` prints for the source, or None without one."""
     try:
-        completed = subprocess.run([str(compiler_path), "run", SOURCE_NAME], cwd=directory,
+        completed = subprocess.run([str(compiler_path), "dump-ast", SOURCE_NAME], cwd=directory,
                                    capture_output=True, timeout=COMPILE_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         return None

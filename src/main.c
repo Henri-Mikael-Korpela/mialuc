@@ -41,13 +41,13 @@ enum {
 // command line that is not understood.
 typedef enum {
     COMMAND_MODE_BUILD,
+    COMMAND_MODE_DUMP_AST,
     COMMAND_MODE_INVALID,
     COMMAND_MODE_RUN,
 } Command_Mode;
 
-// Alphabetical, because nothing depends on the order. `COMMAND_TARGET_NONE` is for the modes
-// that do not write a program, and for `run` without a target, which shows the tokens and the
-// syntax tree.
+// Alphabetical, because nothing depends on the order. `COMMAND_TARGET_NONE` is for the mode that
+// does not make a program, which is `dump-ast`.
 typedef enum {
     COMMAND_TARGET_NONE,
     COMMAND_TARGET_WASM,
@@ -57,8 +57,8 @@ typedef enum {
 
 /**
  * What the command line asks for. `output_path` is NULL unless the mode is build, and `target` is
- * `COMMAND_TARGET_NONE` unless the mode is build or the mode is run with a target. The paths are the C strings of `argv`, because they are only handed
- * to `fopen`.
+ * `COMMAND_TARGET_NONE` only when the mode is dump-ast. The target of run is the one that runs on
+ * this machine. The paths are the C strings of `argv`, because they are only handed to `fopen`.
  */
 typedef struct {
     char const *source_path;
@@ -111,9 +111,9 @@ static bool         main_run_command_write_file            (char const *path, Ar
 static Str_Position main_subject_position                  (Str source, Str subject);
 
 /**
- * Has two modes. `run` reads a source file, tokenizes, parses and analyzes it, and prints the
- * tokens and the syntax tree, or, with a target that can run on this machine, builds the program
- * and runs it. `build` does the same silently and writes the program for a target.
+ * Has three modes. `run` reads a source file, tokenizes, parses and analyzes it, builds the program
+ * for this machine and runs it. `dump-ast` does the same up to the analysis, and prints the tokens
+ * and the syntax tree. `build` builds silently and writes the program for a target.
  * Everything that allocates is in `main` on purpose, so that the buffers are freed in one place on
  * every path.
  */
@@ -129,7 +129,7 @@ int main(int argc, char *argv[]) {
     if (command.mode == COMMAND_MODE_INVALID) {
         fprintf(stderr,
                 "Usage: %s run <source file>\n"
-                "       %s run --target x64-win32 <source file>\n"
+                "       %s dump-ast <source file>\n"
                 "       %s build --target wasm -o <output file> <source file>\n"
                 "       %s build --target wat -o <output file> <source file>\n"
                 "       %s build --target x64-win32 -o <output file> <source file>\n"
@@ -179,13 +179,14 @@ int main(int argc, char *argv[]) {
  * Understands the command line:
  *
  *     mialuc run <source file>
- *     mialuc run --target x64-win32 <source file>
+ *     mialuc dump-ast <source file>
  *     mialuc build --target wasm -o <output file> <source file>
  *     mialuc build --target wat -o <output file> <source file>
  *     mialuc build --target x64-win32 -o <output file> <source file>
  *
- * `mialuc --version` is answered in `main`, before the command is parsed. The output file of a build can also be written without `-o`, right after the target, which is
- * how it was written before there was a flag for it. Returns a command with mode
+ * `mialuc --version` is answered in `main`, before the command is parsed. The output file of a
+ * build can also be written without `-o`, right after the target, which is how it was written
+ * before there was a flag for it. Returns a command with mode
  * `COMMAND_MODE_INVALID` when it is anything else.
  */
 static Command main_command_parse(Array_Slice args) {
@@ -205,25 +206,29 @@ static Command main_command_parse(Array_Slice args) {
     }
 
     if (strcmp(argv[1], "run") == 0) {
-        if (args.length == 3) {
-            return (Command){
-                .source_path = argv[2],
-                .output_path = NULL,
-                .mode = COMMAND_MODE_RUN,
-                .target = COMMAND_TARGET_NONE,
-            };
+        if (args.length != 3) {
+            return invalid;
         }
-        // Only a program for the processor can be run, and it is not run in WebAssembly.
-        if (args.length == 5 && strcmp(argv[2], "--target") == 0 &&
-            main_command_target_parse(argv[3]) == COMMAND_TARGET_X64_WIN32) {
-            return (Command){
-                .source_path = argv[4],
-                .output_path = NULL,
-                .mode = COMMAND_MODE_RUN,
-                .target = COMMAND_TARGET_X64_WIN32,
-            };
+        // Only a program for the processor can be run, and it is not run in WebAssembly. Windows
+        // on x64 is the only machine that a program can run on for now.
+        return (Command){
+            .source_path = argv[2],
+            .output_path = NULL,
+            .mode = COMMAND_MODE_RUN,
+            .target = COMMAND_TARGET_X64_WIN32,
+        };
+    }
+
+    if (strcmp(argv[1], "dump-ast") == 0) {
+        if (args.length != 3) {
+            return invalid;
         }
-        return invalid;
+        return (Command){
+            .source_path = argv[2],
+            .output_path = NULL,
+            .mode = COMMAND_MODE_DUMP_AST,
+            .target = COMMAND_TARGET_NONE,
+        };
     }
 
     if (strcmp(argv[1], "build") == 0) {
@@ -307,9 +312,9 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     }
     assert(result.tokens.length <= TOKEN_COUNT_MAX);
 
-    // Run without a target shows what the front end made. With one it runs the program, whose
-    // output is the only output.
-    bool is_inspection = command.mode == COMMAND_MODE_RUN && command.target == COMMAND_TARGET_NONE;
+    // Dumping the syntax tree shows what the front end made. Running the program has its output
+    // as the only output.
+    bool is_inspection = command.mode == COMMAND_MODE_DUMP_AST;
     if (is_inspection) {
         main_run_command_print_tokens(result.tokens);
     }
@@ -339,13 +344,12 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     switch (command.mode) {
     case COMMAND_MODE_BUILD:
         return main_run_command_build(command, buffers, source, parse_result, semantic_result);
+    case COMMAND_MODE_DUMP_AST:
+        return 0;
     case COMMAND_MODE_INVALID:
         assert(false);
         return 1;
     case COMMAND_MODE_RUN:
-        if (is_inspection) {
-            return 0;
-        }
         return main_run_command_build_x64(command, buffers, source, parse_result, semantic_result);
     }
 
@@ -505,7 +509,7 @@ static bool main_run_command_write_file(char const *path, Array_Slice bytes) {
 }
 
 /**
- * Prints one token per line, for the run mode.
+ * Prints one token per line, for the dump-ast mode.
  */
 static void main_run_command_print_tokens(Array_Slice tokens) {
     assert(tokens.elements != NULL);

@@ -37,7 +37,7 @@ The following are optional:
     - For running the [playground](playground.md) without building the compiler yourself.
     - Tested with Docker 29.8.1.
 
-The compiler has no libraries to install: it only uses the C standard library, and the Windows API in [src/process.c](../src/process.c) to run the programs of `run --target x64-win32`. The `x64-win32` target writes executables that need nothing but Windows, and the `wasm` and `wat` targets need nothing besides the compiler.
+The compiler has no libraries to install: it only uses the C standard library, and the Windows API in [src/process.c](../src/process.c) to run the programs of `run`. The `x64-win32` target writes executables that need nothing but Windows, and the `wasm` and `wat` targets need nothing besides the compiler.
 
 ### Building the compiler
 
@@ -62,10 +62,15 @@ Instead of building and then running your program, you can also run Mialu source
 
 ```
 build/mialuc.exe run <source file>
-build/mialuc.exe run --target x64-win32 <source file>
 ```
 
-`run` without a target prints the tokens, which include the comments, and the syntax tree of the source file, and then resolves its names. `run --target x64-win32` builds the executable, runs it and ends with its exit code. See [test-code/x64](../test-code/x64) for programs of that target.
+`run` builds the program for the machine it is run on, which is `x64-win32` for now, runs it and ends with its exit code. See [test-code/x64](../test-code/x64) for programs of that target.
+
+To see what the front end makes of a source file, print its tokens, which include the comments, and its syntax tree, after which its names are resolved:
+
+```
+build/mialuc.exe dump-ast <source file>
+```
 
 For building WebAssembly files (`.wasm` and `.wat`) using the Mialu compiler, you can run the following commands:
 

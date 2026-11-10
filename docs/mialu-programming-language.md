@@ -127,7 +127,7 @@ foo :: proc() Int ->
 - A line that has only a comment is like a blank line for the structure of the code. It does not have to be indented by a multiple of 4 spaces, it does not end a block, and it can be between the lines of a block or of a multi-line literal.
 - Comments hold UTF-8 text, as all source code does. The compiler reports a comment that has bytes that are not valid UTF-8.
 
-The compiler does not ignore comments: the tokenizer makes each comment a token (`COMMENT` for `//` and `DOCUMENTATION_COMMENT` for a documentation comment), which holds the text exactly as it is in the source, including the slashes. A documentation comment of many lines is one token, which holds the lines with their line breaks. The parser leaves the comment tokens out, so a comment never changes the syntax tree or the program that is built. The tokens are there for tools, such as formatters and generators of documentation, which need to know where the comments are. `mialuc run` prints them with the other tokens.
+The compiler does not ignore comments: the tokenizer makes each comment a token (`COMMENT` for `//` and `DOCUMENTATION_COMMENT` for a documentation comment), which holds the text exactly as it is in the source, including the slashes. A documentation comment of many lines is one token, which holds the lines with their line breaks. The parser leaves the comment tokens out, so a comment never changes the syntax tree or the program that is built. The tokens are there for tools, such as formatters and generators of documentation, which need to know where the comments are. `mialuc dump-ast` prints them with the other tokens.
 
 The reason for `///` is that documentation should be found by tools and not guessed from the `//` comments around it, so it has a form of its own, which is also the form that editors can color apart. What a documentation comment is attached to is not yet used by the compiler.
 
@@ -1566,7 +1566,7 @@ main :: proc() Int ->
 
 ## Compilation targets
 
-The compiler has two modes: `run` without a target prints the tokens and the syntax tree of a program, after which it resolves the names, and `build --target <target> -o <output file> <source file>` writes a program for a target. The output file can also be written without `-o`, directly after the target. `run --target <target> <source file>` builds the program for a target that can run on this machine, runs it, and ends with the exit code of the program. The targets are `wasm`, `wat` and `x64-win32`, and `x64-win32` is the only one that `run` takes.
+The compiler has three modes: `run <source file>` builds the program for the machine that it is run on, runs it, and ends with the exit code of the program, `dump-ast <source file>` prints the tokens and the syntax tree of a program, after which it resolves the names, and `build --target <target> -o <output file> <source file>` writes a program for a target. The output file can also be written without `-o`, directly after the target. The targets are `wasm`, `wat` and `x64-win32`, and `run` uses `x64-win32`, the only one that can run on a machine for now.
 
 ### WebAssembly
 
@@ -1689,7 +1689,7 @@ The `x64-win32` target writes an executable file for Windows on x64 (a PE32+ fil
 
 ```
 mialuc build --target x64-win32 -o ./printf-test.exe test-code/x64/foreign-functions-libc.mu
-mialuc run --target x64-win32 test-code/x64/foreign-functions-libc.mu
+mialuc run test-code/x64/foreign-functions-libc.mu
 ```
 
 The program starts at a few instructions of the compiler that call `main`, which has to be `main :: proc() Int ->`, and pass its result to the function `exit` of the C library, so that the output of the program is written out before it ends and its result is the exit code of the process. A foreign procedure of a `foreign libc` block is imported by name from `msvcrt.dll`, which is part of every installation of Windows, and a procedure of a `foreign js` block is an error. A call of a procedure follows the calling convention of Windows on x64, so that the C library can be called: the first four arguments are in `rcx`, `rdx`, `r8` and `r9`, the result is in `rax`, and the caller makes the 32 bytes of space for the callee, with the stack a multiple of 16 bytes.
