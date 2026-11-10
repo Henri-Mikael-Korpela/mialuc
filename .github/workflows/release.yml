@@ -75,9 +75,9 @@ jobs:
 
       - name: Package
         run: |
-          mkdir dist
-          cp build/mialuc.exe LICENSE README.md dist/
-          7z a "mialuc-$GITHUB_REF_NAME-win-x64.zip" ./dist/*
+          mkdir "mialuc-$GITHUB_REF_NAME"
+          cp build/mialuc.exe LICENSE README.md "mialuc-$GITHUB_REF_NAME/"
+          7z a "mialuc-$GITHUB_REF_NAME-win-x64.zip" "mialuc-$GITHUB_REF_NAME"
 
       - uses: actions/upload-artifact@v4
         with:
