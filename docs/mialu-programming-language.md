@@ -1680,6 +1680,9 @@ The `wat` target writes the same module in the WebAssembly text format, so that 
 There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree and the module as text, and runs JavaScript against it, also the functions that the program imports with `import foreign js`, which are written in a section of their own. See [Playground](playground.md).
 
 
+`mialuc --version` prints the version of the compiler, such as `mialuc 0.1.0`. The version is defined in `src/version.h`.
+
+
 ### x64 for Windows
 
 The `x64-win32` target writes an executable file for Windows on x64 (a PE32+ file for the console), which needs nothing but Windows to run:

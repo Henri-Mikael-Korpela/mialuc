@@ -15,6 +15,7 @@
 #include <mialu/semantic.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
+#include <mialu/version.h>
 #include <mialu/wasm-text.h>
 #include <mialu/wasm.h>
 #include <mialu/x64.h>
@@ -120,6 +121,10 @@ int main(int argc, char *argv[]) {
     // The cast is needed because `argc` is an `int`, which `main` must declare. It is never
     // negative.
     Array_Slice args = array_slice_make(argv, (size_t)argc);
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        printf("mialuc %s\n", MIALU_VERSION_STRING);
+        return 0;
+    }
     Command command = main_command_parse(args);
     if (command.mode == COMMAND_MODE_INVALID) {
         fprintf(stderr,
@@ -127,8 +132,9 @@ int main(int argc, char *argv[]) {
                 "       %s run --target x64-win32 <source file>\n"
                 "       %s build --target wasm -o <output file> <source file>\n"
                 "       %s build --target wat -o <output file> <source file>\n"
-                "       %s build --target x64-win32 -o <output file> <source file>\n",
-                argv[0], argv[0], argv[0], argv[0], argv[0]);
+                "       %s build --target x64-win32 -o <output file> <source file>\n"
+                "       %s --version\n",
+                argv[0], argv[0], argv[0], argv[0], argv[0], argv[0]);
         return 2;
     }
 
@@ -178,7 +184,7 @@ int main(int argc, char *argv[]) {
  *     mialuc build --target wat -o <output file> <source file>
  *     mialuc build --target x64-win32 -o <output file> <source file>
  *
- * The output file of a build can also be written without `-o`, right after the target, which is
+ * `mialuc --version` is answered in `main`, before the command is parsed. The output file of a build can also be written without `-o`, right after the target, which is
  * how it was written before there was a flag for it. Returns a command with mode
  * `COMMAND_MODE_INVALID` when it is anything else.
  */
