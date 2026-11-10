@@ -12,7 +12,3 @@ This is the official compiler implementation for the Mialu programming language.
 - [Editor support](editors/vscode/README.md): the VS Code extension.
 - [C programming style guide](docs/c-programming-style-guide.md): coding conventions for the compiler.
 - [Programming mindset](docs/programming-mindset.md): how to approach programming in this project.
-
-## License
-
-See [LICENSE](LICENSE). The software is provided as is, without warranty or liability, and may be redistributed unmodified with attribution. Derivative works are not permitted.
