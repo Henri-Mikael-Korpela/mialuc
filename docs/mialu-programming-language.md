@@ -1144,7 +1144,7 @@ Static reflection is based on obtaining information about types. For this purpos
 
 ### Enumeration type info
 
-For an [enum](#enumerations), `type_info_of` gives an `Enum_Type_Info`. It has these fields:
+For an [enum](#enumerations), `type_info_of` gives an `Enum_Type_Info` object. It has the following fields:
 
 - `name`, a `Str` with the name of the enum, such as `"Color"`,
 - `members`, an array with an `Enum_Member_Type_Info` for each member of the enum, in the order of the definition. The length of the array is the number of members, which is part of its type, so it is a compile-time array.
@@ -1186,6 +1186,16 @@ Not everything can be done with the information yet, which a later version of th
 - `type_info_of` can only be asked about the name of an enum. The information about a struct or a primitive type is not available.
 - The information is not a value that a variable or a parameter can hold, as above.
 - `Enum_Type_Info` and `Enum_Member_Type_Info` are not written as the type of a variable or a parameter, because the name of the first is not a type that a program can use. The second is, so `[]Enum_Member_Type_Info` is the type of a slice of the members.
+
+### Procedure type info
+
+For a [procedure](#procedures), `type_info_of` gives a `Procedure_Type_Info` object.
+
+It has the following fields:
+
+- `name`, a `Str` with the name of the enum, such as `"create_token"`,
+- `parameters`, an array slice of  `Procedure_Parameter_Type_Info`. If no parameters exist, the length is `0`.
+- `return_types`, an array slice of `Procedure_Return_Type_Info`. If no return types exist, the length is `0`.
 
 ## Pointers
 
