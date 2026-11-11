@@ -10,11 +10,18 @@ localhost only. The script has no dependencies besides the Python standard libra
 The playground, playground.html, compiles Mialu by posting the source to /compile. The server runs
 the compiler, build/mialuc.exe, which must be built first, and answers with JSON:
 
-    {"error": null, "ast": "<syntax tree>", "wasm": "<module in base64>", "wat": "<module text>"}
-    {"error": "<what the compiler printed>", "ast": "<syntax tree or null>", "wasm": null, "wat": null}
+    {"error": null, "ast": "<syntax tree>", "wasm": "<module in base64>", "wat": "<module text>",
+     "asm": "<assembly>", "asm_error": null}
+    {"error": "<what the compiler printed>", "ast": "<syntax tree or null>", "wasm": null, "wat": null,
+     "asm": null, "asm_error": null}
 
 The syntax tree is the one that `mialuc dump-ast` prints, one node per line, indented by depth. It is
 there even when the analysis rejects the program, and null when the source does not parse.
+
+The assembly is the one that `mialuc dump-asm --target x64-win32` prints. The x64-win32 target builds
+much less of the language than the WebAssembly targets, so a program that compiles to WebAssembly is
+often one that it rejects. Then "asm" is null and "asm_error" is what the compiler printed, which is
+not an error of the program as a whole: "error" is only about the WebAssembly targets.
 
 A program that does not compile is a normal answer, so it comes with status 200 too.
 
@@ -96,7 +103,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 
 def compile_source(source):
-    """Builds `source` for both WebAssembly targets, and returns the answer to send as JSON."""
+    """Builds `source` for both WebAssembly targets and shows its assembly, and returns the answer to
+    send as JSON."""
     compiler_path = next((path for path in COMPILER_PATHS if path.is_file()), None)
     if compiler_path is None:
         return failure(f"Cannot find the compiler at {COMPILER_PATHS[0]}. "
@@ -108,6 +116,7 @@ def compile_source(source):
         Path(directory, SOURCE_NAME).write_bytes(source)
 
         ast = parse_tree(compiler_path, directory)
+        assembly, assembly_error = dump_assembly(compiler_path, directory)
 
         outputs = {}
         for target in ["wasm", "wat"]:
@@ -117,11 +126,12 @@ def compile_source(source):
                 completed = subprocess.run(command, cwd=directory, capture_output=True,
                                            timeout=COMPILE_TIMEOUT_SECONDS)
             except subprocess.TimeoutExpired:
-                return failure(f"The compiler did not finish in {COMPILE_TIMEOUT_SECONDS} s.", ast)
+                return failure(f"The compiler did not finish in {COMPILE_TIMEOUT_SECONDS} s.", ast, assembly, assembly_error)
 
             if completed.returncode != 0:
                 message = (completed.stderr or completed.stdout).decode("utf-8", "replace")
-                return failure(message.strip() or f"The compiler exited with {completed.returncode}.", ast)
+                return failure(message.strip() or f"The compiler exited with {completed.returncode}.", ast,
+                               assembly, assembly_error)
             outputs[target] = Path(directory, output_name).read_bytes()
 
     return {
@@ -129,6 +139,8 @@ def compile_source(source):
         "ast": ast,
         "wasm": base64.b64encode(outputs["wasm"]).decode("ascii"),
         "wat": outputs["wat"].decode("utf-8"),
+        "asm": assembly,
+        "asm_error": assembly_error,
     }
 
 
@@ -147,8 +159,30 @@ def parse_tree(compiler_path, directory):
     return None if start < 0 else output[start + 2:].rstrip("\n")
 
 
-def failure(message, ast=None):
-    return {"error": message, "ast": ast, "wasm": None, "wat": None}
+def dump_assembly(compiler_path, directory):
+    """Returns the assembly that `mialuc dump-asm` prints for the source, and the message that the
+    compiler printed instead when it cannot, which is the other of the two that is None.
+
+    The playground runs the same command as the command line does, so that it cannot show anything
+    else than the command line does.
+    """
+    command = [str(compiler_path), "dump-asm", "--target", "x64-win32", SOURCE_NAME]
+    try:
+        completed = subprocess.run(command, cwd=directory, capture_output=True,
+                                   timeout=COMPILE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return None, f"The compiler did not finish in {COMPILE_TIMEOUT_SECONDS} s."
+
+    # Windows writes the lines of text output with "\r\n".
+    if completed.returncode == 0:
+        return completed.stdout.decode("utf-8", "replace").replace("\r\n", "\n"), None
+    message = (completed.stderr or completed.stdout).decode("utf-8", "replace").replace("\r\n", "\n")
+    return None, message.strip() or f"The compiler exited with {completed.returncode}."
+
+
+def failure(message, ast=None, assembly=None, assembly_error=None):
+    return {"error": message, "ast": ast, "wasm": None, "wat": None, "asm": assembly,
+            "asm_error": assembly_error}
 
 
 def main():

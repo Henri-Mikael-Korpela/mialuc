@@ -7,6 +7,8 @@ The playground provides a code editor and is able to compile Mialu to WebAssembl
 
 See [Getting Started](getting-started.md) for the prerequisites of each platform.
 
+The panel below the console has three tabs: the parsed code (what `mialuc dump-ast` shows), the x64 assembly (what `mialuc dump-asm --target x64-win32` shows) and the WebAssembly text. The `x64-win32` target is still a work in progress and builds only a small part of the language, so most programs of the playground have no assembly yet. The tab then says so, and shows what the compiler said.
+
 ## Launching the Playground using Docker
 
 On Linux, install [Docker Engine](https://docs.docker.com/engine/install/) with the Compose plugin, then in the root of the repository:
