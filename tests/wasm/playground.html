@@ -213,6 +213,19 @@
 
         .compile-error:empty { display: none; }
 
+        /* Shown instead of the assembly, which the x64 target cannot make of every program. */
+        .asm-unavailable {
+            flex: 1;
+            margin: 0;
+            padding: 8px 12px;
+            overflow: auto;
+            color: var(--text-muted);
+            font: 13px/1.5 var(--font-code);
+            white-space: pre-wrap;
+        }
+
+        .asm-unavailable[hidden] { display: none; }
+
         #console {
             flex: 1;
             margin: 0;
@@ -266,12 +279,19 @@
                 <div class="tabs" role="tablist">
                     <button class="tab" type="button" role="tab" id="tab-tree"
                         aria-controls="pane-tree" aria-selected="true">Parsed code</button>
+                    <button class="tab" type="button" role="tab" id="tab-asm"
+                        aria-controls="pane-asm" aria-selected="false">X64 Win32 Assembly</button>
                     <button class="tab" type="button" role="tab" id="tab-wat"
                         aria-controls="pane-wat" aria-selected="false">WebAssembly text</button>
                 </div>
                 <pre class="compile-error" id="compile-error"></pre>
                 <div class="tab-pane" id="pane-tree" role="tabpanel" aria-labelledby="tab-tree">
                     <div id="tree"></div>
+                </div>
+                <div class="tab-pane" id="pane-asm" role="tabpanel" aria-labelledby="tab-asm"
+                    hidden>
+                    <pre class="asm-unavailable" id="asm-unavailable" hidden></pre>
+                    <div class="editor" id="editor-asm" data-label="X64 Win32 Assembly"></div>
                 </div>
                 <div class="tab-pane" id="pane-wat" role="tabpanel" aria-labelledby="tab-wat"
                     hidden>
@@ -357,6 +377,15 @@
                     + "while)\\b")],
                 ["number", /\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?n?\b/],
                 ["definition", /\b[A-Za-z_$][\w$]*(?=\s*\()/],
+            ],
+            // The instruction is the word that starts an indented line, and the first line of
+            // the text is a comment, so a line break always comes before it.
+            asm: [
+                ["comment", /\/\/.*/],
+                ["label", /\.[A-Za-z_]\w*/],
+                ["type", /%[a-z][a-z0-9]*/],
+                ["instruction", /(?<=\n {4})[a-z][a-z0-9]*/],
+                ["number", /\b0x[0-9a-f]+\b|\b\d+\b/],
             ],
             wat: [
                 ["comment", /\(;[\s\S]*?;\)|;;.*/],
@@ -466,6 +495,8 @@
         const consoleOutput = document.getElementById("console");
         const compileError = document.getElementById("compile-error");
         const watContainer = document.getElementById("editor-wat");
+        const asmContainer = document.getElementById("editor-asm");
+        const asmUnavailable = document.getElementById("asm-unavailable");
         const treeContainer = document.getElementById("tree");
 
         // Empty until the example has been loaded, see `loadExample`.
@@ -477,6 +508,7 @@
         const importsEditor = createEditor(document.getElementById("editor-imports"),
             "javascript", "", false);
         const watEditor = createEditor(watContainer, "wat", "", true);
+        const asmEditor = createEditor(asmContainer, "asm", "", true);
 
         // The result of the newest compile, a promise of `{ bytes, error }`. Running waits for it,
         // so that it always runs the program that is in the editor.
@@ -505,21 +537,29 @@
                 const response = await fetch("/compile", { method: "POST", body: source });
                 if (response.ok === false) {
                     return {
-                        bytes: null, wat: null, ast: null,
+                        bytes: null, wat: null, ast: null, asm: null, asmError: null,
                         error: `The server answered ${response.status}.`,
                     };
                 }
                 const answer = await response.json();
                 if (answer.error !== null) {
-                    return { bytes: null, wat: null, ast: answer.ast, error: answer.error };
+                    return {
+                        bytes: null, wat: null, ast: answer.ast, error: answer.error,
+                        asm: answer.asm, asmError: answer.asm_error,
+                    };
                 }
                 const bytes = Uint8Array.from(atob(answer.wasm), (character) => character.charCodeAt(0));
-                return { bytes, wat: answer.wat, ast: answer.ast, error: null };
+                return {
+                    bytes, wat: answer.wat, ast: answer.ast, error: null,
+                    asm: answer.asm, asmError: answer.asm_error,
+                };
             } catch (error) {
                 return {
                     bytes: null,
                     wat: null,
                     ast: null,
+                    asm: null,
+                    asmError: null,
                     error: `Cannot reach the compiler. Start it with: python tests/wasm/serve.py\n${error}`,
                 };
             }
@@ -585,10 +625,41 @@
             // The text of the last good module stays, dimmed, so that the view does not jump
             // while a line is half typed.
             watContainer.classList.toggle("is-stale", answer.error !== null);
+            // The assembly is made by the x64 target, which can build a program that the
+            // WebAssembly targets reject, so it is shown whenever there is some. Without any, it
+            // is only explained for a program that has no error, because for one that has, the
+            // reason is the error above, and the last assembly stays, dimmed, like the text.
+            if (answer.asm !== null || answer.error === null) {
+                showAssembly(answer);
+            }
+            const isAssemblyStale = answer.asm === null && answer.error !== null;
+            asmContainer.classList.toggle("is-stale", isAssemblyStale);
+            asmUnavailable.classList.toggle("is-stale", isAssemblyStale);
+        }
+
+        /*
+         * The assembly is what `mialuc dump-asm --target x64-win32` prints. The x64 target is a
+         * work in progress that builds only a small part of the language, so most programs have
+         * none, and then the tab says so and why, instead of showing nothing.
+         */
+        function showAssembly(answer) {
+            const isAvailable = answer.asm !== null;
+            asmContainer.hidden = isAvailable === false;
+            asmUnavailable.hidden = isAvailable;
+            if (isAvailable) {
+                asmEditor.value = answer.asm;
+                asmEditor.render();
+            } else {
+                asmUnavailable.textContent = "The assembly is not available for this program, "
+                    + "because the X64 Win32 target is still a work in progress and does not "
+                    + "support all of the language yet. The WebAssembly targets do.\n\n"
+                    + "The compiler said:\n" + answer.asmError;
+            }
         }
 
         const tabs = [
             { button: document.getElementById("tab-tree"), pane: document.getElementById("pane-tree") },
+            { button: document.getElementById("tab-asm"), pane: document.getElementById("pane-asm") },
             { button: document.getElementById("tab-wat"), pane: document.getElementById("pane-wat") },
         ];
         for (const selected of tabs) {

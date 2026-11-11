@@ -1678,7 +1678,7 @@ A for statement with a range becomes a `block` that holds a `loop`, and the stat
 
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 
-There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree and the module as text, and runs JavaScript against it, also the functions that the program imports with `import foreign js`, which are written in a section of their own. See [Playground](playground.md).
+There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree, the x64 assembly when the `x64-win32` target can build the program, and the module as text, and runs JavaScript against it, also the functions that the program imports with `import foreign js`, which are written in a section of their own. See [Playground](playground.md).
 
 
 ### x64 for Windows
