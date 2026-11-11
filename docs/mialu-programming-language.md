@@ -38,6 +38,7 @@
   - [Unions](#unions)
 - [Reflection](#reflection)
   - [Enumeration type info](#enumeration-type-info)
+  - [Procedure type info](#procedure-type-info)
 - [Pointers](#pointers)
   - [Taking an address](#taking-an-address)
   - [Following a pointer](#following-a-pointer)
@@ -127,7 +128,7 @@ foo :: proc() Int ->
 - A line that has only a comment is like a blank line for the structure of the code. It does not have to be indented by a multiple of 4 spaces, it does not end a block, and it can be between the lines of a block or of a multi-line literal.
 - Comments hold UTF-8 text, as all source code does. The compiler reports a comment that has bytes that are not valid UTF-8.
 
-The compiler does not ignore comments: the tokenizer makes each comment a token (`COMMENT` for `//` and `DOCUMENTATION_COMMENT` for a documentation comment), which holds the text exactly as it is in the source, including the slashes. A documentation comment of many lines is one token, which holds the lines with their line breaks. The parser leaves the comment tokens out, so a comment never changes the syntax tree or the program that is built. The tokens are there for tools, such as formatters and generators of documentation, which need to know where the comments are. `mialuc dump-ast` prints them with the other tokens.
+The compiler does not ignore comments: the tokenizer makes each comment a token (`COMMENT` for `//` and `DOCUMENTATION_COMMENT` for a documentation comment), which holds the text exactly as it is in the source, including the slashes. A documentation comment of many lines is one token, which holds the lines with their line breaks. The parser leaves the comment tokens out, so a comment never changes the syntax tree or the program that is built. The tokens are there for tools, such as formatters and generators of documentation, which need to know where the comments are. `mialuc dump-ast` prints them with the other tokens, see [mialuc](mialu-cli.md#compile-a-program-and-print-its-syntax-tree).
 
 The reason for `///` is that documentation should be found by tools and not guessed from the `//` comments around it, so it has a form of its own, which is also the form that editors can color apart. What a documentation comment is attached to is not yet used by the compiler.
 
@@ -1566,7 +1567,7 @@ main :: proc() Int ->
 
 ## Compilation targets
 
-The compiler has four modes: `run <source file>` builds the program for the machine that it is run on, runs it, and ends with the exit code of the program, `dump-ast <source file>` prints the tokens and the syntax tree of a program, after which it resolves the names, `dump-asm --target <target> <source file>` builds the program and prints its assembly, and `build --target <target> -o <output file> <source file>` writes a program for a target. The output file can also be written without `-o`, directly after the target. The targets are `wasm`, `wat` and `x64-win32`, and `run` uses `x64-win32`, the only one that can run on a machine for now. `dump-asm` takes `x64-win32` too, and prints the code of the executable in the format of the inline assembly of the Odin programming language: one instruction on each line, the operand that is written to first, `%` in front of a register, `[%rbp - 8]` for memory, `.name:` for a label and `//` for a comment.
+The compiler is used from the command line, see [mialuc](mialu-cli.md) for its commands. `build --target <target>` writes a program for a target, and the targets are `wasm`, `wat` and `x64-win32`. `run` and `dump-asm` use `x64-win32`, the only target that can run on a machine, and have assembly to show, for now.
 
 ### WebAssembly
 
@@ -1680,17 +1681,11 @@ The `wat` target writes the same module in the WebAssembly text format, so that 
 There is a playground in `tests/wasm` that compiles Mialu in the browser, shows the parsed code as a tree and the module as text, and runs JavaScript against it, also the functions that the program imports with `import foreign js`, which are written in a section of their own. See [Playground](playground.md).
 
 
-`mialuc --version` prints the version of the compiler, such as `mialuc 0.2.0`. The version is defined in `src/version.h`.
-
-
 ### x64 for Windows
 
 The `x64-win32` target writes an executable file for Windows on x64 (a PE32+ file for the console), which needs nothing but Windows to run:
 
-```
-mialuc build --target x64-win32 -o ./printf-test.exe test-code/x64/foreign-functions-libc.mu
-mialuc run test-code/x64/foreign-functions-libc.mu
-```
+See [mialuc](mialu-cli.md) for how to build and run a program, and how to print its assembly.
 
 The program starts at a few instructions of the compiler that call `main`, which has to be `main :: proc() Int ->`, and pass its result to the function `exit` of the C library, so that the output of the program is written out before it ends and its result is the exit code of the process. A foreign procedure of a `foreign libc` block is imported by name from `msvcrt.dll`, which is part of every installation of Windows, and a procedure of a `foreign js` block is an error. A call of a procedure follows the calling convention of Windows on x64, so that the C library can be called: the first four arguments are in `rcx`, `rdx`, `r8` and `r9`, the result is in `rax`, and the caller makes the 32 bytes of space for the callee, with the stack a multiple of 16 bytes.
 
