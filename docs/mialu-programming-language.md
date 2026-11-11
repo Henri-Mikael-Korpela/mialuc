@@ -224,6 +224,8 @@ ready : Bool = true
 
 Unlike C, integer types are not implicitly converted into boolean values. A `Bool` is never converted to or from another type. An `Int` is not a condition, so `if n ->` is an error and has to be written `if n not= 0 ->`, and `true` is not `1`: `x : Int = true` and `b : Bool = 1` are errors.
 
+> **Lessons learnt from C** In C, any integer or pointer can be used as a condition, and a comparison gives an `int`. So `if (n)`, `if (p)` and `if (x = 0)` all compile, and a value that was meant to be a flag can quietly be 2 or -1 and be unequal to `true`. In Mialu a condition must be a `Bool`, so what is meant has to be written out, such as `n not= 0`, and a mistake of this kind is an error at compile time.
+
 A comparison such as `x > 5` is an expression of type `Bool`, see [Comparison operators](#comparison-operators). The logical operators `and`, `or` and `not` combine `Bool` values, see [Logical operators](#logical-operators).
 
 ### Integers
@@ -235,6 +237,8 @@ count : Int = 42
 ```
 
 The arithmetic operators `+`, `-`, `*` and `/` take two `Int` values and give an `Int`, see [Operators](#operators), and so do the assignment operators `+=`, `-=`, `*=` and `/=`, see [Assignment](#assignment). Addition, subtraction and multiplication wrap around on overflow, so the largest `Int` plus 1 is the smallest. Division truncates toward zero, so `(0 - 7) / 2` is -3. Dividing by zero, or dividing the smallest `Int` by -1, whose result does not fit, is an error at run time, see [WebAssembly](#webassembly).
+
+> **Lessons learnt from C** In C, the size of `int` and `long` depends on the platform, so the same code can overflow on one machine and not on another, and overflow of a signed integer is undefined behavior, which lets a compiler assume that it never happens and remove checks that a programmer wrote against it. Integer types of different sizes and signs are also converted into each other silently, so a comparison of a signed and an unsigned number can give a surprising answer. In Mialu there is one `Int` of 64 bits whose overflow wraps around in a defined way, nothing is converted implicitly, and the cases of division that have no result are traps and not undefined behavior.
 
 An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an error, and an operand of arithmetic that is not an `Int` is an error. The integer types `I8`, `I16`, `I32`, `I64` and `U8`, `U16`, `U32`, `U64` are reserved for possible future use, see [Primitive data types](#primitive-data-types).
 
@@ -257,6 +261,8 @@ A string literal is the text between a pair of double quotes, on one line:
 A `Str` is encoded in UTF-8: its bytes are always a valid UTF-8 encoding of text, as defined by [RFC 3629](https://www.rfc-editor.org/rfc/rfc3629). A string can hold any Unicode character, such as `"héllo"` or `"日本語"`, and each character takes one to four bytes.
 
 A string is length-based, not null-terminated. It is its bytes together with the number of them, so the length is known without looking for an end, and a string can hold a zero byte. The length counts bytes, not characters: `"héllo"` has a length of 6, because `é` takes two bytes. The empty string `""` has a length of zero. A string is immutable, and does not own its bytes: a string literal is a view of bytes that are part of the program, so returning one from a procedure is safe.
+
+> **Lessons learnt from C** In C, a string is a pointer to bytes that end with a zero, so its length is found by walking over it every time, a string cannot hold a zero byte, and a function that copies or appends to one has to be trusted to have enough room, which is the source of a great many buffer overflows. A missing terminator makes code read on past the end of the string. In Mialu a `Str` knows its length, so none of that is needed, and the null-terminated form exists only as the separate type `C_Str`, for interoperating with C code.
 
 The compiler rejects a string literal that is not valid UTF-8. A string cannot contain a double quote or a line break, because they would end it, and cannot contain a backslash. There are no escape sequences.
 
@@ -319,6 +325,8 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `=`      | Sets the initial value of a variable whose type is written. It also assigns a new value to a variable, an element or a field, and copies to a range of elements. | 0 | `x : Int = 5`, `x = 6`, `a[0] = 5`, `p.age = 5` |
 
 A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values or two pointers of one type for `==` and `not=`, and its result is a `Bool`.
+
+> **Lessons learnt from C** In C, `a < b < c` is valid, and it does not mean what it means in mathematics: it compares the `0` or `1` of `a < b` with `c`. Mialu makes the comparison of a comparison an error, so the mistake is found at compile-time.
 
 Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2, and so do `*` and `/`, so `8 / 2 * 3` is 12 and not 1. A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, so `a + 1 > b * 2` means `(a + 1) > (b * 2)`. A comparison is an expression of type `Bool`, but its operands are not comparisons, so it cannot be an operand of another operator, and `a < b < c` and `a == b == c` are errors. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2.
 
@@ -502,6 +510,8 @@ p : Person
 
 The default value is 0 for an `Int`, `false` for a `Bool`, the empty string `""` for a `Str`, an array slice with no elements for an array slice, `nil`, the null pointer, for a [pointer](#null-and-lifetime), and for a [struct](#structs) the default value of each of its fields. An array has no default value, since it is made by an array literal, so `a : [3]Int` is an error.
 
+> **Lessons learnt from C** In C, a local variable that is defined without a value holds whatever was in that memory before, and reading it is undefined behavior. The bug depends on what the program did earlier, so it can come and go with a change that has nothing to do with it. In Mialu every variable has a value from its definition on, either the one that is written or the default value of its type. In the future, the compiler may leave out default value initialization since if it can guarantee the type is initialized later that prevents undefined value from being read.
+
 A variable is defined once, with its initial value, and every variable has one. It can be used in the statements below its definition, but not above it and not in its own initial value. The variables of a procedure are not visible outside of it, so two procedures can have a variable of the same name.
 
 A variable that is defined outside of every procedure is a [global variable](#global-variables).
@@ -543,6 +553,8 @@ foo :: proc() Int ->
 ```
 
 Here `foo` returns 2, because `x > 5` does not hold, so the block of the `if` is skipped and the statements after it run.
+
+> **Lessons learnt from C** In C, a block is optional after `if`, so `if (a) b; c;` looks like it has two statements in the branch when only one is, and adding a line to an unbraced branch has caused serious security bugs. With a `->` and an indented block, the shape of the code is the shape of the program, and a branch always has a block.
 
 A condition is an expression of type `Bool`: a comparison such as `x + 1 > y * 2`, which can use everything that an expression can, or a `Bool` that is stored in a variable or a parameter, or `true` and `false`. There is no implicit conversion to `Bool`, as in C: a condition that is an `Int`, such as `if x ->` or `if 1 ->`, is an error, and so is a string.
 
@@ -857,6 +869,8 @@ a : [3]Int = [const]Int { 7, 8, 9 }
 
 An array literal is an expression, so it can also be used without a variable, for example as an argument of a call. Each time that a literal is evaluated it puts its elements in their place again, so a literal in the block of a loop makes a new array in every pass.
 
+> **Lessons learnt from C** In C, an array turns into a pointer to its first element as soon as it is passed to a procedure, and the length is lost on the way, so `sizeof` gives the wrong answer there and the callee has to be told the length by another parameter that can be wrong. A parameter that is written like an array is really a pointer. In Mialu, an array is not passed at all: a procedure takes an array slice, which carries its length, and an index outside of it traps and does not read or write the memory next to the array.
+
 An array cannot be the type of a parameter, of a global variable (except for the [members of an enum](#static-reflection), which are constant) or of a returned value, because its elements are in the frame of the procedure that defines it: a parameter would have to be a copy, and the elements of a returned array would be gone when the procedure returns. A procedure that works on the elements of an array takes an [array slice](#array-slices) of them.
 
 ### Elements
@@ -989,6 +1003,8 @@ For convenience, the name of the enum can be automatically deduced and therefore
 - In a struct object initialization:
     - Example: `car_model := Car_Model { color = .RED, }`
 
+> **Lessons learnt from C** In C, an enum is an integer in disguise: any `int` can be given to a variable of an enum type, members of different enums can be compared and mixed, and a member can be used in arithmetic. So the type says very little about what a value can be. In Mialu, an enum is a type of its own that is not converted to or from an `Int`, so a value of an enum type is always one of its members.
+
 Enum members don't have any order, so comparsing enum values with `<`, `<=`, `>` and `>=` results in an error. An enum is not converted to or from an `Int` or any other type.
 
 The default value for any enum is the first member of the enum.
@@ -1027,6 +1043,8 @@ p := Person {
     name = "Bob",
 }
 ```
+
+> **Lessons learnt from C** In C, a struct that is initialized with fewer values than it has fields quietly sets the rest to zero, and a struct that is not initialized holds garbage, including the padding between its fields, which can leak memory that was never meant to be seen. A struct that has a field added later keeps compiling in all the places that do not set it. In Mialu a struct has no padding that a program can see, fields are named in a literal, and either all of them are given or none.
 
 Either every field is given a value or none is. A literal with empty braces, `Person {}`, gives each field its default value. 
 A variable can still be defined with a struct type and without a value, such as `p : Person`, and then it has the default value, see [Variables](#variables). This will be removed in the future, though.
@@ -1283,6 +1301,8 @@ A pointer that is `nil` is followed by a field as it is by `^`, which traps, see
 
 ### Null and lifetime
 
+> **Lessons learnt from C** In C, following a null pointer is undefined behavior: it may crash, or read whatever is at address zero, and a compiler may assume it never happens and remove the checks around it. Pointers can also be added to and subtracted from, so a pointer can be moved outside of the thing that it pointed to without any mistake being visible. In Mialu, following `nil` traps, and there is no pointer arithmetic: a pointer points to one value, and going through many of them is done with an array or a slice, which are checked.
+
 `nil` is the null pointer, a pointer that points to nothing, like `NULL` in C. It is a [literal word](#literal-words), and a value of every pointer type: it is a `^Int` where a `^Int` is wanted, a `^Person` where that is, and so on, so it can be the value of a variable that has a pointer type, an argument, a returned value, a field of a struct literal and an element of an array literal. A pointer that is defined with a type and without a value, as in `p : ^Int`, is `nil` as well, and so is a field of a struct whose literal has empty braces, `Node {}`. A field that is a pointer is written out in any other literal, as `next = nil`.
 
 ```
@@ -1411,6 +1431,8 @@ A call that is a statement is the way to call a procedure that returns nothing.
 
 A procedure is not a value that can be stored, but a pointer to it is. The type of a pointer to a procedure is written with a caret, and then `proc`, the types of the parameters between parentheses, and the return type, like the head of a procedure without the names of its parameters: `^proc(Int, Int) Int` is a pointer to a procedure that takes two `Int` values and returns an `Int`, `^proc() Int` to one that takes nothing, and `^proc(^Int)` to one that returns nothing. The caret is always written, because what a variable holds is the pointer, so `proc(Int) Int` alone is not a type.
 
+> **Lessons learnt from C** In C, the type of a pointer to a function is written around the name of the variable, as in `int (*f)(int, int)`, which is hard to read and is the reason that people hide it behind a `typedef`. In Mialu the type is written from left to right like any other, `^proc(Int, Int) Int`, and can be used directly in a parameter, a field or an array.
+
 The name of a procedure that is not called is a pointer to it. A variable that holds one is called by writing its name and the arguments, like the name of a procedure:
 
 ```
@@ -1473,6 +1495,8 @@ get_name :: proc() Str ->
 ```
 
 The order of the definitions does not matter, so a procedure can use a constant or a global variable that is defined below it.
+
+> **Lessons learnt from C** In C, a variable in an inner block can have the name of one in an outer block and hide it. A reader, or the author a month later, can take one for the other, and the change of a name or a block can silently make a use refer to another variable. In Mialu, a name has one meaning wherever it can be used, so this cannot happen.
 
 There is no shadowing of names so a name cannot be declared twice in the same scope. A name cannot be declared again in a nested scope either, where the first declaration is visible. A name has one meaning wherever it can be used. The compiler rejects a program when:
 
