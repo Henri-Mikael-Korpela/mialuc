@@ -115,6 +115,10 @@
             font: 14px/1.5 var(--font-code);
         }
 
+        /* `display: flex` above would otherwise win over the `hidden` attribute, and an editor
+           that is meant to be hidden would sit beside whatever is shown instead of it. */
+        .editor[hidden] { display: none; }
+
         .gutter {
             min-width: 4ch;
             padding: 8px 8px 8px 0;
