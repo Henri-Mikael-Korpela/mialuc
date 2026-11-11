@@ -54,14 +54,26 @@ enum {
 };
 
 /**
+ * Where a procedure that has a body starts. `offset` is counted from the start of the code, which
+ * is where the program starts, so the first procedure is after the few instructions that start it.
+ * `name` views the source that the syntax tree was parsed from.
+ */
+typedef struct {
+    Str name;
+    size_t offset;
+} X64_Symbol;
+
+/**
  * On `X64_BUILD_STATUS_OK`, `bytes` is the filled start of the output buffer, as `byte` elements,
  * and it is a complete executable file. Otherwise `bytes.length` is zero and `subject` is the text
  * in the source that the error is about, as a view into the source that the syntax tree was parsed
  * from, so the caller can work out the position. `subject` has `bytes` NULL when the error is not
- * about any place in the source.
+ * about any place in the source. On success, `symbols` is the filled start of the symbol buffer,
+ * as `X64_Symbol` elements, one for each procedure that has a body, in the order of the code.
  */
 typedef struct {
     Array_Slice bytes;
+    Array_Slice symbols;
     Str subject;
     X64_Build_Status status;
 } X64_Build_Result;
@@ -70,7 +82,9 @@ typedef struct {
  * Builds an executable for Windows on x64 (a PE32+ file for the console) from the syntax tree below
  * `root`, which must be the `AST_NODE_TYPE_MODULE` node of a successful `parse`. `nodes` holds
  * `Ast_Node` elements, and `bindings` holds the `Semantic_Binding` elements that `semantic_analyze`
- * made for the same tree. The file is written to `output_buffer`, which holds `byte` elements.
+ * made for the same tree. The file is written to `output_buffer`, which holds `byte` elements. The
+ * symbols are written to `symbol_buffer`, which holds at least `X64_PROCEDURE_COUNT_MAX`
+ * `X64_Symbol` elements, so that the code can be shown with the names of its procedures.
  *
  * Every procedure is machine code that follows the calling convention of Windows on x64, so that
  * the C library can be called with it. The program starts in a few instructions of its own that
@@ -93,6 +107,6 @@ typedef struct {
  * is rejected with a status other than `X64_BUILD_STATUS_OK`, so that nothing is built wrongly.
  */
 X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,
-                           Array_Slice output_buffer);
+                           Array_Slice output_buffer, Array_Slice symbol_buffer);
 
 #endif

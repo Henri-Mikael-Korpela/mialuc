@@ -18,6 +18,7 @@
 #include <mialu/version.h>
 #include <mialu/wasm-text.h>
 #include <mialu/wasm.h>
+#include <mialu/x64-text.h>
 #include <mialu/x64.h>
 
 enum {
@@ -41,6 +42,7 @@ enum {
 // command line that is not understood.
 typedef enum {
     COMMAND_MODE_BUILD,
+    COMMAND_MODE_DUMP_ASM,
     COMMAND_MODE_DUMP_AST,
     COMMAND_MODE_INVALID,
     COMMAND_MODE_RUN,
@@ -57,7 +59,8 @@ typedef enum {
 
 /**
  * What the command line asks for. `output_path` is NULL unless the mode is build, and `target` is
- * `COMMAND_TARGET_NONE` only when the mode is dump-ast. The target of run is the one that runs on
+ * `COMMAND_TARGET_NONE` only when the mode is dump-ast. The mode dump-asm has the target that it
+ * shows the assembly of. The target of run is the one that runs on
  * this machine. The paths are the C strings of `argv`, because they are only handed to `fopen`.
  */
 typedef struct {
@@ -80,6 +83,8 @@ typedef struct {
     Array_Slice bindings;
     Array_Slice output;
     Array_Slice output_text;
+    // The procedures of the program that the x64 target builds, which name its assembly.
+    Array_Slice symbols;
 } Buffers;
 
 static Command      main_command_parse                     (Array_Slice args);
@@ -107,13 +112,16 @@ static void         main_run_command_report_x64_error      (char const *path, St
                                                             X64_Build_Result result);
 static void         main_run_command_report_wasm_text_error(char const *path,
                                                             Wasm_Text_Result result);
+static void         main_run_command_report_x64_text_error (char const *path,
+                                                            X64_Text_Result result);
 static bool         main_run_command_write_file            (char const *path, Array_Slice bytes);
 static Str_Position main_subject_position                  (Str source, Str subject);
 
 /**
- * Has three modes. `run` reads a source file, tokenizes, parses and analyzes it, builds the program
+ * Has four modes. `run` reads a source file, tokenizes, parses and analyzes it, builds the program
  * for this machine and runs it. `dump-ast` does the same up to the analysis, and prints the tokens
- * and the syntax tree. `build` builds silently and writes the program for a target.
+ * and the syntax tree. `dump-asm` builds the program for a target and prints its assembly. `build`
+ * builds silently and writes the program for a target.
  * Everything that allocates is in `main` on purpose, so that the buffers are freed in one place on
  * every path.
  */
@@ -130,11 +138,12 @@ int main(int argc, char *argv[]) {
         fprintf(stderr,
                 "Usage: %s run <source file>\n"
                 "       %s dump-ast <source file>\n"
+                "       %s dump-asm --target x64-win32 <source file>\n"
                 "       %s build --target wasm -o <output file> <source file>\n"
                 "       %s build --target wat -o <output file> <source file>\n"
                 "       %s build --target x64-win32 -o <output file> <source file>\n"
                 "       %s --version\n",
-                argv[0], argv[0], argv[0], argv[0], argv[0], argv[0]);
+                argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0]);
         return 2;
     }
 
@@ -153,18 +162,22 @@ int main(int argc, char *argv[]) {
                                    OUTPUT_SIZE_BYTES_MAX),
         .output_text = array_slice_make(malloc(OUTPUT_TEXT_SIZE_BYTES_MAX * sizeof(byte)),
                                         OUTPUT_TEXT_SIZE_BYTES_MAX),
+        .symbols = array_slice_make(malloc(X64_PROCEDURE_COUNT_MAX * sizeof(X64_Symbol)),
+                                    X64_PROCEDURE_COUNT_MAX),
     };
 
     int32_t exit_code = 1;
     if (buffers.source.elements == NULL || buffers.tokens.elements == NULL ||
         buffers.code_tokens.elements == NULL || buffers.nodes.elements == NULL ||
         buffers.bindings.elements == NULL ||
-        buffers.output.elements == NULL || buffers.output_text.elements == NULL) {
+        buffers.output.elements == NULL || buffers.output_text.elements == NULL ||
+        buffers.symbols.elements == NULL) {
         fprintf(stderr, "Out of memory.\n");
     } else {
         exit_code = main_run_command(command, &buffers);
     }
 
+    free(buffers.symbols.elements);
     free(buffers.output_text.elements);
     free(buffers.output.elements);
     free(buffers.bindings.elements);
@@ -180,6 +193,7 @@ int main(int argc, char *argv[]) {
  *
  *     mialuc run <source file>
  *     mialuc dump-ast <source file>
+ *     mialuc dump-asm --target x64-win32 <source file>
  *     mialuc build --target wasm -o <output file> <source file>
  *     mialuc build --target wat -o <output file> <source file>
  *     mialuc build --target x64-win32 -o <output file> <source file>
@@ -215,6 +229,20 @@ static Command main_command_parse(Array_Slice args) {
             .source_path = argv[2],
             .output_path = NULL,
             .mode = COMMAND_MODE_RUN,
+            .target = COMMAND_TARGET_X64_WIN32,
+        };
+    }
+
+    if (strcmp(argv[1], "dump-asm") == 0) {
+        // The assembly is shown for the target that has it, which is the one for the processor.
+        if (args.length != 5 || strcmp(argv[2], "--target") != 0 ||
+            main_command_target_parse(argv[3]) != COMMAND_TARGET_X64_WIN32) {
+            return invalid;
+        }
+        return (Command){
+            .source_path = argv[4],
+            .output_path = NULL,
+            .mode = COMMAND_MODE_DUMP_ASM,
             .target = COMMAND_TARGET_X64_WIN32,
         };
     }
@@ -344,6 +372,9 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     switch (command.mode) {
     case COMMAND_MODE_BUILD:
         return main_run_command_build(command, buffers, source, parse_result, semantic_result);
+    case COMMAND_MODE_DUMP_ASM:
+        return main_run_command_build_x64(command, buffers, source, parse_result,
+                                          semantic_result);
     case COMMAND_MODE_DUMP_AST:
         return 0;
     case COMMAND_MODE_INVALID:
@@ -411,7 +442,7 @@ static int32_t main_run_command_build(Command command, Buffers const *buffers, S
 
 /**
  * Builds the parsed and analyzed program for Windows on x64. A build writes the executable file to
- * the output file, and a run writes it to a temporary file and runs it, and its exit code is the
+ * the output file, a dump-asm prints its assembly, and a run writes it to a temporary file and runs it, and its exit code is the
  * exit code of the compiler. Returns the exit code, which is 0 on success.
  */
 static int32_t main_run_command_build_x64(Command command, Buffers const *buffers, Str source,
@@ -423,10 +454,28 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
 
     char const *path = command.source_path;
     X64_Build_Result build_result = x64_build(parse_result.nodes, semantic_result.bindings,
-                                              parse_result.root, buffers->output);
+                                              parse_result.root, buffers->output,
+                                              buffers->symbols);
     if (build_result.status != X64_BUILD_STATUS_OK) {
         main_run_command_report_x64_error(path, source, build_result);
         return 1;
+    }
+
+    if (command.mode == COMMAND_MODE_DUMP_ASM) {
+        // The assembly is formatted from the executable file rather than written from the syntax
+        // tree, so that it always shows exactly what the build wrote.
+        X64_Text_Result text_result = x64_text_format(build_result.bytes, build_result.symbols,
+                                                      buffers->output_text);
+        if (text_result.status != X64_TEXT_STATUS_OK) {
+            main_run_command_report_x64_text_error(path, text_result);
+            return 1;
+        }
+        if (fwrite(text_result.text.bytes, sizeof(byte), text_result.text.length, stdout) !=
+            text_result.text.length) {
+            fprintf(stderr, "Cannot write the assembly to the standard output.\n");
+            return 1;
+        }
+        return 0;
     }
 
     if (command.mode == COMMAND_MODE_BUILD) {
@@ -1275,6 +1324,33 @@ static void main_run_command_report_wasm_text_error(char const *path, Wasm_Text_
         break;
     case WASM_TEXT_STATUS_OUTPUT_TOO_LARGE:
         fprintf(stderr, "%s: the WebAssembly text is larger than %d bytes.\n", path,
+                OUTPUT_TEXT_SIZE_BYTES_MAX);
+        break;
+    }
+}
+
+static void main_run_command_report_x64_text_error(char const *path, X64_Text_Result result) {
+    assert(path != NULL);
+    assert(result.status != X64_TEXT_STATUS_OK);
+
+    // The formatter reads what `x64_build` wrote, so a file that it cannot format is a bug in the
+    // compiler rather than in the program, and the message says so.
+    switch (result.status) {
+    case X64_TEXT_STATUS_EXECUTABLE_MALFORMED:
+        fprintf(stderr, "%s: internal error: the executable is malformed at byte %zu.\n", path,
+                result.error_offset);
+        break;
+    case X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED:
+        fprintf(stderr,
+                "%s: internal error: the executable cannot be formatted as assembly at byte "
+                "%zu.\n",
+                path, result.error_offset);
+        break;
+    case X64_TEXT_STATUS_OK:
+        assert(false);
+        break;
+    case X64_TEXT_STATUS_OUTPUT_TOO_LARGE:
+        fprintf(stderr, "%s: the assembly is larger than %d bytes.\n", path,
                 OUTPUT_TEXT_SIZE_BYTES_MAX);
         break;
     }
