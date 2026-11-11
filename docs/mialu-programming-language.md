@@ -1566,7 +1566,7 @@ main :: proc() Int ->
 
 ## Compilation targets
 
-The compiler has three modes: `run <source file>` builds the program for the machine that it is run on, runs it, and ends with the exit code of the program, `dump-ast <source file>` prints the tokens and the syntax tree of a program, after which it resolves the names, and `build --target <target> -o <output file> <source file>` writes a program for a target. The output file can also be written without `-o`, directly after the target. The targets are `wasm`, `wat` and `x64-win32`, and `run` uses `x64-win32`, the only one that can run on a machine for now.
+The compiler has four modes: `run <source file>` builds the program for the machine that it is run on, runs it, and ends with the exit code of the program, `dump-ast <source file>` prints the tokens and the syntax tree of a program, after which it resolves the names, `dump-asm --target <target> <source file>` builds the program and prints its assembly, and `build --target <target> -o <output file> <source file>` writes a program for a target. The output file can also be written without `-o`, directly after the target. The targets are `wasm`, `wat` and `x64-win32`, and `run` uses `x64-win32`, the only one that can run on a machine for now. `dump-asm` takes `x64-win32` too, and prints the code of the executable in the format of the inline assembly of the Odin programming language: one instruction on each line, the operand that is written to first, `%` in front of a register, `[%rbp - 8]` for memory, `.name:` for a label and `//` for a comment.
 
 ### WebAssembly
 

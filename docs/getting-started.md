@@ -72,6 +72,14 @@ To see what the front end makes of a source file, print its tokens, which includ
 build/mialuc.exe dump-ast <source file>
 ```
 
+To see the assembly that the compiler writes for the `x64-win32` target, use `dump-asm`. It builds the program and prints the code of the executable as text, with a label for the start of the program and for each procedure, and with comments that name the imports of the C library:
+
+```
+build/mialuc.exe dump-asm --target x64-win32 <source file>
+```
+
+The assembly is in the format of the [inline assembly of Odin](https://odin-lang.org/docs/inline-asm/): one instruction on each line, the operand that is written to first, registers written as `%rax`, memory operands written as `[%rbp - 8]`, labels written as `.name:` and used as `.name`, and comments after `//`. Odin's documentation does not show a memory operand that is relative to the instruction pointer, so it is written as `[%rip - 73681]`, and the call of an import has the size of an address after it, as in `[%rip - 73681]:u64`, like Odin's `[base]:T`. The text is made from the executable file that `build` would write, so it shows exactly what runs.
+
 For building WebAssembly files (`.wasm` and `.wat`) using the Mialu compiler, you can run the following commands:
 
 ```

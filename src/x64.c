@@ -219,10 +219,13 @@ static char const X64_LIBRARY_NAME[] = "msvcrt.dll";
 static char const X64_EXIT_NAME[] = "exit";
 
 X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,
-                           Array_Slice output_buffer) {
+                           Array_Slice output_buffer, Array_Slice symbol_buffer) {
     assert(nodes.elements != NULL);
     assert(bindings.elements != NULL);
     assert(output_buffer.elements != NULL);
+    assert(symbol_buffer.elements != NULL);
+    // One symbol for each procedure fits, because the build has room for no more procedures.
+    assert(symbol_buffer.length >= X64_PROCEDURE_COUNT_MAX);
     assert(root < nodes.length);
     // The bindings are of this tree, one for each node.
     assert(bindings.length == nodes.length);
@@ -288,14 +291,29 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Ind
 
     // Nothing was built when there was an error, so no bytes are handed out.
     size_t length_bytes = 0;
+    size_t symbol_count = 0;
     if (is_ok) {
         length_bytes = builder.writer.length;
+
+        X64_Symbol *symbol_elements = symbol_buffer.elements;
+        for (size_t i = 0; i < builder.procedure_count; i += 1) {
+            if (builder.procedures[i].is_foreign) {
+                continue;
+            }
+            symbol_elements[symbol_count] = (X64_Symbol){
+                .name = builder.nodes[builder.procedures[i].definition]
+                            .payload.constant_definition.name,
+                .offset = builder.procedures[i].offset,
+            };
+            symbol_count += 1;
+        }
     }
 
     assert(is_ok == (builder.status == X64_BUILD_STATUS_OK));
     assert(builder.writer.length <= output_buffer.length);
     return (X64_Build_Result){
         .bytes = array_slice_make(output_buffer.elements, length_bytes),
+        .symbols = array_slice_make(symbol_buffer.elements, symbol_count),
         .subject = builder.subject,
         .status = builder.status,
     };
