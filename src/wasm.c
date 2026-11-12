@@ -624,6 +624,8 @@ static bool            wasm_call_is_built_in                  (Wasm_Builder cons
 static size_t          wasm_string_size_bytes                 (Ast_Node const *literal);
 static size_t          wasm_string_address                    (Wasm_Builder const *builder,
                                                                Ast_Node_Index literal);
+static Ast_Node_Index  wasm_string_constant_literal           (Wasm_Builder const *builder,
+                                                               Ast_Node_Index expression);
 static Wasm_Field_Path wasm_field_path                        (Wasm_Builder const *builder,
                                                                Ast_Node_Index access);
 static byte            wasm_load_opcode                       (byte kind);
@@ -761,21 +763,24 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_I
 /**
  * Checks that every foreign procedure is declared in a `foreign js ->` block, because the module
  * imports its foreign procedures from JavaScript and there is no C library to import from, and
- * that `str_to_c_str` is only given string literals. Returns false after
- * it recorded an error.
+ * that `str_to_c_str` is only given string literals and constants that are strings. Returns false
+ * after it recorded an error.
  */
 static bool wasm_check_foreign_targets(Wasm_Builder *builder) {
     for (size_t i = 0; i < builder->node_count; i += 1) {
         // `str_to_c_str` is the address of a string literal, which has a zero after its bytes. A
-        // string that is not a literal has none, so the target cannot make a `C_Str` of it.
+        // constant that is a string is a literal too. Any other string has no zero after it, so
+        // the target cannot make a `C_Str` of it.
         if (builder->nodes[i].node_type == AST_NODE_TYPE_CALL &&
             builder->bindings[i].kind == SEMANTIC_BINDING_KIND_NONE &&
-            str_equals(builder->nodes[i].payload.call.name, STR("str_to_c_str")) &&
-            (builder->nodes[i].first_child == AST_NODE_INDEX_NONE ||
-             builder->nodes[builder->nodes[i].first_child].node_type !=
-                 AST_NODE_TYPE_STRING_LITERAL)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_BUILT_IN_UNSUPPORTED,
-                             builder->nodes[i].payload.call.name);
+            str_equals(builder->nodes[i].payload.call.name, STR("str_to_c_str"))) {
+            Ast_Node_Index argument = builder->nodes[i].first_child;
+            if (argument == AST_NODE_INDEX_NONE ||
+                (builder->nodes[argument].node_type != AST_NODE_TYPE_STRING_LITERAL &&
+                 wasm_string_constant_literal(builder, argument) == AST_NODE_INDEX_NONE)) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_BUILT_IN_UNSUPPORTED,
+                                 builder->nodes[i].payload.call.name);
+            }
         }
     }
 
@@ -3588,6 +3593,20 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             Wasm_Type value_type = wasm_binding_value_type(builder, binding);
             if (value_type.kind == WASM_VALUE_TYPE_NONE) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE, name);
+            }
+
+            // A constant that is a string, given to `str_to_c_str`, is only the address of the
+            // bytes of its literal, like a literal that is given to it.
+            Ast_Node_Index constant_literal = wasm_string_constant_literal(builder, current);
+            if (constant_literal != AST_NODE_INDEX_NONE) {
+                Ast_Node_Index parent = wasm_parent_find(builder, current);
+                if (parent != AST_NODE_INDEX_NONE &&
+                    builder->nodes[parent].node_type == AST_NODE_TYPE_CALL &&
+                    wasm_call_is_built_in(builder, parent) &&
+                    str_equals(builder->nodes[parent].payload.call.name, STR("str_to_c_str"))) {
+                    wasm_build_code_section_body_string(builder, constant_literal, true);
+                    break;
+                }
             }
 
             wasm_build_code_section_body_identifier(builder, procedure, binding);
@@ -6967,6 +6986,28 @@ static bool wasm_call_is_built_in(Wasm_Builder const *builder, Ast_Node_Index ca
 
     return builder->bindings[call].kind == SEMANTIC_BINDING_KIND_NONE &&
            semantic_is_built_in_procedure(builder->nodes[call].payload.call.name);
+}
+
+/**
+ * Returns the string literal that `expression` stands for when it is the name of a constant that
+ * is a string, such as `greeting` of `greeting :: "Hello"`, or `AST_NODE_INDEX_NONE` when it is
+ * anything else. The literal is the only child of the definition of the constant.
+ */
+static Ast_Node_Index wasm_string_constant_literal(Wasm_Builder const *builder,
+                                                   Ast_Node_Index expression) {
+    assert(expression < builder->node_count);
+
+    Semantic_Binding binding = builder->bindings[expression];
+    if (builder->nodes[expression].node_type != AST_NODE_TYPE_IDENTIFIER ||
+        binding.kind != SEMANTIC_BINDING_KIND_CONSTANT) {
+        return AST_NODE_INDEX_NONE;
+    }
+    Ast_Node_Index value = builder->nodes[binding.target].first_child;
+    if (value == AST_NODE_INDEX_NONE ||
+        builder->nodes[value].node_type != AST_NODE_TYPE_STRING_LITERAL) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return value;
 }
 
 /**

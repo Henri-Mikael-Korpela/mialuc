@@ -16,6 +16,9 @@ typedef enum {
     X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH,
     // The value of a call of a procedure that returns nothing. The subject is its name.
     X64_BUILD_STATUS_CALL_RESULT_MISSING,
+    // More constants than the build has room to keep, see `X64_CONSTANT_COUNT_MAX`. The subject
+    // is the name of the first one that does not fit.
+    X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED,
     // A procedure declared in a `foreign js ->` block. A program for the processor has no
     // JavaScript to import from, only the C library. The subject is the name of the procedure.
     X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED,
@@ -28,8 +31,6 @@ typedef enum {
     // A procedure with more parameters than the registers that carry the arguments of a call, see
     // `X64_PARAMETER_COUNT_MAX`. The subject is the name of the procedure.
     X64_BUILD_STATUS_PARAMETER_COUNT_UNSUPPORTED,
-    // More procedures than the build has room to keep, see `X64_PROCEDURE_COUNT_MAX`.
-    X64_BUILD_STATUS_PROCEDURE_COUNT_EXCEEDED,
     // A `return` in a procedure that returns nothing. The subject is the name of the procedure.
     X64_BUILD_STATUS_RETURN_TYPE_MISSING,
     // A returned value of another type than the procedure returns. The subject is the name of
@@ -48,9 +49,10 @@ enum {
     // `rdx`, `r8` and `r9`. The target passes no argument on the stack, so no procedure and no call
     // has more.
     X64_PARAMETER_COUNT_MAX = 4,
-    // The number of procedures, foreign ones too, that a program can have. The build keeps one
-    // record for each in a fixed array, so that it needs no allocation.
-    X64_PROCEDURE_COUNT_MAX = 1024,
+    // The number of constants, the procedures, foreign ones too, and the strings, that a program
+    // can have. The build keeps one record for each in a fixed array, so that it needs no
+    // allocation.
+    X64_CONSTANT_COUNT_MAX = 1024,
 };
 
 /**
@@ -83,7 +85,7 @@ typedef struct {
  * `root`, which must be the `AST_NODE_TYPE_MODULE` node of a successful `parse`. `nodes` holds
  * `Ast_Node` elements, and `bindings` holds the `Semantic_Binding` elements that `semantic_analyze`
  * made for the same tree. The file is written to `output_buffer`, which holds `byte` elements. The
- * symbols are written to `symbol_buffer`, which holds at least `X64_PROCEDURE_COUNT_MAX`
+ * symbols are written to `symbol_buffer`, which holds at least `X64_CONSTANT_COUNT_MAX`
  * `X64_Symbol` elements, so that the code can be shown with the names of its procedures.
  *
  * Every procedure is machine code that follows the calling convention of Windows on x64, so that
@@ -103,8 +105,10 @@ typedef struct {
  *
  * Only a small part of the language is built: procedures with up to `X64_PARAMETER_COUNT_MAX`
  * parameters of the types `Int` and `C_Str`, whose statements are calls and returns, and whose
- * expressions are integer and string literals, parameters, and calls with such arguments. The rest
- * is rejected with a status other than `X64_BUILD_STATUS_OK`, so that nothing is built wrongly.
+ * expressions are integer and string literals, parameters, and calls with such arguments, and
+ * constants that are strings, which are only the argument of `str_to_c_str`, like a string
+ * literal. The rest is rejected with a status other than `X64_BUILD_STATUS_OK`, so that nothing is
+ * built wrongly.
  */
 X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,
                            Array_Slice output_buffer, Array_Slice symbol_buffer);

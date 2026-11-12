@@ -162,8 +162,8 @@ int main(int argc, char *argv[]) {
                                    OUTPUT_SIZE_BYTES_MAX),
         .output_text = array_slice_make(malloc(OUTPUT_TEXT_SIZE_BYTES_MAX * sizeof(byte)),
                                         OUTPUT_TEXT_SIZE_BYTES_MAX),
-        .symbols = array_slice_make(malloc(X64_PROCEDURE_COUNT_MAX * sizeof(X64_Symbol)),
-                                    X64_PROCEDURE_COUNT_MAX),
+        .symbols = array_slice_make(malloc(X64_CONSTANT_COUNT_MAX * sizeof(X64_Symbol)),
+                                    X64_CONSTANT_COUNT_MAX),
     };
 
     int32_t exit_code = 1;
@@ -886,6 +886,10 @@ static void main_run_command_report_x64_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' returns nothing, so its call has no value.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED:
+        fprintf(stderr, "%s:%zu:%zu: more than %d constants, procedures and strings.\n", path,
+                position.line, position.column, X64_CONSTANT_COUNT_MAX);
+        break;
     case X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' is declared in a 'foreign js' "
                 "block, and the x64 target imports from 'foreign libc'.\n", path, position.line,
@@ -904,10 +908,6 @@ static void main_run_command_report_x64_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' has more than %d parameters, which the x64 target "
                 "does not support.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes, X64_PARAMETER_COUNT_MAX);
-        break;
-    case X64_BUILD_STATUS_PROCEDURE_COUNT_EXCEEDED:
-        fprintf(stderr, "%s:%zu:%zu: more than %d procedures.\n", path, position.line,
-                position.column, X64_PROCEDURE_COUNT_MAX);
         break;
     case X64_BUILD_STATUS_RETURN_TYPE_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: the value that '%.*s' returns is not of its return type.\n",
