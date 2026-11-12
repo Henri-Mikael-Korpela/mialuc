@@ -26,6 +26,8 @@ Add `--check` to only test whether it is up to date. The script uses only the Py
 
 [editors/vscode](../editors/vscode) is a VS Code extension that highlights the reserved words, the operators, labels, attribute lists such as `#(static)`, strings and calls in `.mu` files. See its [README](../editors/vscode/README.md) for how to install it.
 
+[editors/vscode-debug](../editors/vscode-debug) is a second VS Code extension, next to the first, that debugs Mialu programs with gdb: it builds a `.mu` file with `mialuc build --target x64-win32 --debug` and starts the debug adapter of gdb, so that breakpoints can be set in `.mu` files and the variables can be looked at. See its [README](../editors/vscode-debug/README.md). One script installs both extensions.
+
 ## Versioning
 
 `scripts/bump-version.ps1 <version>` sets the version of the compiler, a semantic version such as `0.2.0`, in [src/version.h](../src/version.h) and in the language specification. It uses PowerShell, so it needs nothing to install on Windows.

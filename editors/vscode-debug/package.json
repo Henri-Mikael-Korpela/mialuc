@@ -1,0 +1,117 @@
+{
+    "name": "mialu-debug",
+    "displayName": "Mialu Debug",
+    "description": "Debugging of Mialu programs with gdb: breakpoints, stepping, the call stack and variables.",
+    "version": "0.0.1",
+    "publisher": "mialu",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Debuggers"
+    ],
+    "extensionDependencies": [
+        "mialu.mialu"
+    ],
+    "main": "./extension.js",
+    "activationEvents": [
+        "onDebugResolve:mialu",
+        "onDebugDynamicConfigurations:mialu",
+        "onDebugInitialConfigurations"
+    ],
+    "contributes": {
+        "breakpoints": [
+            {
+                "language": "mialu"
+            }
+        ],
+        "debuggers": [
+            {
+                "type": "mialu",
+                "label": "Mialu (gdb)",
+                "languages": [
+                    "mialu"
+                ],
+                "configurationAttributes": {
+                    "launch": {
+                        "required": [
+                            "program"
+                        ],
+                        "properties": {
+                            "program": {
+                                "type": "string",
+                                "description": "The Mialu source file to build and debug.",
+                                "default": "${file}"
+                            },
+                            "args": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "The command line arguments of the program.",
+                                "default": []
+                            },
+                            "cwd": {
+                                "type": "string",
+                                "description": "The directory that the program runs in. The folder of the workspace by default.",
+                                "default": "${workspaceFolder}"
+                            },
+                            "stopAtEntry": {
+                                "type": "boolean",
+                                "description": "Stop at the first statement of main.",
+                                "default": false
+                            },
+                            "output": {
+                                "type": "string",
+                                "description": "Where the program is written. build/debug/<name>.exe in the folder of the workspace by default."
+                            },
+                            "compilerPath": {
+                                "type": "string",
+                                "description": "The path of mialuc. The setting mialu.debug.compilerPath by default."
+                            },
+                            "gdbPath": {
+                                "type": "string",
+                                "description": "The path of gdb, version 14 or newer with Python. The setting mialu.debug.gdbPath by default."
+                            }
+                        }
+                    }
+                },
+                "initialConfigurations": [
+                    {
+                        "type": "mialu",
+                        "request": "launch",
+                        "name": "Debug Mialu file",
+                        "program": "${file}"
+                    }
+                ],
+                "configurationSnippets": [
+                    {
+                        "label": "Mialu: Debug a file",
+                        "description": "Build a Mialu file with debug information and debug it with gdb.",
+                        "body": {
+                            "type": "mialu",
+                            "request": "launch",
+                            "name": "Debug Mialu file",
+                            "program": "^\"\\${file}\""
+                        }
+                    }
+                ]
+            }
+        ],
+        "configuration": {
+            "title": "Mialu Debug",
+            "properties": {
+                "mialu.debug.compilerPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "The path of mialuc. When it is empty, build/mialuc.exe in the folder of the workspace is used if it exists, and otherwise mialuc on the PATH."
+                },
+                "mialu.debug.gdbPath": {
+                    "type": "string",
+                    "default": "gdb",
+                    "description": "The path of gdb, version 14 or newer with Python, which has the debug adapter that the extension uses."
+                }
+            }
+        }
+    }
+}

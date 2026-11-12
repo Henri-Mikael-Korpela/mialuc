@@ -30,6 +30,9 @@ The following are optional:
     - Tested with Python 3.11.9.
 - [VS Code](https://code.visualstudio.com/)
     - For Mialu programming language editor support, which includes syntax highlighting. See the [README of the extension](../editors/vscode/README.md).
+- gdb 14 or newer with Python, which [MinGW-w64](https://github.com/niXman/mingw-builds-binaries/releases) has.
+    - For debugging programs that are built with `--debug`, also in VS Code with the [debug extension](../editors/vscode-debug/README.md). See [Debugging](mialu-cli.md#debugging).
+    - Tested with GDB 17.2.
 - Windows PowerShell 5.1
     - For running `run.ps1`, `build-wasm.ps1` and `scripts/install_vscode_extension.ps1`.
     - Tested with PowerShell 5.1.19041.6456.

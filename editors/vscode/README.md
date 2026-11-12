@@ -10,14 +10,14 @@ nothing to build and nothing to install with a package manager.
 
 ## Install
 
-VS Code only loads extensions from its extensions folder, so link this folder into it:
+VS Code only loads extensions from its extensions folder, so link this folder into it, together with the [debug extension](../vscode-debug/README.md):
 
 ```
 powershell -File scripts/install_vscode_extension.ps1
 ```
 
 Then run "Developer: Reload Window" in VS Code. The link points at this folder, so later changes
-to the grammar only need another reload. To remove the link:
+to the grammar only need another reload. To remove the links:
 
 ```
 powershell -File scripts/install_vscode_extension.ps1 -Uninstall

@@ -74,6 +74,8 @@ gdb variables.exe
 (gdb) info locals
 ```
 
+The VS Code extension in [editors/vscode-debug](../editors/vscode-debug/README.md) builds a program with `--debug` and debugs it with gdb, with breakpoints in the editor.
+
 ## Compile a program and print its assembly
 
 Usage:
