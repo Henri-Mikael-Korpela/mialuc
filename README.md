@@ -2,6 +2,8 @@
 
 This is the official compiler implementation for the Mialu programming language.
 
+Mialu is a procedural language with manual memory management. It is influenced by many languages including C, Odin and Python. It aims to be simple to learn yet provide powerful general constructs without a lot of complexity.
+
 ## Documentation
 
 - [Getting Started](docs/getting-started.md): prerequisites, building the compiler, and building and running programs, with a section for each platform.
