@@ -42,6 +42,9 @@ typedef enum {
     // Something that the target does not build yet. The subject is the name of the definition
     // that has it.
     X64_BUILD_STATUS_UNSUPPORTED,
+    // The value that a variable is defined with or assigned is not of the type of the variable.
+    // The subject is the name of the variable.
+    X64_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
 } X64_Build_Status;
 
 enum {
@@ -104,8 +107,9 @@ typedef struct {
  * declared with a result, or its upper 32 bits are whatever the library left there.
  *
  * Only a small part of the language is built: procedures with up to `X64_PARAMETER_COUNT_MAX`
- * parameters of the types `Int` and `C_Str`, whose statements are calls and returns, and whose
- * expressions are integer and string literals, parameters, and calls with such arguments, and
+ * parameters of the types `Int` and `C_Str`, whose statements are calls, returns, definitions of
+ * variables of those types and assignments to them with `=`, and whose expressions are integer and
+ * string literals, parameters, variables, and calls with such arguments, and
  * constants that are strings, which are only the argument of `str_to_c_str`, like a string
  * literal. The rest is rejected with a status other than `X64_BUILD_STATUS_OK`, so that nothing is
  * built wrongly.

@@ -39,6 +39,11 @@ enum {
     X64_REGISTER_RDX = 2,
     X64_REGISTER_R8 = 8,
     X64_REGISTER_R9 = 9,
+    X64_REGISTER_R11 = 11,
+
+    // `mov` from memory to a register, and from a register to memory.
+    X64_OPCODE_LOAD = 0x8B,
+    X64_OPCODE_STORE = 0x89,
 
     // The space that the caller of a procedure makes below the arguments for the callee to keep the
     // four registers of arguments in, whether it has that many or not.
@@ -58,9 +63,12 @@ enum {
     // the storage follows. Strings are made at multiples of 8 so that they are aligned.
     X64_TEMPORARY_USED_SIZE_BYTES = 8,
     X64_TEMPORARY_ALIGNMENT_BYTES = 8,
-    // What `sub rsp` takes for the number of bytes in use that a procedure with temporary strings
-    // keeps when it starts, to go back to when it ends: the stack must stay a multiple of 16.
-    X64_TEMPORARY_FRAME_SIZE_BYTES = 16,
+    // The stack must stay a multiple of this, so that every call is made with it, see
+    // `x64_procedure_write`. The frame of a procedure is rounded up to it.
+    X64_STACK_ALIGNMENT_BYTES = 16,
+    // The most variables that a procedure can have. Each takes a slot of the frame below `rbp`,
+    // and the frame is made with one `sub rsp` of a 32-bit number, which this keeps far below.
+    X64_VARIABLE_COUNT_MAX = 64 * 1024,
 };
 
 // What a constant of the module is, which decides what the build makes of it. Alphabetical, because
@@ -143,6 +151,14 @@ typedef struct {
     // The place in the file of the start of the code, and of the data that precedes it.
     size_t text_start;
     size_t constant_count;
+    // The number of variables of the procedure that is being written, which says where the slot of
+    // the temporary storage is in its frame, see `x64_frame_offset`.
+    size_t variable_count;
+    // The number of variables of that procedure whose definitions were written, which is the
+    // position of the next one. The analysis gives a position to the uses of a variable and not to
+    // its definition, and the statements are written in the order of the source, which is the order
+    // of the positions, because the target builds no blocks, which have variables of their own.
+    size_t variable_defined_count;
     uint32_t text_rva;
     // Where the section of the temporary storage is in memory, see
     // `X64_TEMPORARY_STORAGE_SIZE_BYTES`.
@@ -151,6 +167,9 @@ typedef struct {
     // The definition of the procedure that is being written, which a message about it names.
     Ast_Node_Index definition;
     X64_Build_Status status;
+    // Whether the procedure that is being written makes temporary strings, which it gives back
+    // when it returns.
+    bool is_temporary_used;
     X64_Constant constants[X64_CONSTANT_COUNT_MAX];
 } X64_Builder;
 
@@ -160,7 +179,20 @@ static bool         x64_call_is_str_to_c_str     (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
 static bool         x64_call_write               (X64_Builder *builder, Ast_Node_Index call,
                                                   bool is_result_used);
-static void         x64_epilogue_write           (X64_Builder *builder, bool is_temporary_used);
+static bool         x64_assignment_write         (X64_Builder *builder, Ast_Node_Index statement);
+static void         x64_epilogue_write           (X64_Builder *builder);
+static int32_t      x64_frame_offset             (size_t position);
+static size_t       x64_procedure_variable_count (X64_Builder const *builder,
+                                                  Ast_Node_Index procedure);
+static bool         x64_value_write              (X64_Builder *builder, Ast_Node_Index value,
+                                                  X64_Type variable_type, Str name);
+static bool         x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index statement);
+static X64_Type     x64_variable_type            (X64_Builder const *builder,
+                                                  Ast_Node_Index definition);
+static Ast_Node_Index x64_variable_type_node     (X64_Builder const *builder,
+                                                  Ast_Node_Index definition);
+static void         x64_write_frame_move         (X64_Builder *builder, byte opcode,
+                                                  byte register_number, int32_t displacement);
 static bool         x64_procedure_uses_temporary (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
 static bool         x64_str_to_c_str_write       (X64_Builder *builder, Ast_Node_Index call,
@@ -262,11 +294,14 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Ind
         .node_count = nodes.length,
         .text_start = 0,
         .constant_count = 0,
+        .variable_count = 0,
+        .variable_defined_count = 0,
         .text_rva = 0,
         .data_rva = 0,
         .module = root,
         .definition = AST_NODE_INDEX_NONE,
         .status = X64_BUILD_STATUS_OK,
+        .is_temporary_used = false,
         .constants = {{0}},
     };
 
@@ -646,10 +681,11 @@ static bool x64_code_write(X64_Builder *builder) {
 
 /**
  * Writes the procedure at `position` of the module: it keeps `rbp` and sets it to the stack
- * pointer, so that the arguments, which are kept above it, are found at the same distance from it
- * whatever the procedure pushes. It copies the registers that carry the arguments to the space
- * that the caller made for them. Then come the statements, which are calls and `return`.
- * Returns false after it recorded an error.
+ * pointer, so that the arguments, which are kept above it, and the variables, which are kept below
+ * it, are found at the same distance from it whatever the procedure pushes. It copies the
+ * registers that carry the arguments to the space that the caller made for them, and makes the
+ * frame, see `x64_frame_offset`. Then come the statements, which are calls, definitions of
+ * variables, assignments to them and `return`. Returns false after it recorded an error.
  */
 static bool x64_procedure_write(X64_Builder *builder, size_t position) {
     assert(position < builder->constant_count);
@@ -671,18 +707,38 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
         x64_write_store_slot(builder, X64_ARGUMENT_REGISTERS[i], i);
     }
 
-    // A procedure that makes temporary strings keeps how much of the storage was in use when it
-    // started, so that it can give them all back when it ends: `sub rsp, 16`, `mov rax, [used]` and
-    // `mov [rbp - 8], rax`. The stack is still a multiple of 16.
-    bool is_temporary_used = x64_procedure_uses_temporary(builder, procedure);
-    if (is_temporary_used) {
-        static byte const FRAME_MAKE[] = {0x48, 0x83, 0xEC, X64_TEMPORARY_FRAME_SIZE_BYTES};
+    builder->is_temporary_used = x64_procedure_uses_temporary(builder, procedure);
+    builder->variable_count = x64_procedure_variable_count(builder, procedure);
+    builder->variable_defined_count = 0;
+    if (builder->variable_count > X64_VARIABLE_COUNT_MAX) {
+        return x64_fail_unsupported(builder);
+    }
+
+    // The frame has a slot for each variable, and one for the temporary storage when the procedure
+    // uses it: `sub rsp, size`, rounded up so that the stack is still a multiple of 16. The
+    // variables are not set here, because each gets its value where it is defined, and nothing can
+    // read it before.
+    size_t slot_count = builder->variable_count;
+    if (builder->is_temporary_used) {
+        slot_count += 1;
+    }
+    if (slot_count > 0) {
+        size_t frame_size_bytes =
+            x64_align_up(slot_count * X64_SLOT_SIZE_BYTES, X64_STACK_ALIGNMENT_BYTES);
+        static byte const FRAME_MAKE[] = {0x48, 0x81, 0xEC};
         x64_write_bytes(writer, FRAME_MAKE, sizeof(FRAME_MAKE));
+        x64_write_u32(writer, (uint32_t)frame_size_bytes);
+    }
+
+    // A procedure that makes temporary strings keeps how much of the storage was in use when it
+    // started, so that it can give them all back when it ends: `mov rax, [used]` and
+    // `mov [rbp - offset], rax`.
+    if (builder->is_temporary_used) {
         static byte const USED_LOAD[] = {0x48, 0x8B, 0x05};
         x64_write_bytes(writer, USED_LOAD, sizeof(USED_LOAD));
         x64_write_rip_displacement(builder, builder->data_rva);
-        static byte const USED_KEEP[] = {0x48, 0x89, 0x45, 0xF8};
-        x64_write_bytes(writer, USED_KEEP, sizeof(USED_KEEP));
+        x64_write_frame_move(builder, X64_OPCODE_STORE, X64_REGISTER_RAX,
+                             x64_frame_offset(builder->variable_count));
     }
 
     // The statements follow the parameters among the children of the procedure.
@@ -706,6 +762,14 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
                 return false;
             }
             is_last_return = true;
+        } else if (statement_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            if (x64_variable_definition_write(builder, statement) == false) {
+                return false;
+            }
+        } else if (statement_node->node_type == AST_NODE_TYPE_ASSIGNMENT) {
+            if (x64_assignment_write(builder, statement) == false) {
+                return false;
+            }
         } else {
             return x64_fail_unsupported(builder);
         }
@@ -719,7 +783,7 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
         if (has_result) {
             x64_write_byte(writer, 0xCC);
         } else {
-            x64_epilogue_write(builder, is_temporary_used);
+            x64_epilogue_write(builder);
         }
     }
     return true;
@@ -727,13 +791,13 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
 
 /**
  * Writes the end of a procedure: the temporary strings that it made are given back when it made
- * any, with `mov r11, [rbp - 8]` and `mov [used], r11`, which leave `rax`, the result, alone. Then
- * `leave` and `ret` give the stack back and return.
+ * any, with `mov r11, [rbp - offset]` and `mov [used], r11`, which leave `rax`, the result, alone.
+ * Then `leave` and `ret` give the stack back and return.
  */
-static void x64_epilogue_write(X64_Builder *builder, bool is_temporary_used) {
-    if (is_temporary_used) {
-        static byte const USED_RESTORE[] = {0x4C, 0x8B, 0x5D, 0xF8};
-        x64_write_bytes(&builder->writer, USED_RESTORE, sizeof(USED_RESTORE));
+static void x64_epilogue_write(X64_Builder *builder) {
+    if (builder->is_temporary_used) {
+        x64_write_frame_move(builder, X64_OPCODE_LOAD, X64_REGISTER_R11,
+                             x64_frame_offset(builder->variable_count));
         static byte const USED_STORE[] = {0x4C, 0x89, 0x1D};
         x64_write_bytes(&builder->writer, USED_STORE, sizeof(USED_STORE));
         x64_write_rip_displacement(builder, builder->data_rva);
@@ -790,16 +854,201 @@ static bool x64_return_write(X64_Builder *builder, Ast_Node_Index procedure,
         // The call of a procedure that returns nothing is in here too.
         return x64_fail(builder, X64_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
     }
-    // The temporary strings are given back by the return, so a pointer to one must not leave.
+    // The temporary strings are given back by the return, so a pointer to one must not leave. A
+    // `C_Str` variable may hold one, so it cannot be returned either.
     if (x64_call_is_str_to_c_str(builder, value)) {
+        return x64_fail_unsupported(builder);
+    }
+    if (value_type == X64_TYPE_C_STR &&
+        builder->bindings[value].kind == SEMANTIC_BINDING_KIND_VARIABLE) {
         return x64_fail_unsupported(builder);
     }
     if (x64_expression_load(builder, value, X64_REGISTER_RAX) == false) {
         return false;
     }
 
-    x64_epilogue_write(builder, x64_procedure_uses_temporary(builder, procedure));
+    x64_epilogue_write(builder);
     return true;
+}
+
+/**
+ * Writes the definition of a variable, `name := value`, `name : Type = value` or `name : Type`,
+ * which stores the value in the slot of the variable. Without a value the variable gets the
+ * default value of its type, which is 0 for an `Int` and the address 0 for a `C_Str`. Returns false
+ * after it recorded an error.
+ */
+static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index statement) {
+    assert(builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
+    assert(builder->variable_defined_count < builder->variable_count);
+
+    Str name = builder->nodes[statement].payload.variable_definition.name;
+    Ast_Node_Index type = x64_variable_type_node(builder, statement);
+    Ast_Node_Index value = builder->nodes[statement].first_child;
+    if (type != AST_NODE_INDEX_NONE) {
+        Ast_Node const *type_node = &builder->nodes[type];
+        if (type_node->node_type != AST_NODE_TYPE_TYPE_NAME) {
+            return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED, name);
+        }
+        if (x64_type_of_name(type_node->payload.type_name.name) == X64_TYPE_NONE) {
+            return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
+                            type_node->payload.type_name.name);
+        }
+        value = type_node->next_sibling;
+    }
+
+    if (value == AST_NODE_INDEX_NONE) {
+        x64_write_load_integer(builder, X64_REGISTER_RAX, 0);
+    } else {
+        // A variable without a type takes the type of its value, so the value is not checked.
+        X64_Type variable_type = X64_TYPE_NONE;
+        if (type != AST_NODE_INDEX_NONE) {
+            variable_type = x64_variable_type(builder, statement);
+        }
+        if (x64_value_write(builder, value, variable_type, name) == false) {
+            return false;
+        }
+    }
+
+    x64_write_frame_move(builder, X64_OPCODE_STORE, X64_REGISTER_RAX,
+                         x64_frame_offset(builder->variable_defined_count));
+    builder->variable_defined_count += 1;
+    return true;
+}
+
+/**
+ * Writes an assignment, `name = value`, which stores the value in the slot of the variable. Only a
+ * variable of the procedure is assigned to: a global variable, a field, an element and what a
+ * pointer points to are not built, and neither are the assignments such as `x += 1`, which need
+ * arithmetic. Returns false after it recorded an error.
+ */
+static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement) {
+    assert(builder->nodes[statement].node_type == AST_NODE_TYPE_ASSIGNMENT);
+
+    Ast_Node_Index target = builder->nodes[statement].first_child;
+    Ast_Node_Index value = builder->nodes[target].next_sibling;
+    Semantic_Binding binding = builder->bindings[target];
+    if (builder->nodes[target].node_type != AST_NODE_TYPE_IDENTIFIER ||
+        binding.kind != SEMANTIC_BINDING_KIND_VARIABLE) {
+        return x64_fail_unsupported(builder);
+    }
+    assert(binding.position < builder->variable_defined_count);
+
+    // The definition of the variable is above, and was checked when it was written.
+    X64_Type variable_type = x64_variable_type(builder, binding.target);
+    assert(variable_type != X64_TYPE_NONE);
+    Str name = builder->nodes[target].payload.identifier.name;
+    if (x64_value_write(builder, value, variable_type, name) == false) {
+        return false;
+    }
+    x64_write_frame_move(builder, X64_OPCODE_STORE, X64_REGISTER_RAX,
+                         x64_frame_offset(binding.position));
+    return true;
+}
+
+/**
+ * Writes the instructions that put `value` in `rax`, after it checked that it is of the type of
+ * the variable `name` that it is given to, which is `variable_type`, or `X64_TYPE_NONE` when the
+ * variable has no type of its own and takes the type of the value. Returns false after it
+ * recorded an error.
+ */
+static bool x64_value_write(X64_Builder *builder, Ast_Node_Index value, X64_Type variable_type,
+                            Str name) {
+    X64_Type value_type = x64_expression_type(builder, value);
+    if (value_type == X64_TYPE_NONE && builder->nodes[value].node_type != AST_NODE_TYPE_CALL) {
+        // An expression that the target does not build has no type.
+        return x64_fail_unsupported(builder);
+    }
+    // The call of a procedure that returns nothing has no type either. When the variable takes the
+    // type of the value, `x64_call_write` reports that the call has no result.
+    if (variable_type != X64_TYPE_NONE && value_type != variable_type) {
+        return x64_fail(builder, X64_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, name);
+    }
+    return x64_expression_load(builder, value, X64_REGISTER_RAX);
+}
+
+/**
+ * Returns the number of variables of `procedure`, which the analysis gives the positions of in the
+ * order of the source, see `Semantic_Binding`. The iterator of a for statement counts as one, but
+ * the target does not build those, so it only takes a slot that is never used.
+ */
+static size_t x64_procedure_variable_count(X64_Builder const *builder, Ast_Node_Index procedure) {
+    assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+
+    size_t count = 0;
+    Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
+    for (Ast_Node_Index node = procedure; node < end; node += 1) {
+        Ast_Node_Type node_type = builder->nodes[node].node_type;
+        if (node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
+            node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+/**
+ * Returns the type that is written in the definition of a variable, which is its first child, or
+ * `AST_NODE_INDEX_NONE` when the variable takes the type of its value.
+ */
+static Ast_Node_Index x64_variable_type_node(X64_Builder const *builder,
+                                             Ast_Node_Index definition) {
+    assert(builder->nodes[definition].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
+
+    Ast_Node_Index first = builder->nodes[definition].first_child;
+    assert(first != AST_NODE_INDEX_NONE);
+    Ast_Node_Type node_type = builder->nodes[first].node_type;
+    if (node_type == AST_NODE_TYPE_TYPE_NAME || node_type == AST_NODE_TYPE_POINTER_TYPE ||
+        node_type == AST_NODE_TYPE_ARRAY_TYPE || node_type == AST_NODE_TYPE_PROCEDURE_TYPE) {
+        return first;
+    }
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Returns the type of the variable that `definition` defines: the type that is written, or the type
+ * of its value. A value that is another variable without a type is followed to the value of that
+ * one, and so on, so that the type is found without recursion. Returns `X64_TYPE_NONE` for a type
+ * that the target does not have, and for a value that it does not build.
+ */
+static X64_Type x64_variable_type(X64_Builder const *builder, Ast_Node_Index definition) {
+    Ast_Node_Index current = definition;
+    // Each step goes to a variable that is defined above, so there cannot be more than there are
+    // nodes.
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        assert(builder->nodes[current].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
+
+        Ast_Node_Index type = x64_variable_type_node(builder, current);
+        if (type != AST_NODE_INDEX_NONE) {
+            if (builder->nodes[type].node_type != AST_NODE_TYPE_TYPE_NAME) {
+                return X64_TYPE_NONE;
+            }
+            return x64_type_of_name(builder->nodes[type].payload.type_name.name);
+        }
+
+        Ast_Node_Index value = builder->nodes[current].first_child;
+        if (builder->nodes[value].node_type == AST_NODE_TYPE_IDENTIFIER &&
+            builder->bindings[value].kind == SEMANTIC_BINDING_KIND_VARIABLE) {
+            current = builder->bindings[value].target;
+            continue;
+        }
+        // The value is not a variable, so this does not come back here.
+        return x64_expression_type(builder, value);
+    }
+
+    assert(false);
+    return X64_TYPE_NONE;
+}
+
+/**
+ * Returns the distance from `rbp` of the slot at `position` of the frame: the variables have the
+ * slots in the order of their positions, see `x64_procedure_variable_count`, and the one after the
+ * last variable keeps how much of the temporary storage was in use, see `x64_procedure_write`. The
+ * frame is below `rbp`, so the distance is negative.
+ */
+static int32_t x64_frame_offset(size_t position) {
+    assert(position <= X64_VARIABLE_COUNT_MAX);
+
+    return -(int32_t)((position + 1) * X64_SLOT_SIZE_BYTES);
 }
 
 /**
@@ -891,8 +1140,8 @@ static bool x64_arguments_write(X64_Builder *builder, Ast_Node_Index call,
 
 /**
  * Writes the instruction that puts the value of `expression` in the register `register_number`.
- * The expression is an integer literal, a string literal, a parameter, or a call, whose result is
- * in `rax` and is moved from there. Returns false after it recorded an error.
+ * The expression is an integer literal, a parameter, a variable, `str_to_c_str` or a call, whose
+ * result is in `rax`, so a call is only loaded to `rax`. Returns false after it recorded an error.
  */
 static bool x64_expression_load(X64_Builder *builder, Ast_Node_Index expression,
                                 byte register_number) {
@@ -904,6 +1153,13 @@ static bool x64_expression_load(X64_Builder *builder, Ast_Node_Index expression,
     if (node->node_type == AST_NODE_TYPE_IDENTIFIER &&
         builder->bindings[expression].kind == SEMANTIC_BINDING_KIND_PARAMETER) {
         x64_write_load_slot(builder, register_number, builder->bindings[expression].position);
+        return true;
+    }
+    if (node->node_type == AST_NODE_TYPE_IDENTIFIER &&
+        builder->bindings[expression].kind == SEMANTIC_BINDING_KIND_VARIABLE) {
+        assert(builder->bindings[expression].position < builder->variable_defined_count);
+        x64_write_frame_move(builder, X64_OPCODE_LOAD, register_number,
+                             x64_frame_offset(builder->bindings[expression].position));
         return true;
     }
     if (x64_call_is_str_to_c_str(builder, expression)) {
@@ -930,6 +1186,10 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
         Ast_Node_Index parameter = builder->bindings[expression].target;
         return x64_type_of_name(
             builder->nodes[builder->nodes[parameter].first_child].payload.type_name.name);
+    }
+    if (node->node_type == AST_NODE_TYPE_IDENTIFIER &&
+        builder->bindings[expression].kind == SEMANTIC_BINDING_KIND_VARIABLE) {
+        return x64_variable_type(builder, builder->bindings[expression].target);
     }
     if (x64_call_is_str_to_c_str(builder, expression)) {
         return X64_TYPE_C_STR;
@@ -1184,15 +1444,11 @@ static void x64_write_load_integer(X64_Builder *builder, byte register_number,
  * the space that its caller made.
  */
 static void x64_write_load_slot(X64_Builder *builder, byte register_number, size_t position) {
-    assert(register_number < 16);
     assert(position < X64_PARAMETER_COUNT_MAX);
 
-    x64_write_byte(&builder->writer, (byte)(0x48 | ((register_number >> 3) << 2)));
-    x64_write_byte(&builder->writer, 0x8B);
-    // The mode that is `rbp` plus a distance of one byte, with the register in the middle bits.
-    x64_write_byte(&builder->writer, (byte)(0x45 | ((register_number & 7) << 3)));
-    x64_write_byte(&builder->writer,
-                   (byte)(X64_ARGUMENT_HOME_OFFSET_BYTES + position * X64_SLOT_SIZE_BYTES));
+    x64_write_frame_move(
+        builder, X64_OPCODE_LOAD, register_number,
+        (int32_t)(X64_ARGUMENT_HOME_OFFSET_BYTES + position * X64_SLOT_SIZE_BYTES));
 }
 
 /**
@@ -1200,14 +1456,39 @@ static void x64_write_load_slot(X64_Builder *builder, byte register_number, size
  * the caller made for it.
  */
 static void x64_write_store_slot(X64_Builder *builder, byte register_number, size_t position) {
-    assert(register_number < 16);
     assert(position < X64_PARAMETER_COUNT_MAX);
 
+    x64_write_frame_move(
+        builder, X64_OPCODE_STORE, register_number,
+        (int32_t)(X64_ARGUMENT_HOME_OFFSET_BYTES + position * X64_SLOT_SIZE_BYTES));
+}
+
+/**
+ * Writes `mov register, [rbp + displacement]` for `X64_OPCODE_LOAD`, or
+ * `mov [rbp + displacement], register` for `X64_OPCODE_STORE`, which is how the frame of a
+ * procedure is read and written. The displacement takes one byte when it fits in one, which it
+ * does for the arguments and the first variables, and four bytes otherwise. Both writes of the code
+ * make the same choice, because the displacement depends only on the procedure.
+ */
+static void x64_write_frame_move(X64_Builder *builder, byte opcode, byte register_number,
+                                 int32_t displacement) {
+    assert(register_number < 16);
+    assert(opcode == X64_OPCODE_LOAD || opcode == X64_OPCODE_STORE);
+
+    // The prefix says that the operands are 64-bit, and has the extension of the register when it
+    // is one of `r8` to `r15`.
     x64_write_byte(&builder->writer, (byte)(0x48 | ((register_number >> 3) << 2)));
-    x64_write_byte(&builder->writer, 0x89);
-    x64_write_byte(&builder->writer, (byte)(0x45 | ((register_number & 7) << 3)));
-    x64_write_byte(&builder->writer,
-                   (byte)(X64_ARGUMENT_HOME_OFFSET_BYTES + position * X64_SLOT_SIZE_BYTES));
+    x64_write_byte(&builder->writer, opcode);
+    // The base is `rbp`, which is 5 in the low bits, the register is in the middle bits, and the
+    // mode in the top bits says how long the displacement is.
+    byte modrm = (byte)(0x05 | ((register_number & 7) << 3));
+    if (displacement >= INT8_MIN && displacement <= INT8_MAX) {
+        x64_write_byte(&builder->writer, (byte)(0x40 | modrm));
+        x64_write_byte(&builder->writer, (byte)(int8_t)displacement);
+    } else {
+        x64_write_byte(&builder->writer, (byte)(0x80 | modrm));
+        x64_write_u32(&builder->writer, (uint32_t)displacement);
+    }
 }
 
 /**

@@ -486,6 +486,7 @@ static size_t x64_text_format_instruction(X64_Text_Formatter *formatter,
         switch (opcode) {
         case 0x01:
         case 0x3D:
+        case 0x81:
         case 0x83:
         case 0x89:
         case 0x8B:
@@ -569,9 +570,11 @@ static size_t x64_text_format_operands(X64_Text_Formatter *formatter, X64_Text_C
         x64_text_write(writer, STR(", "));
         x64_text_write_register(writer, operand.register_number, is_wide);
         break;
+    case 0x81:
     case 0x83: {
-        // The three instructions that have a number of 8 bits, which the processor widens, and
-        // are told apart by the middle bits instead of a register. The operand is a register.
+        // The three instructions that have a number, of 32 bits after 0x81 and of 8 bits after
+        // 0x83, which the processor widens, and are told apart by the middle bits instead of a
+        // register. The operand is a register.
         Str mnemonic = STR_EMPTY;
         if (operand.field == 0) {
             mnemonic = STR("add ");
@@ -580,7 +583,12 @@ static size_t x64_text_format_operands(X64_Text_Formatter *formatter, X64_Text_C
         } else if (operand.field == 7) {
             mnemonic = STR("cmp ");
         }
-        int8_t number = (int8_t)x64_text_read_byte(cursor);
+        int32_t number = 0;
+        if (opcode == 0x81) {
+            number = x64_text_read_signed_32(cursor);
+        } else {
+            number = (int8_t)x64_text_read_byte(cursor);
+        }
         if (mnemonic.bytes == NULL || operand.is_register == false || is_wide == false) {
             x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED, error_offset);
             return 0;

@@ -927,6 +927,10 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 "yet.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
+    case X64_BUILD_STATUS_VARIABLE_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: variable '%.*s' is given a value that is not of its type.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
     }
 }
 
