@@ -36,6 +36,9 @@ enum {
     // largest growth is `i64.add`, one byte of the module that becomes 12 bytes of text, so 16
     // bytes of text per byte of the module is enough.
     OUTPUT_TEXT_SIZE_BYTES_MAX = 16 * OUTPUT_SIZE_BYTES_MAX,
+    // Bounds the absolute path of the source file that a debug build writes into the program. It
+    // is the longest path that Windows has, so any path that the system resolves fits.
+    SOURCE_PATH_SIZE_BYTES_MAX = 32 * 1024,
 };
 
 // Alphabetical, because nothing depends on the order. `COMMAND_MODE_INVALID` is the result of a
@@ -62,12 +65,14 @@ typedef enum {
  * `COMMAND_TARGET_NONE` only when the mode is dump-ast. The mode dump-asm has the target that it
  * shows the assembly of. The target of run is the one that runs on
  * this machine. The paths are the C strings of `argv`, because they are only handed to `fopen`.
+ * `is_debug` is set for a build that has debug information, which only the target `x64-win32` has.
  */
 typedef struct {
     char const *source_path;
     char const *output_path;
     Command_Mode mode;
     Command_Target target;
+    bool is_debug;
 } Command;
 
 /**
@@ -85,6 +90,10 @@ typedef struct {
     Array_Slice output_text;
     // The procedures of the program that the x64 target builds, which name its assembly.
     Array_Slice symbols;
+    // The places of the code that the debug information of the x64 target is about, and the
+    // absolute path of the source file that it names.
+    Array_Slice debug_rows;
+    Array_Slice source_path;
 } Buffers;
 
 static Command      main_command_parse                     (Array_Slice args);
@@ -141,7 +150,7 @@ int main(int argc, char *argv[]) {
                 "       %s dump-asm --target x64-win32 <source file>\n"
                 "       %s build --target wasm -o <output file> <source file>\n"
                 "       %s build --target wat -o <output file> <source file>\n"
-                "       %s build --target x64-win32 -o <output file> <source file>\n"
+                "       %s build --target x64-win32 [--debug] -o <output file> <source file>\n"
                 "       %s --version\n",
                 argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0]);
         return 2;
@@ -164,6 +173,12 @@ int main(int argc, char *argv[]) {
                                         OUTPUT_TEXT_SIZE_BYTES_MAX),
         .symbols = array_slice_make(malloc(X64_CONSTANT_COUNT_MAX * sizeof(X64_Symbol)),
                                     X64_CONSTANT_COUNT_MAX),
+        // As many nodes as tokens, see above, and the most rows that the build notes for each.
+        .debug_rows = array_slice_make(
+            malloc(X64_DEBUG_ROWS_PER_NODE * TOKEN_COUNT_MAX * sizeof(X64_Debug_Row)),
+            X64_DEBUG_ROWS_PER_NODE * TOKEN_COUNT_MAX),
+        .source_path = array_slice_make(malloc(SOURCE_PATH_SIZE_BYTES_MAX * sizeof(char)),
+                                        SOURCE_PATH_SIZE_BYTES_MAX),
     };
 
     int32_t exit_code = 1;
@@ -171,12 +186,15 @@ int main(int argc, char *argv[]) {
         buffers.code_tokens.elements == NULL || buffers.nodes.elements == NULL ||
         buffers.bindings.elements == NULL ||
         buffers.output.elements == NULL || buffers.output_text.elements == NULL ||
-        buffers.symbols.elements == NULL) {
+        buffers.symbols.elements == NULL || buffers.debug_rows.elements == NULL ||
+        buffers.source_path.elements == NULL) {
         fprintf(stderr, "Out of memory.\n");
     } else {
         exit_code = main_run_command(command, &buffers);
     }
 
+    free(buffers.source_path.elements);
+    free(buffers.debug_rows.elements);
     free(buffers.symbols.elements);
     free(buffers.output_text.elements);
     free(buffers.output.elements);
@@ -196,12 +214,13 @@ int main(int argc, char *argv[]) {
  *     mialuc dump-asm --target x64-win32 <source file>
  *     mialuc build --target wasm -o <output file> <source file>
  *     mialuc build --target wat -o <output file> <source file>
- *     mialuc build --target x64-win32 -o <output file> <source file>
+ *     mialuc build --target x64-win32 [--debug] -o <output file> <source file>
  *
  * `mialuc --version` is answered in `main`, before the command is parsed. The output file of a
- * build can also be written without `-o`, right after the target, which is how it was written
- * before there was a flag for it. Returns a command with mode
- * `COMMAND_MODE_INVALID` when it is anything else.
+ * build can also be written without `-o`, right after the target or `--debug`, which is how it was
+ * written before there was a flag for it. `--debug` comes right after the target, and only the
+ * target `x64-win32` has debug information. Returns a command with mode `COMMAND_MODE_INVALID` when
+ * it is anything else.
  */
 static Command main_command_parse(Array_Slice args) {
     assert(args.elements != NULL);
@@ -214,6 +233,7 @@ static Command main_command_parse(Array_Slice args) {
         .output_path = NULL,
         .mode = COMMAND_MODE_INVALID,
         .target = COMMAND_TARGET_NONE,
+        .is_debug = false,
     };
     if (args.length < 2) {
         return invalid;
@@ -230,6 +250,7 @@ static Command main_command_parse(Array_Slice args) {
             .output_path = NULL,
             .mode = COMMAND_MODE_RUN,
             .target = COMMAND_TARGET_X64_WIN32,
+            .is_debug = false,
         };
     }
 
@@ -244,6 +265,7 @@ static Command main_command_parse(Array_Slice args) {
             .output_path = NULL,
             .mode = COMMAND_MODE_DUMP_ASM,
             .target = COMMAND_TARGET_X64_WIN32,
+            .is_debug = false,
         };
     }
 
@@ -256,14 +278,12 @@ static Command main_command_parse(Array_Slice args) {
             .output_path = NULL,
             .mode = COMMAND_MODE_DUMP_AST,
             .target = COMMAND_TARGET_NONE,
+            .is_debug = false,
         };
     }
 
     if (strcmp(argv[1], "build") == 0) {
-        if (args.length != 6 && args.length != 7) {
-            return invalid;
-        }
-        if (strcmp(argv[2], "--target") != 0) {
+        if (args.length < 4 || strcmp(argv[2], "--target") != 0) {
             return invalid;
         }
         Command_Target target = main_command_target_parse(argv[3]);
@@ -271,23 +291,34 @@ static Command main_command_parse(Array_Slice args) {
             return invalid;
         }
 
-        // The output file is after `-o`, or directly after the target.
-        if (args.length == 7) {
-            if (strcmp(argv[4], "-o") != 0) {
+        // `--debug` is right after the target, and the debug information is of the program for
+        // the processor.
+        size_t next = 4;
+        bool is_debug = false;
+        if (args.length > next && strcmp(argv[next], "--debug") == 0) {
+            if (target != COMMAND_TARGET_X64_WIN32) {
                 return invalid;
             }
-            return (Command){
-                .source_path = argv[6],
-                .output_path = argv[5],
-                .mode = COMMAND_MODE_BUILD,
-                .target = target,
-            };
+            is_debug = true;
+            next += 1;
+        }
+
+        // The output file is after `-o`, or directly after the target or `--debug`.
+        if (args.length == next + 3) {
+            if (strcmp(argv[next], "-o") != 0) {
+                return invalid;
+            }
+            next += 1;
+        }
+        if (args.length != next + 2) {
+            return invalid;
         }
         return (Command){
-            .source_path = argv[5],
-            .output_path = argv[4],
+            .source_path = argv[next + 1],
+            .output_path = argv[next],
             .mode = COMMAND_MODE_BUILD,
             .target = target,
+            .is_debug = is_debug,
         };
     }
 
@@ -453,9 +484,28 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
     assert(semantic_result.status == SEMANTIC_STATUS_OK);
 
     char const *path = command.source_path;
-    X64_Build_Result build_result = x64_build(parse_result.nodes, semantic_result.bindings,
-                                              parse_result.root, buffers->output,
-                                              buffers->symbols);
+
+    // The debug information names the source file by its absolute path, which is how a debugger
+    // finds it whatever directory it runs in.
+    X64_Debug debug = {
+        .source = source,
+        .source_path = STR_EMPTY,
+        .row_buffer = buffers->debug_rows,
+    };
+    if (command.is_debug) {
+        debug.source_path = process_path_absolute(path, buffers->source_path);
+        if (debug.source_path.bytes == NULL) {
+            fprintf(stderr, "%s: cannot find the absolute path of the file.\n", path);
+            return 1;
+        }
+    }
+    X64_Debug const *build_debug = NULL;
+    if (command.is_debug) {
+        build_debug = &debug;
+    }
+    X64_Build_Result build_result =
+        x64_build(parse_result.nodes, semantic_result.bindings, parse_result.root,
+                  buffers->output, buffers->symbols, build_debug);
     if (build_result.status != X64_BUILD_STATUS_OK) {
         main_run_command_report_x64_error(path, source, build_result);
         return 1;

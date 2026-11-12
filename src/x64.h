@@ -68,6 +68,45 @@ typedef struct {
     size_t offset;
 } X64_Symbol;
 
+// What a row of the debug information says about a place in the code. Alphabetical, because nothing
+// depends on the order.
+typedef enum {
+    // The `leave` of a procedure is at the place, after which the frame is the one of its caller.
+    X64_DEBUG_ROW_KIND_LEAVE,
+    // A procedure or a statement starts at the place, which is where a debugger stops for its line.
+    X64_DEBUG_ROW_KIND_LINE,
+} X64_Debug_Row_Kind;
+
+/**
+ * A place in the code that the debug information needs to know about, which the build notes while
+ * it writes the code. `code_offset` is counted from the start of the code, and `source_offset` is
+ * the offset in the source of what starts there, which is zero for `X64_DEBUG_ROW_KIND_LEAVE`.
+ */
+typedef struct {
+    uint32_t code_offset;
+    uint32_t source_offset;
+    X64_Debug_Row_Kind kind;
+} X64_Debug_Row;
+
+enum {
+    // The number of `X64_Debug_Row` elements that a build needs at most for every node of the
+    // syntax tree: a statement or a procedure has the row of its line, and a `return` or the end of
+    // a procedure has the row of its `leave`.
+    X64_DEBUG_ROWS_PER_NODE = 2,
+};
+
+/**
+ * What a build with debug information needs. `source` is the text that the syntax tree was parsed
+ * from, which the lines are counted in, and `source_path` is the absolute path of its file, which a
+ * debugger opens and compares with the files that breakpoints are set in. `row_buffer` holds
+ * `X64_Debug_Row` elements, at least `X64_DEBUG_ROWS_PER_NODE` for each node of the tree.
+ */
+typedef struct {
+    Str source;
+    Str source_path;
+    Array_Slice row_buffer;
+} X64_Debug;
+
 /**
  * On `X64_BUILD_STATUS_OK`, `bytes` is the filled start of the output buffer, as `byte` elements,
  * and it is a complete executable file. Otherwise `bytes.length` is zero and `subject` is the text
@@ -106,6 +145,12 @@ typedef struct {
  * declaration: `Int` is 64 bits wide, so a procedure of the C library that returns an `int` is not
  * declared with a result, or its upper 32 bits are whatever the library left there.
  *
+ * When `debug` is not NULL, the file also has debug information in the DWARF format, version 4,
+ * which gdb reads from a file of this format: the lines of the statements, the procedures with
+ * their parameters and variables and where they are kept, the constants that are strings, and how
+ * to find the frame of the caller of each procedure. The code is the same with it and without it,
+ * so a program that is debugged runs as it does without a debugger. With NULL the file has none.
+ *
  * Only a small part of the language is built: procedures with up to `X64_PARAMETER_COUNT_MAX`
  * parameters of the types `Int` and `C_Str`, whose statements are calls, returns, definitions of
  * variables of those types and assignments to them with `=`, and whose expressions are integer and
@@ -115,6 +160,7 @@ typedef struct {
  * built wrongly.
  */
 X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,
-                           Array_Slice output_buffer, Array_Slice symbol_buffer);
+                           Array_Slice output_buffer, Array_Slice symbol_buffer,
+                           X64_Debug const *debug);
 
 #endif

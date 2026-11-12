@@ -357,6 +357,12 @@ typedef struct {
     Ast_Node_Index first_child;
     Ast_Node_Index last_child;
     Ast_Node_Index next_sibling;
+    // The byte offset in the source of the token that was current when the node was made, which is
+    // the first token of most nodes: the name of a definition, of a parameter or of a variable, the
+    // keyword of a statement, or the first token of an expression. A target that writes debug
+    // information tells from it on which line a statement is. Sources are far below 4 GiB, see
+    // `SOURCE_SIZE_BYTES_MAX` in main.c.
+    uint32_t source_offset;
     // This union is named, because unnamed unions are C11 and the project uses C99.
     // Only the member that matches `node_type` is meaningful.
     union {
@@ -498,8 +504,9 @@ typedef struct {
     } payload;
 } Ast_Node;
 
-// Four 4-byte fields, followed by the 16-byte payload.
-STATIC_ASSERT(sizeof(Ast_Node) == 32, ast_node_size_is_32_bytes);
+// Five 4-byte fields and 4 bytes of padding, because the payload has 8-byte fields, followed by the
+// 16-byte payload.
+STATIC_ASSERT(sizeof(Ast_Node) == 40, ast_node_size_is_40_bytes);
 
 /**
  * Returns whether nodes of `node_type` are assignments: statements that change the value of a

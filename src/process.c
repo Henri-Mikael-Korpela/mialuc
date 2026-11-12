@@ -7,6 +7,7 @@
 
 #include <mialu/common_types.h>
 #include <mialu/process.h>
+#include <mialu/str.h>
 
 #ifdef _WIN32
 
@@ -99,6 +100,24 @@ Process_Result process_run_executable(Array_Slice program) {
     return result;
 }
 
+Str process_path_absolute(char const *path, Array_Slice buffer) {
+    assert(path != NULL);
+    assert(buffer.elements != NULL);
+
+    // The size that the function takes is a `DWORD`, and a path is far shorter than one.
+    DWORD capacity = (DWORD)buffer.length;
+    if (buffer.length > MAXDWORD) {
+        capacity = MAXDWORD;
+    }
+    // The length does not count the zero after the path. A path that does not fit gives the size
+    // that it needs instead, which counts the zero, so it is not below the capacity.
+    DWORD length = GetFullPathNameA(path, capacity, buffer.elements, NULL);
+    if (length == 0 || length >= capacity) {
+        return STR_EMPTY;
+    }
+    return str_make(buffer.elements, length);
+}
+
 #else
 
 Process_Result process_run_executable(Array_Slice program) {
@@ -106,6 +125,13 @@ Process_Result process_run_executable(Array_Slice program) {
     assert(program.length > 0);
 
     return (Process_Result){.exit_code = 0, .status = PROCESS_STATUS_UNSUPPORTED};
+}
+
+Str process_path_absolute(char const *path, Array_Slice buffer) {
+    assert(path != NULL);
+    assert(buffer.elements != NULL);
+
+    return str_make(path, strlen(path));
 }
 
 #endif

@@ -1661,12 +1661,13 @@ static Ast_Node_Index parse_return_statement(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
-    if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_RETURN, STR("'return'")) == false) {
+    // The node is made at the keyword, so that it is where the statement starts in the source.
+    Ast_Node_Index statement = parse_node_make(parser, AST_NODE_TYPE_RETURN_STATEMENT);
+    if (statement == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
 
-    Ast_Node_Index statement = parse_node_make(parser, AST_NODE_TYPE_RETURN_STATEMENT);
-    if (statement == AST_NODE_INDEX_NONE) {
+    if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_RETURN, STR("'return'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2841,12 +2842,16 @@ static Ast_Node_Index parse_node_make(Parser *parser, Ast_Node_Type node_type) {
 
     // Node indexes are 32 bits, and a node needs a token, which is bounded by the same limit.
     assert(parser->node_count < AST_NODE_INDEX_NONE);
+    // The last token is `END`, so there is always a current token, also for the nodes that are
+    // made at the end of the source.
+    assert(parser->token_index < parser->token_count);
     Ast_Node_Index index = (Ast_Node_Index)parser->node_count;
     parser->nodes[index] = (Ast_Node){
         .node_type = node_type,
         .first_child = AST_NODE_INDEX_NONE,
         .last_child = AST_NODE_INDEX_NONE,
         .next_sibling = AST_NODE_INDEX_NONE,
+        .source_offset = parser->tokens[parser->token_index].source_offset,
     };
     parser->node_count += 1;
 

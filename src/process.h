@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include <mialu/array_slice.h>
+#include <mialu/str.h>
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
@@ -32,5 +33,16 @@ typedef struct {
  * whatever it does can only harm itself and the system, not the compiler.
  */
 Process_Result process_run_executable(Array_Slice program);
+
+/**
+ * Returns the absolute path of the file at `path`, as the system resolves it against the current
+ * directory, written to `buffer`, which holds `char` elements. A debugger compares the path of a
+ * source file in the debug information with the paths of the files that a person opens, so it is
+ * absolute, and does not depend on the directory that the compiler was run in. Returns an empty
+ * `Str` (`bytes == NULL`) when the system cannot resolve it or it does not fit. On a system other
+ * than Windows it returns `path` itself, because the C library has no function for it, and the
+ * programs that have debug information are for Windows.
+ */
+Str process_path_absolute(char const *path, Array_Slice buffer);
 
 #endif

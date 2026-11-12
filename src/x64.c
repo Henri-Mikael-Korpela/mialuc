@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include <mialu/semantic.h>
+#include <mialu/version.h>
 #include <mialu/x64.h>
 
 // The layout of the file follows the PE format, see
@@ -18,13 +19,16 @@ enum {
     X64_FILE_ALIGNMENT_BYTES = 0x200,
     // The sections start at multiples of this in memory, the size of a page.
     X64_SECTION_ALIGNMENT_BYTES = 0x1000,
-    // The headers take 0x198 bytes, see `x64_headers_write`, so one unit of file alignment holds
-    // them.
-    X64_HEADERS_SIZE_BYTES = 0x200,
+    // The sections that every file has: `.rdata`, `.data` and `.text`, and the sections that a file
+    // has when it is built with debug information, see `X64_DEBUG_SECTION_NAMES`.
+    X64_SECTION_COUNT = 3,
+    X64_DEBUG_SECTION_COUNT = 5,
     // The address in memory, relative to the image, of the first section.
     X64_RDATA_RVA = 0x1000,
 
     X64_DOS_HEADER_SIZE_BYTES = 0x40,
+    // The signature "PE" with two zeros, and the header of the file.
+    X64_FILE_HEADER_SIZE_BYTES = 24,
     X64_OPTIONAL_HEADER_SIZE_BYTES = 240,
     X64_SECTION_HEADER_SIZE_BYTES = 40,
     X64_IMPORT_DESCRIPTOR_SIZE_BYTES = 20,
@@ -63,6 +67,73 @@ enum {
     // the storage follows. Strings are made at multiples of 8 so that they are aligned.
     X64_TEMPORARY_USED_SIZE_BYTES = 8,
     X64_TEMPORARY_ALIGNMENT_BYTES = 8,
+    // A section of the debug information is not needed to run the program, so the system may drop
+    // it: it is data that is initialized, read and discardable. The table of unwinding is read by
+    // the system when it unwinds the stack, so it stays.
+    X64_DEBUG_SECTION_CHARACTERISTICS = 0x42000040,
+    X64_UNWIND_SECTION_CHARACTERISTICS = 0x40000040,
+    // An entry of the table of unwinding: where a procedure starts and ends, and where its unwind
+    // information is. The information of every procedure takes 8 bytes: 4 of header and two codes
+    // of 2 bytes, see `x64_debug_unwind_write`.
+    X64_UNWIND_ENTRY_SIZE_BYTES = 12,
+    X64_UNWIND_INFO_SIZE_BYTES = 8,
+    // The entry of the data directories that is the table of unwinding, which Windows calls the
+    // exception table.
+    X64_DIRECTORY_EXCEPTION = 3,
+    // The address of the image when it is loaded, which the debug information has its addresses
+    // relative to, see `X64_IMAGE_BASE`.
+    X64_DEBUG_ADDRESS_SIZE_BYTES = 8,
+
+    // The numbers of the DWARF format that the debug information uses, see
+    // https://dwarfstd.org/doc/DWARF4.pdf. The registers are numbered as the System V ABI for x64
+    // numbers them for DWARF, which gdb uses for Windows on x64 too.
+    X64_DWARF_VERSION = 4,
+    X64_DWARF_FRAME_VERSION = 1,
+    X64_DWARF_LANGUAGE_C99 = 0x0C,
+    X64_DWARF_REGISTER_RBP = 6,
+    X64_DWARF_REGISTER_RSP = 7,
+    X64_DWARF_REGISTER_RIP = 16,
+    X64_DWARF_ENCODING_SIGNED = 0x05,
+    X64_DWARF_ENCODING_UNSIGNED_CHAR = 0x08,
+    X64_DWARF_OP_ADDR = 0x03,
+    X64_DWARF_OP_FBREG = 0x91,
+    X64_DWARF_OP_CALL_FRAME_CFA = 0x9C,
+    X64_DWARF_LNS_COPY = 0x01,
+    X64_DWARF_LNS_ADVANCE_PC = 0x02,
+    X64_DWARF_LNS_ADVANCE_LINE = 0x03,
+    X64_DWARF_LNS_SET_COLUMN = 0x05,
+    X64_DWARF_LNE_END_SEQUENCE = 0x01,
+    X64_DWARF_LNE_SET_ADDRESS = 0x02,
+    X64_DWARF_CFA_ADVANCE_LOC4 = 0x04,
+    X64_DWARF_CFA_DEF_CFA = 0x0C,
+    X64_DWARF_CFA_DEF_CFA_REGISTER = 0x0D,
+    X64_DWARF_CFA_DEF_CFA_OFFSET = 0x0E,
+    X64_DWARF_CFA_OFFSET = 0x80,
+    X64_DWARF_CFA_RESTORE = 0xC0,
+    X64_DWARF_CFA_NOP = 0x00,
+    // The abbreviations of `X64_DEBUG_ABBREVIATIONS`, which say what each entry of `.debug_info`
+    // is.
+    X64_DWARF_ABBREVIATION_COMPILE_UNIT = 1,
+    X64_DWARF_ABBREVIATION_BASE_TYPE = 2,
+    X64_DWARF_ABBREVIATION_POINTER_TYPE = 3,
+    X64_DWARF_ABBREVIATION_TYPEDEF = 4,
+    X64_DWARF_ABBREVIATION_SUBPROGRAM = 5,
+    X64_DWARF_ABBREVIATION_SUBPROGRAM_VOID = 6,
+    X64_DWARF_ABBREVIATION_PARAMETER = 7,
+    X64_DWARF_ABBREVIATION_VARIABLE = 8,
+    X64_DWARF_ABBREVIATION_ARRAY_TYPE = 9,
+    X64_DWARF_ABBREVIATION_SUBRANGE_TYPE = 10,
+    X64_DWARF_ABBREVIATION_START = 11,
+    // The frame of a procedure, see `x64_procedure_write`: on entry the address to return to is at
+    // `rsp`, so the frame of the caller, the CFA, starts 8 bytes above it. `push rbp` makes that 16,
+    // and keeps `rbp` 16 bytes below the CFA, and from `mov rbp, rsp` on the CFA is `rbp + 16`. So
+    // the arguments that the procedure keeps are at the CFA and above, and the variables are below
+    // the 16 bytes of the address and of `rbp`.
+    X64_DEBUG_CFA_ENTRY_OFFSET_BYTES = 8,
+    X64_DEBUG_CFA_FRAME_OFFSET_BYTES = 16,
+    // The start of the program makes 40 bytes of the stack, see `x64_code_write`.
+    X64_DEBUG_START_FRAME_BYTES = 40,
+
     // The stack must stay a multiple of this, so that every call is made with it, see
     // `x64_procedure_write`. The frame of a procedure is rounded up to it.
     X64_STACK_ALIGNMENT_BYTES = 16,
@@ -136,6 +207,36 @@ typedef struct {
 } X64_Layout;
 
 /**
+ * Where a section of the debug information is in the file and in memory.
+ */
+typedef struct {
+    size_t file_offset;
+    size_t size_bytes;
+    uint32_t rva;
+} X64_Debug_Section;
+
+/**
+ * Where the reading of the source to count lines got to. The source is read forward once for all
+ * the places that are in the order of the source, see `x64_debug_cursor_move`. `line` is counted
+ * from 1, and `line_start` is the offset of its first byte.
+ */
+typedef struct {
+    size_t offset;
+    size_t line_start;
+    uint32_t line;
+} X64_Debug_Cursor;
+
+/**
+ * Where the entries of the types are in `.debug_info`, counted from the start of its unit, which
+ * is how one entry refers to another.
+ */
+typedef struct {
+    uint32_t byte_type;
+    uint32_t c_str_type;
+    uint32_t int_type;
+} X64_Debug_Types;
+
+/**
  * The state shared by the building functions. A building function returns false after it recorded
  * an error here, and its caller then returns false too without recording anything more. So only
  * the first error is kept. The code is written twice, see `x64_build`, so everything here that the
@@ -146,10 +247,22 @@ typedef struct {
     Ast_Node const *nodes;
     Semantic_Binding const *bindings;
     Str subject;
+    // What the debug information needs, or NULL when the file has none.
+    X64_Debug const *debug;
+    X64_Debug_Row *rows;
     X64_Layout layout;
     size_t node_count;
+    // The size of the headers, which is one or two units of file alignment, as the sections need.
+    size_t headers_size_bytes;
     // The place in the file of the start of the code, and of the data that precedes it.
     size_t text_start;
+    // The rows that the code has noted, and how many it can note, see `x64_debug_row_add`.
+    size_t row_count;
+    size_t row_capacity;
+    // The place in the file of the table of strings, which has the names of the sections of the
+    // debug information, which are longer than the 8 bytes of a name in a header.
+    size_t string_table_offset;
+    X64_Debug_Section debug_sections[X64_DEBUG_SECTION_COUNT];
     size_t constant_count;
     // The number of variables of the procedure that is being written, which says where the slot of
     // the temporary storage is in its frame, see `x64_frame_offset`.
@@ -180,6 +293,29 @@ static bool         x64_call_is_str_to_c_str     (X64_Builder const *builder,
 static bool         x64_call_write               (X64_Builder *builder, Ast_Node_Index call,
                                                   bool is_result_used);
 static bool         x64_assignment_write         (X64_Builder *builder, Ast_Node_Index statement);
+static uint32_t     x64_debug_address_rva        (X64_Builder const *builder, size_t code_offset);
+static X64_Debug_Cursor x64_debug_cursor_move    (Str source, X64_Debug_Cursor cursor,
+                                                  size_t offset);
+static void         x64_debug_entry_close        (X64_Builder *builder, size_t entry_start);
+static void         x64_debug_frame_write        (X64_Builder *builder, size_t text_size_bytes);
+static void         x64_debug_info_write         (X64_Builder *builder, size_t text_size_bytes);
+static void         x64_debug_line_write         (X64_Builder *builder, size_t text_size_bytes);
+static void         x64_debug_location_write     (X64_Writer *writer, int64_t cfa_offset);
+static size_t       x64_debug_procedure_end      (X64_Builder const *builder, size_t position,
+                                                  size_t text_size_bytes);
+static void         x64_debug_row_add            (X64_Builder *builder, X64_Debug_Row_Kind kind,
+                                                  uint32_t source_offset);
+static void         x64_debug_sections_write     (X64_Builder *builder, size_t text_size_bytes);
+static void         x64_debug_unwind_write       (X64_Builder *builder, size_t text_size_bytes,
+                                                  uint32_t section_rva);
+static uint32_t     x64_debug_type_reference     (X64_Debug_Types types, X64_Type type);
+static void         x64_patch_u32                (X64_Writer *writer, size_t offset,
+                                                  uint32_t number);
+static size_t       x64_string_offset            (X64_Builder const *builder,
+                                                  Ast_Node_Index literal);
+static void         x64_write_signed_leb128      (X64_Writer *writer, int64_t number);
+static void         x64_write_string             (X64_Writer *writer, Str text);
+static void         x64_write_unsigned_leb128    (X64_Writer *writer, uint64_t number);
 static void         x64_epilogue_write           (X64_Builder *builder);
 static int32_t      x64_frame_offset             (size_t position);
 static size_t       x64_procedure_variable_count (X64_Builder const *builder,
@@ -262,10 +398,80 @@ static uint64_t const X64_IMAGE_BASE = 0x140000000ull;
 // it exports `printf` and `exit` by name, unlike the universal C runtime that the headers of the
 // compilers redirect to.
 static char const X64_LIBRARY_NAME[] = "msvcrt.dll";
+
+// The sections of a build with debug information, in the order of the file. The first is the table
+// of unwinding that Windows describes for x64, and the others are the DWARF of gdb, which finds
+// them by these names. A name that is longer than the 8 bytes of a header is in the table of
+// strings.
+static Str const X64_DEBUG_SECTION_NAMES[X64_DEBUG_SECTION_COUNT] = {
+    {.bytes = ".pdata", .length = 6},
+    {.bytes = ".debug_abbrev", .length = 13},
+    {.bytes = ".debug_info", .length = 11},
+    {.bytes = ".debug_line", .length = 11},
+    {.bytes = ".debug_frame", .length = 12},
+};
+enum {
+    X64_DEBUG_SECTION_UNWIND = 0,
+    X64_DEBUG_SECTION_ABBREV = 1,
+    X64_DEBUG_SECTION_INFO = 2,
+    X64_DEBUG_SECTION_LINE = 3,
+    X64_DEBUG_SECTION_FRAME = 4,
+    // The longest name that a header has room for.
+    X64_SECTION_NAME_SIZE_BYTES = 8,
+};
+
+// The abbreviations of `.debug_info`: the number of each, its tag, whether it has children, and
+// the pairs of attribute and form of its entries, which end with two zeros. The list ends with a
+// zero. The forms are the simplest that the values need: strings in place, numbers of fixed size,
+// references of 4 bytes and expressions with their length before them.
+static byte const X64_DEBUG_ABBREVIATIONS[] = {
+    // The unit: producer, language, name, directory, low_pc, high_pc as a size, stmt_list.
+    X64_DWARF_ABBREVIATION_COMPILE_UNIT, 0x11, 1,
+    0x25, 0x08, 0x13, 0x05, 0x03, 0x08, 0x1B, 0x08, 0x11, 0x01, 0x12, 0x07, 0x10, 0x17, 0, 0,
+    // A type of the processor: name, encoding, size.
+    X64_DWARF_ABBREVIATION_BASE_TYPE, 0x24, 0,
+    0x03, 0x08, 0x3E, 0x0B, 0x0B, 0x0B, 0, 0,
+    // A pointer: size, type.
+    X64_DWARF_ABBREVIATION_POINTER_TYPE, 0x0F, 0,
+    0x0B, 0x0B, 0x49, 0x13, 0, 0,
+    // Another name of a type: name, type.
+    X64_DWARF_ABBREVIATION_TYPEDEF, 0x16, 0,
+    0x03, 0x08, 0x49, 0x13, 0, 0,
+    // A procedure with a result: name, file, line, low_pc, high_pc as a size, frame base,
+    // external, type.
+    X64_DWARF_ABBREVIATION_SUBPROGRAM, 0x2E, 1,
+    0x03, 0x08, 0x3A, 0x0B, 0x3B, 0x06, 0x11, 0x01, 0x12, 0x07, 0x40, 0x18, 0x3F, 0x19,
+    0x49, 0x13, 0, 0,
+    // A procedure without a result: the same without the type.
+    X64_DWARF_ABBREVIATION_SUBPROGRAM_VOID, 0x2E, 1,
+    0x03, 0x08, 0x3A, 0x0B, 0x3B, 0x06, 0x11, 0x01, 0x12, 0x07, 0x40, 0x18, 0x3F, 0x19, 0, 0,
+    // A parameter: name, file, line, type, location.
+    X64_DWARF_ABBREVIATION_PARAMETER, 0x05, 0,
+    0x03, 0x08, 0x3A, 0x0B, 0x3B, 0x06, 0x49, 0x13, 0x02, 0x18, 0, 0,
+    // A variable, or a constant, which is a variable that the program does not change: name,
+    // file, line, type, location.
+    X64_DWARF_ABBREVIATION_VARIABLE, 0x34, 0,
+    0x03, 0x08, 0x3A, 0x0B, 0x3B, 0x06, 0x49, 0x13, 0x02, 0x18, 0, 0,
+    // An array, the bytes of a constant: type of the elements, and the range below it.
+    X64_DWARF_ABBREVIATION_ARRAY_TYPE, 0x01, 1,
+    0x49, 0x13, 0, 0,
+    // The range of an array: the last index.
+    X64_DWARF_ABBREVIATION_SUBRANGE_TYPE, 0x21, 0,
+    0x2F, 0x06, 0, 0,
+    // The start of the program, which is code of the compiler and has no source: name, low_pc,
+    // high_pc as a size.
+    X64_DWARF_ABBREVIATION_START, 0x2E, 0,
+    0x03, 0x08, 0x11, 0x01, 0x12, 0x07, 0, 0,
+    0,
+};
+
+// The padding of an entry of `.debug_frame` is zeros, see `x64_debug_entry_close`.
+STATIC_ASSERT(X64_DWARF_CFA_NOP == 0, x64_dwarf_cfa_nop_is_zero);
 static char const X64_EXIT_NAME[] = "exit";
 
 X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,
-                           Array_Slice output_buffer, Array_Slice symbol_buffer) {
+                           Array_Slice output_buffer, Array_Slice symbol_buffer,
+                           X64_Debug const *debug) {
     assert(nodes.elements != NULL);
     assert(bindings.elements != NULL);
     assert(output_buffer.elements != NULL);
@@ -279,6 +485,28 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Ind
     Ast_Node const *node_elements = nodes.elements;
     assert(node_elements[root].node_type == AST_NODE_TYPE_MODULE);
 
+    // The headers of the sections follow the optional header, and the headers take whole units of
+    // file alignment. The debug information has four sections more, which need a second unit.
+    size_t section_count = X64_SECTION_COUNT;
+    X64_Debug_Row *rows = NULL;
+    size_t row_capacity = 0;
+    if (debug != NULL) {
+        assert(debug->source.bytes != NULL);
+        assert(debug->source_path.bytes != NULL);
+        assert(debug->row_buffer.elements != NULL);
+        assert(debug->row_buffer.length >= X64_DEBUG_ROWS_PER_NODE * nodes.length);
+        section_count += X64_DEBUG_SECTION_COUNT;
+        rows = debug->row_buffer.elements;
+        row_capacity = debug->row_buffer.length;
+    }
+    size_t headers_size_bytes =
+        x64_align_up(X64_DOS_HEADER_SIZE_BYTES + X64_FILE_HEADER_SIZE_BYTES +
+                         X64_OPTIONAL_HEADER_SIZE_BYTES +
+                         section_count * X64_SECTION_HEADER_SIZE_BYTES,
+                     X64_FILE_ALIGNMENT_BYTES);
+    // The headers are below the first section in memory.
+    assert(headers_size_bytes <= X64_RDATA_RVA);
+
     X64_Builder builder = {
         .writer =
             {
@@ -290,9 +518,16 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Ind
         .nodes = node_elements,
         .bindings = bindings.elements,
         .subject = STR_EMPTY,
+        .debug = debug,
+        .rows = rows,
         .layout = {0},
         .node_count = nodes.length,
+        .headers_size_bytes = headers_size_bytes,
         .text_start = 0,
+        .row_count = 0,
+        .row_capacity = row_capacity,
+        .string_table_offset = 0,
+        .debug_sections = {{0}},
         .constant_count = 0,
         .variable_count = 0,
         .variable_defined_count = 0,
@@ -328,6 +563,11 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Ind
             x64_write_zeros(&builder.writer,
                             x64_align_up(text_size_bytes, X64_FILE_ALIGNMENT_BYTES) -
                                 text_size_bytes);
+            // The debug information is about the code, so it comes after it, and it is not needed
+            // to run the program, so the code does not depend on where it is.
+            if (debug != NULL) {
+                x64_debug_sections_write(&builder, text_size_bytes);
+            }
             x64_headers_write(&builder, text_size_bytes);
         }
     }
@@ -550,7 +790,7 @@ static X64_Layout x64_layout_make(X64_Builder const *builder) {
 static void x64_image_write(X64_Builder *builder) {
     assert(builder->writer.length == 0);
 
-    x64_write_zeros(&builder->writer, X64_HEADERS_SIZE_BYTES);
+    x64_write_zeros(&builder->writer, builder->headers_size_bytes);
     x64_rdata_write(builder);
     size_t rdata_end = builder->writer.length;
     x64_write_zeros(&builder->writer,
@@ -627,7 +867,7 @@ static void x64_rdata_write(X64_Builder *builder) {
     }
 
     assert(writer->is_overflowed ||
-           writer->length == X64_HEADERS_SIZE_BYTES + layout->rdata_size_bytes);
+           writer->length == builder->headers_size_bytes + layout->rdata_size_bytes);
 }
 
 /**
@@ -638,6 +878,8 @@ static bool x64_code_write(X64_Builder *builder) {
     assert(builder->writer.length == builder->text_start);
 
     X64_Writer *writer = &builder->writer;
+    // The rows are noted again with the code, so only the ones of the last write are kept.
+    builder->row_count = 0;
 
     // The program starts here. The system enters it with the stack 8 bytes past a multiple of 16,
     // because it was entered like a procedure is, and a call must be made with a multiple of 16.
@@ -696,6 +938,10 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
     Ast_Node_Index procedure = builder->nodes[definition].first_child;
     builder->definition = definition;
 
+    // The line of the procedure is the line of its name, which a debugger shows while the frame is
+    // made, before the first statement.
+    x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LINE, builder->nodes[definition].source_offset);
+
     // `push rbp` and `mov rbp, rsp`. The stack is a multiple of 16 after this, because the call
     // that entered the procedure made it 8 past one and `push rbp` is 8 more. Nothing is pushed
     // after, so it is also what every call made by the procedure is made with.
@@ -753,6 +999,7 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
     for (size_t i = 0; i < builder->node_count && statement != AST_NODE_INDEX_NONE; i += 1) {
         Ast_Node const *statement_node = &builder->nodes[statement];
         is_last_return = false;
+        x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LINE, statement_node->source_offset);
         if (statement_node->node_type == AST_NODE_TYPE_CALL_STATEMENT) {
             if (x64_call_write(builder, statement_node->first_child, false) == false) {
                 return false;
@@ -802,6 +1049,7 @@ static void x64_epilogue_write(X64_Builder *builder) {
         x64_write_bytes(&builder->writer, USED_STORE, sizeof(USED_STORE));
         x64_write_rip_displacement(builder, builder->data_rva);
     }
+    x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LEAVE, 0);
     static byte const EPILOGUE[] = {0xC9, 0xC3};
     x64_write_bytes(&builder->writer, EPILOGUE, sizeof(EPILOGUE));
 }
@@ -1531,6 +1779,12 @@ static void x64_headers_write(X64_Builder *builder, size_t text_size_bytes) {
     size_t rdata_virtual_bytes = builder->layout.rdata_size_bytes;
     size_t image_bytes =
         builder->text_rva + x64_align_up(text_size_bytes, X64_SECTION_ALIGNMENT_BYTES);
+    size_t section_count = X64_SECTION_COUNT;
+    if (builder->debug != NULL) {
+        section_count += X64_DEBUG_SECTION_COUNT;
+        X64_Debug_Section const *last = &builder->debug_sections[X64_DEBUG_SECTION_COUNT - 1];
+        image_bytes = last->rva + x64_align_up(last->size_bytes, X64_SECTION_ALIGNMENT_BYTES);
+    }
 
     if (builder->writer.is_overflowed) {
         return;
@@ -1543,9 +1797,12 @@ static void x64_headers_write(X64_Builder *builder, size_t text_size_bytes) {
     memcpy(file, "PE\0\0", 4);
     file += 4;
     x64_store_u16(file + 0, 0x8664);                      // The processor is x64.
-    x64_store_u16(file + 2, 3);                           // The sections: .rdata, .data, .text.
+    // The sections: .rdata, .data, .text, and the ones of the debug information.
+    x64_store_u16(file + 2, (uint16_t)section_count);
     x64_store_u32(file + 4, 0);                           // No date, so the file is reproducible.
-    x64_store_u32(file + 8, 0);                           // No table of symbols.
+    // No symbols, but the table of strings that follows where they would be has the names of the
+    // sections of the debug information.
+    x64_store_u32(file + 8, (uint32_t)builder->string_table_offset);
     x64_store_u32(file + 12, 0);
     x64_store_u16(file + 16, X64_OPTIONAL_HEADER_SIZE_BYTES);
     // An executable file, and one that may be loaded above 2 GiB.
@@ -1575,7 +1832,7 @@ static void x64_headers_write(X64_Builder *builder, size_t text_size_bytes) {
     x64_store_u16(optional + 50, 0);
     x64_store_u32(optional + 52, 0);
     x64_store_u32(optional + 56, (uint32_t)image_bytes);
-    x64_store_u32(optional + 60, X64_HEADERS_SIZE_BYTES);
+    x64_store_u32(optional + 60, (uint32_t)builder->headers_size_bytes);
     x64_store_u32(optional + 64, 0);                      // The checksum is not checked.
     x64_store_u16(optional + 68, 3);                      // A program for the console.
     // The data cannot be executed. The program is not moved, because it has no relocations.
@@ -1604,7 +1861,7 @@ static void x64_headers_write(X64_Builder *builder, size_t text_size_bytes) {
     x64_store_u32(section + 8, (uint32_t)rdata_virtual_bytes);
     x64_store_u32(section + 12, X64_RDATA_RVA);
     x64_store_u32(section + 16, (uint32_t)rdata_raw_bytes);
-    x64_store_u32(section + 20, X64_HEADERS_SIZE_BYTES);
+    x64_store_u32(section + 20, (uint32_t)builder->headers_size_bytes);
     x64_store_u32(section + 36, 0x40000040);              // Data that is read and was initialized.
     section += X64_SECTION_HEADER_SIZE_BYTES;
     // The temporary storage: it has no bytes in the file, and the system gives it zeroed.
@@ -1621,6 +1878,738 @@ static void x64_headers_write(X64_Builder *builder, size_t text_size_bytes) {
     x64_store_u32(section + 16, (uint32_t)text_raw_bytes);
     x64_store_u32(section + 20, (uint32_t)builder->text_start);
     x64_store_u32(section + 36, 0x60000020);              // Code that is read and executed.
+    if (builder->debug == NULL) {
+        return;
+    }
+
+    X64_Debug_Section const *unwind = &builder->debug_sections[X64_DEBUG_SECTION_UNWIND];
+    x64_store_u32(directories + X64_DIRECTORY_EXCEPTION * 8, unwind->rva);
+    // The table is the entries without the unwind information after them, which is as large for
+    // every entry, see `x64_debug_unwind_write`.
+    size_t unwind_entry_count =
+        unwind->size_bytes / (X64_UNWIND_ENTRY_SIZE_BYTES + X64_UNWIND_INFO_SIZE_BYTES);
+    x64_store_u32(directories + X64_DIRECTORY_EXCEPTION * 8 + 4,
+                  (uint32_t)(unwind_entry_count * X64_UNWIND_ENTRY_SIZE_BYTES));
+
+    // A name that is longer than 8 bytes is a slash and the place of the name in the table of
+    // strings, in decimal, which is how the linkers of GNU write the names of the debug sections.
+    size_t name_offset = 4;
+    for (size_t i = 0; i < X64_DEBUG_SECTION_COUNT; i += 1) {
+        section += X64_SECTION_HEADER_SIZE_BYTES;
+        X64_Debug_Section const *debug_section = &builder->debug_sections[i];
+        Str name = X64_DEBUG_SECTION_NAMES[i];
+        if (name.length <= X64_SECTION_NAME_SIZE_BYTES) {
+            memcpy(section, name.bytes, name.length);
+        } else {
+            char digits[X64_SECTION_NAME_SIZE_BYTES] = {0};
+            size_t digit_count = 0;
+            size_t rest = name_offset;
+            do {
+                digits[digit_count] = (char)('0' + rest % 10);
+                rest /= 10;
+                digit_count += 1;
+            } while (rest != 0 && digit_count < sizeof(digits) - 1);
+            assert(rest == 0);
+            section[0] = '/';
+            for (size_t j = 0; j < digit_count; j += 1) {
+                section[1 + j] = (byte)digits[digit_count - 1 - j];
+            }
+            name_offset += name.length + 1;
+        }
+        x64_store_u32(section + 8, (uint32_t)debug_section->size_bytes);
+        x64_store_u32(section + 12, debug_section->rva);
+        x64_store_u32(section + 16, (uint32_t)x64_align_up(debug_section->size_bytes,
+                                                           X64_FILE_ALIGNMENT_BYTES));
+        x64_store_u32(section + 20, (uint32_t)debug_section->file_offset);
+        if (i == X64_DEBUG_SECTION_UNWIND) {
+            x64_store_u32(section + 36, X64_UNWIND_SECTION_CHARACTERISTICS);
+        } else {
+            x64_store_u32(section + 36, X64_DEBUG_SECTION_CHARACTERISTICS);
+        }
+    }
+}
+
+/**
+ * Notes that the code that is written next is a place of `kind`, see `X64_Debug_Row`. It does
+ * nothing for a file without debug information.
+ */
+static void x64_debug_row_add(X64_Builder *builder, X64_Debug_Row_Kind kind,
+                              uint32_t source_offset) {
+    if (builder->debug == NULL) {
+        return;
+    }
+    // There are at most `X64_DEBUG_ROWS_PER_NODE` rows for each node, see `X64_Debug_Row`.
+    assert(builder->row_count < builder->row_capacity);
+    assert(builder->writer.length >= builder->text_start);
+
+    builder->rows[builder->row_count] = (X64_Debug_Row){
+        .code_offset = (uint32_t)(builder->writer.length - builder->text_start),
+        .source_offset = source_offset,
+        .kind = kind,
+    };
+    builder->row_count += 1;
+}
+
+/**
+ * Writes the sections of the debug information after the code, each at a whole unit of file
+ * alignment and at a page of its own in memory, and the table of strings with their names after
+ * them. `text_size_bytes` is the size of the code without its padding.
+ */
+static void x64_debug_sections_write(X64_Builder *builder, size_t text_size_bytes) {
+    assert(builder->debug != NULL);
+    assert(builder->writer.is_overflowed ||
+           builder->writer.length % X64_FILE_ALIGNMENT_BYTES == 0);
+
+    X64_Writer *writer = &builder->writer;
+    uint32_t rva = (uint32_t)(builder->text_rva +
+                              x64_align_up(text_size_bytes, X64_SECTION_ALIGNMENT_BYTES));
+    for (size_t i = 0; i < X64_DEBUG_SECTION_COUNT; i += 1) {
+        size_t start = writer->length;
+        switch (i) {
+        case X64_DEBUG_SECTION_ABBREV:
+            x64_write_bytes(writer, X64_DEBUG_ABBREVIATIONS, sizeof(X64_DEBUG_ABBREVIATIONS));
+            break;
+        case X64_DEBUG_SECTION_FRAME:
+            x64_debug_frame_write(builder, text_size_bytes);
+            break;
+        case X64_DEBUG_SECTION_INFO:
+            x64_debug_info_write(builder, text_size_bytes);
+            break;
+        case X64_DEBUG_SECTION_LINE:
+            x64_debug_line_write(builder, text_size_bytes);
+            break;
+        case X64_DEBUG_SECTION_UNWIND:
+            x64_debug_unwind_write(builder, text_size_bytes, rva);
+            break;
+        default:
+            assert(false);
+            break;
+        }
+        size_t size_bytes = writer->length - start;
+        builder->debug_sections[i] = (X64_Debug_Section){
+            .file_offset = start,
+            .size_bytes = size_bytes,
+            .rva = rva,
+        };
+        x64_write_zeros(writer, x64_align_up(size_bytes, X64_FILE_ALIGNMENT_BYTES) - size_bytes);
+        rva += (uint32_t)x64_align_up(size_bytes, X64_SECTION_ALIGNMENT_BYTES);
+    }
+
+    // The table of strings starts with its size, which counts the 4 bytes of the size, and then
+    // has the names, each with a zero after it.
+    builder->string_table_offset = writer->length;
+    size_t table_size_bytes = 4;
+    for (size_t i = 0; i < X64_DEBUG_SECTION_COUNT; i += 1) {
+        if (X64_DEBUG_SECTION_NAMES[i].length > X64_SECTION_NAME_SIZE_BYTES) {
+            table_size_bytes += X64_DEBUG_SECTION_NAMES[i].length + 1;
+        }
+    }
+    x64_write_u32(writer, (uint32_t)table_size_bytes);
+    for (size_t i = 0; i < X64_DEBUG_SECTION_COUNT; i += 1) {
+        if (X64_DEBUG_SECTION_NAMES[i].length > X64_SECTION_NAME_SIZE_BYTES) {
+            x64_write_string(writer, X64_DEBUG_SECTION_NAMES[i]);
+        }
+    }
+}
+
+/**
+ * Writes the table of unwinding of Windows for x64, which the system and its debuggers use to
+ * find the frame of the caller of a procedure, see
+ * https://learn.microsoft.com/en-us/cpp/build/exception-handling-x64. gdb reads it to find the end
+ * of the prologue of a procedure, so that a breakpoint on a procedure is at its first statement. The
+ * table has an entry for the start of the program and one for each procedure, in the order of the
+ * code, and the unwind information of each follows the table. `section_rva` is where the section
+ * is in memory.
+ */
+static void x64_debug_unwind_write(X64_Builder *builder, size_t text_size_bytes,
+                                   uint32_t section_rva) {
+    X64_Writer *writer = &builder->writer;
+
+    size_t entry_count = 1;
+    size_t first_procedure = text_size_bytes;
+    for (size_t i = 0; i < builder->constant_count; i += 1) {
+        if (builder->constants[i].kind == X64_CONSTANT_KIND_PROCEDURE) {
+            if (entry_count == 1) {
+                first_procedure = builder->constants[i].offset;
+            }
+            entry_count += 1;
+        }
+    }
+    uint32_t info_rva = (uint32_t)(section_rva + entry_count * X64_UNWIND_ENTRY_SIZE_BYTES);
+
+    x64_write_u32(writer, x64_debug_address_rva(builder, 0));
+    x64_write_u32(writer, x64_debug_address_rva(builder, first_procedure));
+    x64_write_u32(writer, info_rva);
+    for (size_t i = 0; i < builder->constant_count; i += 1) {
+        if (builder->constants[i].kind != X64_CONSTANT_KIND_PROCEDURE) {
+            continue;
+        }
+        info_rva += X64_UNWIND_INFO_SIZE_BYTES;
+        x64_write_u32(writer, x64_debug_address_rva(builder, builder->constants[i].offset));
+        x64_write_u32(writer, x64_debug_address_rva(
+                                  builder, x64_debug_procedure_end(builder, i, text_size_bytes)));
+        x64_write_u32(writer, info_rva);
+    }
+
+    // The start of the program: version 1, a prologue of 4 bytes, and one code, which says that
+    // it made 40 bytes of the stack, in units of 8 after the first 8. The codes are padded to an
+    // even number.
+    static byte const START_INFO[X64_UNWIND_INFO_SIZE_BYTES] = {
+        0x01, 4, 1, 0x00, 4, (byte)(0x02 | (((X64_DEBUG_START_FRAME_BYTES - 8) / 8) << 4)), 0, 0,
+    };
+    x64_write_bytes(writer, START_INFO, sizeof(START_INFO));
+    // A procedure: version 1, a prologue of 4 bytes, two codes, and `rbp` as the register of the
+    // frame, with no offset. The codes are in the reverse order of the prologue: at 4 `rbp` was
+    // set to the stack pointer, and at 1 `rbp` was pushed. The frame that is made after the
+    // prologue needs no code, because `rbp` gives the stack pointer back.
+    static byte const PROCEDURE_INFO[X64_UNWIND_INFO_SIZE_BYTES] = {
+        0x01, 4, 2, 0x05, 4, 0x03, 1, 0x50,
+    };
+    for (size_t i = 1; i < entry_count; i += 1) {
+        x64_write_bytes(writer, PROCEDURE_INFO, sizeof(PROCEDURE_INFO));
+    }
+}
+
+/**
+ * Writes `.debug_info`: one unit, which is the source file, with the types, the constants that are
+ * strings, and the procedures with their parameters and variables. A location is where the value
+ * is relative to the CFA of the procedure, see `X64_DEBUG_CFA_FRAME_OFFSET_BYTES`, which gdb works
+ * out from `.debug_frame`, and the procedures say that with `DW_OP_call_frame_cfa`. The language is
+ * C, because gdb has no Mialu, and the C of gdb shows an `Int` and a `C_Str` as they are.
+ */
+static void x64_debug_info_write(X64_Builder *builder, size_t text_size_bytes) {
+    X64_Writer *writer = &builder->writer;
+    X64_Debug const *debug = builder->debug;
+    size_t unit_start = writer->length;
+
+    // The size of the unit is known at the end.
+    x64_write_u32(writer, 0);
+    x64_write_u16(writer, X64_DWARF_VERSION);
+    x64_write_u32(writer, 0);                             // The abbreviations start the section.
+    x64_write_byte(writer, X64_DEBUG_ADDRESS_SIZE_BYTES);
+
+    // The directory of the source file is the path up to its last separator.
+    Str directory = STR(".");
+    for (size_t i = debug->source_path.length; i > 0; i -= 1) {
+        char character = debug->source_path.bytes[i - 1];
+        if (character == '/' || character == '\\') {
+            directory = str_make(debug->source_path.bytes, i - 1);
+            break;
+        }
+    }
+
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_COMPILE_UNIT);
+    x64_write_string(writer, STR("mialuc " MIALU_VERSION_STRING));
+    x64_write_u16(writer, X64_DWARF_LANGUAGE_C99);
+    x64_write_string(writer, debug->source_path);
+    x64_write_string(writer, directory);
+    x64_write_u64(writer, X64_IMAGE_BASE + builder->text_rva);
+    x64_write_u64(writer, text_size_bytes);
+    x64_write_u32(writer, 0);                             // The lines start their section.
+
+    // An `Int` is a signed number of 8 bytes, and a `C_Str` is a pointer to bytes, which gdb shows
+    // as the text that they are, up to the zero.
+    X64_Debug_Types types = {0};
+    types.int_type = (uint32_t)(writer->length - unit_start);
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_BASE_TYPE);
+    x64_write_string(writer, STR("Int"));
+    x64_write_byte(writer, X64_DWARF_ENCODING_SIGNED);
+    x64_write_byte(writer, X64_SLOT_SIZE_BYTES);
+    types.byte_type = (uint32_t)(writer->length - unit_start);
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_BASE_TYPE);
+    x64_write_string(writer, STR("Byte"));
+    x64_write_byte(writer, X64_DWARF_ENCODING_UNSIGNED_CHAR);
+    x64_write_byte(writer, 1);
+    uint32_t pointer_type = (uint32_t)(writer->length - unit_start);
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_POINTER_TYPE);
+    x64_write_byte(writer, X64_DEBUG_ADDRESS_SIZE_BYTES);
+    x64_write_u32(writer, types.byte_type);
+    types.c_str_type = (uint32_t)(writer->length - unit_start);
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_TYPEDEF);
+    x64_write_string(writer, STR("C_Str"));
+    x64_write_u32(writer, pointer_type);
+
+    // A constant that is a string is an array of its bytes and the zero after them, at its place
+    // in `.rdata`.
+    X64_Debug_Cursor cursor = {.offset = 0, .line_start = 0, .line = 1};
+    for (size_t i = 0; i < builder->constant_count; i += 1) {
+        if (builder->constants[i].kind != X64_CONSTANT_KIND_STRING) {
+            continue;
+        }
+        Ast_Node_Index definition = builder->constants[i].definition;
+        Ast_Node_Index literal = builder->nodes[definition].first_child;
+        Str text = builder->nodes[literal].payload.string_literal.text;
+        cursor = x64_debug_cursor_move(debug->source, cursor,
+                                       builder->nodes[definition].source_offset);
+
+        uint32_t array_type = (uint32_t)(writer->length - unit_start);
+        x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_ARRAY_TYPE);
+        x64_write_u32(writer, types.byte_type);
+        x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_SUBRANGE_TYPE);
+        x64_write_u32(writer, (uint32_t)text.length);
+        x64_write_byte(writer, 0);
+
+        x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_VARIABLE);
+        x64_write_string(writer, builder->nodes[definition].payload.constant_definition.name);
+        x64_write_byte(writer, 1);
+        x64_write_u32(writer, cursor.line);
+        x64_write_u32(writer, array_type);
+        x64_write_unsigned_leb128(writer, 1 + X64_DEBUG_ADDRESS_SIZE_BYTES);
+        x64_write_byte(writer, X64_DWARF_OP_ADDR);
+        x64_write_u64(writer, X64_IMAGE_BASE + X64_RDATA_RVA + builder->layout.strings_offset +
+                                  x64_string_offset(builder, literal));
+    }
+
+    // The start of the program has a name, so that a debugger that shows the frames below `main`
+    // can name its frame. It is the code before the first procedure.
+    size_t first_procedure = text_size_bytes;
+    for (size_t i = 0; i < builder->constant_count; i += 1) {
+        if (builder->constants[i].kind == X64_CONSTANT_KIND_PROCEDURE) {
+            first_procedure = builder->constants[i].offset;
+            break;
+        }
+    }
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_START);
+    x64_write_string(writer, STR("start"));
+    x64_write_u64(writer, X64_IMAGE_BASE + builder->text_rva);
+    x64_write_u64(writer, first_procedure);
+
+    // The procedures are in the order of the source, and so are their parameters and variables,
+    // so the source is read once more from its start for them.
+    cursor = (X64_Debug_Cursor){.offset = 0, .line_start = 0, .line = 1};
+    for (size_t i = 0; i < builder->constant_count; i += 1) {
+        if (builder->constants[i].kind != X64_CONSTANT_KIND_PROCEDURE) {
+            continue;
+        }
+        Ast_Node_Index definition = builder->constants[i].definition;
+        Ast_Node_Index procedure = builder->nodes[definition].first_child;
+        size_t start = builder->constants[i].offset;
+        size_t end = x64_debug_procedure_end(builder, i, text_size_bytes);
+        X64_Type return_type = x64_return_type(&builder->nodes[procedure]);
+        cursor = x64_debug_cursor_move(debug->source, cursor,
+                                       builder->nodes[definition].source_offset);
+
+        if (return_type == X64_TYPE_NONE) {
+            x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_SUBPROGRAM_VOID);
+        } else {
+            x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_SUBPROGRAM);
+        }
+        x64_write_string(writer, builder->nodes[definition].payload.constant_definition.name);
+        x64_write_byte(writer, 1);
+        x64_write_u32(writer, cursor.line);
+        x64_write_u64(writer, X64_IMAGE_BASE + x64_debug_address_rva(builder, start));
+        x64_write_u64(writer, end - start);
+        x64_write_unsigned_leb128(writer, 1);
+        x64_write_byte(writer, X64_DWARF_OP_CALL_FRAME_CFA);
+        if (return_type != X64_TYPE_NONE) {
+            x64_write_u32(writer, x64_debug_type_reference(types, return_type));
+        }
+
+        // The argument at `j` is kept in the space that the caller made, at the CFA and above.
+        size_t parameter_count = x64_parameter_count(builder, procedure);
+        Ast_Node_Index parameter = builder->nodes[procedure].first_child;
+        for (size_t j = 0; j < parameter_count; j += 1) {
+            cursor = x64_debug_cursor_move(debug->source, cursor,
+                                           builder->nodes[parameter].source_offset);
+            x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_PARAMETER);
+            x64_write_string(writer, builder->nodes[parameter].payload.parameter.name);
+            x64_write_byte(writer, 1);
+            x64_write_u32(writer, cursor.line);
+            x64_write_u32(writer, x64_debug_type_reference(types,
+                                                           x64_parameter_type(builder, procedure,
+                                                                              j)));
+            x64_debug_location_write(writer, (int64_t)(j * X64_SLOT_SIZE_BYTES));
+            parameter = builder->nodes[parameter].next_sibling;
+        }
+
+        // The variable at `position` is in its slot below `rbp`, see `x64_frame_offset`.
+        Ast_Node_Index procedure_end = ast_procedure_end(builder->nodes, builder->node_count,
+                                                         procedure);
+        size_t position = 0;
+        for (Ast_Node_Index node = procedure; node < procedure_end; node += 1) {
+            Ast_Node_Type node_type = builder->nodes[node].node_type;
+            if (node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+                position += 1;
+                continue;
+            }
+            if (node_type != AST_NODE_TYPE_VARIABLE_DEFINITION) {
+                continue;
+            }
+            // The build checked the type of every variable, so it is one that the target has.
+            X64_Type type = x64_variable_type(builder, node);
+            assert(type != X64_TYPE_NONE);
+            cursor = x64_debug_cursor_move(debug->source, cursor,
+                                           builder->nodes[node].source_offset);
+            x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_VARIABLE);
+            x64_write_string(writer, builder->nodes[node].payload.variable_definition.name);
+            x64_write_byte(writer, 1);
+            x64_write_u32(writer, cursor.line);
+            x64_write_u32(writer, x64_debug_type_reference(types, type));
+            x64_debug_location_write(writer, (int64_t)x64_frame_offset(position) -
+                                                 X64_DEBUG_CFA_FRAME_OFFSET_BYTES);
+            position += 1;
+        }
+
+        x64_write_byte(writer, 0);                        // The end of the children.
+    }
+
+    x64_write_byte(writer, 0);                            // The end of the children of the unit.
+    x64_patch_u32(writer, unit_start, (uint32_t)(writer->length - unit_start - 4));
+}
+
+/**
+ * Writes `.debug_line`: the program of DWARF that gives the line and the column of every row of
+ * `X64_DEBUG_ROW_KIND_LINE`, in the order of the code. It only uses the simplest instructions, one
+ * row at a time, because the size of the section does not matter.
+ */
+static void x64_debug_line_write(X64_Builder *builder, size_t text_size_bytes) {
+    X64_Writer *writer = &builder->writer;
+    X64_Debug const *debug = builder->debug;
+    size_t unit_start = writer->length;
+
+    x64_write_u32(writer, 0);                             // The size, known at the end.
+    x64_write_u16(writer, X64_DWARF_VERSION);
+    size_t header_size_offset = writer->length;
+    x64_write_u32(writer, 0);                             // The size of the rest of the header.
+    size_t header_start = writer->length;
+    // The smallest instruction is a byte, every row is the start of a statement, and the numbers of
+    // the special opcodes, which are not used, are the usual ones: lines from -5 on, 14 of them,
+    // after the 12 standard opcodes, whose numbers of operands follow.
+    static byte const HEADER[] = {1, 1, 1, 0xFB, 14, 13, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1};
+    x64_write_bytes(writer, HEADER, sizeof(HEADER));
+    x64_write_byte(writer, 0);                            // No directories besides the unit's.
+    // The one file: its path, in the directory of the unit, with no time and size.
+    x64_write_string(writer, debug->source_path);
+    x64_write_unsigned_leb128(writer, 0);
+    x64_write_unsigned_leb128(writer, 0);
+    x64_write_unsigned_leb128(writer, 0);
+    x64_write_byte(writer, 0);
+    x64_patch_u32(writer, header_size_offset, (uint32_t)(writer->length - header_start));
+
+    x64_write_byte(writer, 0);
+    x64_write_unsigned_leb128(writer, 1 + X64_DEBUG_ADDRESS_SIZE_BYTES);
+    x64_write_byte(writer, X64_DWARF_LNE_SET_ADDRESS);
+    x64_write_u64(writer, X64_IMAGE_BASE + builder->text_rva);
+
+    size_t address = 0;
+    uint32_t line = 1;
+    X64_Debug_Cursor cursor = {.offset = 0, .line_start = 0, .line = 1};
+    for (size_t i = 0; i < builder->row_count; i += 1) {
+        X64_Debug_Row row = builder->rows[i];
+        if (row.kind != X64_DEBUG_ROW_KIND_LINE) {
+            continue;
+        }
+        assert(row.code_offset >= address);
+        cursor = x64_debug_cursor_move(debug->source, cursor, row.source_offset);
+        if (row.code_offset > address) {
+            x64_write_byte(writer, X64_DWARF_LNS_ADVANCE_PC);
+            x64_write_unsigned_leb128(writer, row.code_offset - address);
+            address = row.code_offset;
+        }
+        if (cursor.line != line) {
+            x64_write_byte(writer, X64_DWARF_LNS_ADVANCE_LINE);
+            x64_write_signed_leb128(writer, (int64_t)cursor.line - (int64_t)line);
+            line = cursor.line;
+        }
+        x64_write_byte(writer, X64_DWARF_LNS_SET_COLUMN);
+        x64_write_unsigned_leb128(writer, cursor.offset - cursor.line_start + 1);
+        x64_write_byte(writer, X64_DWARF_LNS_COPY);
+    }
+
+    // The sequence ends at the end of the code.
+    if (text_size_bytes > address) {
+        x64_write_byte(writer, X64_DWARF_LNS_ADVANCE_PC);
+        x64_write_unsigned_leb128(writer, text_size_bytes - address);
+    }
+    x64_write_byte(writer, 0);
+    x64_write_unsigned_leb128(writer, 1);
+    x64_write_byte(writer, X64_DWARF_LNE_END_SEQUENCE);
+    x64_patch_u32(writer, unit_start, (uint32_t)(writer->length - unit_start - 4));
+}
+
+/**
+ * Writes `.debug_frame`, which tells a debugger how to find the frame of the caller, the CFA, and
+ * where `rbp` and the address to return to are kept, at every place of the code, so that it can
+ * show the procedures that were called and step over a call. The common entry says what holds on
+ * entry to a procedure, and then there is an entry for the start of the program and one for each
+ * procedure, see `X64_DEBUG_CFA_FRAME_OFFSET_BYTES`.
+ */
+static void x64_debug_frame_write(X64_Builder *builder, size_t text_size_bytes) {
+    X64_Writer *writer = &builder->writer;
+
+    // The common entry: no augmentation, instructions of one byte, slots of 8 bytes that go down,
+    // the address to return to is the register of `rip`, the CFA is `rsp + 8` and the address to
+    // return to is in the slot right below it.
+    size_t common_start = writer->length;
+    x64_write_u32(writer, 0);
+    x64_write_u32(writer, UINT32_MAX);
+    x64_write_byte(writer, X64_DWARF_FRAME_VERSION);
+    x64_write_byte(writer, 0);
+    x64_write_unsigned_leb128(writer, 1);
+    x64_write_signed_leb128(writer, -X64_SLOT_SIZE_BYTES);
+    x64_write_byte(writer, X64_DWARF_REGISTER_RIP);
+    x64_write_byte(writer, X64_DWARF_CFA_DEF_CFA);
+    x64_write_unsigned_leb128(writer, X64_DWARF_REGISTER_RSP);
+    x64_write_unsigned_leb128(writer, X64_DEBUG_CFA_ENTRY_OFFSET_BYTES);
+    x64_write_byte(writer, X64_DWARF_CFA_OFFSET | X64_DWARF_REGISTER_RIP);
+    x64_write_unsigned_leb128(writer, 1);
+    x64_debug_entry_close(builder, common_start);
+
+    // The start of the program makes 40 bytes of the stack with its first instruction of 4 bytes,
+    // and never returns.
+    size_t first_procedure = text_size_bytes;
+    for (size_t i = 0; i < builder->constant_count; i += 1) {
+        if (builder->constants[i].kind == X64_CONSTANT_KIND_PROCEDURE) {
+            first_procedure = builder->constants[i].offset;
+            break;
+        }
+    }
+    size_t start_entry = writer->length;
+    x64_write_u32(writer, 0);
+    x64_write_u32(writer, 0);                             // The common entry is at the start.
+    x64_write_u64(writer, X64_IMAGE_BASE + builder->text_rva);
+    x64_write_u64(writer, first_procedure);
+    x64_write_byte(writer, X64_DWARF_CFA_ADVANCE_LOC4);
+    x64_write_u32(writer, 4);
+    x64_write_byte(writer, X64_DWARF_CFA_DEF_CFA_OFFSET);
+    x64_write_unsigned_leb128(writer,
+                              X64_DEBUG_CFA_ENTRY_OFFSET_BYTES + X64_DEBUG_START_FRAME_BYTES);
+    x64_debug_entry_close(builder, start_entry);
+
+    // The rows are in the order of the code, and so are the procedures, so the rows of `leave` of
+    // each are found by going on from where the last one ended.
+    size_t row_index = 0;
+    for (size_t i = 0; i < builder->constant_count; i += 1) {
+        if (builder->constants[i].kind != X64_CONSTANT_KIND_PROCEDURE) {
+            continue;
+        }
+        size_t start = builder->constants[i].offset;
+        size_t end = x64_debug_procedure_end(builder, i, text_size_bytes);
+        size_t entry = writer->length;
+        x64_write_u32(writer, 0);
+        x64_write_u32(writer, 0);
+        x64_write_u64(writer, X64_IMAGE_BASE + x64_debug_address_rva(builder, start));
+        x64_write_u64(writer, end - start);
+
+        // After `push rbp`, which is 1 byte, the CFA is `rsp + 16` and `rbp` is kept right below
+        // the address to return to. After `mov rbp, rsp`, which is 3 bytes, the CFA is `rbp + 16`
+        // for the rest of the procedure, whatever it pushes.
+        x64_write_byte(writer, X64_DWARF_CFA_ADVANCE_LOC4);
+        x64_write_u32(writer, 1);
+        x64_write_byte(writer, X64_DWARF_CFA_DEF_CFA_OFFSET);
+        x64_write_unsigned_leb128(writer, X64_DEBUG_CFA_FRAME_OFFSET_BYTES);
+        x64_write_byte(writer, X64_DWARF_CFA_OFFSET | X64_DWARF_REGISTER_RBP);
+        x64_write_unsigned_leb128(writer, 2);
+        x64_write_byte(writer, X64_DWARF_CFA_ADVANCE_LOC4);
+        x64_write_u32(writer, 3);
+        x64_write_byte(writer, X64_DWARF_CFA_DEF_CFA_REGISTER);
+        x64_write_unsigned_leb128(writer, X64_DWARF_REGISTER_RBP);
+        size_t location = start + 4;
+
+        // After a `leave`, which is 1 byte, `rbp` is the one of the caller again and the CFA is
+        // `rsp + 8`, until the `ret` after it. A `return` that is not the end of the procedure has
+        // more code after its `ret`, where the frame is as it was before the `leave`.
+        for (; row_index < builder->row_count; row_index += 1) {
+            X64_Debug_Row row = builder->rows[row_index];
+            if (row.code_offset >= end) {
+                break;
+            }
+            if (row.kind != X64_DEBUG_ROW_KIND_LEAVE) {
+                continue;
+            }
+            assert(row.code_offset + 1 >= location);
+            x64_write_byte(writer, X64_DWARF_CFA_ADVANCE_LOC4);
+            x64_write_u32(writer, (uint32_t)(row.code_offset + 1 - location));
+            x64_write_byte(writer, X64_DWARF_CFA_DEF_CFA);
+            x64_write_unsigned_leb128(writer, X64_DWARF_REGISTER_RSP);
+            x64_write_unsigned_leb128(writer, X64_DEBUG_CFA_ENTRY_OFFSET_BYTES);
+            x64_write_byte(writer, X64_DWARF_CFA_RESTORE | X64_DWARF_REGISTER_RBP);
+            location = row.code_offset + 1;
+            if (row.code_offset + 2 < end) {
+                x64_write_byte(writer, X64_DWARF_CFA_ADVANCE_LOC4);
+                x64_write_u32(writer, 1);
+                x64_write_byte(writer, X64_DWARF_CFA_DEF_CFA);
+                x64_write_unsigned_leb128(writer, X64_DWARF_REGISTER_RBP);
+                x64_write_unsigned_leb128(writer, X64_DEBUG_CFA_FRAME_OFFSET_BYTES);
+                x64_write_byte(writer, X64_DWARF_CFA_OFFSET | X64_DWARF_REGISTER_RBP);
+                x64_write_unsigned_leb128(writer, 2);
+                location += 1;
+            }
+        }
+        x64_debug_entry_close(builder, entry);
+    }
+}
+
+/**
+ * Ends the entry of `.debug_frame` that starts at `entry_start`: it is padded with instructions
+ * that do nothing to a multiple of the size of an address, as the format asks, and its size, which
+ * does not count the 4 bytes of the size, is written at its start.
+ */
+static void x64_debug_entry_close(X64_Builder *builder, size_t entry_start) {
+    X64_Writer *writer = &builder->writer;
+    size_t size_bytes = writer->length - entry_start;
+    // The instruction that does nothing is a zero.
+    x64_write_zeros(writer, x64_align_up(size_bytes, X64_DEBUG_ADDRESS_SIZE_BYTES) - size_bytes);
+    x64_patch_u32(writer, entry_start, (uint32_t)(writer->length - entry_start - 4));
+}
+
+/**
+ * Writes a location of DWARF that is `cfa_offset` bytes from the CFA of the procedure, which is
+ * its frame base, with the size of the expression before it.
+ */
+static void x64_debug_location_write(X64_Writer *writer, int64_t cfa_offset) {
+    // The number takes one byte for each 7 bits of it, with the sign.
+    size_t number_size_bytes = 1;
+    for (int64_t rest = cfa_offset >> 6; rest != 0 && rest != -1; rest >>= 7) {
+        number_size_bytes += 1;
+    }
+    x64_write_unsigned_leb128(writer, 1 + number_size_bytes);
+    x64_write_byte(writer, X64_DWARF_OP_FBREG);
+    x64_write_signed_leb128(writer, cfa_offset);
+}
+
+/**
+ * Returns the offset in the code of the end of the procedure at `position` of the constants, which
+ * is where the next procedure with code starts, or the end of the code for the last one.
+ */
+static size_t x64_debug_procedure_end(X64_Builder const *builder, size_t position,
+                                      size_t text_size_bytes) {
+    assert(position < builder->constant_count);
+    assert(builder->constants[position].kind == X64_CONSTANT_KIND_PROCEDURE);
+
+    for (size_t i = position + 1; i < builder->constant_count; i += 1) {
+        if (builder->constants[i].kind == X64_CONSTANT_KIND_PROCEDURE) {
+            return builder->constants[i].offset;
+        }
+    }
+    return text_size_bytes;
+}
+
+/**
+ * Returns the address in memory, relative to the image, of the code at `code_offset`.
+ */
+static uint32_t x64_debug_address_rva(X64_Builder const *builder, size_t code_offset) {
+    return (uint32_t)(builder->text_rva + code_offset);
+}
+
+/**
+ * Returns where the entry of `type` is in `.debug_info`, which `type` must have.
+ */
+static uint32_t x64_debug_type_reference(X64_Debug_Types types, X64_Type type) {
+    switch (type) {
+    case X64_TYPE_C_STR:
+        return types.c_str_type;
+    case X64_TYPE_INT:
+        return types.int_type;
+    case X64_TYPE_NONE:
+        assert(false);
+        return 0;
+    }
+    assert(false);
+    return 0;
+}
+
+/**
+ * Returns the cursor at `offset` in `source`, read on from `cursor`, or from the start when the
+ * offset is before it, so that places in the order of the source are counted in one pass.
+ */
+static X64_Debug_Cursor x64_debug_cursor_move(Str source, X64_Debug_Cursor cursor,
+                                              size_t offset) {
+    assert(offset <= source.length);
+
+    if (offset < cursor.offset) {
+        cursor = (X64_Debug_Cursor){.offset = 0, .line_start = 0, .line = 1};
+    }
+    for (size_t i = cursor.offset; i < offset; i += 1) {
+        if (source.bytes[i] == '\n') {
+            cursor.line += 1;
+            cursor.line_start = i + 1;
+        }
+    }
+    cursor.offset = offset;
+    return cursor;
+}
+
+/**
+ * Returns where the bytes of the string literal `literal` are in `.rdata`, counted from the start
+ * of the strings, which are in the order of the nodes, see `x64_rdata_write`.
+ */
+static size_t x64_string_offset(X64_Builder const *builder, Ast_Node_Index literal) {
+    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_STRING_LITERAL);
+
+    size_t offset = 0;
+    for (Ast_Node_Index node = 0; node < literal; node += 1) {
+        if (builder->nodes[node].node_type == AST_NODE_TYPE_STRING_LITERAL) {
+            offset += builder->nodes[node].payload.string_literal.text.length + 1;
+        }
+    }
+    return offset;
+}
+
+/**
+ * Writes `number` at `offset` of what was written already, which is how a size that is known only
+ * at the end is written at the start. A writer that overflowed may not have the place, and its
+ * file is not handed out, so nothing is written then.
+ */
+static void x64_patch_u32(X64_Writer *writer, size_t offset, uint32_t number) {
+    if (offset + 4 > writer->length) {
+        assert(writer->is_overflowed);
+        return;
+    }
+    x64_store_u32(writer->bytes + offset, number);
+}
+
+/**
+ * Writes `text` and a zero after it, which is how DWARF and the table of strings have a string.
+ */
+static void x64_write_string(X64_Writer *writer, Str text) {
+    x64_write_bytes(writer, (byte const *)text.bytes, text.length);
+    x64_write_byte(writer, 0);
+}
+
+/**
+ * Writes `number` in the LEB128 format of DWARF: 7 bits in each byte, the lowest first, with the
+ * top bit set in every byte but the last.
+ */
+static void x64_write_unsigned_leb128(X64_Writer *writer, uint64_t number) {
+    // A 64-bit number has at most 10 groups of 7 bits.
+    for (size_t i = 0; i < 10; i += 1) {
+        byte low = (byte)(number & 0x7F);
+        number >>= 7;
+        if (number == 0) {
+            x64_write_byte(writer, low);
+            return;
+        }
+        x64_write_byte(writer, (byte)(low | 0x80));
+    }
+    assert(false);
+}
+
+/**
+ * Writes `number` in the signed LEB128 format of DWARF, which ends when the rest is only the sign,
+ * and the sign bit of the last byte agrees with it.
+ */
+static void x64_write_signed_leb128(X64_Writer *writer, int64_t number) {
+    // A 64-bit number has at most 10 groups of 7 bits. The shift of a negative number is
+    // arithmetic on every compiler that the project is built with, and the arithmetic is done on
+    // the bits of an unsigned number so that it has no undefined behavior.
+    uint64_t bits = (uint64_t)number;
+    bool is_negative = number < 0;
+    for (size_t i = 0; i < 10; i += 1) {
+        byte low = (byte)(bits & 0x7F);
+        bits >>= 7;
+        if (is_negative) {
+            bits |= ~(UINT64_MAX >> 7);
+        }
+        bool is_done = (bits == 0 && (low & 0x40) == 0) ||
+                       (bits == UINT64_MAX && (low & 0x40) != 0);
+        if (is_done) {
+            x64_write_byte(writer, low);
+            return;
+        }
+        x64_write_byte(writer, (byte)(low | 0x80));
+    }
+    assert(false);
 }
 
 /**

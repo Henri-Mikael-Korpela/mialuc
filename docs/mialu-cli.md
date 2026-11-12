@@ -28,8 +28,8 @@ See the [language specification](mialu-programming-language.md) for the language
 Usage:
 
 ```
-mialuc build --target <target> -o <output file> <source file>
-mialuc build --target <target> <output file> <source file>
+mialuc build --target <target> [--debug] -o <output file> <source file>
+mialuc build --target <target> [--debug] <output file> <source file>
 ```
 
 Build compiles the source file for the target, and writes the program to the output file. It writes nothing to the standard output, and does not create the output file when the program has an error.
@@ -44,14 +44,34 @@ x64-win32   an executable file for Windows on x64
 
 See [Targets](#targets).
 
+The `--debug` flag, right after the target, adds debug information to the program, so that it can be debugged with gdb, also from VS Code, see [Debugging](#debugging). Only the `x64-win32` target has it, and the flag is a usage error with another target.
+
 The `-o` flag says where to write the program. The output file can also be written without it, directly after the target, which is how it was written before there was a flag for it. Either form replaces a file that is already there.
 
 For example:
 
 ```
 mialuc build --target x64-win32 -o hello.exe test-code/x64/foreign-functions-libc.mu
+mialuc build --target x64-win32 --debug -o hello.exe test-code/x64/foreign-functions-libc.mu
 mialuc build --target wasm -o loops.wasm test-code/wasm/loops.mu
 mialuc build --target wat -o loops.wat test-code/wasm/loops.mu
+```
+
+### Debugging
+
+A program that is built with `--debug` has the same code as one built without it, and runs the same, but it also has sections that a debugger reads:
+
+- The DWARF debug information, version 4, which gdb reads from a file of this format: `.debug_info` has the procedures, their parameters and variables, where each is kept in the frame, their types, and the constants that are strings, `.debug_line` has the line and the column of every procedure and statement, and `.debug_frame` tells how to find the frame of the caller, so that the debugger can show the procedures that were called and step over a call. The language of the information is C, because gdb has no Mialu, and its C shows an `Int` as a number and a `C_Str` as its text.
+- `.pdata`, the table that Windows has for unwinding the stack of a program for x64, which gdb uses to find where the first statement of a procedure is, so that a breakpoint on a procedure stops there.
+
+The source file is named by its absolute path, so a debugger finds it whatever directory it runs in. gdb from [MinGW-w64](https://github.com/niXman/mingw-builds-binaries/releases) can debug such a program:
+
+```
+mialuc build --target x64-win32 --debug -o variables.exe test-code/x64/variables.mu
+gdb variables.exe
+(gdb) break variables.mu:22
+(gdb) run
+(gdb) info locals
 ```
 
 ## Compile a program and print its assembly
