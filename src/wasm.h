@@ -259,20 +259,29 @@ typedef struct {
  * Builds a WebAssembly binary module from the syntax tree below `root`, which must be the
  * `AST_NODE_TYPE_MODULE` node of a successful `parse`. `nodes` holds `Ast_Node` elements, and
  * `bindings` holds the `Semantic_Binding` elements that `semantic_analyze` made for the same tree,
- * so every name in the tree is known to stand for a parameter or a constant. The module is written
- * to `output_buffer`, which holds `byte` elements.
+ * so every name in the tree is known to stand for a parameter or a constant, and `constants` holds
+ * the `Constant_Value` elements that it made, which say what is known about each node when the
+ * program is compiled. The module is written to `output_buffer`, which holds `byte` elements.
+ *
+ * An expression that is a constant, such as `42`, `LIMIT * 2` or `"Hello"`, is written as the
+ * instruction that pushes its value, and its operands are not. An untyped constant is written as
+ * a value of the type that its place wants, when its value fits in it: an untyped integer is
+ * `i64.const`, or `i32.const` where a `Byte` is wanted, an untyped truth value is `i32.const` of 1 or
+ * 0, and an untyped string is the address and the length of its literal, or the address alone
+ * where a `C_Str` is wanted, because the bytes of a literal have a zero after them.
  *
  * Every constant definition becomes a function that the module exports under the name of the
  * definition. A global variable becomes a mutable global of the module, or two when it is a `Str`,
- * in the order of the source, which is not exported. Its initial value is a literal, and it is set
+ * in the order of the source, which is not exported. Its initial value is a constant, and it is set
  * once when the module is instantiated, so the global keeps its value between calls. A use of one
  * in a procedure is a `global.get`, and an assignment to one is a `global.set`. A variable of a
  * procedure is a local of its function, or two locals when it is a `Str`, after the
  * parameters. The iterator of a for statement is a local too, followed by one more local that holds
- * the end of its range, which is read once before the loop. A definition whose value is a string
- * literal becomes a function without parameters that returns the string. A use of such a constant
- * in a procedure is a call of that function, so the constant can be used above its definition as
- * well.
+ * the end of its range, which is read once before the loop. A definition whose value is a constant,
+ * such as a number or a string, becomes a function without parameters that returns the value, as a
+ * value of the type that the constant has where nothing else says, see `constant_type_default`. A
+ * use of such a constant in a procedure is its value, like a literal, and not a call of that
+ * function, so the constant can be used above its definition as well.
  *
  * `Int` is a 64-bit integer (`i64`), so callers from JavaScript pass and receive `BigInt`.
  * `Str` is two 32-bit integers (`i32`), the address of its first byte in memory and its length
@@ -341,7 +350,7 @@ typedef struct {
  * struct as a value. Such trees are rejected with a status other than
  * `WASM_BUILD_STATUS_OK`.
  */
-Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,
-                             Array_Slice output_buffer);
+Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slice constants,
+                             Ast_Node_Index root, Array_Slice output_buffer);
 
 #endif

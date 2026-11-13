@@ -38,15 +38,28 @@
        targets are `js` and `libc`. A foreign procedure takes and gives `Int`, `Bool`, `Byte`,
        `Str`, `C_Str` or a struct, as any other procedure does, and an array only as a slice. The name
        of the object of `js` is not checked, because it is not known until the program runs.
+     - A literal is untyped: it becomes the type that its place wants, when its value fits in it,
+       and else it has its default type. An integer literal is an `Int`, or a `Byte` where one is
+       wanted and its value is from 0 to 255. A string literal is a `Str`, or a `C_Str` where one is
+       wanted, `true` and `false` are a `Bool`, and `nil` is a pointer of any type. A constant that
+       is defined without a type, such as `LIMIT :: 200`, is untyped in the same way, and so is
+       an operator of untyped constants, such as `LIMIT * 2`, which the compiler works out. A
+       constant that is defined with a type, such as `LIMIT : Byte : 200`, has that type, which is
+       `Int`, `Byte`, `Bool` or `Str`, and its value must fit in it.
+     - The value of a constant that is not a procedure, a struct, an enum or the member of an enum
+       must be known when the program is compiled: literals, other such constants, and the
+       arithmetic, comparison and logical operators of them. A constant cannot be defined in terms
+       of itself, a constant expression cannot divide by zero, and its value must fit in an `Int`
+       at every step, because a constant does not wrap around.
      - `str_to_c_str` is a built-in procedure like `length_of`. It takes a `Str` and gives a
        `C_Str`. The target decides what it supports, for example where the string may come from.
-       A `C_Str` is given the result of `str_to_c_str`, or another `C_Str`, and nothing else: a
-       string literal is a `Str` and is not converted to a `C_Str` implicitly.
+       A `C_Str` is given the result of `str_to_c_str`, another `C_Str` or an untyped string, and
+       nothing else: a typed `Str` is not converted to a `C_Str` implicitly.
      - The only attribute is `static`, it cannot be given twice, and every global variable must
        have it, because a global variable has static storage duration. A global variable can be
        used in every procedure of the module, also above where it is defined, and it can be assigned
        to like a variable. The type of a global variable must make sense for the target too, and
-       the literal that it is given must be of that type.
+       the constant that it is given must be of that type, or fit in it when it is untyped.
      - The types in a program must make sense for the target, for example `Str` has no addition,
        which the grammar cannot tell from `Int`, and the value of a variable must be of the type
        that the variable is given.
@@ -57,7 +70,7 @@
        defines. It takes one array or array slice.
      - `byte_to_int` and `int_to_byte` are built-in procedures like `length_of`. `byte_to_int`
        takes a `Byte` and gives an `Int`, and `int_to_byte` takes an `Int` and gives a `Byte`.
-       An integer literal from 0 to 255 is a `Byte` where a `Byte` is wanted, and any other
+       An untyped integer from 0 to 255 is a `Byte` where a `Byte` is wanted, and any other
        `Int` is not one, so `b : Byte = 256` is an error. A `Byte` has no arithmetic.
      - The name of a call must be a procedure, or a variable, a parameter or a global variable that
        holds a pointer to a procedure, and the arguments must match the parameters in number and in
@@ -77,7 +90,7 @@
        `break` or a `continue` in it must not leave it, because it runs while its block is being
        left. The names in a deferred statement are looked up where the `defer` is.
      - The condition of an if statement must be a `Bool`, so a number or a string is not one, and
-       the operands of a comparison must both be `Int`, or both `Byte` (or an integer literal
+       the operands of a comparison must both be `Int`, or both `Byte` (or an untyped integer
        from 0 to 255, which is a `Byte` there), or both `Bool` for `==` and `not=`. A
        variable defined in a block can only be used in that block. All are checked after parsing.
      - The elements of an array and of an array slice must be `Int`, `Bool`, `Byte`, `Str` or a struct, an
@@ -132,7 +145,7 @@
        call, an array or an array slice. There is no pointer to an array or to an array slice, so
        the caret of a pointer type is followed by a name or by another caret. A return type is
        never an array or an array slice either, and a global variable is never a pointer, because
-       its value is a literal and no literal is a pointer. All of this the grammar cannot tell.
+       its value is a constant and no constant is a pointer. All of this the grammar cannot tell.
 *)
 
 module = { blank_line | definition | foreign_import | foreign_block } , end_of_input ;
@@ -167,12 +180,16 @@ foreign_procedure =
 
 (* A constant definition. It starts in the first column, so a line that starts with a space or a
    tab does not match here. `::` is two separate ':' characters for the compiler, so spaces may
-   be between them. The value is a procedure, a struct, an enum, the member of an enum such as
-   `Color.RED`, or a string on one line. *)
+   be between them. The value is a procedure, a struct, an enum, or an expression on one line, such
+   as `100`, `"Hello"`, `LIMIT * 2` or the member of an enum such as `Color.RED`, which the compiler
+   checks is known when the program is compiled. A typed constant has its type between the two
+   colons, `LIMIT : Byte : 200`, and its value is an expression. *)
 constant_definition =
-    name , ws , ":" , ws , ":" , ws ,
-    ( procedure | string_literal , ws , line_end | struct_definition | enum_definition |
-      enum_member_value ) ;
+    name , ws , ":" , ws ,
+    ( ":" , ws , ( procedure | struct_definition | enum_definition | constant_value ) |
+      type , ws , ":" , ws , constant_value ) ;
+
+constant_value = expression , ws , line_end ;
 
 (* A struct is a record type: `struct ->` and then its fields, one on each line, indented one level
    deeper, each of them `name: Type`. The type of a field can be `struct ->` again, followed by
@@ -198,9 +215,6 @@ enum_definition = "enum" , required_space , type_name , branch_end , enum_body ;
 enum_body = { blank_line } , enum_member , { blank_line | enum_member } ;
 
 enum_member = indentation_1 , name , ws , line_end ;
-
-(* The value of a constant that is the member of an enum. *)
-enum_member_value = name , ws , "." , ws , name , ws , line_end ;
 
 struct_body_1 = { blank_line } , struct_item_1 , { blank_line | struct_item_1 } ;
 struct_item_1 = struct_field_1 | union_match_1 ;
@@ -245,17 +259,16 @@ struct_field_4 = indentation_4 , name , ws , ":" , ws , type , ws , line_end ;
 
 (* A global variable, which is also defined in the first column. It has static storage duration:
    it exists for as long as the program runs, and it is initialized once, before any procedure is
-   called. Its value is a literal, or a field of the information about a type, which is known when
-   the program is compiled, because nothing runs before it is set, and it keeps what the
-   procedures assign to it from one call to the next. The attribute list comes right after the
-   name, and `static` in it is required. Without a type the type of the variable is the type of the
-   literal. `counter #(static) := 0` is an `Int`, `ready #(static) : Bool = false` gives the type. *)
+   called. Its value is a constant expression, such as `0` or `LIMIT * 2`, or a field of the
+   information about a type, which is known when the program is compiled, because nothing runs
+   before it is set, and it keeps what the procedures assign to it from one call to the next. The
+   grammar takes any expression, and the compiler checks that it is one of those. The attribute
+   list comes right after the name, and `static` in it is required. Without a type the type of the
+   variable is the default type of the value. `counter #(static) := 0` is an `Int`,
+   `ready #(static) : Bool = false` gives the type. *)
 global_variable_definition =
     name , ws , [ attribute_list , ws ] , ":" , ws , [ type , ws ] , "=" , ws ,
-    global_value , ws , line_end ;
-
-global_value =
-    integer_literal | bool_literal | string_literal | type_info_of , { ws , postfix } ;
+    expression , ws , line_end ;
 
 (* An attribute list starts with `#`, and has one or more attributes, each of them between
    parentheses: `#(static)`, or `#(first)(second)`. An attribute is a name. The compiler knows

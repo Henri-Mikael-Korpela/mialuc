@@ -6,3 +6,6 @@ say_farewell()
 
 // greet_twice keeps the C_Str in a variable, and passes it on to log_twice.
 greet_twice()
+
+// greet_untyped passes a string literal and a constant as they are, which are C_Str there.
+greet_untyped()

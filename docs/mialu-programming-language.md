@@ -19,6 +19,7 @@
   - [Logical operators](#logical-operators)
 - [Constants and variables](#constants-and-variables)
   - [Constants](#constants)
+  - [Untyped constants](#untyped-constants)
   - [Variables](#variables)
   - [Global variables](#global-variables)
 - [Control flow structures](#control-flow-structures)
@@ -203,7 +204,7 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 |-------|--------------------------------------------------------------|
 | `Bool` | A boolean value, which is `true` or `false`. See [Booleans](#booleans). |
 | `Byte` | An unsigned 8-bit integer, from 0 to 255. It is the unit of memory and of binary data. See [Bytes](#bytes). |
-| `Int` | A signed 64-bit integer. Written as a decimal number, such as `42`. See [Integers](#integers). |
+| `Int` | A signed 64-bit integer. Written as a number, such as `42`, `0b101010` or `0x2A`. See [Integers](#integers). |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
 | `C_Str` | A null-terminated C string, the address of bytes that end with a zero. It is for passing text to and from code written in C, to a parameter of type `char *` or `char const *`. See [C strings](#c-strings). |
 
@@ -247,7 +248,7 @@ flags := 0b1111_0000
 mask := 0xFF_FF
 ```
 
-Every literal is an `Int` whatever its base, so the bases can be mixed, and `0b1010 + 10 + 0xA` is 30. A literal that does not fit in an `Int` is an error in every base, so the largest hexadecimal literal is `0x7FFF_FFFF_FFFF_FFFF`, and `0xFFFF_FFFF_FFFF_FFFF` is an error and not -1. There is no negative literal, so a negative number is written as a subtraction, such as `0 - 4` or `0 - 0x10`. A literal must not be directly followed by a letter or an underscore, so `12a`, `0b102` and `0xFG` are errors that name the character that is not a digit of the literal.
+A literal is the same untyped integer whatever its base, which is an `Int` where nothing else is wanted, see [Untyped constants](#untyped-constants), so the bases can be mixed, and `0b1010 + 10 + 0xA` is 30. A literal that does not fit in an `Int` is an error in every base, so the largest hexadecimal literal is `0x7FFF_FFFF_FFFF_FFFF`, and `0xFFFF_FFFF_FFFF_FFFF` is an error and not -1. There is no negative literal, so a negative number is written as a subtraction, such as `0 - 4` or `0 - 0x10`. A literal must not be directly followed by a letter or an underscore, so `12a`, `0b102` and `0xFG` are errors that name the character that is not a digit of the literal.
 
 > **Lessons learnt from C** In C, a literal that starts with `0`, such as `010`, is octal, so a number that is padded with a zero to line up with others quietly becomes another number. In Mialu a leading zero changes nothing, `010` is ten, and a base other than decimal is always spelled out with a letter, `0b` or `0x`.
 
@@ -255,13 +256,15 @@ The arithmetic operators `+`, `-`, `*` and `/` take two `Int` values and give an
 
 > **Lessons learnt from C** In C, the size of `int` and `long` depends on the platform, so the same code can overflow on one machine and not on another, and overflow of a signed integer is undefined behavior, which lets a compiler assume that it never happens and remove checks that a programmer wrote against it. Integer types of different sizes and signs are also converted into each other silently, so a comparison of a signed and an unsigned number can give a surprising answer. In Mialu there is one `Int` of 64 bits whose overflow wraps around in a defined way, nothing is converted implicitly, and the cases of division that have no result are traps and not undefined behavior.
 
-An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an error, and an operand of arithmetic that is not an `Int` is an error. The integer types `I8`, `I16`, `I32`, `I64` and `U8`, `U16`, `U32`, `U64` are reserved for possible future use, see [Primitive data types](#primitive-data-types).
+An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an error, it is not a `Byte`, and an operand of arithmetic that is not an `Int` is an error. A literal or a constant without a type is not an `Int` yet, so it becomes a `Byte` where one is wanted without being converted, see [Untyped constants](#untyped-constants). The integer types `I8`, `I16`, `I32`, `I64` and `U8`, `U16`, `U32`, `U64` are reserved for possible future use, see [Primitive data types](#primitive-data-types).
 
 ### Bytes
 
 A `Byte` is an unsigned 8-bit integer: it holds the numbers from 0 to 255. It can be used to represent individual bytes of memory. The default value for `Byte` is `0`.
 
 The built-in procedures `byte_to_int` and `int_to_byte` allow conversion between bytes and integers.
+
+An untyped integer from 0 to 255, which is a literal, a constant without a type or a constant expression of them, is a `Byte` where a `Byte` is wanted, so `b : Byte = 200`, `b >= 65` and `[3]Byte { 1, 2, 3 }` need no conversion, and `b : Byte = 300` is an error, see [Untyped constants](#untyped-constants). An `Int` is never a `Byte`, whatever its value, because its value is known only when the program runs.
 
 A `Byte` has no arithmetic: `a + b` for two bytes is an error, and the arithmetic is done on `Int` values, as in `byte_to_int(a) + byte_to_int(b)`.
 
@@ -285,7 +288,7 @@ A `C_Str` (short for "C string") represents a null-terminated string. Unlike `St
 
 A `C_Str` is for interoperating with existing C code, as in [foreign procedures](#foreign-procedures), the equivalent type in C being `char*` or `char const*` Nothing can be done with a `C_Str` but to keep it in a variable or a parameter, pass it on, return it, and hand it to a foreign procedure.
 
-A `Str` is never converted to a `C_Str` implicitly and there is no `C_Str` literal. The built-in procedure `str_to_c_str` makes a `C_Str` of a `Str`, and the `C_Str` it gives can be kept in a variable, passed on or returned. Example:
+A `Str` value is never converted to a `C_Str` implicitly. A string literal, and a constant that is an untyped string, is not a `Str` yet: it is a `C_Str` where one is wanted, which is the same as `str_to_c_str` of it, see [Untyped constants](#untyped-constants). The built-in procedure `str_to_c_str` makes a `C_Str` of a `Str` explicitly, and the `C_Str` it gives can be kept in a variable, passed on or returned. Example:
 
 ```
 import foreign libc
@@ -294,15 +297,16 @@ foreign libc ->
     puts :: proc(content: C_Str) -> ...
 
 greet :: proc() ->
-    text : C_Str = str_to_c_str("Hello, world!")
+    text : C_Str = "Hello, world!"
     puts(text)
 
 main :: proc() Int ->
-    puts(str_to_c_str("Hello, world!"))
+    puts("Hello, world!")
+    puts(str_to_c_str("The same, written out."))
     return 0
 ```
 
-`str_to_c_str` copies the bytes of its argument and a zero after them to temporary storage, and gives the address of the copy. Temporary storage is a stack of strings that belongs to the program: a copy is made on top of it, and all the copies that a procedure made are given back when that procedure returns. So the `C_Str` that `str_to_c_str` gives is good until the procedure that called it returns, and it must not be returned from that procedure or kept anywhere that outlives it. Temporary storage has a fixed size, and a program that makes more copies than fit in it is stopped.
+`str_to_c_str`, and an untyped string that is a `C_Str`, copies the bytes of the string and a zero after them to temporary storage, and gives the address of the copy. Temporary storage is a stack of strings that belongs to the program: a copy is made on top of it, and all the copies that a procedure made are given back when that procedure returns. So the `C_Str` that `str_to_c_str` gives is good until the procedure that called it returns, and it must not be returned from that procedure or kept anywhere that outlives it. Temporary storage has a fixed size, and a program that makes more copies than fit in it is stopped.
 
 See [Compilation targets](#compilation-targets) for which targets have it, and what they allow as the argument.
 
@@ -446,7 +450,7 @@ is_even :: proc(n: Int) Bool ->
     return n / 2 * 2 == n
 ```
 
-Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. `Int` and `Byte` are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an integer literal from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Strings cannot be compared.
+Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. `Int` and `Byte` are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an untyped integer from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Strings cannot be compared.
 
 A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, see [Operators](#operators).
 
@@ -494,11 +498,58 @@ sum :: proc(a: Int, b: Int) Int ->
     return a + b
 ```
 
-A constant can also be a [struct](#structs) or an [enum](#enumerations), which are types, the [member of an enum](#enumerations), and a string, which is written on its own line:
+A constant can also be a [struct](#structs) or an [enum](#enumerations), which are types, the [member of an enum](#enumerations), or a value that is known when the program is compiled, which is written on its own line:
 
 ```
-greeting :: "Hello, world"
+LIMIT :: 100
+GREETING :: "Hello, world"
+DEBUG :: true
 ```
+
+The value of such a constant is a constant expression: a literal, the name of another constant, or the arithmetic, comparison and logical operators applied to them, such as `DOUBLE_LIMIT :: LIMIT * 2` or `VERBOSE :: DEBUG and LIMIT > 50`. The compiler works the value out, so a constant costs nothing when the program runs: a use of its name is its value, as if the literal were written there. A constant can be used above the line where it is defined, like any constant, and it can be defined in terms of constants below it, but not in terms of itself, so `A :: B` together with `B :: A + 1` is an error. A call, a variable, a parameter and a global variable have a value only when the program runs, so `START :: clock()` is an error.
+
+Arithmetic in a constant expression is exact. A step whose result does not fit in an `Int`, such as `0x7FFF_FFFF_FFFF_FFFF + 1`, is an error, and so is a division by zero, such as `1 / 0`, where the same operation on variables would wrap around or trap when the program runs. That goes for the parts of any expression that are constants, so `x + 1 / 0` is an error as well.
+
+### Untyped constants
+
+A literal has no type of its own. `200` is an untyped integer: a number without a size, which becomes the type that the place where it is used wants, when its value fits in that type. The same goes for every constant that is defined without a type, such as `LIMIT :: 200`, and for every constant expression of them, such as `LIMIT / 2`. So one constant can be given to an `Int` and to a `Byte`:
+
+```
+LIMIT :: 200
+
+both :: proc() Int ->
+    count : Int = LIMIT
+    small : Byte = LIMIT
+    return count + byte_to_int(small)
+```
+
+An untyped constant becomes a value of its type when the program is compiled, so nothing is converted while the program runs, and only where its value fits: `b : Byte = 300` and `b : Byte = LIMIT + 100` are errors, because 300 is not a `Byte`. There are three untyped kinds. Each has a default type, which is the type that an untyped constant has where its place does not say which type it wants, such as the value of a variable without a type, `x := LIMIT`:
+
+| Kind | Literals | Becomes | Default type |
+| ---- | -------- | ------- | ------------ |
+| Untyped integer | `42`, `0b101010`, `0x2A` | `Int`, or a `Byte` when it is from 0 to 255 | `Int` |
+| Untyped boolean | `true`, `false` | `Bool` | `Bool` |
+| Untyped string | `"Hello"` | `Str`, or a `C_Str` | `Str` |
+
+`nil` is untyped in the same way: it is a pointer of any type, see [Null and lifetime](#null-and-lifetime).
+
+Two untyped operands give an untyped result, so `LIMIT * 2` is the untyped integer 400. A comparison of constants, such as `LIMIT > 100`, gives an untyped boolean, and so do `and`, `or` and `not` of untyped booleans. An untyped integer next to an `Int` that is known only when the program runs, as in `x + 1`, becomes an `Int`, and one that is compared with a `Byte`, as in `b == 65`, becomes a `Byte`, which it must fit in.
+
+An untyped string is a `C_Str` where one is wanted, such as for a parameter of a [foreign procedure](#foreign-procedures), and it is then what `str_to_c_str` of it gives, see [Strings](#strings). So `puts("Hello")` passes the string to the C library without a call of `str_to_c_str`.
+
+A constant can be given a type, which is written between its two colons, `name : Type : value`. A typed constant has that type, like a variable, and it is not converted, so it is used only where a value of its type is:
+
+```
+MASK : Byte : 0x0F
+COUNT : Int : 3
+NAME : Str : "Mialu"
+```
+
+The type of a constant is `Int`, `Byte`, `Bool` or `Str`, and its value must be a constant expression that has that type, or that is untyped and fits in it, so `MASK : Byte : 256` and `COUNT : Int : "three"` are errors. A typed constant follows the rules of its type: `MASK + 1` is an error, because a `Byte` has no arithmetic, and so is `b : Byte = COUNT`, because an `Int` is not a `Byte`. A typed and an untyped operand give a value of the type, so `COUNT * 2` is the `Int` 6.
+
+That is how a literal is written once and used with every type that can hold it: no type is chosen for it until it is used, so it needs no conversion, which `byte_to_int` and `int_to_byte` are for values that are known only when the program runs.
+
+> **Lessons learnt from C** In C, every literal has a type, `int` by default, so `200` is an `int` that is converted to a `char` when it is given to one, whether it fits or not: `unsigned char b = 300;` compiles and gives 44. A `#define` has no type and no scope, and it is checked nowhere but where it is pasted in, while a `const int` is a variable, which cannot be used everywhere that C wants a constant. In Mialu a constant has a name with a scope and a value that the compiler works out exactly, and it has no type until it is used, where it becomes a value of the type that is wanted only when it fits, which is checked when the program is compiled.
 
 ### Variables
 
@@ -508,7 +559,7 @@ A variable is a name for a value that is local to a procedure. It is defined by 
 x := 4
 ```
 
-The type of the variable is deduced from the initial value. It is implicit. `x` above is of type `Int` because literal `4` is.
+The type of the variable is deduced from the initial value. It is implicit. `x` above is of type `Int`, because `4` is an untyped integer, whose default type is `Int`, see [Untyped constants](#untyped-constants).
 
 The type can also be written explicitly, between the `:` and the `=`:
 
@@ -551,7 +602,7 @@ The type of a global variable is deduced from its initial value, or written betw
 ready #(static) : Bool = false
 ```
 
-The initial value is a literal: a number, `true` or `false`, or a string, or else a field of [type information](#static-reflection), such as `type_info_of(Color).members`, which is known when the program is compiled and so is a constant like a literal. It is stored when the program starts, before any code runs, so it cannot be an expression, a name or a call. A global variable can be used and assigned to in every procedure of the module, also in the ones that are written above its definition, because it is in the module scope, see [Scope resolution](#scope-resolution). Like a constant, it has a name of its own in that scope, so it cannot have the name of a constant or of another global variable, and a parameter or a variable of a procedure cannot have its name.
+The initial value is a constant expression, such as `0`, `"calls"`, `true` or `LIMIT * 2`, see [Constants](#constants), or else a field of [type information](#static-reflection), such as `type_info_of(Color).members`, which is known when the program is compiled too. It is stored when the program starts, before any code runs, so it cannot be a call, a variable or another global variable. An untyped value becomes the type that is written for the global variable, when it fits, or else the variable has its default type. A global variable can be used and assigned to in every procedure of the module, also in the ones that are written above its definition, because it is in the module scope, see [Scope resolution](#scope-resolution). Like a constant, it has a name of its own in that scope, so it cannot have the name of a constant or of another global variable, and a parameter or a variable of a procedure cannot have its name.
 
 ## Control flow structures
 
@@ -1127,7 +1178,7 @@ The default value for any enum is the first member of the enum.
 
 In the future, the language spec and implementation will address the following issues:
 
-- An enum cannot be the type of a global variable, because its initial value is a literal, and no literal is a member.
+- An enum cannot be the type of a global variable, because its initial value is a constant expression, and no constant expression is a member.
 - A member has no value of its own, such as a number or a string, that is written in the definition.
 - A member cannot be the value of a variable without a type written, as above, and a member is not called or followed with `^`.
 
@@ -1589,7 +1640,7 @@ A few things cannot be done with a pointer to a procedure, which a later version
 
 - A procedure cannot return one, and it cannot be the return type of a procedure type, because a return type is a name with carets before it. A procedure can take one, and store it where a pointer can be stored.
 - The parameters of a type of a pointer to a procedure are not pointers to procedures themselves, so `^proc(^proc(Int) Int) Int` cannot be written.
-- A global variable cannot hold one, because its initial value is a literal, and no literal is a pointer to a procedure.
+- A global variable cannot hold one, because its initial value is a constant expression, and no constant expression is a pointer to a procedure.
 - Only the name of a variable, a parameter or a global variable is called, and not an element, a field or the result of following a pointer, which are stored in a variable first.
 
 
@@ -1712,9 +1763,9 @@ The compiler is used from the command line, see [mialuc](mialu-cli.md) for its c
 
 ### WebAssembly
 
-The `wasm` target writes a WebAssembly binary module. It imports its foreign procedures from JavaScript, so a procedure of a `foreign libc` block is an error, and so is a call of `str_to_c_str` whose argument is not a string literal or a constant that is a string. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a string becomes a function without parameters that returns the string, and a procedure that uses the constant by its name calls that function. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool`, `Byte` and `Str` are the basic types that the target supports, and then the structs, the pointers to any of them, and the arrays and array slices of any of them.
+The `wasm` target writes a WebAssembly binary module. It imports its foreign procedures from JavaScript, so a procedure of a `foreign libc` block is an error, and so is a call of `str_to_c_str` whose argument is not a string literal or a constant that is a string. Every constant definition becomes a function that the module exports under the name of the constant. A constant that is a value becomes a function without parameters that returns the value as a value of its type, or of its default type when it is untyped, so `LIMIT :: 200` returns an `Int` and `GREETING :: "Hello"` a `Str`, which JavaScript can call to read it. A procedure that uses the constant does not call that function: the compiler worked out the value, and a constant expression is the one instruction that pushes it as a value of the type that its place wants, so `LIMIT * 2` is `i64.const 400`, and `0 - 1` is `i64.const -1`. A call of a procedure is the `call` instruction with the function of the procedure, after the instructions of the arguments, which are pushed in order. A `Str` argument or result is two values, as it is for the exports. A call that is a statement is followed by a `drop` for every value that the procedure returns, which is one, or two for a `Str`. `Int`, `Bool`, `Byte` and `Str` are the basic types that the target supports, and then the structs, the pointers to any of them, and the arrays and array slices of any of them.
 
-`Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`. An integer literal is `i64.const` of its value, whatever its base, since the compiler has worked out the number, so the `wat` target shows `0xFF` and `0b1111_1111` as `i64.const 255`. The arithmetic is the one of [Integers](#integers), with the signed `i64` instructions. Division traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
+`Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`. An untyped integer is `i64.const` of its value where an `Int` is wanted, whatever its base, since the compiler has worked out the number, so the `wat` target shows `0xFF` and `0b1111_1111` as `i64.const 255`. The arithmetic is the one of [Integers](#integers), with the signed `i64` instructions. Division traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
 
 `Bool` is a 32-bit integer (`i32`), which is 0 for `false` and 1 for `true`, as a comparison in WebAssembly leaves it. So JavaScript passes a `Bool` as `true`, `false`, 0 or 1, and receives it as the number 0 or 1, which `Boolean(...)` turns into a boolean. Comparisons of `Int` values are signed `i64` instructions, and comparisons of `Bool` values with `==` and `not=` are `i32.eq` and `i32.ne`. `and`, `or` and `not` are `i32.and`, `i32.or` and `i32.eqz`, which are correct because a `Bool` is always 0 or 1.
 
@@ -1725,9 +1776,9 @@ const [address, length] = instance.exports.get_name();
 new TextDecoder().decode(new Uint8Array(instance.exports.memory.buffer, address, length));
 ```
 
-A `C_Str` is one 32-bit integer (`i32`): the address in the memory of the module of bytes that end with a zero. So a parameter of that type is one WebAssembly parameter, and a caller from JavaScript reads the bytes from the address up to the first zero. A zero is written after every string literal in the data section. `str_to_c_str` is only accepted with a string literal or a constant that is a string as its argument, and it is then only the address of the literal, `i32.const`, without the length and without a copy. For a constant that is the address of the literal of its definition, so `str_to_c_str(greeting)` does not call the function of `greeting`. Nothing else is a `C_Str`, so a `C_Str` cannot be given a value as an element of an array, a field of a struct or a global variable.
+A `C_Str` is one 32-bit integer (`i32`): the address in the memory of the module of bytes that end with a zero. So a parameter of that type is one WebAssembly parameter, and a caller from JavaScript reads the bytes from the address up to the first zero. A zero is written after every string literal in the data section. `str_to_c_str` is only accepted with a string literal or a constant that is a string as its argument, and it is then only the address of the literal, `i32.const`, without the length and without a copy. For a constant it is the address of its literal, so `str_to_c_str(greeting)` does not call the function of `greeting`. An untyped string where a `C_Str` is wanted is the same address, so `show("Hello")` passes `i32.const` of the address of the bytes of `"Hello"`. Nothing else is a `C_Str`, so a `C_Str` cannot be given a value as an element of an array, a field of a struct or a global variable.
 
-A global variable is a mutable global of the module, or two when it is a `Str`, which are the address and the length of the string, in the order of the definitions in the source. They are not exported. The initial value is the constant expression of the global, which WebAssembly evaluates once when the module is instantiated, which is why it is a literal. The bytes of a string literal that is the value of a global variable are in the data section, as the bytes of the other string literals are. A use of a global variable is a `global.get` for each of its globals, and an assignment such as `x += 2` pushes it with `global.get`, then the value, adds them and stores the result with `global.set`. So a global variable keeps its value from one call of the exported functions to the next, for as long as the instance lives.
+A global variable is a mutable global of the module, or two when it is a `Str`, which are the address and the length of the string, in the order of the definitions in the source. They are not exported. The initial value is the constant expression of the global, which WebAssembly evaluates once when the module is instantiated, which is why it is a constant: the compiler worked out its value, and the global is `i64.const` or `i32.const` of it, or of the address and the length of a string. The bytes of a string literal that is the value of a global variable are in the data section, as the bytes of the other string literals are. A use of a global variable is a `global.get` for each of its globals, and an assignment such as `x += 2` pushes it with `global.get`, then the value, adds them and stores the result with `global.set`. So a global variable keeps its value from one call of the exported functions to the next, for as long as the instance lives.
 
 A foreign procedure is an imported function, which the module gets from the object of imports when it is instantiated, see [foreign procedures](#foreign-procedures-in-webassembly). The imported functions come before the other functions of the module, because WebAssembly numbers them first, so a foreign procedure has the index of its place among the foreign procedures, and any other procedure has the number of foreign procedures plus its place among the others. That index is what the `call` instruction has, so it is not the place of the constant in the source. The module has an import section, with one function for each foreign procedure, whose type is the signature of the declaration, and the type section lists the types of the imports before the ones of the other functions. A foreign procedure has no export and no code of its own, and a program that has no foreign procedure has no import section.
 
@@ -1748,7 +1799,7 @@ A for statement that goes through the elements of an array or a slice is the sam
 
 A struct is made of the values of its fields, one after the other, in the order of its definition, where a field that is a struct takes its own fields in its place, and nothing else: it has no header and no padding. So a `Person` is three values, the `i64` of the age and the `i32` address and `i32` length of the name. A parameter of a struct type is that many parameters, a variable is that many locals, and a procedure that returns a struct has that many results, which JavaScript receives as an array, in the order of the fields. Reading a field of a variable or a parameter is a `local.get` for each of its values, with no cost for the rest of the struct, and assigning to a field is a `local.set`; a struct literal pushes the values of the fields in the order of the struct, with the default value, which is zero, for every field when its braces are empty. The values of a struct literal are written in the order of the fields of the struct, so a string in a literal can have its address in the data section before one that comes before it in the source, which the address of a string allows, since it is the length of the strings before it in the source. A struct in an array is in memory, with 8 bytes for each of its values, so `Person` takes 24 bytes there. The field of an element is read with a load at the address of the element plus 8 times the number of values before the field, and is assigned with a store there. An assignment of a whole struct to an element is a store of each of its values, with the last on the stack stored first, using a local to hold each value while the address is pushed below it. A default value is `i64.const 0` or `i32.const 0` for each value. A struct is not a function: the definition of one is a constant that has no code and no export.
 
-A `Byte` is one 32-bit integer (`i32`) whose value is from 0 to 255, so a parameter of the type is one WebAssembly parameter and a result is one result, which JavaScript passes and receives as a plain number and not as a `BigInt`. An integer literal that is a `Byte` is `i32.const`. Bytes are compared with the unsigned instructions `i32.lt_u`, `i32.le_u`, `i32.gt_u` and `i32.ge_u`, and with `i32.eq` and `i32.ne`. `byte_to_int` is `i64.extend_i32_u`. `int_to_byte` keeps the number in a local, compares it with 255 as an unsigned 64-bit number with `i64.gt_u`, which also finds a negative number, traps with `unreachable` when it is above, and otherwise is `i32.wrap_i64` of the number. The default value is `i32.const 0`. The elements of an array of `Byte` and what a pointer to a `Byte` points to take one byte of memory, not 8 as the others do: an element is read with `i32.load8_u` and written with `i32.store8`, the address of an element is the address of the array plus the index with no scaling, and a `for` statement moves its address up by 1. So a `Uint8Array` of the memory of the module is the array: `new Uint8Array(memory.buffer, 0, 3).set([1, 2, 3])` and then `sum_of_bytes(0, 3)`. The elements of the array literals in the frame of a procedure, and its variables, are each rounded up to a multiple of 8 bytes, so that what comes after them is aligned. A `Byte` that is a field of a struct is one value of the struct, and in memory it takes the 8 bytes of any value, from which `i32.load8_u` and `i32.store8` use the first.
+A `Byte` is one 32-bit integer (`i32`) whose value is from 0 to 255, so a parameter of the type is one WebAssembly parameter and a result is one result, which JavaScript passes and receives as a plain number and not as a `BigInt`. An untyped integer that is a `Byte` is `i32.const`. Bytes are compared with the unsigned instructions `i32.lt_u`, `i32.le_u`, `i32.gt_u` and `i32.ge_u`, and with `i32.eq` and `i32.ne`. `byte_to_int` is `i64.extend_i32_u`. `int_to_byte` keeps the number in a local, compares it with 255 as an unsigned 64-bit number with `i64.gt_u`, which also finds a negative number, traps with `unreachable` when it is above, and otherwise is `i32.wrap_i64` of the number. The default value is `i32.const 0`. The elements of an array of `Byte` and what a pointer to a `Byte` points to take one byte of memory, not 8 as the others do: an element is read with `i32.load8_u` and written with `i32.store8`, the address of an element is the address of the array plus the index with no scaling, and a `for` statement moves its address up by 1. So a `Uint8Array` of the memory of the module is the array: `new Uint8Array(memory.buffer, 0, 3).set([1, 2, 3])` and then `sum_of_bytes(0, 3)`. The elements of the array literals in the frame of a procedure, and its variables, are each rounded up to a multiple of 8 bytes, so that what comes after them is aligned. A `Byte` that is a field of a struct is one value of the struct, and in memory it takes the 8 bytes of any value, from which `i32.load8_u` and `i32.store8` use the first.
 
 A pointer is one 32-bit integer (`i32`): the address in the memory of the module of what it points to, so a parameter that is a pointer is one WebAssembly parameter, and a result that is a pointer is one result, which JavaScript passes and receives as a number. `nil` is `i32.const 0`, which is also what a pointer that is not given a value is, and is not the address of anything that a program can point to. Two pointers or a pointer and `nil` are compared with `i32.eq` and `i32.ne`, as two `Bool` values are. What a pointer points to is in memory like an element of an array: 8 bytes for each of its values, aligned, so a `Str` takes 16 bytes and a struct takes 8 for each of its values, and the first four bytes of the 8 hold a 32-bit value. A field that is a pointer is one value of the struct, and so is an element of an array that is a pointer. A caller from JavaScript can point to what it wrote to the memory of the module, as it does for the elements of a slice:
 
@@ -1785,7 +1836,7 @@ The target rejects a program that the parser accepts when:
 - a value that is assigned with `=` is not of the type of the variable, the field, the element or what the pointer points to,
 - `^` follows a value that is not a pointer,
 - the operand of `%` has no address: it is a value that is computed, a parameter, the iterator of a for statement, a global variable, an array or an array slice, or a variable of an array or array slice type,
-- the type of a parameter is an array, or the type of a global variable is an array, an array slice or a pointer, which can be given no literal for its initial value,
+- the type of a parameter is an array, or the type of a global variable is an array, an array slice or a pointer, which can be given no constant for its initial value,
 - an array literal has another number of elements than the length of its type, or a variable of an array type with a length has another number than that,
 - a variable of an array type is not given an array literal,
 - an element of an array literal, or the value that is assigned to an element, is not of the type of the elements,
@@ -1794,7 +1845,7 @@ The target rejects a program that the parser accepts when:
 - a call is of a variable, a parameter or a global variable that does not hold a pointer to a procedure,
 - `^` follows a pointer to a procedure, or `%` is given the name of a procedure, which has no address,
 - a type in the parameters or the return type of a pointer to a procedure is not one that the target has,
-- the initial value of a global variable is not of the type that is written for the variable,
+- the initial value of a global variable is not of the type that is written for the variable, or is untyped and does not fit in it, or the type is `C_Str`,
 - a definition is called `memory`,
 - a procedure with no return type has a `return` statement,
 - the value that a procedure returns is not of its return type,
@@ -1832,13 +1883,13 @@ See [mialuc](mialu-cli.md) for how to build and run a program, and how to print 
 
 The program starts at a few instructions of the compiler that call `main`, which has to be `main :: proc() Int ->`, and pass its result to the function `exit` of the C library, so that the output of the program is written out before it ends and its result is the exit code of the process. A foreign procedure of a `foreign libc` block is imported by name from `msvcrt.dll`, which is part of every installation of Windows, and a procedure of a `foreign js` block is an error. A call of a procedure follows the calling convention of Windows on x64, so that the C library can be called: the first four arguments are in `rcx`, `rdx`, `r8` and `r9`, the result is in `rax`, and the caller makes the 32 bytes of space for the callee, with the stack a multiple of 16 bytes.
 
-`Int` is a 64-bit integer, and a `C_Str` is the 64-bit address of its bytes. An integer literal of any base is loaded into a register with one `mov` of its whole 64-bit value, so a literal that does not fit in 32 bits, such as `0x7FFF_FFFF_FFFF_FFFF`, needs nothing more. A string literal is the address of its bytes in the read-only data of the program, which end with a zero. The target does not build much yet, and rejects the rest: procedures of up to four parameters of the types `Int` and `C_Str`, whose statements are calls, `return`, definitions of variables and assignments to them with `=`, and whose expressions are integer literals, parameters, variables, and calls whose arguments are such expressions or `str_to_c_str`.
+`Int` is a 64-bit integer, and a `C_Str` is the 64-bit address of its bytes. A constant that is a number, which is a literal of any base, a constant or a constant expression such as `KILO * KILO`, is loaded into a register with one `mov` of its whole 64-bit value, which the compiler worked out, so a number that does not fit in 32 bits, such as `0x7FFF_FFFF_FFFF_FFFF`, needs nothing more. A string literal is the address of its bytes in the read-only data of the program, which end with a zero. The target does not build much yet, and rejects the rest: procedures of up to four parameters of the types `Int` and `C_Str`, whose statements are calls, `return`, definitions of variables and assignments to them with `=`, and whose expressions are constants that are numbers, strings where a `C_Str` is wanted, parameters, variables, and calls whose arguments are such expressions or `str_to_c_str`.
 
-A variable of a procedure is of the type `Int` or `C_Str`, which is written or taken from its value, and the value must be of that type. A variable without a value is 0, which for a `C_Str` is the address 0, the null pointer of C. Each variable has a slot of 8 bytes in the frame of its procedure, below the `rbp` that the procedure set when it started: the first variable is at `rbp - 8`, the second at `rbp - 16`, and so on in the order of the source, and the slot after the last one keeps how much of the temporary storage was in use, when the procedure makes temporary strings. The procedure makes the frame with one `sub rsp` right after it kept its arguments, rounded up to 16 bytes so that its calls are made with the stack as the calling convention wants it. The definition and an assignment store the value in the slot, and a use loads it from there, so a variable always has its value in memory, where a debugger finds it too. An assignment such as `x += 1`, which needs arithmetic, and an assignment to a global variable, a field, an element or what a pointer points to are rejected, and so are the global variables themselves. A `C_Str` variable cannot be returned, because it may hold a copy that `str_to_c_str` made, which is given back when the procedure returns. A string literal is only accepted as the argument of `str_to_c_str`. A `Str` has no value yet, so the argument of `str_to_c_str` must be a string literal or a constant that is a string, such as `greeting :: "Hello"`. The bytes of a constant are in the read-only data of the program with the other string literals, and `str_to_c_str(greeting)` copies them like it copies a literal. A constant that is a string has no code, and its name is only accepted as the argument of `str_to_c_str`. A constant that is a struct, an enum or the member of an enum is rejected.
+A variable of a procedure is of the type `Int` or `C_Str`, which is written or taken from its value, and the value must be of that type. A variable without a value is 0, which for a `C_Str` is the address 0, the null pointer of C. Each variable has a slot of 8 bytes in the frame of its procedure, below the `rbp` that the procedure set when it started: the first variable is at `rbp - 8`, the second at `rbp - 16`, and so on in the order of the source, and the slot after the last one keeps how much of the temporary storage was in use, when the procedure makes temporary strings. The procedure makes the frame with one `sub rsp` right after it kept its arguments, rounded up to 16 bytes so that its calls are made with the stack as the calling convention wants it. The definition and an assignment store the value in the slot, and a use loads it from there, so a variable always has its value in memory, where a debugger finds it too. An assignment such as `x += 1`, which needs arithmetic, and an assignment to a global variable, a field, an element or what a pointer points to are rejected, and so are the global variables themselves. A `C_Str` variable cannot be returned, because it may hold a copy that `str_to_c_str` made, which is given back when the procedure returns, and neither can a string where a `C_Str` is returned, for the same reason. A `Str` has no value yet, so a string literal, or a constant that is a string, such as `greeting :: "Hello"`, is only accepted where a `C_Str` is wanted, which an untyped string becomes, and as the argument of `str_to_c_str`, which must be one of them. The bytes of a constant are in the read-only data of the program with the other string literals, and both `puts(greeting)` and `str_to_c_str(greeting)` copy them like they copy a literal. A constant that is a number or a string has no code: a use of it is its value. A constant that is a `Bool`, a `Byte`, a typed `Str`, a struct, an enum or the member of an enum is rejected where it is used, and so is a constant expression of such a type.
 
 A program that is built with `--debug` has debug information that gdb reads: DWARF of version 4 with the lines of the statements, the procedures and their parameters and variables, where each is kept, and the constants that are strings, and the table of unwinding that Windows has for x64. The code is the same as without it. See [mialuc](mialu-cli.md#debugging).
 
-`str_to_c_str` copies its argument and the zero after it to temporary storage, which is a section of 64 KiB of the program that is zeroed when it is loaded and not in the file. The first 8 bytes of it say how much of the rest is in use. A copy is made at the end of what is in use and takes its size, rounded up to 8 bytes, and a procedure that makes copies saves how much was in use when it started and sets it back when it returns, so its copies are given back. A copy that does not fit stops the program with a breakpoint, and so does a `str_to_c_str` that is returned, which the target rejects, because the copy is gone when the procedure returns.
+`str_to_c_str`, and an untyped string that is a `C_Str`, copies the string and the zero after it to temporary storage, which is a section of 64 KiB of the program that is zeroed when it is loaded and not in the file. The first 8 bytes of it say how much of the rest is in use. A copy is made at the end of what is in use and takes its size, rounded up to 8 bytes, and a procedure that makes copies saves how much was in use when it started and sets it back when it returns, so its copies are given back. A copy that does not fit stops the program with a breakpoint, and so does a `str_to_c_str` that is returned, which the target rejects, because the copy is gone when the procedure returns.
 
 ## Possible future features
 

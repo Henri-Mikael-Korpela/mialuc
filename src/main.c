@@ -10,6 +10,7 @@
 #include <mialu/array_slice.h>
 #include <mialu/ast.h>
 #include <mialu/common_types.h>
+#include <mialu/constant.h>
 #include <mialu/parser.h>
 #include <mialu/process.h>
 #include <mialu/semantic.h>
@@ -86,6 +87,7 @@ typedef struct {
     Array_Slice code_tokens;
     Array_Slice nodes;
     Array_Slice bindings;
+    Array_Slice constants;
     Array_Slice output;
     Array_Slice output_text;
     // The procedures of the program that the x64 target builds, which name its assembly.
@@ -167,6 +169,9 @@ int main(int argc, char *argv[]) {
         // The analysis has one binding for each node.
         .bindings = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Semantic_Binding)),
                                      TOKEN_COUNT_MAX),
+        // And one value that is known when the program is compiled for each node.
+        .constants = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Constant_Value)),
+                                      TOKEN_COUNT_MAX),
         .output = array_slice_make(malloc(OUTPUT_SIZE_BYTES_MAX * sizeof(byte)),
                                    OUTPUT_SIZE_BYTES_MAX),
         .output_text = array_slice_make(malloc(OUTPUT_TEXT_SIZE_BYTES_MAX * sizeof(byte)),
@@ -184,7 +189,7 @@ int main(int argc, char *argv[]) {
     int32_t exit_code = 1;
     if (buffers.source.elements == NULL || buffers.tokens.elements == NULL ||
         buffers.code_tokens.elements == NULL || buffers.nodes.elements == NULL ||
-        buffers.bindings.elements == NULL ||
+        buffers.bindings.elements == NULL || buffers.constants.elements == NULL ||
         buffers.output.elements == NULL || buffers.output_text.elements == NULL ||
         buffers.symbols.elements == NULL || buffers.debug_rows.elements == NULL ||
         buffers.source_path.elements == NULL) {
@@ -198,6 +203,7 @@ int main(int argc, char *argv[]) {
     free(buffers.symbols.elements);
     free(buffers.output_text.elements);
     free(buffers.output.elements);
+    free(buffers.constants.elements);
     free(buffers.bindings.elements);
     free(buffers.nodes.elements);
     free(buffers.code_tokens.elements);
@@ -394,7 +400,7 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     }
 
     Semantic_Result semantic_result = semantic_analyze(parse_result.nodes, parse_result.root,
-                                                       buffers->bindings);
+                                                       buffers->bindings, buffers->constants);
     if (semantic_result.status != SEMANTIC_STATUS_OK) {
         main_run_command_report_semantic_error(path, source, semantic_result);
         return 1;
@@ -437,8 +443,9 @@ static int32_t main_run_command_build(Command command, Buffers const *buffers, S
     }
 
     char const *path = command.source_path;
-    Wasm_Build_Result build_result = wasm_build(parse_result.nodes, semantic_result.bindings,
-                                                parse_result.root, buffers->output);
+    Wasm_Build_Result build_result =
+        wasm_build(parse_result.nodes, semantic_result.bindings, semantic_result.constants,
+                   parse_result.root, buffers->output);
     if (build_result.status != WASM_BUILD_STATUS_OK) {
         main_run_command_report_wasm_error(path, source, build_result);
         return 1;
@@ -504,8 +511,8 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
         build_debug = &debug;
     }
     X64_Build_Result build_result =
-        x64_build(parse_result.nodes, semantic_result.bindings, parse_result.root,
-                  buffers->output, buffers->symbols, build_debug);
+        x64_build(parse_result.nodes, semantic_result.bindings, semantic_result.constants,
+                  parse_result.root, buffers->output, buffers->symbols, build_debug);
     if (build_result.status != X64_BUILD_STATUS_OK) {
         main_run_command_report_x64_error(path, source, build_result);
         return 1;
@@ -1293,9 +1300,61 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: global variable '%.*s' must have the attribute #(static).\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case SEMANTIC_STATUS_GLOBAL_VALUE_NOT_CONSTANT:
+        fprintf(stderr, "%s:%zu:%zu: the initial value of global variable '%.*s' must be known "
+                "when the program is compiled: a constant expression, such as a number or "
+                "'LIMIT * 2', or a field of the information about a type.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
     case SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a procedure, so it cannot be called.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_CONSTANT_CYCLE:
+        fprintf(stderr, "%s:%zu:%zu: the constant '%.*s' is defined in terms of itself.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_CONSTANT_DIVISION_BY_ZERO:
+        fprintf(stderr, "%s:%zu:%zu: the constant expression at '%.*s' divides by zero.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_CONSTANT_NOT_CONSTANT:
+        fprintf(stderr, "%s:%zu:%zu: the value of the constant '%.*s' must be known when the "
+                "program is compiled: a number, 'true', 'false', a string, another such constant, "
+                "or an operator of them.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_CONSTANT_OPERAND_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: an operator of the constant expression at '%.*s' is given "
+                "operands that it does not take: arithmetic takes integers that are untyped or "
+                "Int, 'and', 'or' and 'not' take truth values, a Byte is compared with a Byte or a "
+                "number from 0 to 255, and strings are not compared.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_CONSTANT_OVERFLOW:
+        fprintf(stderr, "%s:%zu:%zu: the constant expression at '%.*s' has a value that does not "
+                "fit in an Int, which goes from -9223372036854775808 to 9223372036854775807.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_CONSTANT_TOO_DEEP:
+        fprintf(stderr, "%s:%zu:%zu: the constant expression at '%.*s' has more than %d nested "
+                "operators and constants.\n", path, position.line, position.column,
+                subject_length, result.subject.bytes, CONSTANT_EXPRESSION_DEPTH_MAX);
+        break;
+    case SEMANTIC_STATUS_CONSTANT_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the constant '%.*s' has a type that a constant cannot have. "
+                "A constant is an Int, a Byte, a Bool or a Str.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_CONSTANT_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the value of the constant '%.*s' is not of the type of the "
+                "constant.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_CONSTANT_VALUE_NOT_REPRESENTABLE:
+        fprintf(stderr, "%s:%zu:%zu: the number at '%.*s' does not fit in a Byte, which is a "
+                "number from 0 to 255.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case SEMANTIC_STATUS_ENUM_MEMBER_DUPLICATE:
         fprintf(stderr, "%s:%zu:%zu: the enum has the member '%.*s' twice.\n", path, position.line,

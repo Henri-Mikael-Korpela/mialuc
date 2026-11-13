@@ -125,8 +125,8 @@ typedef struct {
 /**
  * Builds an executable for Windows on x64 (a PE32+ file for the console) from the syntax tree below
  * `root`, which must be the `AST_NODE_TYPE_MODULE` node of a successful `parse`. `nodes` holds
- * `Ast_Node` elements, and `bindings` holds the `Semantic_Binding` elements that `semantic_analyze`
- * made for the same tree. The file is written to `output_buffer`, which holds `byte` elements. The
+ * `Ast_Node` elements, and `bindings` and `constants` hold the `Semantic_Binding` and the
+ * `Constant_Value` elements that `semantic_analyze` made for the same tree. The file is written to `output_buffer`, which holds `byte` elements. The
  * symbols are written to `symbol_buffer`, which holds at least `X64_CONSTANT_COUNT_MAX`
  * `X64_Symbol` elements, so that the code can be shown with the names of its procedures.
  *
@@ -137,8 +137,9 @@ typedef struct {
  * code of the process.
  *
  * `Int` is a 64-bit integer, and `C_Str` is the 64-bit address of bytes that end with a zero. A
- * string literal is a `Str`, which the target does not build, so it is only the argument of
- * `str_to_c_str`, which makes the `C_Str`.
+ * string literal is untyped, and the target does not build a `Str`, so it is only accepted where a
+ * `C_Str` is wanted, which it then becomes, and as the argument of `str_to_c_str`, which makes the
+ * `C_Str` too. A constant that is a number is loaded as its value, which the analysis worked out.
  *
  * A foreign procedure that a `foreign libc ->` block declares is imported from `msvcrt.dll`, which
  * every installation of Windows has, by the name of the procedure. The compiler trusts the
@@ -153,14 +154,13 @@ typedef struct {
  *
  * Only a small part of the language is built: procedures with up to `X64_PARAMETER_COUNT_MAX`
  * parameters of the types `Int` and `C_Str`, whose statements are calls, returns, definitions of
- * variables of those types and assignments to them with `=`, and whose expressions are integer and
- * string literals, parameters, variables, and calls with such arguments, and
- * constants that are strings, which are only the argument of `str_to_c_str`, like a string
- * literal. The rest is rejected with a status other than `X64_BUILD_STATUS_OK`, so that nothing is
+ * variables of those types and assignments to them with `=`, and whose expressions are constants
+ * that are numbers, strings where a `C_Str` is wanted, parameters, variables, and calls with such
+ * arguments. The rest is rejected with a status other than `X64_BUILD_STATUS_OK`, so that nothing is
  * built wrongly.
  */
-X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,
-                           Array_Slice output_buffer, Array_Slice symbol_buffer,
-                           X64_Debug const *debug);
+X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice constants,
+                           Ast_Node_Index root, Array_Slice output_buffer,
+                           Array_Slice symbol_buffer, X64_Debug const *debug);
 
 #endif

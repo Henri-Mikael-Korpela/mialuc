@@ -63,6 +63,33 @@ typedef enum {
     SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR,
     // The name that is called is not a procedure: a variable, a parameter or a constant string.
     SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE,
+    // A constant that is defined in terms of itself. The subject is the name where the circle
+    // closes.
+    SEMANTIC_STATUS_CONSTANT_CYCLE,
+    // A constant expression that divides by zero. The subject is its first name, or the
+    // definition that it is in.
+    SEMANTIC_STATUS_CONSTANT_DIVISION_BY_ZERO,
+    // The value of a constant is not known when the program is compiled, such as a call or a
+    // variable. The subject is the name of the constant.
+    SEMANTIC_STATUS_CONSTANT_NOT_CONSTANT,
+    // An operator of a constant expression is given operands that it does not take, such as
+    // `true + 1`. The subject is the first name of the expression, or the definition that it is
+    // in.
+    SEMANTIC_STATUS_CONSTANT_OPERAND_TYPE_INVALID,
+    // A constant expression whose value does not fit in an `Int`. The subject is its first name, or
+    // the definition that it is in.
+    SEMANTIC_STATUS_CONSTANT_OVERFLOW,
+    // A constant expression that is nested deeper than `CONSTANT_EXPRESSION_DEPTH_MAX`, with the
+    // constants that it goes through. The subject is the name or the definition where it was.
+    SEMANTIC_STATUS_CONSTANT_TOO_DEEP,
+    // A typed constant whose type is not `Int`, `Byte`, `Bool` or `Str`. The subject is its name.
+    SEMANTIC_STATUS_CONSTANT_TYPE_INVALID,
+    // The value of a typed constant is of another type, such as a string for an `Int`. The
+    // subject is its name.
+    SEMANTIC_STATUS_CONSTANT_TYPE_MISMATCH,
+    // An untyped integer that does not fit in the `Byte` that it must be, such as 300. The subject
+    // is the name of the constant, or the first name of the comparison.
+    SEMANTIC_STATUS_CONSTANT_VALUE_NOT_REPRESENTABLE,
     // A `defer` inside the statement of another `defer`. The subject is the inner `defer`.
     SEMANTIC_STATUS_DEFER_NESTED,
     // A `defer` of a statement that cannot be deferred: a variable definition, which would be gone
@@ -82,6 +109,9 @@ typedef enum {
     SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING,
     // A global variable without the `static` attribute. The subject is its name.
     SEMANTIC_STATUS_GLOBAL_NOT_STATIC,
+    // The initial value of a global variable is not known when the program is compiled. The subject
+    // is the name of the global variable.
+    SEMANTIC_STATUS_GLOBAL_VALUE_NOT_CONSTANT,
     SEMANTIC_STATUS_IDENTIFIER_UNKNOWN,
     // A `break` that is not in a loop or a scope.
     SEMANTIC_STATUS_BREAK_OUTSIDE_SCOPE,
@@ -113,20 +143,28 @@ typedef enum {
  * it is an `AST_NODE_TYPE_CALL`, which is a binding of the kind `SEMANTIC_BINDING_KIND_CONSTANT`
  * whose target is the definition of the procedure, or the variable, parameter or global variable
  * that holds the pointer to a procedure that is called. Any other node has the kind
- * `SEMANTIC_BINDING_KIND_NONE`. Otherwise `bindings.length` is zero
+ * `SEMANTIC_BINDING_KIND_NONE`. `constants` is the filled start of the constant buffer, as
+ * `Constant_Value` elements, with one element per node: what is known about the node when the
+ * program is compiled, see `constant_evaluate`. Every expression that can be a constant, and the
+ * definition of every constant that is a value, has `CONSTANT_STATUS_OK` or
+ * `CONSTANT_STATUS_NOT_CONSTANT`, and any other node has `CONSTANT_STATUS_UNKNOWN`, which is not a
+ * constant either. Otherwise the lengths of both are zero
  * and `subject` is the name that the error is about, as a view into the source that the syntax tree
  * was parsed from, so the caller can work out the position.
  */
 typedef struct {
     Array_Slice bindings;
+    Array_Slice constants;
     Str subject;
     Semantic_Status status;
 } Semantic_Result;
 
 /**
  * Resolves the names of the syntax tree below `root`, which must be the `AST_NODE_TYPE_MODULE`
- * node of a successful `parse`. `nodes` holds `Ast_Node` elements. The bindings are written to
- * `binding_buffer`, which holds `Semantic_Binding` elements and must have room for one per node.
+ * node of a successful `parse`, and works out the values that are known when the program is
+ * compiled. `nodes` holds `Ast_Node` elements. The bindings are written to `binding_buffer`, which
+ * holds `Semantic_Binding` elements, and the values to `constant_buffer`, which holds
+ * `Constant_Value` elements, and both must have room for one per node.
  *
  * There are two scopes. The module scope has the name of every constant definition and of every
  * global variable, and a definition can be used anywhere in the module, also above where it is
@@ -148,6 +186,14 @@ typedef struct {
  * can also be the member of an enum, such as `DEFAULT :: Color.RED`, which is a constant like the
  * others, and the name of its enum is bound as the name in any use, to the constant of the enum.
  * Whether that is an enum, and whether it has the member, is for the target to check.
+ *
+ * A constant can be a value that is known when the program is compiled, such as `LIMIT :: 100`,
+ * `GREETING :: "Hello"` or `DOUBLE :: LIMIT * 2`, which can be given a type, as in
+ * `LIMIT : Byte : 100`. Its names are in the module scope, and it must be a constant expression, see
+ * `constant_evaluate`, and so must the initial value of a global variable, except the information
+ * about a type. Every expression of the program that can be a constant is evaluated, so that an
+ * error in a constant part of it, such as a division by zero or an operand of the wrong kind, is
+ * found here and not when the program runs.
  *
  * A constant can be a struct, such as `Person :: struct -> ...`. It has its name in the module
  * scope like any other constant, but it is a type and not a value, so it is not counted among the
@@ -202,11 +248,12 @@ typedef struct {
  * defined. Two blocks that are not inside each other can have a variable of one name each, because
  * neither is in scope in the other. A name that no scope has is an error as well.
  *
- * The analysis is about names only. It does not know what a type is, so whether the value that a
- * name stands for is of the right type is for the target to check.
+ * Apart from the values of constants, the analysis is about names only. It does not know what a
+ * type is, so whether the value that a name stands for is of the right type is for the target to
+ * check, and so is whether a constant fits in the type that its place wants.
  */
 Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
-                                 Array_Slice binding_buffer);
+                                 Array_Slice binding_buffer, Array_Slice constant_buffer);
 
 /**
  * Returns whether `name` is the name of a built-in procedure, which is called like any procedure

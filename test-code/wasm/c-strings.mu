@@ -1,7 +1,8 @@
 // A C_Str is the address of bytes that end with a zero, as a C string does. It is for passing text
 // to and from code written in C, and a Str is the one to use in Mialu code. A Str is made a C_Str
 // by the built-in procedure str_to_c_str, which the wasm target takes with a string literal or a
-// constant that is a string only.
+// constant that is a string only. A string literal, and a constant that is a string, is untyped,
+// so it is a C_Str without str_to_c_str where a C_Str is wanted.
 
 import foreign js "functions"
 
@@ -27,3 +28,8 @@ log_twice :: proc(text: C_Str) ->
 greet_twice :: proc() ->
     text : C_Str = str_to_c_str("Hi!")
     log_twice(text)
+
+/// A string literal and a string constant are a C_Str where one is wanted.
+greet_untyped :: proc() ->
+    log_c_str("Hello without str_to_c_str!")
+    log_c_str(farewell)

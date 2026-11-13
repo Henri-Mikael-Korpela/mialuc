@@ -176,10 +176,13 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_COMPARISON`: two children, the left and the right operand, in that order. It is
  *   an expression of type `Bool` with the lowest precedence of the operators, so its operands are
  *   not comparisons. The operator is in the payload.
- * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: one child, the value that is bound to the name. It is
- *   an `AST_NODE_TYPE_PROCEDURE`, an `AST_NODE_TYPE_STRING_LITERAL`, an
- *   `AST_NODE_TYPE_STRUCT_TYPE`, an `AST_NODE_TYPE_ENUM_TYPE` or the member of an enum, which is an
- *   `AST_NODE_TYPE_FIELD_ACCESS` of an `AST_NODE_TYPE_IDENTIFIER`, as in `DEFAULT :: Color.RED`.
+ * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: the value that is bound to the name is the first child.
+ *   It is an `AST_NODE_TYPE_PROCEDURE`, an `AST_NODE_TYPE_STRUCT_TYPE`, an
+ *   `AST_NODE_TYPE_ENUM_TYPE`, the member of an enum, which is an `AST_NODE_TYPE_FIELD_ACCESS` of an
+ *   `AST_NODE_TYPE_IDENTIFIER`, as in `DEFAULT :: Color.RED`, or any other expression, which the
+ *   analysis checks is a constant, see `constant_evaluate`, such as `LIMIT :: 100` or
+ *   `GREETING :: "Hello"`. A typed constant, `LIMIT : Byte : 100`, has a second child, its type,
+ *   which comes after the value, so that the value is the first child of every definition.
  * - `AST_NODE_TYPE_CONTINUE_STATEMENT`: no children, or one `AST_NODE_TYPE_LABEL` when the
  *   statement names the loop to go on with. It ends the current pass of the innermost loop that it
  *   is in, or of the labeled loop, and goes on with the next one. The word is in the payload. It is
@@ -247,10 +250,10 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   Its children are one `AST_NODE_TYPE_ATTRIBUTE` for each attribute of its attribute list, in the
  *   order of the source, then the type, an `AST_NODE_TYPE_TYPE_NAME` or an
  *   `AST_NODE_TYPE_ARRAY_TYPE`, when the definition gives one, and last the initial value, which is
- *   an `AST_NODE_TYPE_INTEGER_LITERAL`, an `AST_NODE_TYPE_BOOL_LITERAL`, an
- *   `AST_NODE_TYPE_STRING_LITERAL` or, for information that is known when the program is compiled,
- *   an `AST_NODE_TYPE_FIELD_ACCESS` of an `AST_NODE_TYPE_TYPE_INFO_OF`, and never another
- *   expression. The name is in the payload. It is
+ *   an expression. The parser takes any expression there, and the analysis checks that it is known
+ *   when the program is compiled: a constant, such as a literal or `LIMIT * 2`, or the information
+ *   about a type, an `AST_NODE_TYPE_FIELD_ACCESS` of an `AST_NODE_TYPE_TYPE_INFO_OF`. The name is in
+ *   the payload. It is
  *   a child of the `AST_NODE_TYPE_MODULE`, between the constant definitions.
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_IF_STATEMENT`: a chain of `if`, any number of `else if` and an optional `else`,

@@ -217,6 +217,7 @@ syntax tree nodes              65536
 program                        1 MiB
 assembly or WebAssembly text   16 MiB
 procedures (x64-win32)         1024
+nested constant expression     1024 operators and constants
 ```
 
 A source file or a program that is larger is an error that says so.

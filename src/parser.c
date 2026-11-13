@@ -79,7 +79,6 @@ static Ast_Node_Index parse_block_open          (Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_branch              (Parser *parser, Ast_Node_Index statement);
 static Ast_Node_Index parse_defer_statement     (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_definition          (Parser *parser);
-static Ast_Node_Index parse_enum_member_value   (Parser *parser);
 static Ast_Node_Index parse_enum_type           (Parser *parser, uint32_t indentation_level);
 static bool           parse_foreign_block       (Parser *parser, Ast_Node_Index module);
 static Ast_Node_Index parse_foreign_import      (Parser *parser);
@@ -101,6 +100,7 @@ static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
 static Ast_Node_Index parse_for_statement       (Parser *parser, Ast_Node_Index parent);
 static bool           parse_for_statement_has_range(Parser const *parser);
 static Ast_Node_Index parse_global_variable_definition(Parser *parser);
+static bool           parse_typed_constant_is_next(Parser const *parser);
 static Ast_Node_Index parse_jump_statement      (Parser *parser);
 static Ast_Node_Index parse_scope_statement     (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_identifier          (Parser *parser);
@@ -271,6 +271,37 @@ static bool parse_reflection_types_append(Parser *parser, Ast_Node_Index module)
     return true;
 }
 
+/**
+ * Returns whether the definition whose name is the current token is a typed constant,
+ * `name : Type : value`: a single `:` after the name, and another one later on the line, before
+ * any `=`. A global variable has an `=` after its type, `name : Type = value`, and a type has no
+ * `:` in it, so the second `:` tells them apart. The tokens are only looked at, not consumed.
+ */
+static bool parse_typed_constant_is_next(Parser const *parser) {
+    assert(parser->token_index < parser->token_count);
+    assert(parser->tokens[parser->token_index].kind == TOKEN_KIND_IDENTIFIER);
+
+    size_t index = parser->token_index + 1;
+    if (index + 1 >= parser->token_count ||
+        parser->tokens[index].kind != TOKEN_KIND_TYPE_SEPARATOR ||
+        parser->tokens[index + 1].kind == TOKEN_KIND_TYPE_SEPARATOR) {
+        return false;
+    }
+    // The line ends at the next indentation token, and the tokens end with `END`, which bound the
+    // search.
+    for (index += 1; index < parser->token_count; index += 1) {
+        Token_Kind kind = parser->tokens[index].kind;
+        if (kind == TOKEN_KIND_TYPE_SEPARATOR) {
+            return true;
+        }
+        if (kind == TOKEN_KIND_EQUALS || kind == TOKEN_KIND_INDENTATION ||
+            kind == TOKEN_KIND_END) {
+            return false;
+        }
+    }
+    return false;
+}
+
 static Ast_Node_Index parse_definition(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->node_count <= parser->node_count_max);
@@ -296,16 +327,18 @@ static Ast_Node_Index parse_definition(Parser *parser) {
         return parse_fail(parser, STR("a name"));
     }
 
-    // A constant has `::` after its name, which is two separator tokens. Anything else is a global
-    // variable, which has an attribute list, a single `:` or both after its name. The last token is
-    // `END`, which is neither, so a name at the end of the file is not a constant, and the global
-    // variable it starts reports what it expected.
+    // A constant has `::` after its name, which is two separator tokens, or a type between the two,
+    // `name : Type : value`. Anything else is a global variable, which has an attribute list, a
+    // single `:` or both after its name. The last token is `END`, which is neither, so a name at the
+    // end of the file is not a constant, and the global variable it starts reports what it
+    // expected.
     bool is_constant = parser->token_index + 2 < parser->token_count &&
                        parser->tokens[parser->token_index + 1].kind ==
                            TOKEN_KIND_TYPE_SEPARATOR &&
                        parser->tokens[parser->token_index + 2].kind ==
                            TOKEN_KIND_TYPE_SEPARATOR;
-    if (is_constant == false) {
+    bool is_typed_constant = parse_typed_constant_is_next(parser);
+    if (is_constant == false && is_typed_constant == false) {
         return parse_global_variable_definition(parser);
     }
 
@@ -316,38 +349,51 @@ static Ast_Node_Index parse_definition(Parser *parser) {
     parser->nodes[definition].payload.constant_definition.name = name->payload.identifier.text;
     parse_token_advance(parser);
 
-    // `::` is two separator tokens, one after the other.
+    // `::` is two separator tokens, one after the other, and a typed constant has its type between
+    // them. The type is kept aside until the value is appended, because the value is the first
+    // child of every constant.
     if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'")) == false) {
+    Ast_Node_Index type = AST_NODE_INDEX_NONE;
+    if (is_typed_constant) {
+        type = parse_type(parser, STR("a type name"));
+        if (type == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+    }
+    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'")) == false) {
         return AST_NODE_INDEX_NONE;
     }
 
-    // The value is a string, a struct, an enum, the member of an enum, or a procedure, which is
-    // what any other token here starts.
+    // The value is a procedure, a struct, an enum or else an expression, such as a number, a
+    // string or the member of an enum, which the analysis checks is known when the program is
+    // compiled. Only an expression can have a type.
+    Token_Kind next = parse_token_current(parser)->kind;
     Ast_Node_Index value = AST_NODE_INDEX_NONE;
-    if (parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_STRUCT) {
+    if (is_typed_constant == false && next == TOKEN_KIND_KEYWORD_STRUCT) {
         // Like a procedure, a struct ends with its body.
         value = parse_struct_type(parser, INDENTATION_LEVEL_TOP);
-    } else if (parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_ENUM) {
+    } else if (is_typed_constant == false && next == TOKEN_KIND_KEYWORD_ENUM) {
         // An enum ends with its members.
         value = parse_enum_type(parser, INDENTATION_LEVEL_TOP);
-    } else if (parse_token_current(parser)->kind == TOKEN_KIND_IDENTIFIER) {
-        value = parse_enum_member_value(parser);
-    } else if (parse_token_current(parser)->kind == TOKEN_KIND_STRING_LITERAL) {
-        value = parse_string_literal(parser);
-        // A procedure ends with its body, but a string is one line, so its end is checked here.
+    } else if (is_typed_constant == false && next == TOKEN_KIND_KEYWORD_PROC) {
+        value = parse_procedure(parser, INDENTATION_LEVEL_TOP, false, AST_FOREIGN_TARGET_JS);
+    } else {
+        value = parse_expression(parser);
+        // A procedure ends with its body, but an expression is one line, so its end is checked
+        // here.
         if (value != AST_NODE_INDEX_NONE && parse_line_end_expect(parser) == false) {
             return AST_NODE_INDEX_NONE;
         }
-    } else {
-        value = parse_procedure(parser, INDENTATION_LEVEL_TOP, false, AST_FOREIGN_TARGET_JS);
     }
     if (value == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
     parse_node_append_child(parser, definition, value);
+    if (type != AST_NODE_INDEX_NONE) {
+        parse_node_append_child(parser, definition, type);
+    }
 
     assert(parser->nodes[definition].first_child == value);
     return definition;
@@ -414,40 +460,6 @@ static Ast_Node_Index parse_enum_type(Parser *parser, uint32_t indentation_level
         return parse_fail(parser, STR("a member"));
     }
     return root;
-}
-
-/**
- * Parses the value of a constant that is the member of an enum, `Color.RED`: the name of the enum,
- * a dot and the name of the member, and then the end of the line. The node is the access of the
- * field `RED`, whose child is the identifier `Color`, so it is the same tree that `Color.RED` has
- * in an expression, and the nodes are in the order of the source.
- */
-static Ast_Node_Index parse_enum_member_value(Parser *parser) {
-    assert(parser->status == PARSE_STATUS_OK);
-
-    Ast_Node_Index enum_name = parse_identifier(parser);
-    if (enum_name == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
-    }
-    if (parse_token_expect(parser, TOKEN_KIND_DOT, STR("'.' and the member of an enum")) == false) {
-        return AST_NODE_INDEX_NONE;
-    }
-    Token const *member_name = parse_token_current(parser);
-    if (member_name->kind != TOKEN_KIND_IDENTIFIER) {
-        return parse_fail(parser, STR("the name of a member"));
-    }
-    Ast_Node_Index access = parse_node_make(parser, AST_NODE_TYPE_FIELD_ACCESS);
-    if (access == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
-    }
-    parser->nodes[access].payload.field_access.name = member_name->payload.identifier.text;
-    parse_token_advance(parser);
-    parse_node_append_child(parser, access, enum_name);
-
-    if (parse_line_end_expect(parser) == false) {
-        return AST_NODE_INDEX_NONE;
-    }
-    return access;
 }
 
 /**
@@ -626,7 +638,7 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
  * Parses `name #(attribute)... : Type = value` or `name #(attribute)... := value`, a global
  * variable. The attribute list may be left out. The current token is the name, which the caller
  * checked. The node for the variable has the name in its payload. Its children are the attributes,
- * the type when the definition has one, and then the value, which is a literal.
+ * the type when the definition has one, and then the value, which is a constant expression.
  */
 static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
@@ -662,26 +674,10 @@ static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
-    // The value is stored once, before any code runs, so it is a literal and not an expression.
-    // Information about a type is known when the program is compiled, so it is allowed as well.
-    Ast_Node_Index value = AST_NODE_INDEX_NONE;
-    switch (parse_token_current(parser)->kind) {
-    case TOKEN_KIND_INTEGER_LITERAL:
-        value = parse_integer_literal(parser);
-        break;
-    case TOKEN_KIND_KEYWORD_FALSE:
-    case TOKEN_KIND_KEYWORD_TRUE:
-        value = parse_bool_literal(parser);
-        break;
-    case TOKEN_KIND_STRING_LITERAL:
-        value = parse_string_literal(parser);
-        break;
-    case TOKEN_KIND_KEYWORD_TYPE_INFO_OF:
-        value = parse_type_info_of(parser);
-        break;
-    default:
-        return parse_fail(parser, STR("a number, a string, 'true', 'false' or 'type_info_of'"));
-    }
+    // The value is stored once, before any code runs, so it must be known when the program is
+    // compiled: a constant expression, such as a literal or `LIMIT * 2`, or the information about
+    // a type. The parser takes any expression, and the analysis checks that it is one of those.
+    Ast_Node_Index value = parse_expression(parser);
     if (value == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }

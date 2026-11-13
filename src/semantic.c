@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <mialu/constant.h>
 #include <mialu/semantic.h>
 
 /**
@@ -12,6 +13,9 @@
 typedef struct {
     Ast_Node const *nodes;
     Semantic_Binding *bindings;
+    // What is known about each node when the program is compiled, one entry per node, see
+    // `semantic_constants_check`.
+    Constant_Value *constants;
     Str subject;
     size_t node_count;
     Ast_Node_Index module;
@@ -40,14 +44,23 @@ static bool             semantic_call_resolve       (Semantic_Analyzer *analyzer
                                                      Ast_Node_Index procedure,
                                                      Ast_Node_Index statement,
                                                      Ast_Node_Index call);
+static bool             semantic_constant_fail      (Semantic_Analyzer *analyzer,
+                                                     Constant_Value value,
+                                                     Ast_Node_Index definition);
+static Str              semantic_constant_subject   (Semantic_Analyzer const *analyzer,
+                                                     Ast_Node_Index node,
+                                                     Ast_Node_Index definition);
+static bool             semantic_constants_check    (Semantic_Analyzer *analyzer);
 static bool             semantic_defer_check        (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index defer);
 static Ast_Node_Index   semantic_defer_end          (Semantic_Analyzer const *analyzer,
                                                      Ast_Node_Index defer);
 static Semantic_Binding semantic_definition_find    (Semantic_Analyzer const *analyzer, Str name);
 static bool             semantic_definitions_check  (Semantic_Analyzer *analyzer);
-static bool             semantic_enum_member_resolve(Semantic_Analyzer *analyzer,
-                                                     Ast_Node_Index access);
+static Ast_Node_Index   semantic_definition_end     (Semantic_Analyzer const *analyzer,
+                                                     Ast_Node_Index definition);
+static bool             semantic_definition_names_resolve(Semantic_Analyzer *analyzer,
+                                                     Ast_Node_Index definition);
 static bool             semantic_enum_members_check (Semantic_Analyzer *analyzer);
 static bool             semantic_fields_check       (Semantic_Analyzer *analyzer);
 static bool             semantic_fail               (Semantic_Analyzer *analyzer,
@@ -82,10 +95,12 @@ static Semantic_Binding semantic_variable_find      (Semantic_Analyzer const *an
                                                      Ast_Node_Index excluded, Str name);
 
 Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
-                                 Array_Slice binding_buffer) {
+                                 Array_Slice binding_buffer, Array_Slice constant_buffer) {
     assert(nodes.elements != NULL);
     assert(binding_buffer.elements != NULL);
     assert(binding_buffer.length >= nodes.length);
+    assert(constant_buffer.elements != NULL);
+    assert(constant_buffer.length >= nodes.length);
     assert(root < nodes.length);
 
     Ast_Node const *node_elements = nodes.elements;
@@ -102,9 +117,22 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
         };
     }
 
+    // Nothing is known about any node until it is evaluated, see `constant_evaluate`.
+    Constant_Value *constant_elements = constant_buffer.elements;
+    for (size_t i = 0; i < nodes.length; i += 1) {
+        constant_elements[i] = (Constant_Value){
+            .integer = 0,
+            .string = AST_NODE_INDEX_NONE,
+            .error = AST_NODE_INDEX_NONE,
+            .type = CONSTANT_TYPE_UNTYPED_INTEGER,
+            .status = CONSTANT_STATUS_UNKNOWN,
+        };
+    }
+
     Semantic_Analyzer analyzer = {
         .nodes = node_elements,
         .bindings = binding_elements,
+        .constants = constant_elements,
         .subject = STR_EMPTY,
         .node_count = nodes.length,
         .module = root,
@@ -128,14 +156,24 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
             Ast_Node_Index value = node_elements[definition].first_child;
             if (node_elements[value].node_type == AST_NODE_TYPE_PROCEDURE) {
                 is_ok = semantic_procedure_resolve(&analyzer, definition);
-            } else if (node_elements[value].node_type == AST_NODE_TYPE_FIELD_ACCESS) {
-                is_ok = semantic_enum_member_resolve(&analyzer, value);
+            } else if (node_elements[value].node_type != AST_NODE_TYPE_STRUCT_TYPE &&
+                       node_elements[value].node_type != AST_NODE_TYPE_ENUM_TYPE) {
+                is_ok = semantic_definition_names_resolve(&analyzer, definition);
             }
+        } else if (node_elements[definition].node_type ==
+                   AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            is_ok = semantic_definition_names_resolve(&analyzer, definition);
         }
         definition = node_elements[definition].next_sibling;
     }
 
-    // Nothing is handed out when there was an error, because the table is only partly filled.
+    // The values are worked out once every name is resolved, because a constant can use one that
+    // is defined below it.
+    if (is_ok) {
+        is_ok = semantic_constants_check(&analyzer);
+    }
+
+    // Nothing is handed out when there was an error, because the tables are only partly filled.
     size_t length = 0;
     if (is_ok) {
         length = nodes.length;
@@ -144,6 +182,7 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
     assert(is_ok == (analyzer.status == SEMANTIC_STATUS_OK));
     return (Semantic_Result){
         .bindings = array_slice_make(binding_elements, length),
+        .constants = array_slice_make(constant_elements, length),
         .subject = analyzer.subject,
         .status = analyzer.status,
     };
@@ -265,25 +304,203 @@ static bool semantic_enum_members_check(Semantic_Analyzer *analyzer) {
 }
 
 /**
- * Binds the name of the enum in the value of a constant that is the member of an enum, such as
- * `Color` in `DEFAULT :: Color.RED`, which is the child of `access`, to the constant that has the
- * name. Only a constant can be one, so a global variable, which is not a type, and a name that
- * nothing has are unknown names. Returns false after it recorded an error.
+ * Resolves the names in the value of the definition `definition`, a constant whose value is not a
+ * procedure, a struct or an enum, or a global variable. The value is in the module scope, so a name
+ * in it is a constant or a global variable. Whether it is known when the program is compiled is
+ * checked later, see `semantic_constants_check`, because that depends on what the names stand for.
+ * Returns false after it recorded an error.
  */
-static bool semantic_enum_member_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index access) {
-    assert(analyzer->nodes[access].node_type == AST_NODE_TYPE_FIELD_ACCESS);
+static bool semantic_definition_names_resolve(Semantic_Analyzer *analyzer,
+                                              Ast_Node_Index definition) {
+    assert(analyzer->nodes[definition].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION ||
+           analyzer->nodes[definition].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION);
 
-    Ast_Node_Index identifier = analyzer->nodes[access].first_child;
-    assert(analyzer->nodes[identifier].node_type == AST_NODE_TYPE_IDENTIFIER);
-
-    Str name = analyzer->nodes[identifier].payload.identifier.name;
-    Semantic_Binding binding = semantic_definition_find(analyzer, name);
-    if (binding.kind != SEMANTIC_BINDING_KIND_CONSTANT) {
-        return semantic_fail(analyzer, SEMANTIC_STATUS_IDENTIFIER_UNKNOWN, name);
+    Ast_Node_Index end = semantic_definition_end(analyzer, definition);
+    for (Ast_Node_Index current = definition + 1; current < end; current += 1) {
+        if (analyzer->nodes[current].node_type != AST_NODE_TYPE_IDENTIFIER) {
+            continue;
+        }
+        Str name = analyzer->nodes[current].payload.identifier.name;
+        Semantic_Binding binding = semantic_definition_find(analyzer, name);
+        if (binding.kind == SEMANTIC_BINDING_KIND_NONE) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_IDENTIFIER_UNKNOWN, name);
+        }
+        analyzer->bindings[current] = binding;
     }
-
-    analyzer->bindings[identifier] = binding;
     return true;
+}
+
+/**
+ * Returns the index after the last node of `definition`, which is a child of the module. Its nodes
+ * are made after it and before the next one, so that is the next node that is a child of the
+ * module, or the end of the tree.
+ */
+static Ast_Node_Index semantic_definition_end(Semantic_Analyzer const *analyzer,
+                                              Ast_Node_Index definition) {
+    assert(definition < analyzer->node_count);
+
+    Ast_Node_Index end = definition + 1;
+    while (end < analyzer->node_count &&
+           analyzer->nodes[end].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION &&
+           analyzer->nodes[end].node_type != AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION &&
+           analyzer->nodes[end].node_type != AST_NODE_TYPE_FOREIGN_IMPORT) {
+        end += 1;
+    }
+    return end;
+}
+
+/**
+ * Works out what is known about the expressions of the program when it is compiled, and fills the
+ * table of constants with it, see `constant_evaluate`. The value of a constant that is not a
+ * procedure, a struct, an enum or the member of an enum must be a constant, and so must the initial
+ * value of a global variable, unless it is the information about a type, which the target checks.
+ * Every expression of every procedure is evaluated too, so that an error in a part that is known,
+ * such as `1 / 0`, is found also where the expression as a whole is not, and so that a target
+ * finds the entry of every expression filled. Returns false after it recorded the first error, in
+ * the order of the source.
+ */
+static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
+    Ast_Node const *nodes = analyzer->nodes;
+    Ast_Node_Index definition = nodes[analyzer->module].first_child;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < analyzer->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node_Type definition_type = nodes[definition].node_type;
+        if (definition_type == AST_NODE_TYPE_CONSTANT_DEFINITION &&
+            constant_definition_is_value(nodes, definition)) {
+            Constant_Value value = constant_evaluate(nodes, analyzer->node_count,
+                                                     analyzer->bindings, analyzer->constants,
+                                                     definition);
+            if (value.status != CONSTANT_STATUS_OK) {
+                return semantic_constant_fail(analyzer, value, definition);
+            }
+        } else if (definition_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            // The information about a type is known when the program is compiled as well, but it
+            // is no value of the kinds that a constant has, and the target checks it.
+            Ast_Node_Index value_node = nodes[definition].last_child;
+            bool is_type_info =
+                nodes[value_node].node_type == AST_NODE_TYPE_TYPE_INFO_OF ||
+                (nodes[value_node].node_type == AST_NODE_TYPE_FIELD_ACCESS &&
+                 nodes[nodes[value_node].first_child].node_type == AST_NODE_TYPE_TYPE_INFO_OF);
+            if (is_type_info == false) {
+                Constant_Value value = constant_evaluate(nodes, analyzer->node_count,
+                                                         analyzer->bindings, analyzer->constants,
+                                                         value_node);
+                if (value.status != CONSTANT_STATUS_OK) {
+                    return semantic_constant_fail(analyzer, value, definition);
+                }
+            }
+        } else if (definition_type == AST_NODE_TYPE_CONSTANT_DEFINITION &&
+                   nodes[nodes[definition].first_child].node_type == AST_NODE_TYPE_PROCEDURE) {
+            Ast_Node_Index procedure = nodes[definition].first_child;
+            Ast_Node_Index end = ast_procedure_end(nodes, analyzer->node_count, procedure);
+            for (Ast_Node_Index current = procedure + 1; current < end; current += 1) {
+                Ast_Node_Type node_type = nodes[current].node_type;
+                // The expressions that can be constants. The others are statements, or expressions
+                // that never are, such as a call, which a target finds out from the entry that
+                // stays unknown.
+                bool is_candidate = node_type == AST_NODE_TYPE_ADDITION ||
+                                    node_type == AST_NODE_TYPE_AND ||
+                                    node_type == AST_NODE_TYPE_BOOL_LITERAL ||
+                                    node_type == AST_NODE_TYPE_COMPARISON ||
+                                    node_type == AST_NODE_TYPE_DIVISION ||
+                                    node_type == AST_NODE_TYPE_IDENTIFIER ||
+                                    node_type == AST_NODE_TYPE_INTEGER_LITERAL ||
+                                    node_type == AST_NODE_TYPE_MULTIPLICATION ||
+                                    node_type == AST_NODE_TYPE_NOT ||
+                                    node_type == AST_NODE_TYPE_OR ||
+                                    node_type == AST_NODE_TYPE_STRING_LITERAL ||
+                                    node_type == AST_NODE_TYPE_SUBTRACTION;
+                if (is_candidate == false) {
+                    continue;
+                }
+                // A node that an operator above it evaluated already is not worked out again.
+                Constant_Value value = constant_evaluate(nodes, analyzer->node_count,
+                                                         analyzer->bindings, analyzer->constants,
+                                                         current);
+                // Most expressions of a procedure are not constants, which is fine there.
+                if (value.status != CONSTANT_STATUS_OK &&
+                    value.status != CONSTANT_STATUS_NOT_CONSTANT) {
+                    return semantic_constant_fail(analyzer, value, definition);
+                }
+            }
+        }
+        definition = nodes[definition].next_sibling;
+    }
+    return true;
+}
+
+/**
+ * Records the error of `value`, which is not `CONSTANT_STATUS_OK`, found in `definition`, the
+ * constant, global variable or procedure that it is in. Returns false, like every function that
+ * records an error.
+ */
+static bool semantic_constant_fail(Semantic_Analyzer *analyzer, Constant_Value value,
+                                   Ast_Node_Index definition) {
+    assert(value.status != CONSTANT_STATUS_OK);
+    assert(definition < analyzer->node_count);
+
+    Str subject = semantic_constant_subject(analyzer, value.error, definition);
+    switch (value.status) {
+    case CONSTANT_STATUS_CYCLE:
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_CYCLE, subject);
+    case CONSTANT_STATUS_DEPTH_EXCEEDED:
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_TOO_DEEP, subject);
+    case CONSTANT_STATUS_DIVISION_BY_ZERO:
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_DIVISION_BY_ZERO, subject);
+    case CONSTANT_STATUS_NOT_CONSTANT:
+        // Only the value of a definition has to be a constant, and its name is the subject.
+        if (analyzer->nodes[definition].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_GLOBAL_VALUE_NOT_CONSTANT, subject);
+        }
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_NOT_CONSTANT, subject);
+    case CONSTANT_STATUS_OPERAND_TYPE_INVALID:
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_OPERAND_TYPE_INVALID, subject);
+    case CONSTANT_STATUS_OVERFLOW:
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_OVERFLOW, subject);
+    case CONSTANT_STATUS_TYPE_INVALID:
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_TYPE_INVALID, subject);
+    case CONSTANT_STATUS_TYPE_MISMATCH:
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_TYPE_MISMATCH, subject);
+    case CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE:
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_VALUE_NOT_REPRESENTABLE, subject);
+    case CONSTANT_STATUS_EVALUATING:
+    case CONSTANT_STATUS_OK:
+    case CONSTANT_STATUS_UNKNOWN:
+        // A finished evaluation has none of these, and the second is no error.
+        assert(false);
+        break;
+    }
+    return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_NOT_CONSTANT, subject);
+}
+
+/**
+ * Returns the text in the source that an error about `node` points at: the name of a definition,
+ * or the first name or string in an expression, which is its leftmost leaf. An expression that
+ * starts with a number or with `true` or `false` has no such text, and neither has a node of
+ * `AST_NODE_INDEX_NONE`, so the name of `definition`, which the error is in, is the closest place
+ * that the tree knows.
+ */
+static Str semantic_constant_subject(Semantic_Analyzer const *analyzer, Ast_Node_Index node,
+                                     Ast_Node_Index definition) {
+    assert(definition < analyzer->node_count);
+
+    Ast_Node_Index current = node;
+    // Each step goes to a child, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < analyzer->node_count && current != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node const *current_node = &analyzer->nodes[current];
+        if (current_node->node_type == AST_NODE_TYPE_IDENTIFIER) {
+            return current_node->payload.identifier.name;
+        }
+        if (current_node->node_type == AST_NODE_TYPE_STRING_LITERAL) {
+            return current_node->payload.string_literal.text;
+        }
+        if (current_node->node_type == AST_NODE_TYPE_CONSTANT_DEFINITION ||
+            current_node->node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            return ast_definition_name(current_node);
+        }
+        current = current_node->first_child;
+    }
+    return ast_definition_name(&analyzer->nodes[definition]);
 }
 
 /**

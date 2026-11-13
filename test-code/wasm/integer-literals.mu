@@ -61,7 +61,7 @@ array_with_hexadecimal_length :: proc() Int ->
         total += n
     return total
 
-/// The initial value of a global variable is a literal.
+/// The initial value of a global variable is a constant, such as a literal.
 mask #(static) := 0x0F
 
 /// Masks the lowest four bits of a number by keeping its remainder of 16, since there are no

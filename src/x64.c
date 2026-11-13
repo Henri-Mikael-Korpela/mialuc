@@ -6,6 +6,7 @@
 
 #include <mialu/semantic.h>
 #include <mialu/version.h>
+#include <mialu/constant.h>
 #include <mialu/x64.h>
 
 // The layout of the file follows the PE format, see
@@ -150,8 +151,12 @@ typedef enum {
     // A procedure with a body, which has code.
     X64_CONSTANT_KIND_PROCEDURE,
     // A string, such as `greeting :: "Hello"`, whose bytes are in `.rdata` with the other string
-    // literals. It has no code, and it is used as the argument of `str_to_c_str`.
+    // literals. It has no code, and it is used where a `C_Str` is wanted, or as the argument of
+    // `str_to_c_str`, like a string literal.
     X64_CONSTANT_KIND_STRING,
+    // A number or a truth value, such as `LIMIT :: 100`. It has no code either: a use of it is its
+    // value, like a literal.
+    X64_CONSTANT_KIND_VALUE,
 } X64_Constant_Kind;
 
 // Alphabetical, because nothing depends on the order. `X64_TYPE_NONE` is the type of a call of a
@@ -246,6 +251,9 @@ typedef struct {
     X64_Writer writer;
     Ast_Node const *nodes;
     Semantic_Binding const *bindings;
+    // What is known about each node when the program is compiled, see `constant_evaluate`. A node
+    // whose entry is `CONSTANT_STATUS_OK` is loaded as its value.
+    Constant_Value const *constant_values;
     Str subject;
     // What the debug information needs, or NULL when the file has none.
     X64_Debug const *debug;
@@ -331,6 +339,8 @@ static void         x64_write_frame_move         (X64_Builder *builder, byte opc
                                                   byte register_number, int32_t displacement);
 static bool         x64_procedure_uses_temporary (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
+static bool         x64_c_str_write              (X64_Builder *builder, Ast_Node_Index literal,
+                                                  byte register_number);
 static bool         x64_str_to_c_str_write       (X64_Builder *builder, Ast_Node_Index call,
                                                   byte register_number);
 static Ast_Node_Index x64_string_literal_of      (X64_Builder const *builder,
@@ -343,6 +353,8 @@ static bool         x64_expression_load          (X64_Builder *builder, Ast_Node
                                                   byte register_number);
 static X64_Type     x64_expression_type          (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
+static X64_Type     x64_expression_type_for      (X64_Builder const *builder,
+                                                  Ast_Node_Index expression, X64_Type wanted);
 static bool         x64_fail                     (X64_Builder *builder, X64_Build_Status status,
                                                   Str subject);
 static bool         x64_fail_unsupported         (X64_Builder *builder);
@@ -469,11 +481,13 @@ static byte const X64_DEBUG_ABBREVIATIONS[] = {
 STATIC_ASSERT(X64_DWARF_CFA_NOP == 0, x64_dwarf_cfa_nop_is_zero);
 static char const X64_EXIT_NAME[] = "exit";
 
-X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Index root,
-                           Array_Slice output_buffer, Array_Slice symbol_buffer,
-                           X64_Debug const *debug) {
+X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice constants,
+                           Ast_Node_Index root, Array_Slice output_buffer,
+                           Array_Slice symbol_buffer, X64_Debug const *debug) {
     assert(nodes.elements != NULL);
     assert(bindings.elements != NULL);
+    assert(constants.elements != NULL);
+    assert(constants.length == nodes.length);
     assert(output_buffer.elements != NULL);
     assert(symbol_buffer.elements != NULL);
     // One symbol for each procedure fits, because the build has room for no more procedures.
@@ -517,6 +531,7 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Ast_Node_Ind
             },
         .nodes = node_elements,
         .bindings = bindings.elements,
+        .constant_values = constants.elements,
         .subject = STR_EMPTY,
         .debug = debug,
         .rows = rows,
@@ -641,13 +656,18 @@ static bool x64_constants_collect(X64_Builder *builder) {
         if (builder->constant_count == X64_CONSTANT_COUNT_MAX) {
             return x64_fail(builder, X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED, name);
         }
-        // A string needs nothing more: its bytes are written with the other string literals.
-        if (builder->nodes[procedure].node_type == AST_NODE_TYPE_STRING_LITERAL) {
+        // A value needs nothing more: its uses are its value, and the bytes of a string are written
+        // with the other string literals.
+        if (constant_definition_is_value(builder->nodes, definition)) {
+            X64_Constant_Kind kind = X64_CONSTANT_KIND_VALUE;
+            if (builder->constant_values[definition].string != AST_NODE_INDEX_NONE) {
+                kind = X64_CONSTANT_KIND_STRING;
+            }
             builder->constants[builder->constant_count] = (X64_Constant){
                 .definition = definition,
                 .offset = 0,
                 .import_slot = 0,
-                .kind = X64_CONSTANT_KIND_STRING,
+                .kind = kind,
             };
             builder->constant_count += 1;
             definition = definition_node->next_sibling;
@@ -1064,6 +1084,12 @@ static bool x64_procedure_uses_temporary(X64_Builder const *builder, Ast_Node_In
         if (x64_call_is_str_to_c_str(builder, node)) {
             return true;
         }
+        // A string that is a `C_Str` is copied to the temporary storage, as `str_to_c_str` copies
+        // it, and the target has no `Str` that a string could be instead.
+        if (builder->constant_values[node].status == CONSTANT_STATUS_OK &&
+            builder->constant_values[node].string != AST_NODE_INDEX_NONE) {
+            return true;
+        }
     }
     return false;
 }
@@ -1093,7 +1119,7 @@ static bool x64_return_write(X64_Builder *builder, Ast_Node_Index procedure,
     }
 
     Ast_Node_Index value = builder->nodes[statement].first_child;
-    X64_Type value_type = x64_expression_type(builder, value);
+    X64_Type value_type = x64_expression_type_for(builder, value, return_type);
     if (value_type == X64_TYPE_NONE && builder->nodes[value].node_type != AST_NODE_TYPE_CALL) {
         // An expression that the target does not build has no type.
         return x64_fail_unsupported(builder);
@@ -1103,8 +1129,10 @@ static bool x64_return_write(X64_Builder *builder, Ast_Node_Index procedure,
         return x64_fail(builder, X64_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
     }
     // The temporary strings are given back by the return, so a pointer to one must not leave. A
-    // `C_Str` variable may hold one, so it cannot be returned either.
-    if (x64_call_is_str_to_c_str(builder, value)) {
+    // string that is a `C_Str` is one, and a `C_Str` variable may hold one, so neither can be
+    // returned either.
+    if (x64_call_is_str_to_c_str(builder, value) ||
+        x64_string_literal_of(builder, value) != AST_NODE_INDEX_NONE) {
         return x64_fail_unsupported(builder);
     }
     if (value_type == X64_TYPE_C_STR &&
@@ -1201,7 +1229,7 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
  */
 static bool x64_value_write(X64_Builder *builder, Ast_Node_Index value, X64_Type variable_type,
                             Str name) {
-    X64_Type value_type = x64_expression_type(builder, value);
+    X64_Type value_type = x64_expression_type_for(builder, value, variable_type);
     if (value_type == X64_TYPE_NONE && builder->nodes[value].node_type != AST_NODE_TYPE_CALL) {
         // An expression that the target does not build has no type.
         return x64_fail_unsupported(builder);
@@ -1333,8 +1361,9 @@ static bool x64_call_write(X64_Builder *builder, Ast_Node_Index call, bool is_re
     static byte const SHADOW_SPACE_MAKE[] = {0x48, 0x83, 0xEC, X64_SHADOW_SPACE_BYTES};
     static byte const SHADOW_SPACE_FREE[] = {0x48, 0x83, 0xC4, X64_SHADOW_SPACE_BYTES};
     x64_write_bytes(&builder->writer, SHADOW_SPACE_MAKE, sizeof(SHADOW_SPACE_MAKE));
-    // The analysis does not bind a call to a string, which is not a procedure.
+    // The analysis does not bind a call to a value, such as a string, which is not a procedure.
     assert(callee->kind != X64_CONSTANT_KIND_STRING);
+    assert(callee->kind != X64_CONSTANT_KIND_VALUE);
     if (callee->kind == X64_CONSTANT_KIND_FOREIGN) {
         x64_write_call_import(builder, callee->import_slot);
     } else {
@@ -1367,11 +1396,12 @@ static bool x64_arguments_write(X64_Builder *builder, Ast_Node_Index call,
             x64_call_is_str_to_c_str(builder, argument) == false) {
             return x64_fail_unsupported(builder);
         }
-        X64_Type type = x64_expression_type(builder, argument);
+        X64_Type parameter_type = x64_parameter_type(builder, callee, i);
+        X64_Type type = x64_expression_type_for(builder, argument, parameter_type);
         if (type == X64_TYPE_NONE) {
             return x64_fail_unsupported(builder);
         }
-        if (type != x64_parameter_type(builder, callee, i)) {
+        if (type != parameter_type) {
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         }
         if (x64_expression_load(builder, argument, X64_ARGUMENT_REGISTERS[i]) == false) {
@@ -1388,14 +1418,20 @@ static bool x64_arguments_write(X64_Builder *builder, Ast_Node_Index call,
 
 /**
  * Writes the instruction that puts the value of `expression` in the register `register_number`.
- * The expression is an integer literal, a parameter, a variable, `str_to_c_str` or a call, whose
- * result is in `rax`, so a call is only loaded to `rax`. Returns false after it recorded an error.
+ * The expression is a constant, a parameter, a variable, `str_to_c_str` or a call, whose result is
+ * in `rax`, so a call is only loaded to `rax`. A constant that is a number is its value, whatever
+ * operators and constants it was worked out from, and a string is a `C_Str`, because the type of
+ * the place was checked, and the target has no `Str`. Returns false after it recorded an error.
  */
 static bool x64_expression_load(X64_Builder *builder, Ast_Node_Index expression,
                                 byte register_number) {
     Ast_Node const *node = &builder->nodes[expression];
-    if (node->node_type == AST_NODE_TYPE_INTEGER_LITERAL) {
-        x64_write_load_integer(builder, register_number, node->payload.integer_literal.value);
+    Constant_Value constant = builder->constant_values[expression];
+    if (constant.status == CONSTANT_STATUS_OK && constant.string != AST_NODE_INDEX_NONE) {
+        return x64_c_str_write(builder, constant.string, register_number);
+    }
+    if (constant.status == CONSTANT_STATUS_OK) {
+        x64_write_load_integer(builder, register_number, constant.integer);
         return true;
     }
     if (node->node_type == AST_NODE_TYPE_IDENTIFIER &&
@@ -1421,13 +1457,36 @@ static bool x64_expression_load(X64_Builder *builder, Ast_Node_Index expression,
 }
 
 /**
+ * Returns the type that `expression` has where a value of `wanted` is wanted, or `X64_TYPE_NONE` for
+ * no type in particular. It is the type of the expression, except that an untyped string is a
+ * `C_Str` where one is wanted: the address of a copy of its bytes with a zero after them. The
+ * caller compares the type with `wanted`, so an untyped constant that does not become it keeps the
+ * type that it has where nothing else says.
+ */
+static X64_Type x64_expression_type_for(X64_Builder const *builder, Ast_Node_Index expression,
+                                        X64_Type wanted) {
+    Constant_Value constant = builder->constant_values[expression];
+    if (constant.status == CONSTANT_STATUS_OK && constant.type == CONSTANT_TYPE_UNTYPED_STRING &&
+        wanted == X64_TYPE_C_STR) {
+        return X64_TYPE_C_STR;
+    }
+    return x64_expression_type(builder, expression);
+}
+
+/**
  * Returns the type of `expression`, or `X64_TYPE_NONE` if it has none, which is the case for a
- * call of a procedure that returns nothing and for everything that the target does not build.
+ * call of a procedure that returns nothing and for everything that the target does not build. A
+ * constant has the type that it has where nothing else says, see `constant_type_default`, which is
+ * `Int` for an untyped integer, and the target has no `Byte`, `Bool` or `Str`.
  */
 static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index expression) {
     Ast_Node const *node = &builder->nodes[expression];
-    if (node->node_type == AST_NODE_TYPE_INTEGER_LITERAL) {
-        return X64_TYPE_INT;
+    Constant_Value constant = builder->constant_values[expression];
+    if (constant.status == CONSTANT_STATUS_OK) {
+        if (constant_type_default(constant.type) == CONSTANT_TYPE_INT) {
+            return X64_TYPE_INT;
+        }
+        return X64_TYPE_NONE;
     }
     if (node->node_type == AST_NODE_TYPE_IDENTIFIER &&
         builder->bindings[expression].kind == SEMANTIC_BINDING_KIND_PARAMETER) {
@@ -1542,6 +1601,17 @@ static bool x64_str_to_c_str_write(X64_Builder *builder, Ast_Node_Index call,
     if (literal == AST_NODE_INDEX_NONE) {
         return x64_fail_unsupported(builder);
     }
+    return x64_c_str_write(builder, literal, register_number);
+}
+
+/**
+ * Writes the copy of the string literal `literal` as a `C_Str`, which is what `str_to_c_str` of it
+ * and an untyped string where a `C_Str` is wanted both are, see `x64_str_to_c_str_write`, and puts
+ * its address in `register_number`. Returns false after it recorded an error.
+ */
+static bool x64_c_str_write(X64_Builder *builder, Ast_Node_Index literal, byte register_number) {
+    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_STRING_LITERAL);
+    assert(register_number < 16);
 
     Str text = builder->nodes[literal].payload.string_literal.text;
     size_t size_bytes = x64_align_up(text.length + 1, X64_TEMPORARY_ALIGNMENT_BYTES);
@@ -1597,29 +1667,19 @@ static bool x64_str_to_c_str_write(X64_Builder *builder, Ast_Node_Index call,
 }
 
 /**
- * Returns the string literal that `expression` is, or that it stands for when it is the name of a
- * constant that is a string, such as `greeting` of `greeting :: "Hello"`, whose literal is the only
- * child of the definition. Returns `AST_NODE_INDEX_NONE` for anything else.
+ * Returns the string literal that `expression` is, or that it stands for when it is a constant that
+ * is a string, such as `greeting` of `greeting :: "Hello"`. Returns `AST_NODE_INDEX_NONE` for
+ * anything else.
  */
 static Ast_Node_Index x64_string_literal_of(X64_Builder const *builder,
                                             Ast_Node_Index expression) {
     assert(expression < builder->node_count);
 
-    if (builder->nodes[expression].node_type == AST_NODE_TYPE_STRING_LITERAL) {
-        return expression;
-    }
-    Semantic_Binding binding = builder->bindings[expression];
-    if (builder->nodes[expression].node_type != AST_NODE_TYPE_IDENTIFIER ||
-        binding.kind != SEMANTIC_BINDING_KIND_CONSTANT) {
+    Constant_Value constant = builder->constant_values[expression];
+    if (constant.status != CONSTANT_STATUS_OK) {
         return AST_NODE_INDEX_NONE;
     }
-    assert(binding.position < builder->constant_count);
-    if (builder->constants[binding.position].kind != X64_CONSTANT_KIND_STRING) {
-        return AST_NODE_INDEX_NONE;
-    }
-    Ast_Node_Index literal = builder->nodes[binding.target].first_child;
-    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_STRING_LITERAL);
-    return literal;
+    return constant.string;
 }
 
 /**
@@ -2137,7 +2197,9 @@ static void x64_debug_info_write(X64_Builder *builder, size_t text_size_bytes) {
             continue;
         }
         Ast_Node_Index definition = builder->constants[i].definition;
-        Ast_Node_Index literal = builder->nodes[definition].first_child;
+        // The literal of the string, which is the value of the definition or of the constant
+        // that it is defined as.
+        Ast_Node_Index literal = builder->constant_values[definition].string;
         Str text = builder->nodes[literal].payload.string_literal.text;
         cursor = x64_debug_cursor_move(debug->source, cursor,
                                        builder->nodes[definition].source_offset);
