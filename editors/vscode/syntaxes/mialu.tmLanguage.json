@@ -31,6 +31,9 @@
             "include": "#type-positions"
         },
         {
+            "include": "#numbers"
+        },
+        {
             "include": "#reserved-words"
         },
         {
@@ -198,6 +201,23 @@
                             "name": "entity.name.label.mialu"
                         }
                     }
+                }
+            ]
+        },
+        "numbers": {
+            "comment": "Integer literals: decimal, binary after 0b and hexadecimal after 0x, with an underscore as a digit separator between two digits, as in 1_000_000, 0b1111_0000 and 0xFF_FF. A literal that the compiler rejects, such as 1__0 or 0b102, is not colored as a number.",
+            "patterns": [
+                {
+                    "name": "constant.numeric.integer.binary.mialu",
+                    "match": "\\b0b[01](?:_?[01])*\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.hexadecimal.mialu",
+                    "match": "\\b0x[0-9A-Fa-f](?:_?[0-9A-Fa-f])*\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.decimal.mialu",
+                    "match": "\\b[0-9](?:_?[0-9])*\\b"
                 }
             ]
         },
@@ -440,6 +460,9 @@
                 },
                 {
                     "include": "#array-brackets"
+                },
+                {
+                    "include": "#numbers"
                 },
                 {
                     "include": "#reserved-words"

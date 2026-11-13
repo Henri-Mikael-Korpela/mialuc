@@ -848,9 +848,22 @@ static void main_run_command_report_tokenize_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: indentation must be a multiple of 4 spaces.\n", path, line,
                 column);
         break;
+    case TOKENIZE_STATUS_INTEGER_LITERAL_DIGIT_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%c' is not a digit of the integer literal, which has the "
+                "digits 0 to 9, or 0 and 1 after '0b', or 0 to 9 and a to f after '0x'.\n",
+                path, line, column, source.bytes[result.error_offset]);
+        break;
+    case TOKENIZE_STATUS_INTEGER_LITERAL_DIGITS_MISSING:
+        fprintf(stderr, "%s:%zu:%zu: integer literal has no digits after its prefix.\n", path,
+                line, column);
+        break;
+    case TOKENIZE_STATUS_INTEGER_LITERAL_SEPARATOR_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: a digit separator '_' must be between two digits.\n", path,
+                line, column);
+        break;
     case TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE:
-        fprintf(stderr, "%s:%zu:%zu: integer literal does not fit in 64 bits.\n", path, line,
-                column);
+        fprintf(stderr, "%s:%zu:%zu: integer literal is larger than the largest Int, "
+                "9223372036854775807.\n", path, line, column);
         break;
     case TOKENIZE_STATUS_LABEL_INVALID:
         fprintf(stderr, "%s:%zu:%zu: a label is '@' directly followed by a name that is not a "

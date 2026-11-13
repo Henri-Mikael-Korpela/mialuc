@@ -12,6 +12,18 @@
 #include <mialu/common_types.h>
 #include <mialu/tokenizer.h>
 
+/**
+ * An integer literal that `tokenizer_integer_literal` read. On `TOKENIZE_STATUS_OK`, `value` is
+ * its value and `end` is the offset right after it. Otherwise `error_offset` is where the mistake
+ * is.
+ */
+typedef struct {
+    int64_t value;
+    size_t end;
+    size_t error_offset;
+    Tokenize_Status status;
+} Tokenize_Integer_Literal;
+
 enum {
     // Indentation must be a whole number of levels, and one level is always this many spaces.
     INDENTATION_SPACES_PER_LEVEL = 4,
@@ -23,7 +35,9 @@ static bool   char_is_lower     (char character);
 static bool   char_is_upper     (char character);
 static bool   char_is_whitespace(char character);
 static size_t utf8_sequence_size(Str text, size_t offset);
+static int    char_digit_value  (char character);
 static bool   tokenizer_comment_line_end(Str source, size_t offset, size_t *end);
+static Tokenize_Integer_Literal tokenizer_integer_literal(Str source, size_t offset);
 static Token_Kind tokenizer_keyword_type(Str text);
 static bool   tokenizer_operator_types(char character, Token_Kind *plain_type,
                                        Token_Kind *equals_type);
@@ -95,6 +109,24 @@ static size_t utf8_sequence_size(Str text, size_t offset) {
 
 static bool char_is_digit(char character) {
     return character >= '0' && character <= '9';
+}
+
+/**
+ * Returns the value of `character` as a digit of a base up to 16: 0 to 9 for the decimal digits,
+ * and 10 to 15 for `a` to `f` and `A` to `F`. Returns -1 for any other character, which is above
+ * no base, so that the caller only has to compare the value with its base.
+ */
+static int char_digit_value(char character) {
+    if (char_is_digit(character)) {
+        return character - '0';
+    }
+    if (character >= 'a' && character <= 'f') {
+        return character - 'a' + 10;
+    }
+    if (character >= 'A' && character <= 'F') {
+        return character - 'A' + 10;
+    }
+    return -1;
 }
 
 static bool char_is_letter(char character) {
@@ -186,6 +218,91 @@ static bool tokenizer_operator_types(char character, Token_Kind *plain_type,
  * Returns the keyword token kind of `text`, or `TOKEN_KIND_IDENTIFIER` when it is not a reserved
  * word. `not` followed by `=` must be handled before, because that is the token `not=`.
  */
+/**
+ * Reads the integer literal that starts at `offset` in `source`, where there is a digit. It is
+ * decimal, or binary when it starts with `0b`, or hexadecimal when it starts with `0x`. An
+ * underscore is a digit separator, which only makes the number easier to read, and it must be
+ * between two digits, so that `1__000`, `1_` and `0x_FF` are errors: a separator has one meaning,
+ * and the start of the digits is always a digit.
+ *
+ * The literal is taken to go on for as long as there are letters, digits and underscores, so a
+ * character that is not a digit of its base, such as the `2` of `0b102` or the `g` of `0xfg`, is
+ * reported as a wrong digit of the literal. It would otherwise be split off into a token of its own
+ * and give a less clear error, or none: an identifier cannot begin with a digit, so a letter right
+ * after the digits is never the start of a name.
+ */
+static Tokenize_Integer_Literal tokenizer_integer_literal(Str source, size_t offset) {
+    assert(offset < source.length);
+    assert(char_is_digit(source.bytes[offset]));
+
+    Tokenize_Integer_Literal literal = { .status = TOKENIZE_STATUS_OK };
+
+    // The prefix is lowercase only, so that a literal has one spelling. The digits of a
+    // hexadecimal literal can be either case, since `0xff` and `0xFF` are both common.
+    int base = 10;
+    size_t digits_start = offset;
+    if (source.bytes[offset] == '0' && offset + 1 < source.length) {
+        if (source.bytes[offset + 1] == 'b') {
+            base = 2;
+            digits_start = offset + 2;
+        } else if (source.bytes[offset + 1] == 'x') {
+            base = 16;
+            digits_start = offset + 2;
+        }
+    }
+
+    // Bounded by `source.length`, since each iteration consumes one character.
+    size_t end = digits_start;
+    while (end < source.length && (char_is_letter(source.bytes[end]) ||
+                                   char_is_digit(source.bytes[end]) ||
+                                   source.bytes[end] == '_')) {
+        end += 1;
+    }
+    literal.end = end;
+
+    if (digits_start == end) {
+        literal.status = TOKENIZE_STATUS_INTEGER_LITERAL_DIGITS_MISSING;
+        literal.error_offset = offset;
+        return literal;
+    }
+
+    int64_t value = 0;
+    for (size_t i = digits_start; i < end; i += 1) {
+        char character = source.bytes[i];
+
+        // The first character is never a separator and the last one is not either, and a
+        // separator is never followed by another, so each one is between two digits.
+        if (character == '_') {
+            if (i == digits_start || i + 1 == end || source.bytes[i + 1] == '_') {
+                literal.status = TOKENIZE_STATUS_INTEGER_LITERAL_SEPARATOR_INVALID;
+                literal.error_offset = i;
+                return literal;
+            }
+            continue;
+        }
+
+        int digit = char_digit_value(character);
+        if (digit < 0 || digit >= base) {
+            literal.status = TOKENIZE_STATUS_INTEGER_LITERAL_DIGIT_INVALID;
+            literal.error_offset = i;
+            return literal;
+        }
+
+        // Checked before multiplying, because signed overflow is undefined behavior. A binary or
+        // hexadecimal literal has the same limit as a decimal one, because it is the same `Int`,
+        // so `0xFFFF_FFFF_FFFF_FFFF` is too large rather than -1.
+        if (value > (INT64_MAX - digit) / base) {
+            literal.status = TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE;
+            literal.error_offset = offset;
+            return literal;
+        }
+        value = value * base + digit;
+    }
+
+    literal.value = value;
+    return literal;
+}
+
 static Token_Kind tokenizer_keyword_type(Str text) {
     if (str_equals(text, STR("proc"))) {
         return TOKEN_KIND_KEYWORD_PROC;
@@ -447,47 +564,22 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset = end + 1;
         }
-        // Only decimal format is supported for integer literals.
+        // An integer literal is decimal, or binary after `0b`, or hexadecimal after `0x`.
         else if (char_is_digit(character)) {
-            int64_t value = 0;
-            bool is_too_large = false;
-
-            // Bounded by `source.length`, since each iteration consumes one digit.
-            size_t end = offset;
-            while (end < source.length && char_is_digit(source.bytes[end])) {
-                int64_t digit = source.bytes[end] - '0';
-
-                // Checked before multiplying, because signed overflow is undefined behavior.
-                if (value > (INT64_MAX - digit) / 10) {
-                    is_too_large = true;
-                    break;
-                }
-                value = value * 10 + digit;
-                end += 1;
-            }
-
-            if (is_too_large) {
-                result.status = TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE;
-                result.error_offset = offset;
-                return result;
-            }
-
-            // A letter or underscore right after the digits would otherwise be silently split into
-            // a separate identifier, but identifiers cannot begin with a digit.
-            if (end < source.length && (char_is_letter(source.bytes[end]) ||
-                                        source.bytes[end] == '_')) {
-                result.status = TOKENIZE_STATUS_UNEXPECTED_CHARACTER;
-                result.error_offset = end;
+            Tokenize_Integer_Literal literal = tokenizer_integer_literal(source, offset);
+            if (literal.status != TOKENIZE_STATUS_OK) {
+                result.status = literal.status;
+                result.error_offset = literal.error_offset;
                 return result;
             }
 
             token_elements[result.tokens.length] = (Token){
                 .kind = TOKEN_KIND_INTEGER_LITERAL,
                 .source_offset = (uint32_t)offset,
-                .payload.integer_literal.value = value,
+                .payload.integer_literal.value = literal.value,
             };
             result.tokens.length += 1;
-            offset = end;
+            offset = literal.end;
         }
         // If the character is a letter or underscore, it starts an identifier:
         else if (char_is_letter(character) || character == '_') {

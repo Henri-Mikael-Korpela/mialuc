@@ -149,6 +149,16 @@ typedef enum {
     TOKENIZE_STATUS_DOCUMENTATION_COMMENT_TRAILING,
     TOKENIZE_STATUS_INDENTATION_TAB,
     TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID,
+    // A character of an integer literal that is not a digit of its base, such as the `2` of
+    // `0b102`, the `g` of `0xfg` or the `a` of `12a`. `error_offset` is where the character is.
+    TOKENIZE_STATUS_INTEGER_LITERAL_DIGIT_INVALID,
+    // A `0b` or `0x` that has no digits after it. `error_offset` is where the literal starts.
+    TOKENIZE_STATUS_INTEGER_LITERAL_DIGITS_MISSING,
+    // A digit separator `_` that is not between two digits, such as in `1__000`, `1_` or `0x_FF`.
+    // `error_offset` is where the separator is.
+    TOKENIZE_STATUS_INTEGER_LITERAL_SEPARATOR_INVALID,
+    // The value of an integer literal is above the largest `Int`. `error_offset` is where the
+    // literal starts.
     TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE,
     // An `@` that is not directly followed by a name, or whose name is a reserved word.
     TOKENIZE_STATUS_LABEL_INVALID,

@@ -326,6 +326,7 @@
             defer: "defer",
             "foreign functions": "foreign-functions",
             "global variables": "global-variables",
+            "integer literals": "integer-literals",
             loops: "loops",
             pointers: "pointers",
             "procedure pointers": "procedure-pointers",
@@ -371,7 +372,9 @@
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)/],
                 ["function", /\b[A-Za-z_]\w*(?=\()/],
                 ["type", /\b[A-Z]\w*\b/],
-                ["number", /\b\d+\b/],
+                // Decimal, binary after 0b or hexadecimal after 0x, with an underscore only
+                // between two digits, as the compiler takes them.
+                ["number", /\b(?:0b[01](?:_?[01])*|0x[\dA-Fa-f](?:_?[\dA-Fa-f])*|\d(?:_?\d)*)\b/],
             ],
             javascript: [
                 ["comment", /\/\/.*|\/\*[\s\S]*?\*\//],

@@ -27,7 +27,8 @@
      - Rule names are written in snake_case, without spaces.
 
    What a grammar cannot say, and the compiler checks in addition:
-     - An integer literal must fit in a signed 64-bit integer.
+     - An integer literal must fit in a signed 64-bit integer, in any base: `0x7FFF_FFFF_FFFF_FFFF`
+       is the largest.
      - A name that is used must be a variable or a parameter of its procedure or a constant or a
        global variable of the module, a variable can only be used below its definition, and no name
        may be declared twice, for example a variable may not have the name of a parameter. This is
@@ -609,10 +610,22 @@ literal_word = "true" | "false" | "nil" ;
 
 identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 
-(* A number is written in decimal, and a letter or underscore may not follow it directly. Both
-   are guaranteed because only a space, an operator, a line end or the end of input is allowed after
-   it. *)
-integer_literal = digit , { digit } ;
+(* A number is written in decimal, in binary after `0b` or in hexadecimal after `0x`, whose prefix
+   is lowercase and whose digits can be either case. An underscore is a digit separator, which can
+   only be between two digits, so not after the prefix, at the end or twice in a row. A letter,
+   a digit of another base or an underscore may not follow a literal directly, which is guaranteed
+   because only a space, an operator, a line end or the end of input is allowed after it. *)
+integer_literal = binary_literal | hexadecimal_literal | decimal_literal ;
+
+decimal_literal = digit , { [ "_" ] , digit } ;
+
+binary_literal = "0b" , binary_digit , { [ "_" ] , binary_digit } ;
+
+hexadecimal_literal = "0x" , hexadecimal_digit , { [ "_" ] , hexadecimal_digit } ;
+
+binary_digit = "0" | "1" ;
+
+hexadecimal_digit = digit | "a" .. "f" | "A" .. "F" ;
 
 letter = "a" .. "z" | "A" .. "Z" ;
 
