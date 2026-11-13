@@ -25,7 +25,7 @@
 - [Control flow structures](#control-flow-structures)
   - [If statements](#if-statements)
   - [For statements](#for-statements)
-  - [Loops without a range](#loops-without-a-range)
+  - [Infinite loops](#infinite-loops)
   - [Scopes](#scopes)
   - [Break and continue](#break-and-continue)
   - [Defer](#defer)
@@ -665,7 +665,7 @@ A block is a scope, see [Scope resolution](#scope-resolution): a variable that i
 
 ### For statements
 
-A for statement runs a block of statements once for each number in a range. There is also a [loop without a range](#loops-without-a-range), and a loop can be left early or skipped ahead with [`break` and `continue`](#break-and-continue). After `for` comes the name of the iterator, then the keyword `in`, and then the range. The `->` after the range starts the block, which is indented one level deeper than the `for`, like the block of an `if`:
+A for statement runs a block of statements once for each number in a range. There is also a [infinite loop](#infinite-loops), and a loop can be left early or skipped ahead with [`break` and `continue`](#break-and-continue). After `for` comes the name of the iterator, then the keyword `in`, and then the range. The `->` after the range starts the block, which is indented one level deeper than the `for`, like the block of an `if`:
 
 ```
 sum_to_nine :: proc() Int ->
@@ -732,9 +732,9 @@ fill :: proc() Int ->
     return a[4]
 ```
 
-### Loops without a range
+### Infinite loops
 
-A for statement with no iterator and no range is a loop that has no end of its own. It is written `for ->`, and the block, which is indented one level deeper, runs again and again until a `break` or a `return` leaves it:
+A for statement with no iterator and no range is an infinite loop, like `for(;;)` and `while(true)` in C. It is written `for ->`, and the block, which is indented one level deeper, runs again and again until a `break` or a `return` leaves it. Example:
 
 ```
 count_up_to :: proc(limit: Int) Int ->
@@ -779,7 +779,7 @@ find_first :: proc(limit: Int) Int ->
 
 The name of a label follows the rules of an [identifier](#identifiers), so a keyword or a literal word cannot be one, and `@ outer` with a space is an error. Labels are a kind of name of their own: they cannot be used as variables, and a variable or a procedure with the same name does not clash with them. A statement cannot have the label of a statement that it is inside of, so a label has one meaning wherever it can be used, but statements that are not inside each other can have the same label.
 
-An if statement, a for statement and a [loop without a range](#loops-without-a-range) can have a label as well. It is written before the `if` or the `for` on the same line, with a space after it:
+An if statement, a for statement and a [infinite loop](#infinite-loops) can have a label as well. It is written before the `if` or the `for` on the same line, with a space after it:
 
 ```
 @check if n > 5 ->
@@ -798,7 +798,7 @@ The label belongs to the whole statement. For an if statement that is the `if` w
 
 ### Break and continue
 
-`break` leaves the innermost loop or scope that it is in, and the statement after it runs next. `continue` ends the current pass of the loop and starts the next one: in a loop without a range that is the first statement of the block again, and in a for statement with a range it is the next number of the range, or the end of the loop when there are no more. The iterator is stepped after a `continue` the same way as after a block that runs to its end, so an inclusive range that ends at the largest `Int` also ends. Both are statements of one word on a line of their own:
+`break` leaves the innermost loop or scope that it is in, and the statement after it runs next. `continue` ends the current pass of the loop and starts the next one: in an infinite loop that is the first statement of the block again, and in a for statement with a range it is the next number of the range, or the end of the loop when there are no more. The iterator is stepped after a `continue` the same way as after a block that runs to its end, so an inclusive range that ends at the largest `Int` also ends. Both are statements of one word on a line of their own:
 
 ```
 sum_of_odd_numbers :: proc(n: Int) Int ->
@@ -818,7 +818,7 @@ first_multiple :: proc(factor: Int, limit: Int) Int ->
     return found
 ```
 
-They work in the loops without a range and in the for statements with a range alike, and they can be in the blocks of if statements that are inside the loop. They belong to the innermost loop only, so a `break` in an inner loop does not leave the outer one. The block of an `if` is not a scope to leave, so a `break` in it leaves the loop or scope around the `if`:
+They work in infinite loops and in for statements with a range alike, and they can be in the blocks of if statements that are inside the loop. They belong to the innermost loop only, so a `break` in an inner loop does not leave the outer one. The block of an `if` is not a scope to leave, so a `break` in it leaves the loop or scope around the `if`:
 
 ```
 count_pairs :: proc(n: Int) Int ->
@@ -896,7 +896,7 @@ count_triangle :: proc(n: Int) Int ->
     return total
 ```
 
-`count_triangle(3)` returns 6. The label of a `continue` must be the one of a for statement or a loop without a range that it is inside of. A scope or an if statement cannot be continued, so `continue` with the label of one is an error.
+`count_triangle(3)` returns 6. The label of a `continue` must be the one of a for statement or an infinite loop that it is inside of. A scope or an if statement cannot be continued, so `continue` with the label of one is an error.
 
 A `break` that is not inside a loop or a scope, and a `continue` that is not inside a loop, are errors, and so is one in a procedure that has no loop, even if the procedure is only called from a loop. A `break` or a `continue` with a label that no statement around it has is an error as well. They are not expressions, so they have no value and nothing can follow them on the line, except a label. The statements that come after them in the same block are never run.
 
@@ -970,7 +970,7 @@ increment_after_return :: proc(counter: ^Int) Int ->
 
 `return_value_comes_first()` returns 1, and `increment_after_return` returns the value that `counter` pointed to before it was increased.
 
-The statement after `defer` is an assignment, a call, or an if statement, a for statement, a loop without a range or a scope statement, with or without a label. A deferred if statement has its `else if` and `else` lines below it as usual, and the `defer` is written on the `if` line only. `defer ->` defers a scope, which is how a block of statements is deferred together:
+The statement after `defer` is an assignment, a call, or an if statement, a for statement, an infinite loop or a scope statement, with or without a label. A deferred if statement has its `else if` and `else` lines below it as usual, and the `defer` is written on the `if` line only. `defer ->` defers a scope, which is how a block of statements is deferred together:
 
 ```
 defer_a_block :: proc() ->
@@ -1866,7 +1866,7 @@ The target is built from the result of scope resolution, so it also rejects ever
 
 An if statement becomes the structured instructions of WebAssembly: the condition, which leaves 1 or 0 (for a comparison, its two operands and the signed comparison of them), then `if`, the block, `else` and the next branch, up to `end`. An `else if` is written as an `else` with another `if` in it, so the statement ends with an `end` for each of its conditions. When the last statement of a procedure that returns a value is not a `return`, for example an if statement that returns in all of its branches, the body ends with the `unreachable` instruction, because WebAssembly cannot tell that the end of it cannot be reached. A body that gets there anyway traps.
 
-A for statement with a range becomes a `block` that holds a `loop`, and the statements of its block are in a second `block` inside the `loop`. The iterator is a local, and the end of the range is a local right after it, which is where the end is read once. First the start and the end are stored, then the loop begins with a test that leaves the `block` with `br_if` when the iterator is not below the end, or above it for an inclusive range. After the statements of the block, which the second `block` ends, the iterator is increased by one and `br` goes back to the start of the `loop`. A `continue` is a `br` to the end of the second `block`, so the increase is not skipped, and a `break` is a `br` to the end of the first. A loop without a range is the same three instructions without the test and the increase, with a `br` back to the start of the `loop`. A scope statement becomes a `block`, and a `break` that leaves it is a `br` to the end of it. An if statement with a label is inside a `block` of its own, which a `break` with the label leaves, so the `block` ends after the last `end` of the statement. The number in a `br` is the number of structured instructions between it and its target, which counts the `if` instructions of the if statements that the jump is in, one for each scope or labeled if statement that it is in and has to leave on the way, and three for each loop, because a loop is a `block`, a `loop` and a `block`. A label of a loop or of a scope has no instruction of its own: it only tells which `block` the `br` goes to. For an inclusive range the loop leaves the `block` before the increase when the iterator is equal to the end, so an inclusive range that ends at the largest `Int` stops instead of wrapping around.
+A for statement with a range becomes a `block` that holds a `loop`, and the statements of its block are in a second `block` inside the `loop`. The iterator is a local, and the end of the range is a local right after it, which is where the end is read once. First the start and the end are stored, then the loop begins with a test that leaves the `block` with `br_if` when the iterator is not below the end, or above it for an inclusive range. After the statements of the block, which the second `block` ends, the iterator is increased by one and `br` goes back to the start of the `loop`. A `continue` is a `br` to the end of the second `block`, so the increase is not skipped, and a `break` is a `br` to the end of the first. An infinite loop is the same three instructions without the test and the increase, with a `br` back to the start of the `loop`. A scope statement becomes a `block`, and a `break` that leaves it is a `br` to the end of it. An if statement with a label is inside a `block` of its own, which a `break` with the label leaves, so the `block` ends after the last `end` of the statement. The number in a `br` is the number of structured instructions between it and its target, which counts the `if` instructions of the if statements that the jump is in, one for each scope or labeled if statement that it is in and has to leave on the way, and three for each loop, because a loop is a `block`, a `loop` and a `block`. A label of a loop or of a scope has no instruction of its own: it only tells which `block` the `br` goes to. For an inclusive range the loop leaves the `block` before the increase when the iterator is equal to the end, so an inclusive range that ends at the largest `Int` stops instead of wrapping around.
 
 A [defer statement](#defer) writes no instructions where it is. The instructions of its deferred statement are written again at each place where its block is left: before the end of the block, which is before the `end` of the `block` of a scope and before the second `block` of a loop ends, and before each `br` of a `break` or a `continue` and each `return` below the `defer` that leaves the block. A jump writes the deferred statements of each block that it leaves, the innermost block first and in each block the last `defer` first, and then its `br`, whose number counts the structured instructions as before. A `return` writes its value first, then the deferred statements, which leave the stack as they found it, so the value is still on top, and then gives the frame back and returns. A block whose last statement is a jump writes no deferred statements at its end, which is never reached. A procedure without a `defer` gets the same instructions as it would without the statement in the language.
 

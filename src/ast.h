@@ -271,7 +271,7 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   is given to, written `@name if ...` or `@name for ...`. It takes the place of that statement in
  *   its block, and the node of the statement comes right after it. A label of a scope statement is
  *   its child instead. It is a statement of a procedure body.
- * - `AST_NODE_TYPE_LOOP_STATEMENT`: one child, the `AST_NODE_TYPE_BLOCK` that runs again and again
+ * - `AST_NODE_TYPE_LOOP_STATEMENT`: an infinite loop, written `for ->`. It has one child, the `AST_NODE_TYPE_BLOCK` that runs again and again
  *   until a `break` or a `return` leaves it. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition, which is an
  *   `AST_NODE_TYPE_CONSTANT_DEFINITION` or an `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`, and one

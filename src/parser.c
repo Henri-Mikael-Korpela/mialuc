@@ -1052,7 +1052,7 @@ static Ast_Node_Index parse_if_statement(Parser *parser, Ast_Node_Index parent) 
 }
 
 /**
- * Parses the header line `for ->` of a loop without an end, or `for name in first..<end ->`, or
+ * Parses the header line `for ->` of an infinite loop, or `for name in first..<end ->`, or
  * `first..<=end` for a range that includes its end, or `for name in elements ->` for the elements
  * of an array or an array slice, and appends the statement that it starts to `parent`. The
  * statement gets a range, or the expression of the elements, and an empty block, which is returned
@@ -1065,7 +1065,7 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
 
     parse_token_advance(parser);
 
-    // `for ->` has no iterator and no range: the block runs until it is left.
+    // `for ->` is an infinite loop: it has no iterator and no range, and the block runs until a `break` or a `return` leaves it.
     if (parse_token_current(parser)->kind == TOKEN_KIND_ARROW) {
         Ast_Node_Index loop = parse_node_make(parser, AST_NODE_TYPE_LOOP_STATEMENT);
         if (loop == AST_NODE_INDEX_NONE) {
