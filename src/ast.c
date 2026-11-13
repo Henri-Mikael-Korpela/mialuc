@@ -36,6 +36,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
+    case AST_NODE_TYPE_DEFER_STATEMENT:
     case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_ENUM_LITERAL:
@@ -272,6 +273,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_CONTINUE_STATEMENT:
             printf("CONTINUE_STATEMENT\n");
+            break;
+        case AST_NODE_TYPE_DEFER_STATEMENT:
+            printf("DEFER_STATEMENT\n");
             break;
         case AST_NODE_TYPE_DEREFERENCE:
             printf("DEREFERENCE\n");

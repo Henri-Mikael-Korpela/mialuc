@@ -63,6 +63,12 @@ typedef enum {
     SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR,
     // The name that is called is not a procedure: a variable, a parameter or a constant string.
     SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE,
+    // A `defer` inside the statement of another `defer`. The subject is the inner `defer`.
+    SEMANTIC_STATUS_DEFER_NESTED,
+    // A `defer` of a statement that cannot be deferred: a variable definition, which would be gone
+    // as soon as it is made, or a `return`, a `break` or a `continue`, which would leave the block
+    // while it is being left. The subject is the `defer`.
+    SEMANTIC_STATUS_DEFER_STATEMENT_INVALID,
     SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE,
     // Two members of one enum with the same name. The subject is the second one.
     SEMANTIC_STATUS_ENUM_MEMBER_DUPLICATE,
@@ -79,6 +85,9 @@ typedef enum {
     SEMANTIC_STATUS_IDENTIFIER_UNKNOWN,
     // A `break` that is not in a loop or a scope.
     SEMANTIC_STATUS_BREAK_OUTSIDE_SCOPE,
+    // A `break` or a `continue` inside a deferred statement that leaves it, or goes on with a loop
+    // around it. The subject is the word of the jump.
+    SEMANTIC_STATUS_JUMP_OUT_OF_DEFER,
     // A `continue` that is not in the block of a loop.
     SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP,
     // A statement with the label of a statement around it.
@@ -90,6 +99,9 @@ typedef enum {
     SEMANTIC_STATUS_OK,
     SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE,
     SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS,
+    // A `return` inside a deferred statement, which runs while the block is being left, maybe by
+    // another `return`. The subject is the word `return`.
+    SEMANTIC_STATUS_RETURN_IN_DEFER,
     SEMANTIC_STATUS_VARIABLE_NAME_DUPLICATE,
     SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS,
 } Semantic_Status;
@@ -165,6 +177,12 @@ typedef struct {
  * with the innermost one, also when scopes are in between, or with the loop that has its label. The
  * jump is bound to the statement that it leaves or goes on with, see
  * `SEMANTIC_BINDING_KIND_JUMP_TARGET`.
+ *
+ * A `defer` takes an assignment, a call, or an if, for, loop or scope statement, with or without a
+ * label, and not a variable definition, a `return`, a `break` or a `continue`. The deferred
+ * statement runs while its block is being left, so it cannot leave anything itself: a `return` in
+ * it, a `break` or a `continue` in it whose target is around the `defer`, and a `defer` in it are
+ * errors. Its names are looked up where the `defer` is, like the names of any other statement.
  *
  * An assignment, such as `x += 1`, uses the name that it assigns to like any other use of a name,
  * and the name must stand for a variable or a global variable: a parameter or a constant cannot be

@@ -27,6 +27,7 @@
   - [Loops without a range](#loops-without-a-range)
   - [Scopes](#scopes)
   - [Break and continue](#break-and-continue)
+  - [Defer](#defer)
 - [Arrays](#arrays)
   - [Array literals](#array-literals)
   - [Elements](#elements)
@@ -142,6 +143,7 @@ Reserved words are categorized into used and unused keywords and literal words. 
 and
 break
 case const continue
+defer
 else enum
 for foreign
 if import in
@@ -168,7 +170,7 @@ Mialu also defines the following unused keywords. They are reserved for possible
 ```
 abstract alias as async await
 cast catch class
-defer delete distinct do dynamic
+delete distinct do dynamic
 extern
 final finally
 gen generate goto
@@ -833,6 +835,107 @@ count_triangle :: proc(n: Int) Int ->
 `count_triangle(3)` returns 6. The label of a `continue` must be the one of a for statement or a loop without a range that it is inside of. A scope or an if statement cannot be continued, so `continue` with the label of one is an error.
 
 A `break` that is not inside a loop or a scope, and a `continue` that is not inside a loop, are errors, and so is one in a procedure that has no loop, even if the procedure is only called from a loop. A `break` or a `continue` with a label that no statement around it has is an error as well. They are not expressions, so they have no value and nothing can follow them on the line, except a label. The statements that come after them in the same block are never run.
+
+### Defer
+
+A defer statement is the word `defer` and a statement after it on the same line. The statement does not run where the `defer` is, but when the block that the `defer` is in is left, which is why it is called a deferred statement. Its use is to keep what undoes something next to what does it, such as closing a file right below the line that opens it, so that no way out of the block forgets it:
+
+```
+copy_file :: proc(source: C_Str, target: C_Str) Int ->
+    input := open_file(source)
+    defer close_file(input)
+    output := open_file(target)
+    defer close_file(output)
+    if copy_bytes(input, output) == false ->
+        return 1
+    return 0
+```
+
+Both files are closed whichever `return` leaves `copy_file`. A block is left in four ways, and each of them runs the deferred statements of the block:
+
+- at its end, after its last statement,
+- by a `break` that leaves it, or a loop or a scope around it,
+- by a `continue`, which leaves the block of the pass of the loop, and the blocks inside it that it is in,
+- by a `return`, which leaves every block that it is in, out to the body of the procedure.
+
+The deferred statements of a block run in the reverse order of their `defer`s, the last one first, so what was set up last is undone first. When a jump leaves several blocks at once, the deferred statements of the innermost block run first, then the ones of the block around it, and so on out to the block that it leaves:
+
+```
+trace #(static) := 0
+
+note :: proc(digit: Int) ->
+    trace = trace * 10 + digit
+
+return_runs_every_defer :: proc(n: Int) Int ->
+    defer note(1)
+    ->
+        defer note(2)
+        for i in 0..<n ->
+            defer note(3)
+            if i == 1 ->
+                return 100
+    note(4)
+    return 0
+```
+
+`return_runs_every_defer(3)` returns 100 and notes 3321: the first pass of the loop runs its deferred statement at the end of its block, and in the second pass the `return` runs the deferred statements of the block of the loop, of the scope and of the procedure, in that order. `return_runs_every_defer(0)` notes 241.
+
+A `defer` belongs to the block that it is in, and not to the procedure, unlike in Go, so a `defer` in the block of a loop runs on every pass, and one in a scope or in the branch of an if statement runs when that block ends. A `defer` takes effect when it is reached: a block that is left before its `defer` does not run the deferred statement, and an early `return` above a `defer` runs only the deferred statements above it.
+
+A deferred statement reads the variables when it runs, not when the `defer` is reached, so it sees what the block did after the `defer`:
+
+```
+last_value :: proc() ->
+    x := 1
+    defer note(x)
+    x = 7
+```
+
+`last_value()` notes 7. A `return` computes its value first, and then the deferred statements run, so they cannot change the value that is returned, but what they do to something outside the procedure, such as what a pointer points to or a global variable, is seen after the call:
+
+```
+return_value_comes_first :: proc() Int ->
+    x := 1
+    defer x += 10
+    return x
+
+increment_after_return :: proc(counter: ^Int) Int ->
+    defer counter^ += 1
+    return counter^
+```
+
+`return_value_comes_first()` returns 1, and `increment_after_return` returns the value that `counter` pointed to before it was increased.
+
+The statement after `defer` is an assignment, a call, or an if statement, a for statement, a loop without a range or a scope statement, with or without a label. A deferred if statement has its `else if` and `else` lines below it as usual, and the `defer` is written on the `if` line only. `defer ->` defers a scope, which is how a block of statements is deferred together:
+
+```
+defer_a_block :: proc() ->
+    defer ->
+        note(3)
+        note(4)
+    note(1)
+    note(2)
+
+defer_if_statement :: proc(n: Int) ->
+    defer if n > 5 ->
+        note(2)
+    else ->
+        note(3)
+    note(1)
+```
+
+A deferred statement runs while its block is being left, maybe by a `return` or a `break`, so it cannot leave anything itself. These are errors:
+
+- a variable definition after `defer`, because the variable would be gone at once, and a `return`, a `break` or a `continue` after `defer`,
+- a `return` inside a deferred statement,
+- a `break` or a `continue` inside a deferred statement that leaves it, or goes on with a loop around it; one that stays inside it, such as a `break` of a deferred scope or a `continue` of a deferred loop, is allowed,
+- a `defer` inside a deferred statement, because the deferred statement is already what runs last.
+
+The names in a deferred statement are looked up where the `defer` is, like the names of any statement there, so a variable that is defined below the `defer` cannot be used in it. A deferred statement runs before the block ends, so every variable that it can use still exists when it runs.
+
+There is nothing about a `defer` that is left for the program to do when it runs: which deferred statements run where is known when the program is compiled, and the code of a deferred statement is put at each place where its block is left. So a `defer` costs as much as writing its statement out by hand at each of those places, which makes the program larger when a block has many ways out.
+
+> **Lessons learnt from Go** In Go, `defer` belongs to the function, and a deferred call runs when the function returns, so a `defer` in a loop piles up calls until the end of the function, and the resources of each pass are held until then. The arguments of the call are evaluated where the `defer` is, while the rest of the function goes on, which surprises as often as it helps. Mialu takes `defer` from Odin instead: it belongs to the block, it runs where the block ends, and it is one more statement there, which reads the variables as they are at that point.
 
 ## Arrays
 
@@ -1509,6 +1612,7 @@ There is no shadowing of names so a name cannot be declared twice in the same sc
 - an attribute of a global variable is not `static`, or is given twice, or the global variable does not have the attribute `static`,
 - a `break` is not inside a loop or a scope, or a `continue` is not inside the block of a loop,
 - the label of a `break` or a `continue` is not the label of a statement that it is inside of, the label of a `continue` is not the one of a loop, or a statement has the label of a statement around it,
+- a `defer` takes a variable definition, a `return`, a `break` or a `continue`, a deferred statement has a `return` or a `defer` in it, or a `break` or a `continue` in it leaves it, see [Defer](#defer),
 - two fields of a struct have the same name,
 - the name that an assignment assigns to is not a variable or a global variable, but a parameter or a constant, or the iterator of a for statement. A field that is assigned through a parameter or an iterator is an error as well, unless the parameter is a pointer, but only the target tells whether a name is a pointer, see [WebAssembly](#webassembly).
 
@@ -1699,6 +1803,8 @@ The target is built from the result of scope resolution, so it also rejects ever
 An if statement becomes the structured instructions of WebAssembly: the condition, which leaves 1 or 0 (for a comparison, its two operands and the signed comparison of them), then `if`, the block, `else` and the next branch, up to `end`. An `else if` is written as an `else` with another `if` in it, so the statement ends with an `end` for each of its conditions. When the last statement of a procedure that returns a value is not a `return`, for example an if statement that returns in all of its branches, the body ends with the `unreachable` instruction, because WebAssembly cannot tell that the end of it cannot be reached. A body that gets there anyway traps.
 
 A for statement with a range becomes a `block` that holds a `loop`, and the statements of its block are in a second `block` inside the `loop`. The iterator is a local, and the end of the range is a local right after it, which is where the end is read once. First the start and the end are stored, then the loop begins with a test that leaves the `block` with `br_if` when the iterator is not below the end, or above it for an inclusive range. After the statements of the block, which the second `block` ends, the iterator is increased by one and `br` goes back to the start of the `loop`. A `continue` is a `br` to the end of the second `block`, so the increase is not skipped, and a `break` is a `br` to the end of the first. A loop without a range is the same three instructions without the test and the increase, with a `br` back to the start of the `loop`. A scope statement becomes a `block`, and a `break` that leaves it is a `br` to the end of it. An if statement with a label is inside a `block` of its own, which a `break` with the label leaves, so the `block` ends after the last `end` of the statement. The number in a `br` is the number of structured instructions between it and its target, which counts the `if` instructions of the if statements that the jump is in, one for each scope or labeled if statement that it is in and has to leave on the way, and three for each loop, because a loop is a `block`, a `loop` and a `block`. A label of a loop or of a scope has no instruction of its own: it only tells which `block` the `br` goes to. For an inclusive range the loop leaves the `block` before the increase when the iterator is equal to the end, so an inclusive range that ends at the largest `Int` stops instead of wrapping around.
+
+A [defer statement](#defer) writes no instructions where it is. The instructions of its deferred statement are written again at each place where its block is left: before the end of the block, which is before the `end` of the `block` of a scope and before the second `block` of a loop ends, and before each `br` of a `break` or a `continue` and each `return` below the `defer` that leaves the block. A jump writes the deferred statements of each block that it leaves, the innermost block first and in each block the last `defer` first, and then its `br`, whose number counts the structured instructions as before. A `return` writes its value first, then the deferred statements, which leave the stack as they found it, so the value is still on top, and then gives the frame back and returns. A block whose last statement is a jump writes no deferred statements at its end, which is never reached. A procedure without a `defer` gets the same instructions as it would without the statement in the language.
 
 The `wat` target writes the same module in the WebAssembly text format, so that it can be read. It rejects the same programs as the `wasm` target.
 

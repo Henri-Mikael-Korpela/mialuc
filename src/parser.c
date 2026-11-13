@@ -77,6 +77,7 @@ static bool           parse_attributes          (Parser *parser, Ast_Node_Index 
 static void           parse_block_close         (Parser *parser, Ast_Node_Index block);
 static Ast_Node_Index parse_block_open          (Parser *parser, Ast_Node_Index statement);
 static Ast_Node_Index parse_branch              (Parser *parser, Ast_Node_Index statement);
+static Ast_Node_Index parse_defer_statement     (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_definition          (Parser *parser);
 static Ast_Node_Index parse_enum_member_value   (Parser *parser);
 static Ast_Node_Index parse_enum_type           (Parser *parser, uint32_t indentation_level);
@@ -935,6 +936,15 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
 
         Ast_Node_Index parent = blocks[block_count - 1].node;
         Token_Kind next = parse_token_current(parser)->kind;
+        // The statement after `defer` is parsed like any other, with the defer statement as its
+        // parent instead of the block, so a deferred if statement gets its block the same way.
+        if (next == TOKEN_KIND_KEYWORD_DEFER) {
+            parent = parse_defer_statement(parser, parent);
+            if (parent == AST_NODE_INDEX_NONE) {
+                return false;
+            }
+            next = parse_token_current(parser)->kind;
+        }
         if (next == TOKEN_KIND_KEYWORD_IF || next == TOKEN_KIND_KEYWORD_ELSE ||
             next == TOKEN_KIND_KEYWORD_FOR || next == TOKEN_KIND_ARROW ||
             next == TOKEN_KIND_LABEL) {
@@ -1203,6 +1213,36 @@ static Ast_Node_Index parse_scope_statement(Parser *parser, Ast_Node_Index paren
 }
 
 /**
+ * Parses the word `defer` that starts a line, and appends the defer statement to `parent`. Returns
+ * the defer statement, which the caller appends the statement after the word to, on the same line:
+ * a single statement, or the header line of a statement with a block. Which statements can be
+ * deferred is for the analysis, except that there must be one, so the line cannot end after the
+ * word, and that it cannot be an `else`, which belongs to an `if` above it, or another `defer`.
+ */
+static Ast_Node_Index parse_defer_statement(Parser *parser, Ast_Node_Index parent) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_DEFER);
+
+    Ast_Node_Index statement = parse_node_make(parser, AST_NODE_TYPE_DEFER_STATEMENT);
+    if (statement == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[statement].payload.jump.keyword =
+        parse_token_current(parser)->payload.identifier.text;
+    parse_node_append_child(parser, parent, statement);
+    parse_token_advance(parser);
+
+    Token_Kind next = parse_token_current(parser)->kind;
+    if (next == TOKEN_KIND_KEYWORD_ELSE || next == TOKEN_KIND_KEYWORD_DEFER ||
+        next == TOKEN_KIND_INDENTATION || next == TOKEN_KIND_END) {
+        return parse_fail(parser, STR("a statement after 'defer'"));
+    }
+
+    assert(parser->nodes[parent].last_child == statement);
+    return statement;
+}
+
+/**
  * Parses `break` or `continue` and the end of the line. A `break` may name the scope to leave
  * with the name of its label, without the `@`, which becomes its child. The node keeps the word so
  * that the analysis can point at it. Whether the jump is inside a loop or a scope, and whether the
@@ -1256,6 +1296,12 @@ static Ast_Node_Index parse_else_branch(Parser *parser, Ast_Node_Index parent) {
     assert(parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_ELSE);
 
     Ast_Node_Index statement = parser->nodes[parent].last_child;
+    // A deferred if statement is inside a defer statement, and its `else` lines are written without
+    // the `defer`, which is on the `if` line only.
+    if (statement != AST_NODE_INDEX_NONE &&
+        parser->nodes[statement].node_type == AST_NODE_TYPE_DEFER_STATEMENT) {
+        statement = parser->nodes[statement].last_child;
+    }
     // An if statement with a label is inside a labeled statement.
     if (statement != AST_NODE_INDEX_NONE &&
         parser->nodes[statement].node_type == AST_NODE_TYPE_LABELED_STATEMENT) {
@@ -1666,6 +1712,9 @@ static Ast_Node_Index parse_return_statement(Parser *parser) {
     if (statement == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
+    // The analysis points at the word when a `return` is where it cannot be, inside a `defer`.
+    parser->nodes[statement].payload.jump.keyword =
+        parse_token_current(parser)->payload.identifier.text;
 
     if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_RETURN, STR("'return'")) == false) {
         return AST_NODE_INDEX_NONE;

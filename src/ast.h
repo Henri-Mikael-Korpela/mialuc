@@ -26,6 +26,7 @@ typedef enum {
     AST_NODE_TYPE_COMPARISON,
     AST_NODE_TYPE_CONSTANT_DEFINITION,
     AST_NODE_TYPE_CONTINUE_STATEMENT,
+    AST_NODE_TYPE_DEFER_STATEMENT,
     AST_NODE_TYPE_DEREFERENCE,
     AST_NODE_TYPE_DIVISION,
     AST_NODE_TYPE_DIVISION_ASSIGNMENT,
@@ -183,6 +184,15 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   statement names the loop to go on with. It ends the current pass of the innermost loop that it
  *   is in, or of the labeled loop, and goes on with the next one. The word is in the payload. It is
  *   a statement of a procedure body.
+ * - `AST_NODE_TYPE_DEFER_STATEMENT`: one child, the statement that is deferred: an assignment, an
+ *   `AST_NODE_TYPE_CALL_STATEMENT`, an if statement, a for statement, a loop statement, a scope
+ *   statement or an `AST_NODE_TYPE_LABELED_STATEMENT`, which the parser takes as any statement and
+ *   the analysis narrows down. The child does not run where the `defer` is, but each time the
+ *   block that the `defer` is in is left after the `defer` was reached: at the end of the block,
+ *   and at every `break`, `continue` and `return` below it that leaves the block. The deferred
+ *   statements of a block run in the reverse order of their `defer`s. The node is made before its
+ *   child, which comes right after it. The word `defer` is in the payload. It is a statement of a
+ *   procedure body.
  * - `AST_NODE_TYPE_DEREFERENCE`: one child, the expression whose value is a pointer, such as `p`
  *   in `p^`. It is an expression, whose value is what the pointer points to, and it can be the
  *   target of an assignment. Like a subscript it is made after its child.
@@ -303,7 +313,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   each one an expression (the target requires them to be `Int`). Whether the end is part of the
  *   range is in the payload. It is the child of an `AST_NODE_TYPE_FOR_STATEMENT`, and not an
  *   expression itself.
- * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child, the returned value.
+ * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child, the returned value. The word `return` is in the
+ *   payload, like the word of a `break`.
  * - `AST_NODE_TYPE_SCOPE_STATEMENT`: an optional `AST_NODE_TYPE_LABEL`, and then the
  *   `AST_NODE_TYPE_BLOCK` that runs once, in a scope of its own. A `break` inside it leaves it.
  *   It is a statement of a procedure body.
@@ -450,8 +461,8 @@ typedef struct {
             Str name;
         } struct_literal;
         struct {
-            // The word `break` or `continue`, as a view of the source text, so that an error can
-            // point at it.
+            // The word `break`, `continue`, `defer` or `return` of the statement, as a view of the
+            // source text, so that an error can point at it.
             Str keyword;
         } jump;
         struct {

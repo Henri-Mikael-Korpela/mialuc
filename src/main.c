@@ -701,6 +701,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_KIND_KEYWORD_CONTINUE:
             printf("KEYWORD_CONTINUE\n");
             break;
+        case TOKEN_KIND_KEYWORD_DEFER:
+            printf("KEYWORD_DEFER\n");
+            break;
         case TOKEN_KIND_KEYWORD_ELSE:
             printf("KEYWORD_ELSE\n");
             break;
@@ -1285,6 +1288,15 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: the enum has the member '%.*s' twice.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
+    case SEMANTIC_STATUS_DEFER_NESTED:
+        fprintf(stderr, "%s:%zu:%zu: 'defer' cannot be inside the statement of another 'defer'.\n",
+                path, position.line, position.column);
+        break;
+    case SEMANTIC_STATUS_DEFER_STATEMENT_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: 'defer' takes an assignment, a call, or an if, for or scope "
+                "statement, and not a variable definition, 'return', 'break' or 'continue'.\n",
+                path, position.line, position.column);
+        break;
     case SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is already defined.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
@@ -1292,6 +1304,11 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     case SEMANTIC_STATUS_IDENTIFIER_UNKNOWN:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a variable or parameter of the procedure, a "
                 "constant or a global variable.\n", path, position.line, position.column,
+                subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_JUMP_OUT_OF_DEFER:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot leave the statement of a 'defer', which runs "
+                "while its block is being left.\n", path, position.line, position.column,
                 subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP:
@@ -1323,6 +1340,10 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     case SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE:
         fprintf(stderr, "%s:%zu:%zu: parameter '%.*s' is declared twice.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_RETURN_IN_DEFER:
+        fprintf(stderr, "%s:%zu:%zu: 'return' cannot be inside the statement of a 'defer', which "
+                "runs while its block is being left.\n", path, position.line, position.column);
         break;
     case SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS:
         fprintf(stderr, "%s:%zu:%zu: parameter '%.*s' has the name of a constant or a global "

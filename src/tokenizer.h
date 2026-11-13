@@ -60,6 +60,9 @@ typedef enum {
     TOKEN_KIND_KEYWORD_CASE,
     TOKEN_KIND_KEYWORD_CONST,
     TOKEN_KIND_KEYWORD_CONTINUE,
+    // Runs the statement after it when the block that it is in is left, see
+    // `AST_NODE_TYPE_DEFER_STATEMENT`.
+    TOKEN_KIND_KEYWORD_DEFER,
     TOKEN_KIND_KEYWORD_ELSE,
     TOKEN_KIND_KEYWORD_ENUM,
     TOKEN_KIND_KEYWORD_FALSE,

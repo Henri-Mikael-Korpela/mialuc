@@ -16,8 +16,13 @@ enum {
     WASM_EXPRESSION_DEPTH_MAX = 1024,
     // The most statement lists that can be open at once while the statements of a procedure are
     // written: the body, and for each nested if statement the statement itself and its current
-    // block. The parser does not accept deeper nesting, see `AST_BLOCK_DEPTH_MAX`.
-    WASM_STATEMENT_DEPTH_MAX = 2 * AST_BLOCK_DEPTH_MAX + 2,
+    // block, which is two for each of the blocks that the parser accepts inside each other, see
+    // `AST_BLOCK_DEPTH_MAX`. A deferred statement is written again where its block is left, at the
+    // depth of the jump that leaves it, so on top of those come the frame of the jump and of the
+    // deferred statement, the lists of the deferred statement, which is in at least one block
+    // already, and the frame of a jump inside it, which does not write deferred statements, because
+    // a `defer` cannot be in another.
+    WASM_STATEMENT_DEPTH_MAX = 4 * AST_BLOCK_DEPTH_MAX + 4,
     // The size of the stack in memory that the arrays of the running procedures are on. Arrays are
     // not in locals, because an array slice refers to elements by address. A recursion that
     // needs more traps, see `wasm_frame_enter`.
@@ -215,6 +220,11 @@ typedef struct {
  * `if_count` is how many `if` instructions of an if statement are open, which is one for the `if`
  * and one for each `else if`, and which the end of the statement closes. A block that is the body
  * of a for statement, a loop statement or a scope statement has the statement in `statement`.
+ *
+ * Deferred statements add two kinds of frame. A defer statement is the node of a frame that writes
+ * its one child, the deferred statement, where a block is left. A `return`, a `break` or a
+ * `continue` is the node of a frame that writes the deferred statements of the blocks that it
+ * leaves, one at a time, before it writes itself, see `wasm_build_code_section_body_exit`.
  */
 typedef struct {
     Ast_Node_Index node;
@@ -224,6 +234,15 @@ typedef struct {
     // `AST_NODE_INDEX_NONE`. The end of the block of a loop writes what the loop does after each
     // pass, and closes the loop, and the end of the block of a scope closes its `block`.
     Ast_Node_Index statement;
+    // The deferred statements of a list that are still to be written when it is left are its
+    // defer statements before this index, the last one first. It is `AST_NODE_INDEX_NONE`, which
+    // is above every index, until the first one is written. For a jump it is about the list in
+    // `exit_level`, and starts at the jump, which comes after every defer statement that it has
+    // passed.
+    Ast_Node_Index defer_bound;
+    // For a jump, the index in the frames of the list whose deferred statements are written, which
+    // goes down from the list that the jump is in to the one that it leaves.
+    size_t exit_level;
 } Wasm_Statement_Frame;
 
 static size_t          wasm_block_begin                       (Wasm_Writer *writer);
@@ -273,6 +292,24 @@ static void            wasm_build_code_section_body_identifier(Wasm_Builder *bui
                                                                Semantic_Binding binding);
 static bool            wasm_build_code_section_body_procedure (Wasm_Builder *builder,
                                                                Ast_Node_Index definition);
+static void            wasm_build_code_section_body_exit      (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Wasm_Statement_Frame *frames,
+                                                               size_t *frame_count);
+static void            wasm_build_code_section_body_return_end(Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
+static size_t          wasm_defer_count                       (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure);
+static Ast_Node_Index  wasm_defer_last_before                 (Wasm_Builder const *builder,
+                                                               Ast_Node_Index list,
+                                                               Ast_Node_Index bound);
+static void            wasm_frame_push_exit                   (Wasm_Builder const *builder,
+                                                               Wasm_Statement_Frame *frames,
+                                                               size_t *frame_count,
+                                                               Ast_Node_Index jump);
+static bool            wasm_list_ends_with_exit               (Wasm_Builder const *builder,
+                                                               Ast_Node_Index list);
+static bool            wasm_node_type_is_exit                 (Ast_Node_Type node_type);
 static bool            wasm_build_code_section_body_return    (Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index statement);
@@ -1884,8 +1921,153 @@ static void wasm_frame_push(Wasm_Builder const *builder, Wasm_Statement_Frame *f
         .next = builder->nodes[node].first_child,
         .if_count = 0,
         .statement = statement,
+        .defer_bound = AST_NODE_INDEX_NONE,
+        .exit_level = 0,
     };
     *frame_count += 1;
+}
+
+/**
+ * Opens the frame of the `return`, `break` or `continue` statement `jump`, which is in the list of
+ * the innermost of `frames`, so that the deferred statements of the blocks that it leaves are
+ * written before it, see `wasm_build_code_section_body_exit`. The jump has no children to write,
+ * and the label of a `break` is not one.
+ */
+static void wasm_frame_push_exit(Wasm_Builder const *builder, Wasm_Statement_Frame *frames,
+                                 size_t *frame_count, Ast_Node_Index jump) {
+    assert(*frame_count > 0);
+    assert(*frame_count < WASM_STATEMENT_DEPTH_MAX);
+    assert(wasm_node_type_is_exit(builder->nodes[jump].node_type));
+
+    frames[*frame_count] = (Wasm_Statement_Frame){
+        .node = jump,
+        .next = AST_NODE_INDEX_NONE,
+        .if_count = 0,
+        .statement = AST_NODE_INDEX_NONE,
+        .defer_bound = jump,
+        .exit_level = *frame_count - 1,
+    };
+    *frame_count += 1;
+}
+
+/**
+ * Returns whether nodes of `node_type` are statements that leave blocks: `return`, `break` and
+ * `continue`.
+ */
+static bool wasm_node_type_is_exit(Ast_Node_Type node_type) {
+    return node_type == AST_NODE_TYPE_RETURN_STATEMENT ||
+           node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
+           node_type == AST_NODE_TYPE_CONTINUE_STATEMENT;
+}
+
+/**
+ * Returns the last defer statement among the children of `list`, a procedure, a block or another
+ * node whose children are statements, that comes before the index `bound`, or `AST_NODE_INDEX_NONE`
+ * when there is none. The children are in the order of the source, so going on with the result as
+ * the bound finds the defer statements from the last one to the first, which is the order that
+ * their statements run in.
+ */
+static Ast_Node_Index wasm_defer_last_before(Wasm_Builder const *builder, Ast_Node_Index list,
+                                             Ast_Node_Index bound) {
+    assert(list < builder->node_count);
+
+    Ast_Node_Index found = AST_NODE_INDEX_NONE;
+    Ast_Node_Index child = builder->nodes[list].first_child;
+    // Every child is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && child != AST_NODE_INDEX_NONE && child < bound;
+         i += 1) {
+        if (builder->nodes[child].node_type == AST_NODE_TYPE_DEFER_STATEMENT) {
+            found = child;
+        }
+        child = builder->nodes[child].next_sibling;
+    }
+
+    assert(found == AST_NODE_INDEX_NONE || found < bound);
+    return found;
+}
+
+/**
+ * Returns the number of defer statements in `procedure`, also the ones in its blocks.
+ */
+static size_t wasm_defer_count(Wasm_Builder const *builder, Ast_Node_Index procedure) {
+    assert(procedure < builder->node_count);
+    assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+
+    size_t count = 0;
+    Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
+    for (Ast_Node_Index node = procedure + 1; node < end; node += 1) {
+        if (builder->nodes[node].node_type == AST_NODE_TYPE_DEFER_STATEMENT) {
+            count += 1;
+        }
+    }
+
+    assert(count < end - procedure);
+    return count;
+}
+
+/**
+ * Writes the next part of the jump whose frame is the innermost of `frames`, which is a `return`,
+ * a `break` or a `continue`: each step opens the frame of the next deferred statement to write, or
+ * goes on to the next list, or writes the jump itself and closes the frame. The deferred statements
+ * of each list that the jump leaves are written, from the list that it is in, the last one first,
+ * out to the list of the procedure for a `return`, or to the block of the statement that a `break`
+ * leaves or a `continue` goes on with, which is left too: a `continue` starts the next pass of the
+ * block. The block of a labeled if statement is inside the frame of the statement, which has no
+ * defer statements of its own. A `break` or a `continue` inside a deferred statement stays inside
+ * it, which the analysis checked, so it never reaches the frame of the deferred statement or the
+ * frames below it.
+ */
+static void wasm_build_code_section_body_exit(Wasm_Builder *builder, Ast_Node_Index procedure,
+                                              Wasm_Statement_Frame *frames, size_t *frame_count) {
+    assert(*frame_count > 1);
+    assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+
+    Wasm_Statement_Frame *jump_frame = &frames[*frame_count - 1];
+    Ast_Node_Index jump = jump_frame->node;
+    assert(wasm_node_type_is_exit(builder->nodes[jump].node_type));
+    assert(jump_frame->exit_level < *frame_count - 1);
+
+    Wasm_Statement_Frame const *level = &frames[jump_frame->exit_level];
+    Ast_Node_Index deferred =
+        wasm_defer_last_before(builder, level->node, jump_frame->defer_bound);
+    if (deferred != AST_NODE_INDEX_NONE) {
+        jump_frame->defer_bound = deferred;
+        wasm_frame_push(builder, frames, frame_count, deferred, AST_NODE_INDEX_NONE);
+        return;
+    }
+
+    bool is_return = builder->nodes[jump].node_type == AST_NODE_TYPE_RETURN_STATEMENT;
+    bool is_last_level = jump_frame->exit_level == 0;
+    if (is_return == false) {
+        is_last_level = level->statement == builder->bindings[jump].target;
+    }
+    if (is_last_level == false) {
+        assert(jump_frame->exit_level > 0);
+        jump_frame->exit_level -= 1;
+        jump_frame->defer_bound = jump;
+        return;
+    }
+
+    *frame_count -= 1;
+    if (is_return) {
+        wasm_build_code_section_body_return_end(builder, procedure);
+    } else {
+        wasm_build_code_section_body_jump(builder, frames, *frame_count, jump);
+    }
+}
+
+/**
+ * Returns whether the last child of `list`, a node whose children are statements, is a `return`,
+ * a `break` or a `continue`, after which the end of the list is never reached.
+ */
+static bool wasm_list_ends_with_exit(Wasm_Builder const *builder, Ast_Node_Index list) {
+    assert(list < builder->node_count);
+
+    Ast_Node_Index last = builder->nodes[list].last_child;
+    if (last == AST_NODE_INDEX_NONE) {
+        return false;
+    }
+    return wasm_node_type_is_exit(builder->nodes[last].node_type);
 }
 
 /**
@@ -1902,24 +2084,58 @@ static void wasm_frame_push(Wasm_Builder const *builder, Wasm_Statement_Frame *f
  * `else if` is an `else` that holds another `if`, so the statement ends with as many `end`
  * instructions as it has `if` instructions. The tree is walked with an array of the lists of
  * statements that are open, the way expressions are, instead of calling itself.
+ *
+ * A defer statement writes nothing where it is. Its statement is written where its block is left
+ * instead, which is known when the code is written, so nothing about it is left for the program
+ * to do when it runs: before the end of the block, and before each `return`, `break` and `continue`
+ * below it that leaves the block, after the value of a `return`. The statement is written as many
+ * times as there are such places, because each place needs its own code, as with the end of a loop
+ * that a `continue` leads to. Code after a jump at the end of a block is never reached, so the
+ * end of such a block has no deferred statements.
  */
 static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                                                    Ast_Node_Index definition) {
     assert(definition < builder->node_count);
 
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    size_t defer_count = wasm_defer_count(builder, procedure);
 
     Wasm_Statement_Frame frames[WASM_STATEMENT_DEPTH_MAX];
     size_t frame_count = 0;
     wasm_frame_push(builder, frames, &frame_count, procedure, AST_NODE_INDEX_NONE);
 
-    // Every step takes a child of a list or closes a list, and each node is a child once and each
-    // list is closed once, so twice the number of nodes steps are enough.
-    for (size_t step = 0; step < builder->node_count * 2 + 2 && frame_count > 0; step += 1) {
+    // Without deferred statements, every step takes a child of a list or closes a list, and each
+    // node is a child once and each list is closed once, so twice the number of nodes steps are
+    // enough. A jump takes a step for each list that it leaves on top of that, which is less than
+    // `WASM_STATEMENT_DEPTH_MAX`. Each end of a list and each jump writes each deferred statement
+    // at most once, and a deferred statement has no `defer` in it, so writing one takes no more
+    // steps than the procedure does without deferred statements. The counts are 64 bits, because
+    // the product can be beyond 32 bits, although nothing that big is ever written.
+    uint64_t node_count = (uint64_t)(ast_procedure_end(builder->nodes, builder->node_count,
+                                                       procedure) - procedure);
+    uint64_t pass_step_max = node_count * (WASM_STATEMENT_DEPTH_MAX + 2) + 2;
+    uint64_t step_max = pass_step_max * (1 + 2 * node_count * (uint64_t)defer_count);
+    for (uint64_t step = 0; step < step_max && frame_count > 0; step += 1) {
         Wasm_Statement_Frame *frame = &frames[frame_count - 1];
         Ast_Node const *frame_node = &builder->nodes[frame->node];
 
+        if (wasm_node_type_is_exit(frame_node->node_type)) {
+            wasm_build_code_section_body_exit(builder, procedure, frames, &frame_count);
+            continue;
+        }
+
         if (frame->next == AST_NODE_INDEX_NONE) {
+            // The deferred statements of the list come before its end, the last one first, unless
+            // the list ends with a jump, which wrote them before itself.
+            if (defer_count > 0 && wasm_list_ends_with_exit(builder, frame->node) == false) {
+                Ast_Node_Index deferred =
+                    wasm_defer_last_before(builder, frame->node, frame->defer_bound);
+                if (deferred != AST_NODE_INDEX_NONE) {
+                    frame->defer_bound = deferred;
+                    wasm_frame_push(builder, frames, &frame_count, deferred, AST_NODE_INDEX_NONE);
+                    continue;
+                }
+            }
             for (size_t i = 0; i < frame->if_count; i += 1) {
                 wasm_write_byte(&builder->writer, WASM_OPCODE_END);
             }
@@ -1974,9 +2190,17 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 wasm_frame_push(builder, frames, &frame_count, child, AST_NODE_INDEX_NONE);
             }
         } else if (child_node->node_type == AST_NODE_TYPE_RETURN_STATEMENT) {
+            // The value is computed before the deferred statements run, so they cannot change it.
             if (wasm_build_code_section_body_return(builder, definition, child) == false) {
                 return false;
             }
+            if (defer_count > 0) {
+                wasm_frame_push_exit(builder, frames, &frame_count, child);
+            } else {
+                wasm_build_code_section_body_return_end(builder, procedure);
+            }
+        } else if (child_node->node_type == AST_NODE_TYPE_DEFER_STATEMENT) {
+            // Written where its block is left, see above.
         } else if (child_node->node_type == AST_NODE_TYPE_CALL_STATEMENT) {
             if (wasm_build_code_section_body_call_statement(builder, definition, child) == false) {
                 return false;
@@ -2001,7 +2225,11 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             wasm_frame_push(builder, frames, &frame_count, child, label_owner);
         } else if (child_node->node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
                    child_node->node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
-            wasm_build_code_section_body_jump(builder, frames, frame_count, child);
+            if (defer_count > 0) {
+                wasm_frame_push_exit(builder, frames, &frame_count, child);
+            } else {
+                wasm_build_code_section_body_jump(builder, frames, frame_count, child);
+            }
         } else if (child_node->node_type == AST_NODE_TYPE_SCOPE_STATEMENT) {
             // A scope is a `block` that `break` leaves with a `br`.
             wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
@@ -2319,9 +2547,9 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
 }
 
 /**
- * Writes the instructions of a `return`: the value, and the `return` instruction. The value must
- * be of the return type of the procedure that `definition` is, which must have one. Returns false
- * after it recorded an error.
+ * Writes the value of a `return`, which `wasm_build_code_section_body_return_end` returns after the
+ * deferred statements that come in between, if any. The value must be of the return type of the
+ * procedure that `definition` is, which must have one. Returns false after it recorded an error.
  */
 static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_Index definition,
                                                 Ast_Node_Index statement) {
@@ -2347,11 +2575,23 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
         Str name = builder->nodes[definition].payload.constant_definition.name;
         return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
     }
+    return true;
+}
 
-    // The value is on the stack already, and giving the frame back does not touch it.
+/**
+ * Writes the end of a `return` of `procedure`, after its value: the frame is given back and the
+ * `return` instruction returns the value. A deferred statement between the value and this leaves
+ * the stack as it found it, so the value is still on top.
+ */
+static void wasm_build_code_section_body_return_end(Wasm_Builder *builder,
+                                                    Ast_Node_Index procedure) {
+    assert(procedure < builder->node_count);
+    assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+
+    // The value is on the stack already, and giving the frame back does not touch it. The deferred
+    // statements may use the frame, so it is given back after them.
     wasm_frame_leave(builder, procedure);
     wasm_write_byte(&builder->writer, WASM_OPCODE_RETURN);
-    return true;
 }
 
 /**
@@ -3148,6 +3388,7 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     case AST_NODE_TYPE_ENUM_TYPE:
     case AST_NODE_TYPE_BREAK_STATEMENT:
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
+    case AST_NODE_TYPE_DEFER_STATEMENT:
     case AST_NODE_TYPE_FIELD:
     case AST_NODE_TYPE_FIELD_INITIALIZER:
     case AST_NODE_TYPE_FOR_STATEMENT:
@@ -3721,6 +3962,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
         case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
         case AST_NODE_TYPE_BREAK_STATEMENT:
         case AST_NODE_TYPE_CONTINUE_STATEMENT:
+        case AST_NODE_TYPE_DEFER_STATEMENT:
         case AST_NODE_TYPE_FOR_STATEMENT:
         case AST_NODE_TYPE_FOREIGN_BODY:
         case AST_NODE_TYPE_FOREIGN_IMPORT:
@@ -4894,6 +5136,7 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
     case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
+    case AST_NODE_TYPE_DEFER_STATEMENT:
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
     case AST_NODE_TYPE_FIELD:

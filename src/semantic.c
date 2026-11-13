@@ -40,6 +40,10 @@ static bool             semantic_call_resolve       (Semantic_Analyzer *analyzer
                                                      Ast_Node_Index procedure,
                                                      Ast_Node_Index statement,
                                                      Ast_Node_Index call);
+static bool             semantic_defer_check        (Semantic_Analyzer *analyzer,
+                                                     Ast_Node_Index defer);
+static Ast_Node_Index   semantic_defer_end          (Semantic_Analyzer const *analyzer,
+                                                     Ast_Node_Index defer);
 static Semantic_Binding semantic_definition_find    (Semantic_Analyzer const *analyzer, Str name);
 static bool             semantic_definitions_check  (Semantic_Analyzer *analyzer);
 static bool             semantic_enum_member_resolve(Semantic_Analyzer *analyzer,
@@ -341,11 +345,33 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
     // them, and a `continue` goes on with the innermost loop.
     Semantic_Jump_Target targets[AST_BLOCK_DEPTH_MAX] = {0};
     size_t target_count = 0;
+    // The defer statement that the pass is in, while it is in its deferred statement, and the index
+    // after the last node of that statement. One is enough, because a `defer` cannot be in another.
+    Ast_Node_Index defer = AST_NODE_INDEX_NONE;
+    Ast_Node_Index defer_end = 0;
     for (Ast_Node_Index current = procedure + 1; current < end; current += 1) {
         Ast_Node_Type node_type = analyzer->nodes[current].node_type;
 
         while (target_count > 0 && targets[target_count - 1].end <= current) {
             target_count -= 1;
+        }
+        if (defer != AST_NODE_INDEX_NONE && defer_end <= current) {
+            defer = AST_NODE_INDEX_NONE;
+        }
+        if (node_type == AST_NODE_TYPE_DEFER_STATEMENT) {
+            if (defer != AST_NODE_INDEX_NONE) {
+                return semantic_fail(analyzer, SEMANTIC_STATUS_DEFER_NESTED,
+                                     analyzer->nodes[current].payload.jump.keyword);
+            }
+            if (semantic_defer_check(analyzer, current) == false) {
+                return false;
+            }
+            defer = current;
+            defer_end = semantic_defer_end(analyzer, current);
+        }
+        if (node_type == AST_NODE_TYPE_RETURN_STATEMENT && defer != AST_NODE_INDEX_NONE) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_RETURN_IN_DEFER,
+                                 analyzer->nodes[current].payload.jump.keyword);
         }
         if (semantic_jump_target_is_statement(analyzer, procedure, current)) {
             if (semantic_jump_target_push(analyzer, targets, &target_count, current) == false) {
@@ -356,6 +382,12 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
             node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
             if (semantic_jump_resolve(analyzer, targets, target_count, current) == false) {
                 return false;
+            }
+            // The statements are in the order of the source and the target is around the jump, so
+            // a target that comes before the `defer` is around the `defer` as well.
+            if (defer != AST_NODE_INDEX_NONE && analyzer->bindings[current].target < defer) {
+                return semantic_fail(analyzer, SEMANTIC_STATUS_JUMP_OUT_OF_DEFER,
+                                     analyzer->nodes[current].payload.jump.keyword);
             }
         }
 
@@ -422,6 +454,64 @@ static void semantic_address_of_resolve(Semantic_Analyzer *analyzer, Ast_Node_In
     if (binding.kind == SEMANTIC_BINDING_KIND_VARIABLE) {
         analyzer->bindings[binding.target].is_address_taken = true;
     }
+}
+
+/**
+ * Checks that the statement of the defer statement `defer` is one that can be deferred: not a
+ * variable definition, which would be out of scope as soon as it was made, and not a `return`, a
+ * `break` or a `continue`, which would leave the block while it is being left. Returns false after
+ * it recorded an error.
+ */
+static bool semantic_defer_check(Semantic_Analyzer *analyzer, Ast_Node_Index defer) {
+    assert(defer < analyzer->node_count);
+    assert(analyzer->nodes[defer].node_type == AST_NODE_TYPE_DEFER_STATEMENT);
+
+    Ast_Node_Index statement = analyzer->nodes[defer].first_child;
+    assert(statement == defer + 1);
+
+    Ast_Node_Type node_type = analyzer->nodes[statement].node_type;
+    if (node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
+        node_type == AST_NODE_TYPE_RETURN_STATEMENT ||
+        node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
+        node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
+        return semantic_fail(analyzer, SEMANTIC_STATUS_DEFER_STATEMENT_INVALID,
+                             analyzer->nodes[defer].payload.jump.keyword);
+    }
+    // The parser makes no other statements.
+    assert(ast_node_type_is_assignment(node_type) || node_type == AST_NODE_TYPE_CALL_STATEMENT ||
+           node_type == AST_NODE_TYPE_IF_STATEMENT || node_type == AST_NODE_TYPE_FOR_STATEMENT ||
+           node_type == AST_NODE_TYPE_LOOP_STATEMENT ||
+           node_type == AST_NODE_TYPE_SCOPE_STATEMENT ||
+           node_type == AST_NODE_TYPE_LABELED_STATEMENT);
+    return true;
+}
+
+/**
+ * Returns the index after the last node of the statement of `defer`, a defer statement that
+ * `semantic_defer_check` accepted, as far as statements are concerned: a statement with a block
+ * ends where its last block does, and an assignment or a call ends right after its own node,
+ * because it holds no statements, only expressions, which are no matter to the analysis of a
+ * `defer`.
+ */
+static Ast_Node_Index semantic_defer_end(Semantic_Analyzer const *analyzer, Ast_Node_Index defer) {
+    assert(defer < analyzer->node_count);
+    assert(analyzer->nodes[defer].node_type == AST_NODE_TYPE_DEFER_STATEMENT);
+
+    Ast_Node_Index statement = analyzer->nodes[defer].first_child;
+    if (analyzer->nodes[statement].node_type == AST_NODE_TYPE_LABELED_STATEMENT) {
+        statement = analyzer->nodes[statement].first_child;
+    }
+
+    Ast_Node_Type node_type = analyzer->nodes[statement].node_type;
+    if (node_type == AST_NODE_TYPE_IF_STATEMENT || node_type == AST_NODE_TYPE_FOR_STATEMENT ||
+        node_type == AST_NODE_TYPE_LOOP_STATEMENT || node_type == AST_NODE_TYPE_SCOPE_STATEMENT) {
+        // The last child of each of them is a block, also of an if statement with an `else`.
+        Ast_Node_Index block = analyzer->nodes[statement].last_child;
+        assert(analyzer->nodes[block].node_type == AST_NODE_TYPE_BLOCK);
+        assert(analyzer->nodes[block].payload.block.end > block);
+        return analyzer->nodes[block].payload.block.end;
+    }
+    return statement + 1;
 }
 
 /**

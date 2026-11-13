@@ -197,6 +197,8 @@ static Token_Kind tokenizer_keyword_type(Str text) {
         return TOKEN_KIND_KEYWORD_CONST;
     } else if (str_equals(text, STR("continue"))) {
         return TOKEN_KIND_KEYWORD_CONTINUE;
+    } else if (str_equals(text, STR("defer"))) {
+        return TOKEN_KIND_KEYWORD_DEFER;
     } else if (str_equals(text, STR("for"))) {
         return TOKEN_KIND_KEYWORD_FOR;
     } else if (str_equals(text, STR("foreign"))) {
