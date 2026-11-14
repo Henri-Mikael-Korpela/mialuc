@@ -480,8 +480,9 @@ static int32_t main_run_command_build(Command command, Buffers const *buffers, S
 
 /**
  * Builds the parsed and analyzed program for Windows on x64. A build writes the executable file to
- * the output file, a dump-asm prints its assembly, and a run writes it to a temporary file and runs it, and its exit code is the
- * exit code of the compiler. Returns the exit code, which is 0 on success.
+ * the output file, a dump-asm prints its assembly, and a run writes it to a temporary file and runs
+ * it, and its exit code is the exit code of the compiler. Returns the exit code, which is 0 on
+ * success.
  */
 static int32_t main_run_command_build_x64(Command command, Buffers const *buffers, Str source,
                                           Parse_Result parse_result,

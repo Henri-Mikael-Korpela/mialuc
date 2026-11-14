@@ -332,8 +332,8 @@ static Ast_Node_Index parse_definition(Parser *parser) {
 
     // A constant has `::` after its name, which is two separator tokens, or a type between the two,
     // `name : Type : value`. Anything else is a global variable, which has an attribute list, a
-    // single `:` or both after its name. The last token is `END`, which is neither, so a name at the
-    // end of the file is not a constant, and the global variable it starts reports what it
+    // single `:` or both after its name. The last token is `END`, which is neither, so a name at
+    // the end of the file is not a constant, and the global variable it starts reports what it
     // expected.
     bool is_constant = parser->token_index + 2 < parser->token_count &&
                        parser->tokens[parser->token_index + 1].kind ==
@@ -652,7 +652,8 @@ static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
     if (definition == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    parser->nodes[definition].payload.global_variable_definition.name = name->payload.identifier.text;
+    parser->nodes[definition].payload.global_variable_definition.name =
+        name->payload.identifier.text;
     parse_token_advance(parser);
 
     if (parse_token_current(parser)->kind == TOKEN_KIND_HASH) {
@@ -708,7 +709,8 @@ static bool parse_attributes(Parser *parser, Ast_Node_Index definition) {
     // Every attribute consumes three tokens, so there are fewer attributes than tokens, which
     // bounds the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'(' after '#'")) == false) {
+        if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT,
+                               STR("'(' after '#'")) == false) {
             return false;
         }
 
@@ -1135,7 +1137,8 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
 
     parse_token_advance(parser);
 
-    // `for ->` is an infinite loop: it has no iterator and no range, and the block runs until a `break` or a `return` leaves it.
+    // `for ->` is an infinite loop: it has no iterator and no range, and the block runs until a
+    // `break` or a `return` leaves it.
     if (parse_token_current(parser)->kind == TOKEN_KIND_ARROW) {
         Ast_Node_Index loop = parse_node_make(parser, AST_NODE_TYPE_LOOP_STATEMENT);
         if (loop == AST_NODE_INDEX_NONE) {

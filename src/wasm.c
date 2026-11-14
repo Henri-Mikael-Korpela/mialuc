@@ -81,10 +81,10 @@ typedef struct {
 // `definition` is the `AST_NODE_TYPE_ENUM_TYPE`. The
 // member of an enum that is written without the enum, such as `.RED`, has the kind
 // `WASM_VALUE_TYPE_ENUM_LITERAL`, which like `nil` is accepted where any enum is wanted and is
-// given a number when the enum is known, see `wasm_enum_literal_expected`. A byte is one 32-bit value
-// from 0 to 255 in a local, a global or a field, and one byte in an array, an array slice or what a
-// pointer points to, see `wasm_type_stride_bytes`. An untyped integer from 0 to 255 is a byte where
-// one is wanted, see `wasm_value_is_accepted`.
+// given a number when the enum is known, see `wasm_enum_literal_expected`. A byte is one 32-bit
+// value from 0 to 255 in a local, a global or a field, and one byte in an array, an array slice or
+// what a pointer points to, see `wasm_type_stride_bytes`. An untyped integer from 0 to 255 is a
+// byte where one is wanted, see `wasm_value_is_accepted`.
 typedef enum {
     WASM_VALUE_TYPE_ARRAY,
     WASM_VALUE_TYPE_BOOL,
@@ -444,8 +444,6 @@ static size_t          wasm_signature_type_index              (Wasm_Builder cons
                                                                Ast_Node_Index signature);
 static Ast_Node_Index  wasm_call_signature                    (Wasm_Builder const *builder,
                                                                Ast_Node_Index call);
-static size_t          wasm_children_count                    (Wasm_Builder const *builder,
-                                                               Ast_Node_Index parent);
 static Str             wasm_expression_subject                (Wasm_Builder const *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index expression);
@@ -1188,8 +1186,8 @@ static size_t wasm_function_index(Wasm_Builder const *builder, Ast_Node_Index de
 
     bool is_foreign = wasm_constant_is_foreign(builder, definition);
     size_t index = 0;
-    Ast_Node_Index current = wasm_function_find(builder, builder->nodes[builder->module].first_child,
-                                                is_foreign);
+    Ast_Node_Index first = builder->nodes[builder->module].first_child;
+    Ast_Node_Index current = wasm_function_find(builder, first, is_foreign);
     // Every definition is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < builder->node_count && current != definition; i += 1) {
         assert(current != AST_NODE_INDEX_NONE);
@@ -1297,8 +1295,9 @@ static bool wasm_check_globals(Wasm_Builder *builder) {
                 Ast_Node_Index declared = wasm_global_type_node(builder, global);
                 if (declared != AST_NODE_INDEX_NONE &&
                     wasm_type_equals(wasm_type_info_type(builder, value), global_type) == false) {
-                    return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
-                                     builder->nodes[global].payload.global_variable_definition.name);
+                    return wasm_fail(
+                        builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
+                        builder->nodes[global].payload.global_variable_definition.name);
                 }
                 if (declared != AST_NODE_INDEX_NONE &&
                     global_type.kind == WASM_VALUE_TYPE_ARRAY &&
@@ -1398,10 +1397,10 @@ static size_t wasm_global_slot_count(Wasm_Builder const *builder) {
  * order of the source: one for an `Int` or a `Bool`, and two for a `Str`, its address and its
  * length. They are mutable, so a procedure can assign to them, and the initial value is a constant
  * expression, which is evaluated once when the module is instantiated. That is why the value of a
- * global variable is a constant, which the analysis worked out. The address of a string is where its bytes are in the data section,
- * which is the length of the strings whose nodes come before it. The types must have been checked
- * by `wasm_check_globals`. When the program has array literals, the stack pointer comes after the
- * globals of the program.
+ * global variable is a constant, which the analysis worked out. The address of a string is where
+ * its bytes are in the data section, which is the length of the strings whose nodes come before it.
+ * The types must have been checked by `wasm_check_globals`. When the program has array literals,
+ * the stack pointer comes after the globals of the program.
  */
 static void wasm_build_global_section(Wasm_Builder *builder) {
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_GLOBAL);
@@ -1668,7 +1667,8 @@ static void wasm_build_import_section(Wasm_Builder *builder, Ast_Node_Index modu
         assert(definition != AST_NODE_INDEX_NONE);
 
         wasm_write_text(&builder->writer, module_name);
-        wasm_write_text(&builder->writer, builder->nodes[definition].payload.constant_definition.name);
+        wasm_write_text(&builder->writer,
+                        builder->nodes[definition].payload.constant_definition.name);
         wasm_write_byte(&builder->writer, WASM_IMPORT_KIND_FUNCTION);
         // One type for each function, and the imports are the first of them.
         wasm_write_unsigned(&builder->writer, i);
@@ -1812,7 +1812,8 @@ static void wasm_build_element_section(Wasm_Builder *builder) {
 
 /**
  * Writes the export section, which makes every function of the module callable from outside it
- * under the name of its definition, which the imported functions are not, and the memory, if there is one, readable under the name `memory`.
+ * under the name of its definition, which the imported functions are not, and the memory, if there
+ * is one, readable under the name `memory`.
  */
 static bool wasm_build_export_section(Wasm_Builder *builder, Ast_Node_Index module,
                                       size_t definition_count) {
@@ -4108,7 +4109,8 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     // Bytes have an order, like numbers. The other operand is a `Byte` too, or an untyped integer
     // from 0 to 255, which is a `Byte` there.
     if (left_type.kind == WASM_VALUE_TYPE_BYTE || right_type.kind == WASM_VALUE_TYPE_BYTE) {
-        if (left_type.kind != WASM_VALUE_TYPE_BYTE && wasm_is_byte_literal(builder, left) == false) {
+        if (left_type.kind != WASM_VALUE_TYPE_BYTE &&
+            wasm_is_byte_literal(builder, left) == false) {
             return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                              wasm_expression_subject(builder, definition, left));
         }
@@ -6016,9 +6018,9 @@ static Wasm_Type wasm_type_make(Wasm_Value_Type kind) {
 
 /**
  * Returns the type of a pointer to a value of the type `target`, which is a pointer with one more
- * caret when `target` is a pointer already. Only an `Int`, a `Bool`, a `Byte`, a `Str`, a struct, a pointer
- * or a pointer to a procedure is pointed to: there is no pointer to an array or to an array slice,
- * so those, and a type that the target does not have, give a type of the kind
+ * caret when `target` is a pointer already. Only an `Int`, a `Bool`, a `Byte`, a `Str`, a struct, a
+ * pointer or a pointer to a procedure is pointed to: there is no pointer to an array or to an array
+ * slice, so those, and a type that the target does not have, give a type of the kind
  * `WASM_VALUE_TYPE_NONE`.
  */
 static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
@@ -6374,9 +6376,9 @@ static bool wasm_enum_member_write(Wasm_Builder *builder, Ast_Node_Index enum_no
 
 /**
  * Returns the type that `type_name` stands for, which is `Bool`, `C_Str`, `Int`, `Str` or the name
- * of a struct, or a type of the kind `WASM_VALUE_TYPE_NONE` if the target does not have a type of that
- * name. The text can have the carets of a pointer type before the name, such as `^Int`, which is
- * how a return type is kept, see `Ast_Node.payload.procedure`, and then the type is a pointer to
+ * of a struct, or a type of the kind `WASM_VALUE_TYPE_NONE` if the target does not have a type of
+ * that name. The text can have the carets of a pointer type before the name, such as `^Int`, which
+ * is how a return type is kept, see `Ast_Node.payload.procedure`, and then the type is a pointer to
  * that. Spaces after a caret are skipped, because the source can have them.
  */
 static Wasm_Type wasm_type_of_name(Wasm_Builder const *builder, Str type_name) {
@@ -6417,8 +6419,8 @@ static Wasm_Type wasm_type_of_name(Wasm_Builder const *builder, Str type_name) {
 
 /**
  * Returns the type that the name `type_name` stands for, which has no carets before it: `Bool`,
- * `Byte`, `C_Str`, `Int`, `Str` or the name of a struct, or a type of the kind `WASM_VALUE_TYPE_NONE` if the target
- * does not have a type of that name.
+ * `Byte`, `C_Str`, `Int`, `Str` or the name of a struct, or a type of the kind
+ * `WASM_VALUE_TYPE_NONE` if the target does not have a type of that name.
  */
 static Wasm_Type wasm_type_of_plain_name(Wasm_Builder const *builder, Str type_name) {
     assert(type_name.bytes != NULL);

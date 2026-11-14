@@ -180,8 +180,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   not comparisons. The operator is in the payload.
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: the value that is bound to the name is the first child.
  *   It is an `AST_NODE_TYPE_PROCEDURE`, an `AST_NODE_TYPE_STRUCT_TYPE`, an
- *   `AST_NODE_TYPE_ENUM_TYPE`, the member of an enum, which is an `AST_NODE_TYPE_FIELD_ACCESS` of an
- *   `AST_NODE_TYPE_IDENTIFIER`, as in `DEFAULT :: Color.RED`, or any other expression, which the
+ *   `AST_NODE_TYPE_ENUM_TYPE`, the member of an enum, which is an `AST_NODE_TYPE_FIELD_ACCESS` of
+ *   an `AST_NODE_TYPE_IDENTIFIER`, as in `DEFAULT :: Color.RED`, or any other expression, which the
  *   analysis checks is a constant, see `constant_evaluate`, such as `LIMIT :: 100` or
  *   `GREETING :: "Hello"`. A typed constant, `LIMIT : Byte : 100`, has a second child, its type,
  *   which comes after the value, so that the value is the first child of every definition.
@@ -237,10 +237,10 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   variable of type `Int` that exists only in the block, and it cannot be assigned to. The nodes
  *   of the range come before the block, so the iterator is not in scope in the range. It is a
  *   statement of a procedure body.
- * - `AST_NODE_TYPE_FOREIGN_BODY`: no children. The `...` that takes the place of the statements of a
- *   procedure that is declared in a `foreign js ->` or `foreign libc ->` block: its code is not in
- *   the program but is provided from outside. The target of the block is in the payload. It is the
- *   only child after the parameters of such an `AST_NODE_TYPE_PROCEDURE`, see
+ * - `AST_NODE_TYPE_FOREIGN_BODY`: no children. The `...` that takes the place of the statements of
+ *   a procedure that is declared in a `foreign js ->` or `foreign libc ->` block: its code is not
+ *   in the program but is provided from outside. The target of the block is in the payload. It is
+ *   the only child after the parameters of such an `AST_NODE_TYPE_PROCEDURE`, see
  *   `ast_procedure_is_foreign`.
  * - `AST_NODE_TYPE_FOREIGN_IMPORT`: no children. `import foreign js "functions"`: the program
  *   gets the foreign procedures that its `foreign js ->` blocks declare from the JavaScript object
@@ -254,9 +254,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   `AST_NODE_TYPE_ARRAY_TYPE`, when the definition gives one, and last the initial value, which is
  *   an expression. The parser takes any expression there, and the analysis checks that it is known
  *   when the program is compiled: a constant, such as a literal or `LIMIT * 2`, or the information
- *   about a type, an `AST_NODE_TYPE_FIELD_ACCESS` of an `AST_NODE_TYPE_TYPE_INFO_OF`. The name is in
- *   the payload. It is
- *   a child of the `AST_NODE_TYPE_MODULE`, between the constant definitions.
+ *   about a type, an `AST_NODE_TYPE_FIELD_ACCESS` of an `AST_NODE_TYPE_TYPE_INFO_OF`. The name is
+ *   in the payload. It is a child of the `AST_NODE_TYPE_MODULE`, between the constant
+ *   definitions.
  * - `AST_NODE_TYPE_IDENTIFIER`: no children. It is a use of a name, such as a parameter.
  * - `AST_NODE_TYPE_IF_STATEMENT`: a chain of `if`, any number of `else if` and an optional `else`,
  *   as the children in the order of the source: a condition, which is any expression (the target
@@ -273,8 +273,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   is given to, written `@name if ...` or `@name for ...`. It takes the place of that statement in
  *   its block, and the node of the statement comes right after it. A label of a scope statement is
  *   its child instead. It is a statement of a procedure body.
- * - `AST_NODE_TYPE_LOOP_STATEMENT`: an infinite loop, written `for ->`. It has one child, the `AST_NODE_TYPE_BLOCK` that runs again and again
- *   until a `break` or a `return` leaves it. It is a statement of a procedure body.
+ * - `AST_NODE_TYPE_LOOP_STATEMENT`: an infinite loop, written `for ->`. It has one child, the
+ *   `AST_NODE_TYPE_BLOCK` that runs again and again until a `break` or a `return` leaves it. It is
+ *   a statement of a procedure body.
  * - `AST_NODE_TYPE_MATCH_CASE`: one case of an `AST_NODE_TYPE_MATCH_STATEMENT`, written
  *   `case pattern ->`. Its first child is the pattern, which is an expression or an
  *   `AST_NODE_TYPE_RANGE`, and the default case, `case ->`, has none. Then comes the
@@ -345,9 +346,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_STRING_LITERAL`: no children.
  * - `AST_NODE_TYPE_STRUCT_LITERAL`: one `AST_NODE_TYPE_FIELD_INITIALIZER` for each field that is
  *   given a value, in the order of the source, which is not necessarily the order of the fields of
- *   the struct. `Person { age = 30, name = "Bob" }` is a struct literal. The name of the struct is in the
- *   payload, with `bytes` NULL for the literal `{ ... }` of a field that is a struct, which gets
- *   its type from the field. It is an expression.
+ *   the struct. `Person { age = 30, name = "Bob" }` is a struct literal. The name of the struct is
+ *   in the payload, with `bytes` NULL for the literal `{ ... }` of a field that is a struct, which
+ *   gets its type from the field. It is an expression.
  * - `AST_NODE_TYPE_STRUCT_TYPE`: one `AST_NODE_TYPE_FIELD` for each field, in the order of the
  *   source. It is the value of an `AST_NODE_TYPE_CONSTANT_DEFINITION` that defines a struct, or the
  *   type of a field.

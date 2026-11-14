@@ -126,10 +126,10 @@ enum {
     X64_DWARF_ABBREVIATION_SUBRANGE_TYPE = 10,
     X64_DWARF_ABBREVIATION_START = 11,
     // The frame of a procedure, see `x64_procedure_write`: on entry the address to return to is at
-    // `rsp`, so the frame of the caller, the CFA, starts 8 bytes above it. `push rbp` makes that 16,
-    // and keeps `rbp` 16 bytes below the CFA, and from `mov rbp, rsp` on the CFA is `rbp + 16`. So
-    // the arguments that the procedure keeps are at the CFA and above, and the variables are below
-    // the 16 bytes of the address and of `rbp`.
+    // `rsp`, so the frame of the caller, the CFA, starts 8 bytes above it. `push rbp` makes that
+    // 16, and keeps `rbp` 16 bytes below the CFA, and from `mov rbp, rsp` on the CFA is `rbp + 16`.
+    // So the arguments that the procedure keeps are at the CFA and above, and the variables are
+    // below the 16 bytes of the address and of `rbp`.
     X64_DEBUG_CFA_ENTRY_OFFSET_BYTES = 8,
     X64_DEBUG_CFA_FRAME_OFFSET_BYTES = 16,
     // The start of the program makes 40 bytes of the stack, see `x64_code_write`.
@@ -1457,8 +1457,8 @@ static bool x64_expression_load(X64_Builder *builder, Ast_Node_Index expression,
 }
 
 /**
- * Returns the type that `expression` has where a value of `wanted` is wanted, or `X64_TYPE_NONE` for
- * no type in particular. It is the type of the expression, except that an untyped string is a
+ * Returns the type that `expression` has where a value of `wanted` is wanted, or `X64_TYPE_NONE`
+ * for no type in particular. It is the type of the expression, except that an untyped string is a
  * `C_Str` where one is wanted: the address of a copy of its bytes with a zero after them. The
  * caller compares the type with `wanted`, so an untyped constant that does not become it keeps the
  * type that it has where nothing else says.
@@ -2076,10 +2076,10 @@ static void x64_debug_sections_write(X64_Builder *builder, size_t text_size_byte
  * Writes the table of unwinding of Windows for x64, which the system and its debuggers use to
  * find the frame of the caller of a procedure, see
  * https://learn.microsoft.com/en-us/cpp/build/exception-handling-x64. gdb reads it to find the end
- * of the prologue of a procedure, so that a breakpoint on a procedure is at its first statement. The
- * table has an entry for the start of the program and one for each procedure, in the order of the
- * code, and the unwind information of each follows the table. `section_rva` is where the section
- * is in memory.
+ * of the prologue of a procedure, so that a breakpoint on a procedure is at its first statement.
+ * The table has an entry for the start of the program and one for each procedure, in the order of
+ * the code, and the unwind information of each follows the table. `section_rva` is where the
+ * section is in memory.
  */
 static void x64_debug_unwind_write(X64_Builder *builder, size_t text_size_bytes,
                                    uint32_t section_rva) {

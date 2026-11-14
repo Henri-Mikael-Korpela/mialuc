@@ -294,8 +294,8 @@ typedef struct {
  * An expression that is a constant, such as `42`, `LIMIT * 2` or `"Hello"`, is written as the
  * instruction that pushes its value, and its operands are not. An untyped constant is written as
  * a value of the type that its place wants, when its value fits in it: an untyped integer is
- * `i64.const`, or `i32.const` where a `Byte` is wanted, an untyped truth value is `i32.const` of 1 or
- * 0, and an untyped string is the address and the length of its literal, or the address alone
+ * `i64.const`, or `i32.const` where a `Byte` is wanted, an untyped truth value is `i32.const` of 1
+ * or 0, and an untyped string is the address and the length of its literal, or the address alone
  * where a `C_Str` is wanted, because the bytes of a literal have a zero after them.
  *
  * Every constant definition becomes a function that the module exports under the name of the

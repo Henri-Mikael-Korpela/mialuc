@@ -196,11 +196,11 @@ typedef struct {
  *
  * A constant can be a value that is known when the program is compiled, such as `LIMIT :: 100`,
  * `GREETING :: "Hello"` or `DOUBLE :: LIMIT * 2`, which can be given a type, as in
- * `LIMIT : Byte : 100`. Its names are in the module scope, and it must be a constant expression, see
- * `constant_evaluate`, and so must the initial value of a global variable, except the information
- * about a type. Every expression of the program that can be a constant is evaluated, so that an
- * error in a constant part of it, such as a division by zero or an operand of the wrong kind, is
- * found here and not when the program runs.
+ * `LIMIT : Byte : 100`. Its names are in the module scope, and it must be a constant expression,
+ * see `constant_evaluate`, and so must the initial value of a global variable, except the
+ * information about a type. Every expression of the program that can be a constant is evaluated, so
+ * that an error in a constant part of it, such as a division by zero or an operand of the wrong
+ * kind, is found here and not when the program runs.
  *
  * A constant can be a struct, such as `Person :: struct -> ...`. It has its name in the module
  * scope like any other constant, but it is a type and not a value, so it is not counted among the
@@ -264,11 +264,11 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
 
 /**
  * Returns whether `name` is the name of a built-in procedure, which is called like any procedure
- * but is not defined in the program. Today those are `byte_to_int`, `int_to_byte`, `length_of` and `str_to_c_str`. The analysis
- * does not bind the call of a built-in procedure to a definition, so its binding keeps the kind
- * `SEMANTIC_BINDING_KIND_NONE`, and the target knows what the call means from the name. A
- * definition of the program with the same name is called instead, because a name has one meaning
- * and the program's own is looked up first.
+ * but is not defined in the program. Today those are `byte_to_int`, `int_to_byte`, `length_of` and
+ * `str_to_c_str`. The analysis does not bind the call of a built-in procedure to a definition, so
+ * its binding keeps the kind `SEMANTIC_BINDING_KIND_NONE`, and the target knows what the call means
+ * from the name. A definition of the program with the same name is called instead, because a name
+ * has one meaning and the program's own is looked up first.
  */
 bool semantic_is_built_in_procedure(Str name);
 

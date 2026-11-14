@@ -46,6 +46,8 @@ static Constant_Value constant_comparison      (Ast_Node const *nodes, Ast_Node_
                                                 Constant_Value left, Constant_Value right);
 static Constant_Value constant_convert         (Ast_Node const *nodes, Ast_Node_Index definition,
                                                 Constant_Value value);
+static Ast_Node_Index constant_definition_type (Ast_Node const *nodes,
+                                                Ast_Node_Index definition);
 static Constant_Value constant_divide          (Constant_Value left, Constant_Value right,
                                                 Ast_Node_Index operation);
 static Constant_Value constant_fail            (Constant_Status status, Ast_Node_Index node);
@@ -151,7 +153,12 @@ bool constant_definition_is_value(Ast_Node const *nodes, Ast_Node_Index definiti
     return true;
 }
 
-Ast_Node_Index constant_definition_type(Ast_Node const *nodes, Ast_Node_Index definition) {
+/**
+ * Returns the type that `definition`, an `AST_NODE_TYPE_CONSTANT_DEFINITION`, gives its constant,
+ * which is its second child, or `AST_NODE_INDEX_NONE` when it gives none and the constant is
+ * untyped.
+ */
+static Ast_Node_Index constant_definition_type(Ast_Node const *nodes, Ast_Node_Index definition) {
     assert(nodes != NULL);
     assert(nodes[definition].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION);
 

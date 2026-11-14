@@ -28,7 +28,8 @@ typedef enum {
     CONSTANT_TYPE_BYTE,
     CONSTANT_TYPE_INT,
     CONSTANT_TYPE_STR,
-    // `true`, `false`, a comparison of constants, and `and`, `or` and `not` of untyped truth values.
+    // `true`, `false`, a comparison of constants, and `and`, `or` and `not` of untyped truth
+    // values.
     CONSTANT_TYPE_UNTYPED_BOOL,
     // An integer literal, and arithmetic of untyped integers.
     CONSTANT_TYPE_UNTYPED_INTEGER,
@@ -129,13 +130,6 @@ Constant_Value constant_evaluate(Ast_Node const *nodes, size_t node_count,
  * member of an enum such as `Color.RED`, which is written as a field of the name of the enum.
  */
 bool constant_definition_is_value(Ast_Node const *nodes, Ast_Node_Index definition);
-
-/**
- * Returns the type that `definition`, an `AST_NODE_TYPE_CONSTANT_DEFINITION`, gives its constant,
- * which is its second child, or `AST_NODE_INDEX_NONE` when it gives none and the constant is
- * untyped.
- */
-Ast_Node_Index constant_definition_type(Ast_Node const *nodes, Ast_Node_Index definition);
 
 /**
  * Returns whether `value`, which must be `CONSTANT_STATUS_OK`, is an untyped integer that fits in a

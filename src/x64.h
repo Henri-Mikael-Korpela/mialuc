@@ -126,9 +126,10 @@ typedef struct {
  * Builds an executable for Windows on x64 (a PE32+ file for the console) from the syntax tree below
  * `root`, which must be the `AST_NODE_TYPE_MODULE` node of a successful `parse`. `nodes` holds
  * `Ast_Node` elements, and `bindings` and `constants` hold the `Semantic_Binding` and the
- * `Constant_Value` elements that `semantic_analyze` made for the same tree. The file is written to `output_buffer`, which holds `byte` elements. The
- * symbols are written to `symbol_buffer`, which holds at least `X64_CONSTANT_COUNT_MAX`
- * `X64_Symbol` elements, so that the code can be shown with the names of its procedures.
+ * `Constant_Value` elements that `semantic_analyze` made for the same tree. The file is written to
+ * `output_buffer`, which holds `byte` elements. The symbols are written to `symbol_buffer`, which
+ * holds at least `X64_CONSTANT_COUNT_MAX` `X64_Symbol` elements, so that the code can be shown with
+ * the names of its procedures.
  *
  * Every procedure is machine code that follows the calling convention of Windows on x64, so that
  * the C library can be called with it. The program starts in a few instructions of its own that
@@ -156,8 +157,8 @@ typedef struct {
  * parameters of the types `Int` and `C_Str`, whose statements are calls, returns, definitions of
  * variables of those types and assignments to them with `=`, and whose expressions are constants
  * that are numbers, strings where a `C_Str` is wanted, parameters, variables, and calls with such
- * arguments. The rest is rejected with a status other than `X64_BUILD_STATUS_OK`, so that nothing is
- * built wrongly.
+ * arguments. The rest is rejected with a status other than `X64_BUILD_STATUS_OK`, so that nothing
+ * is built wrongly.
  */
 X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice constants,
                            Ast_Node_Index root, Array_Slice output_buffer,
