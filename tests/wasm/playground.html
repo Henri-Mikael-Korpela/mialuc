@@ -40,6 +40,18 @@
 
         header h1 { margin: 0; font-size: 16px; font-weight: 600; }
 
+        nav { display: flex; gap: 4px; }
+
+        nav a {
+            padding: 4px 10px;
+            border-radius: 2px;
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+
+        nav a:hover { color: var(--text); }
+        nav a[aria-current="page"] { background: var(--background); color: var(--text); }
+
         button {
             padding: 4px 16px;
             border: 0;
@@ -252,7 +264,11 @@
 </head>
 <body>
     <header>
-        <h1>Mialu Playground</h1>
+        <h1>Mialu</h1>
+        <nav aria-label="Pages">
+            <a href="playground.html" aria-current="page">Playground</a>
+            <a href="internals.html">Compiler internals</a>
+        </nav>
         <select id="example" aria-label="Example"></select>
         <button id="run" type="button">Run</button>
         <span class="hint">Ctrl+Enter</span>
@@ -571,7 +587,7 @@
                     ast: null,
                     asm: null,
                     asmError: null,
-                    error: `Cannot reach the compiler. Start it with: python tests/wasm/serve.py\n${error}`,
+                    error: `Cannot reach the compiler. Start it with: python serve.py\n${error}`,
                 };
             }
         }
@@ -993,7 +1009,7 @@
                 if (loadIndex === exampleLoadCount) {
                     consoleOutput.replaceChildren();
                     print("error", `Cannot load the example ${name}. Start the server with: `
-                        + `python tests/wasm/serve.py\n${error}`);
+                        + `python serve.py\n${error}`);
                 }
                 return;
             }

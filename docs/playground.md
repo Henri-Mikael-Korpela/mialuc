@@ -29,14 +29,16 @@ Once the build is complete, open http://localhost:8008/playground.html in your b
 
 ## Launching the Playground without Dockerw
 
-The playground can run as a web page that is served by a small Python script, [tests/wasm/serve.py](../tests/wasm/serve.py). Without Docker, you need Python 3 and a Mialu compiler that you have built yourself.
+The playground can run as a web page that is served by a small Python script, [serve.py](../serve.py). Without Docker, you need Python 3 and a Mialu compiler that you have built yourself.
 
 1. Build the compiler as described in [Getting Started](getting-started.md#building-the-compiler). The script does not build it, and it answers every request with an error when `build/mialuc.exe` (build target executable) is missing.
 2. In the root of the repository, start the server:
 
     ```
-    python tests/wasm/serve.py
+    python serve.py
     ```
 
-    A different port than the default 8008 can be given after the script: `python tests/wasm/serve.py 8080`.
+    A different port than the default 8008 can be given after the script: `python serve.py 8080`.
 3. Open http://localhost:8008/playground.html in your browser. Stop the server with Ctrl+C.
+
+The navigation bar on top of the page goes to the compiler internals page, http://localhost:8008/internals.html, which documents the implementation of the compiler: the tokens, the syntax tree nodes and the reserved words, each with a search. The server builds it from `src/tokenizer.h`, `src/ast.h` and the language specification, so it follows the code.

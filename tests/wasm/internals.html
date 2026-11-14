@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mialu Compiler Internals</title>
+    <style>
+        :root {
+            --background: #1e1e1e;
+            --background-panel: #252526;
+            --border: #3c3c3c;
+            --text: #d4d4d4;
+            --text-muted: #858585;
+            --accent: #0e639c;
+            --error: #f48771;
+            --highlight: #614d00;
+            --font-code: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: var(--background);
+            color: var(--text);
+            font: 14px/1.5 system-ui, sans-serif;
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 16px;
+            padding: 8px 16px;
+            background: var(--background-panel);
+            border-bottom: 1px solid var(--border);
+        }
+
+        header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+
+        nav { display: flex; gap: 4px; }
+
+        nav a {
+            padding: 4px 10px;
+            border-radius: 2px;
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+
+        nav a:hover { color: var(--text); }
+        nav a[aria-current="page"] { background: var(--background); color: var(--text); }
+
+        .tabs { display: flex; gap: 4px; margin-left: auto; }
+
+        .tabs button {
+            padding: 4px 12px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: transparent;
+            color: var(--text-muted);
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: white; }
+
+        main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+
+        .intro { margin: 0 0 12px; color: var(--text-muted); }
+
+        .search { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+
+        .search input {
+            flex: 1;
+            padding: 6px 10px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--background-panel);
+            color: var(--text);
+            font: inherit;
+        }
+
+        .search input:focus { outline: 1px solid var(--accent); }
+
+        .count { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+
+        .filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+
+        .filters button {
+            padding: 2px 10px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: transparent;
+            color: var(--text-muted);
+            font: 12px system-ui, sans-serif;
+            cursor: pointer;
+        }
+
+        .filters button[aria-pressed="true"] { border-color: var(--accent); color: var(--text); background: var(--background-panel); }
+
+        h2 {
+            margin: 24px 0 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .entry {
+            display: grid;
+            grid-template-columns: minmax(180px, 320px) 1fr;
+            gap: 4px 16px;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .entry-name { font-family: var(--font-code); font-size: 13px; word-break: break-all; }
+
+        .spelling {
+            display: inline-block;
+            margin-left: 8px;
+            padding: 0 6px;
+            border-radius: 2px;
+            background: var(--background-panel);
+            color: #ce9178;
+        }
+
+        .entry-description { color: var(--text-muted); }
+        .entry-description code { font-family: var(--font-code); font-size: 12px; color: var(--text); }
+
+        mark { background: var(--highlight); color: inherit; }
+
+        .empty { padding: 16px 0; color: var(--text-muted); }
+        #error { padding: 16px 0; color: var(--error); white-space: pre-wrap; }
+
+        .words { display: flex; flex-wrap: wrap; gap: 6px; }
+
+        .word {
+            padding: 2px 10px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--background-panel);
+            font-family: var(--font-code);
+        }
+
+        .word small { margin-left: 6px; color: var(--text-muted); font-family: system-ui, sans-serif; font-size: 11px; }
+
+        @media (max-width: 700px) {
+            .entry { grid-template-columns: 1fr; }
+            .tabs { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Mialu</h1>
+        <nav aria-label="Pages">
+            <a href="playground.html">Playground</a>
+            <a href="internals.html" aria-current="page">Compiler internals</a>
+        </nav>
+        <div class="tabs" role="tablist">
+            <button type="button" role="tab" data-tab="tokens">Tokens</button>
+            <button type="button" role="tab" data-tab="ast_nodes">AST nodes</button>
+            <button type="button" role="tab" data-tab="reserved_words">Reserved words</button>
+            <button type="button" role="tab" data-tab="operators">Operators</button>
+        </div>
+    </header>
+
+    <main>
+        <p class="intro" id="intro"></p>
+        <div class="search">
+            <input id="search" type="search" aria-label="Search" autocomplete="off" autofocus>
+            <span class="count" id="count"></span>
+        </div>
+        <div class="filters" id="filters"></div>
+        <div id="error" hidden></div>
+        <div id="results"></div>
+    </main>
+
+    <script>
+        "use strict";
+
+        const TABS = {
+            tokens: {
+                title: "Tokens",
+                intro: "The kinds of token that the tokenizer produces, from Token_Kind in src/tokenizer.h. "
+                    + "A single-character token has the value of its ASCII character, and the others have a unique value from 256.",
+            },
+            ast_nodes: {
+                title: "AST nodes",
+                intro: "The types of node of the syntax tree, from Ast_Node_Type in src/ast.h, with the children that each has. "
+                    + "These are the nodes that `mialuc dump-ast` prints.",
+            },
+            reserved_words: {
+                title: "Reserved words",
+                intro: "The words that cannot be used as names, from the language specification. "
+                    + "A keyword in use has a token of its own, which shows when the pointer is over it, and an unused keyword is kept for the future.",
+            },
+            operators: {
+                title: "Operators",
+                intro: "The operators of the language, from the table in the language specification. "
+                    + "A higher precedence binds tighter, and precedence 0 is for the operators that define or assign and are not part of an expression.",
+            },
+        };
+
+        let data = null;
+        let tab = "tokens";
+        // The categories that the filter of each tab hides.
+        const hidden = { tokens: new Set(), ast_nodes: new Set(), reserved_words: new Set(), operators: new Set() };
+        // Whether the reserved words that are in use, and those that are not, are hidden. A literal
+        // word such as `true` is in use, because the language has it.
+        const usage = { Used: false, Unused: false };
+
+        const search = document.getElementById("search");
+        const results = document.getElementById("results");
+
+        function escapeHtml(text) {
+            return text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+        }
+
+        // Escapes the text and marks what matches the query. The query is escaped like the text, so
+        // that it matches the same characters, and it is never matched inside a tag.
+        function render(text, query) {
+            const html = escapeHtml(text);
+            if (!query) return html;
+            const pattern = new RegExp(escapeHtml(query).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+            return html.replace(pattern, "<mark>$&</mark>");
+        }
+
+        // The comments of the source quote code between backticks.
+        function withCode(text, query) {
+            return text.split("`").map((part, i) => i % 2 ? `<code>${render(part, query)}</code>` : render(part, query)).join("");
+        }
+
+        function searchableText(item) {
+            return Object.values(item).filter((value) => typeof value === "string").join(" ").toLowerCase();
+        }
+
+        function groupByCategory(list) {
+            const groups = new Map();
+            for (const item of list) {
+                if (!groups.has(item.category)) groups.set(item.category, []);
+                groups.get(item.category).push(item);
+            }
+            return groups;
+        }
+
+        function renderFilters() {
+            const filters = document.getElementById("filters");
+            filters.textContent = "";
+            if (data === null) return;
+            if (tab === "reserved_words") {
+                for (const name of Object.keys(usage)) {
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.textContent = name;
+                    button.setAttribute("aria-pressed", String(!usage[name]));
+                    button.addEventListener("click", () => {
+                        usage[name] = !usage[name];
+                        button.setAttribute("aria-pressed", String(!usage[name]));
+                        update();
+                    });
+                    filters.appendChild(button);
+                }
+            }
+            for (const name of new Set(data[tab].map((item) => item.category))) {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = name;
+                button.setAttribute("aria-pressed", String(!hidden[tab].has(name)));
+                button.addEventListener("click", () => {
+                    if (hidden[tab].has(name)) hidden[tab].delete(name); else hidden[tab].add(name);
+                    button.setAttribute("aria-pressed", String(!hidden[tab].has(name)));
+                    update();
+                });
+                filters.appendChild(button);
+            }
+        }
+
+        function operatorHtml(item, query) {
+            return `<div class="entry"><div class="entry-name">${render(item.operator, query)}`
+                + `<span class="spelling">precedence ${item.precedence}</span></div>`
+                + `<div class="entry-description">${withCode(item.description, query)}<br>`
+                + `Example: ${withCode(item.example, query)}</div></div>`;
+        }
+
+        function entryHtml(item, query) {
+            let name = render(item.name, query);
+            if (tab === "tokens") {
+                if (item.spelling) name += `<span class="spelling">${render(item.spelling, query)}</span>`;
+                if (item.value) name += ` (${render(item.value, query)})`;
+            }
+            return `<div class="entry"><div class="entry-name">${name}</div>`
+                + `<div class="entry-description">${withCode(item.description, query)}</div></div>`;
+        }
+
+        function wordHtml(item, query) {
+            const title = item.token ? ` title="${escapeHtml(item.token)}"` : "";
+            return `<span class="word"${title}>${render(item.word, query)}<small>${escapeHtml(item.status)}</small></span>`;
+        }
+
+        function update() {
+            if (data === null) return;
+            const needle = search.value.trim().toLowerCase();
+            const query = search.value.trim();
+            const all = data[tab];
+            const matching = all.filter((item) => !hidden[tab].has(item.category)
+                && !(tab === "reserved_words" && usage[item.status === "Unused keyword" ? "Unused" : "Used"])
+                && (needle === "" || searchableText(item).includes(needle)));
+
+            document.getElementById("count").textContent = `${matching.length} of ${all.length}`;
+            if (matching.length === 0) {
+                results.innerHTML = '<div class="empty">Nothing matches.</div>';
+                return;
+            }
+
+            let html = "";
+            for (const [group, list] of groupByCategory(matching)) {
+                html += `<h2>${escapeHtml(group)} (${list.length})</h2>`;
+                if (tab === "reserved_words") {
+                    html += `<div class="words">${list.map((item) => wordHtml(item, query)).join("")}</div>`;
+                } else if (tab === "operators") {
+                    html += list.map((item) => operatorHtml(item, query)).join("");
+                } else {
+                    html += list.map((item) => entryHtml(item, query)).join("");
+                }
+            }
+            results.innerHTML = html;
+        }
+
+        function selectTab(name) {
+            tab = name;
+            for (const button of document.querySelectorAll(".tabs button")) {
+                button.setAttribute("aria-selected", String(button.dataset.tab === name));
+            }
+            document.getElementById("intro").textContent = TABS[name].intro;
+            search.placeholder = `Search ${TABS[name].title.toLowerCase()}`;
+            try { history.replaceState(null, "", `#${name}`); } catch (error) { /* The tab is not remembered. */ }
+            renderFilters();
+            update();
+        }
+
+        for (const button of document.querySelectorAll(".tabs button")) {
+            button.addEventListener("click", () => selectTab(button.dataset.tab));
+        }
+        search.addEventListener("input", update);
+
+        async function load() {
+            const initial = location.hash.slice(1);
+            selectTab(initial in TABS ? initial : "tokens");
+            try {
+                const response = await fetch("/api/internals");
+                if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+                data = await response.json();
+                renderFilters();
+                update();
+            } catch (error) {
+                const element = document.getElementById("error");
+                element.hidden = false;
+                element.textContent = `Cannot load the internals. Start the server with: python serve.py\n${error}`;
+            }
+        }
+
+        load();
+    </script>
+</body>
+</html>
