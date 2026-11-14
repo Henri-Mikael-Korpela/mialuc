@@ -86,6 +86,13 @@
        that the `break` is inside of, and the label of a `continue` the one of a loop that it is
        inside of. A statement cannot have the label of a statement around it. Labels are separate
        from the names of variables.
+     - The subject of a match statement must be an `Int`, a `Byte`, a `Str` or an enum, and every
+       pattern a constant of its type: a literal, a constant or arithmetic of them, a range of
+       them for an `Int` or a `Byte`, and a member of the enum of the subject, written `.MEMBER`
+       or `Enum.MEMBER`, for an enum. A range must have a number in it, and no two cases may match
+       a value in common. A match of an enum without a default case must have a case for every
+       member of the enum, unless it has the attribute `partial`, which is its only attribute and
+       which only such a match can have. All are checked after parsing.
      - A deferred if, for, loop or scope statement cannot have a `return` or a `defer` in it, and a
        `break` or a `continue` in it must not leave it, because it runs while its block is being
        left. The names in a deferred statement are looked up where the `defer` is.
@@ -272,7 +279,8 @@ global_variable_definition =
 
 (* An attribute list starts with `#`, and has one or more attributes, each of them between
    parentheses: `#(static)`, or `#(first)(second)`. An attribute is a name. The compiler knows
-   `static` only, and rejects any other. *)
+   `static` for a global variable and `partial` for a match statement only, and rejects any
+   other. *)
 attribute_list = "#" , ws , attribute , { ws , attribute } ;
 
 attribute = "(" , ws , name , ws , ")" ;
@@ -333,12 +341,14 @@ procedure_body = block_1 ;
    statement, which is indented one level deeper than the `if`. A block has at least one
    statement, and blank lines are allowed before, between and after them, so a blank line before an
    `else` belongs to the block above it. The rules go down to the fourth level, which is the body
-   and three if, for, loop or scope statements inside each other. The compiler accepts 32 levels of
-   blocks, and deeper nesting would be more sets of rules like these. *)
+   and three if, for, loop or scope statements inside each other. The cases of a match statement
+   are one level deeper than the `match`, and their blocks two, so a match statement in the third
+   level has its blocks in a fifth, which has the simple statements only. The compiler accepts 32
+   levels of blocks, and deeper nesting would be more sets of rules like these. *)
 block_1 = { blank_line } , statement_1 , { blank_line | statement_1 } ;
 statement_1 =
     simple_statement_1 | if_statement_1 | for_statement_1 | loop_statement_1 |
-    scope_statement_1 ;
+    scope_statement_1 | match_statement_1 ;
 simple_statement_1 =
     indentation_1 ,
     ( return_statement | variable_definition | assignment | call | jump_statement |
@@ -358,11 +368,17 @@ for_statement_1 =
 loop_statement_1 =
     indentation_1 , [ defer_prefix ] , [ label , required_space ] , "for" , branch_end , block_2 ;
 scope_statement_1 = indentation_1 , [ "defer" , ws ] , [ label ] , branch_end , block_2 ;
+match_statement_1 =
+    indentation_1 , [ defer_prefix ] , match_header , { blank_line } ,
+    { match_case_2 , { blank_line } } , match_case_last_2 ;
+match_case_2 = indentation_2 , "case" , required_space , pattern , branch_end , [ block_3 ] ;
+match_case_last_2 =
+    indentation_2 , "case" , ( required_space , pattern | ws ) , branch_end , block_3 ;
 
 block_2 = { blank_line } , statement_2 , { blank_line | statement_2 } ;
 statement_2 =
     simple_statement_2 | if_statement_2 | for_statement_2 | loop_statement_2 |
-    scope_statement_2 ;
+    scope_statement_2 | match_statement_2 ;
 simple_statement_2 =
     indentation_2 ,
     ( return_statement | variable_definition | assignment | call | jump_statement |
@@ -382,11 +398,17 @@ for_statement_2 =
 loop_statement_2 =
     indentation_2 , [ defer_prefix ] , [ label , required_space ] , "for" , branch_end , block_3 ;
 scope_statement_2 = indentation_2 , [ "defer" , ws ] , [ label ] , branch_end , block_3 ;
+match_statement_2 =
+    indentation_2 , [ defer_prefix ] , match_header , { blank_line } ,
+    { match_case_3 , { blank_line } } , match_case_last_3 ;
+match_case_3 = indentation_3 , "case" , required_space , pattern , branch_end , [ block_4 ] ;
+match_case_last_3 =
+    indentation_3 , "case" , ( required_space , pattern | ws ) , branch_end , block_4 ;
 
 block_3 = { blank_line } , statement_3 , { blank_line | statement_3 } ;
 statement_3 =
     simple_statement_3 | if_statement_3 | for_statement_3 | loop_statement_3 |
-    scope_statement_3 ;
+    scope_statement_3 | match_statement_3 ;
 simple_statement_3 =
     indentation_3 ,
     ( return_statement | variable_definition | assignment | call | jump_statement |
@@ -406,6 +428,12 @@ for_statement_3 =
 loop_statement_3 =
     indentation_3 , [ defer_prefix ] , [ label , required_space ] , "for" , branch_end , block_4 ;
 scope_statement_3 = indentation_3 , [ "defer" , ws ] , [ label ] , branch_end , block_4 ;
+match_statement_3 =
+    indentation_3 , [ defer_prefix ] , match_header , { blank_line } ,
+    { match_case_4 , { blank_line } } , match_case_last_4 ;
+match_case_4 = indentation_4 , "case" , required_space , pattern , branch_end , [ block_5 ] ;
+match_case_last_4 =
+    indentation_4 , "case" , ( required_space , pattern | ws ) , branch_end , block_5 ;
 
 block_4 = { blank_line } , statement_4 , { blank_line | statement_4 } ;
 statement_4 = simple_statement_4 ;
@@ -414,6 +442,30 @@ simple_statement_4 =
     ( return_statement | variable_definition | assignment | call | jump_statement |
       deferred_simple_statement ) , ws ,
     line_end ;
+
+(* The blocks of the cases of a match statement in the third level only. *)
+block_5 = { blank_line } , simple_statement_5 , { blank_line | simple_statement_5 } ;
+simple_statement_5 =
+    indentation_5 ,
+    ( return_statement | variable_definition | assignment | call | jump_statement |
+      deferred_simple_statement ) , ws ,
+    line_end ;
+
+(* A match statement compares its subject, the expression after `match`, with the pattern of each
+   case below it, one level deeper, and runs the block of the first case that matches. Then the
+   statement after the match runs next, as after an if statement. The subject is computed once.
+   `case ->` is the default case, which has no pattern and runs when no other case matches, so it
+   can only be the last case. A case without a block, which has no lines below it, runs the block
+   of the next case, so cases can share a block, and the last case has a block. An attribute list
+   after `match` gives the attributes of the statement, which has `#(partial)` only: a match of an
+   enum must have a case for every member, or a default case, unless it is partial. The words
+   `match` and `case` and what follows them must be separated, or `case5` would be one
+   identifier. *)
+match_header =
+    "match" , required_space , [ attribute_list , ws ] , expression , branch_end ;
+
+(* A pattern is a range, such as `0..<=5`, or an expression, such as `5`, `"print"` or `.RED`. *)
+pattern = range | expression ;
 
 (* A loop statement runs its block again and again, until a `break` or a `return` leaves it. It is a
    `for` without an iterator and a range. *)
@@ -468,6 +520,7 @@ indentation_1 = "    " ;
 indentation_2 = "        " ;
 indentation_3 = "            " ;
 indentation_4 = "                " ;
+indentation_5 = "                    " ;
 
 (* A variable and its initial value. `:=` is a ':' and a '=' for the compiler, so spaces may be
    between them, as for `::`. Without a type the type of the variable is the type of the value.

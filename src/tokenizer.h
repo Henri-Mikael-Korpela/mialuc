@@ -57,6 +57,7 @@ typedef enum {
     TOKEN_KIND_INTEGER_LITERAL,
     TOKEN_KIND_KEYWORD_AND,
     TOKEN_KIND_KEYWORD_BREAK,
+    // Starts a case of a match statement, see `AST_NODE_TYPE_MATCH_CASE`, or of a union match.
     TOKEN_KIND_KEYWORD_CASE,
     TOKEN_KIND_KEYWORD_CONST,
     TOKEN_KIND_KEYWORD_CONTINUE,
@@ -71,6 +72,8 @@ typedef enum {
     TOKEN_KIND_KEYWORD_IF,
     TOKEN_KIND_KEYWORD_IMPORT,
     TOKEN_KIND_KEYWORD_IN,
+    // Starts a match statement, see `AST_NODE_TYPE_MATCH_STATEMENT`, and follows `union` in a
+    // union match.
     TOKEN_KIND_KEYWORD_MATCH,
     TOKEN_KIND_KEYWORD_NIL,
     TOKEN_KIND_KEYWORD_NOT,

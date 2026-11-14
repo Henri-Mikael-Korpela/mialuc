@@ -126,6 +126,9 @@ typedef enum {
     SEMANTIC_STATUS_LABEL_NOT_LOOP,
     // A `break` or a `continue` with a label that no statement around it has.
     SEMANTIC_STATUS_LABEL_UNKNOWN,
+    // An attribute of a match statement that the language does not have, which has `partial`
+    // only. The subject is the attribute.
+    SEMANTIC_STATUS_MATCH_ATTRIBUTE_UNKNOWN,
     SEMANTIC_STATUS_OK,
     SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE,
     SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS,
@@ -179,6 +182,10 @@ typedef struct {
  * the block ends. The iterator of a for statement is a variable that is in scope in the block of
  * the statement only, not in its range, and it cannot be assigned to. A name is looked up in the
  * innermost scope that uses it first, and then in the scopes around it, up to the module scope.
+ * The blocks of the cases of a match statement are scopes in the same way, and the names in its
+ * subject and its patterns are looked up where the statement is. Its only attribute is `partial`,
+ * and what the attribute and the patterns mean depends on the type of the subject, which is for
+ * the target to check.
  *
  * A constant can be an enum, such as `Color :: enum Int -> ...`, which is a type like a struct: it
  * has its name in the module scope, and is not counted among the constants either. The members of

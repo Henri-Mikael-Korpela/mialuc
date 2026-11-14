@@ -329,6 +329,8 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
     case AST_NODE_TYPE_LABEL:
     case AST_NODE_TYPE_LABELED_STATEMENT:
     case AST_NODE_TYPE_LOOP_STATEMENT:
+    case AST_NODE_TYPE_MATCH_CASE:
+    case AST_NODE_TYPE_MATCH_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
     case AST_NODE_TYPE_PARAMETER:

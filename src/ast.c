@@ -55,6 +55,8 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_LABEL:
     case AST_NODE_TYPE_LABELED_STATEMENT:
     case AST_NODE_TYPE_LOOP_STATEMENT:
+    case AST_NODE_TYPE_MATCH_CASE:
+    case AST_NODE_TYPE_MATCH_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION:
     case AST_NODE_TYPE_NIL_LITERAL:
@@ -103,6 +105,41 @@ Ast_Node_Index ast_procedure_end(Ast_Node const *nodes, size_t node_count,
     }
 
     return (Ast_Node_Index)end;
+}
+
+Ast_Node_Index ast_match_subject(Ast_Node const *nodes, Ast_Node_Index match) {
+    assert(nodes[match].node_type == AST_NODE_TYPE_MATCH_STATEMENT);
+
+    Ast_Node_Index child = nodes[match].first_child;
+    // The attributes come first, and there is at least the subject after them, so the loop ends
+    // before the last child.
+    while (nodes[child].node_type == AST_NODE_TYPE_ATTRIBUTE) {
+        child = nodes[child].next_sibling;
+        assert(child != AST_NODE_INDEX_NONE);
+    }
+
+    assert(nodes[child].node_type != AST_NODE_TYPE_MATCH_CASE);
+    return child;
+}
+
+Ast_Node_Index ast_match_case_pattern(Ast_Node const *nodes, Ast_Node_Index match_case) {
+    assert(nodes[match_case].node_type == AST_NODE_TYPE_MATCH_CASE);
+
+    Ast_Node_Index first = nodes[match_case].first_child;
+    if (first == AST_NODE_INDEX_NONE || nodes[first].node_type == AST_NODE_TYPE_BLOCK) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return first;
+}
+
+Ast_Node_Index ast_match_case_block(Ast_Node const *nodes, Ast_Node_Index match_case) {
+    assert(nodes[match_case].node_type == AST_NODE_TYPE_MATCH_CASE);
+
+    Ast_Node_Index last = nodes[match_case].last_child;
+    if (last == AST_NODE_INDEX_NONE || nodes[last].node_type != AST_NODE_TYPE_BLOCK) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return last;
 }
 
 Str ast_procedure_return_type(Ast_Node const *procedure) {
@@ -350,6 +387,17 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_LOOP_STATEMENT:
             printf("LOOP_STATEMENT\n");
+            break;
+        case AST_NODE_TYPE_MATCH_CASE:
+            // The default case has no pattern, which the line would not show otherwise.
+            if (ast_match_case_pattern(node_elements, current) == AST_NODE_INDEX_NONE) {
+                printf("MATCH_CASE default\n");
+            } else {
+                printf("MATCH_CASE\n");
+            }
+            break;
+        case AST_NODE_TYPE_MATCH_STATEMENT:
+            printf("MATCH_STATEMENT\n");
             break;
         case AST_NODE_TYPE_MODULE:
             printf("MODULE\n");

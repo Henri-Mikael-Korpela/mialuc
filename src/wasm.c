@@ -173,6 +173,20 @@ typedef struct {
 } Wasm_Field_Path;
 
 /**
+ * What the pattern of a case of a match statement matches, see `wasm_match_pattern`. For a subject
+ * that is an `Int`, a `Byte` or an enum, whose member is its number, it is the numbers from `low`
+ * to `high`, both included, which are one number for a pattern that is not a range. For a `Str` it
+ * is the string literal `string`, which is `AST_NODE_INDEX_NONE` for the others. When `status` is
+ * not `WASM_BUILD_STATUS_OK` the pattern is wrong, and the rest means nothing.
+ */
+typedef struct {
+    int64_t low;
+    int64_t high;
+    Ast_Node_Index string;
+    Wasm_Build_Status status;
+} Wasm_Match_Pattern;
+
+/**
  * The state shared by the building functions. A building function returns false after it recorded
  * an error here, and its caller then returns false too without recording anything more. So only
  * the first error is kept. `bindings` says what each name in the tree stands for, so the builder
@@ -191,6 +205,8 @@ typedef struct {
     // whose entry is `CONSTANT_STATUS_OK` is written as the instruction that pushes its value.
     Constant_Value const *constants;
     Str subject;
+    // The second text of an error, see `Wasm_Build_Result`.
+    Str detail;
     size_t node_count;
     Ast_Node_Index module;
     // The number of foreign procedures. They are imported functions, which come before the
@@ -276,6 +292,34 @@ static bool            wasm_build_code_section_body_for        (Wasm_Builder *bu
 static void            wasm_build_code_section_body_for_end    (Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index statement);
+static bool            wasm_build_code_section_body_match     (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index match);
+static void            wasm_build_code_section_body_match_case(Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Wasm_Statement_Frame *frames,
+                                                               size_t *frame_count,
+                                                               Ast_Node_Index first);
+static void            wasm_build_code_section_body_match_condition(Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Ast_Node_Index match,
+                                                               Ast_Node_Index match_case);
+static void            wasm_build_code_section_body_match_string(Wasm_Builder *builder,
+                                                               size_t local,
+                                                               Ast_Node_Index literal);
+static bool            wasm_match_check                       (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index match);
+static Wasm_Match_Pattern wasm_match_pattern                  (Wasm_Builder const *builder,
+                                                               Wasm_Type subject,
+                                                               Ast_Node_Index pattern);
+static bool            wasm_match_patterns_overlap            (Wasm_Builder const *builder,
+                                                               Wasm_Type subject,
+                                                               Ast_Node_Index first,
+                                                               Ast_Node_Index second);
+static Wasm_Type       wasm_match_subject_type                (Wasm_Builder const *builder,
+                                                               Ast_Node_Index match);
+static bool            wasm_node_has_locals                   (Ast_Node_Type node_type);
 static size_t          wasm_variable_slot_count                (Wasm_Builder const *builder,
                                                                Ast_Node_Index variable);
 static bool            wasm_build_code_section_body_call_statement(Wasm_Builder *builder,
@@ -729,6 +773,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slic
         .bindings = binding_elements,
         .constants = constants.elements,
         .subject = STR_EMPTY,
+        .detail = STR_EMPTY,
         .node_count = nodes.length,
         .module = root,
         .foreign_count = 0,
@@ -819,6 +864,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slic
     return (Wasm_Build_Result){
         .bytes = array_slice_make(output_buffer.elements, length_bytes),
         .subject = builder.subject,
+        .detail = builder.detail,
         .status = builder.status,
     };
 }
@@ -2111,7 +2157,9 @@ static bool wasm_list_ends_with_exit(Wasm_Builder const *builder, Ast_Node_Index
  * statements of its block, and `else` followed by what the next branch is, up to `end`. An
  * `else if` is an `else` that holds another `if`, so the statement ends with as many `end`
  * instructions as it has `if` instructions. The tree is walked with an array of the lists of
- * statements that are open, the way expressions are, instead of calling itself.
+ * statements that are open, the way expressions are, instead of calling itself. A match statement
+ * becomes such a chain too, after its subject is stored, see `wasm_build_code_section_body_match`:
+ * its frame counts the `if` instructions of its cases.
  *
  * A defer statement writes nothing where it is. Its statement is written where its block is left
  * instead, which is known when the code is written, so nothing about it is left for the program
@@ -2190,7 +2238,10 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             child_node = &builder->nodes[child];
         }
 
-        if (frame_node->node_type == AST_NODE_TYPE_IF_STATEMENT) {
+        if (frame_node->node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+            wasm_build_code_section_body_match_case(builder, procedure, frames, &frame_count,
+                                                    child);
+        } else if (frame_node->node_type == AST_NODE_TYPE_IF_STATEMENT) {
             bool is_first = child == frame_node->first_child;
             if (child_node->node_type != AST_NODE_TYPE_BLOCK) {
                 // A condition after the first is an `else if`, which is inside the `else` of the
@@ -2251,6 +2302,14 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
                 label_owner = child;
             }
             wasm_frame_push(builder, frames, &frame_count, child, label_owner);
+        } else if (child_node->node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+            // The frame of the match goes through its cases, which come after the subject.
+            if (wasm_build_code_section_body_match(builder, definition, child) == false) {
+                return false;
+            }
+            wasm_frame_push(builder, frames, &frame_count, child, AST_NODE_INDEX_NONE);
+            frames[frame_count - 1].next =
+                builder->nodes[ast_match_subject(builder->nodes, child)].next_sibling;
         } else if (child_node->node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
                    child_node->node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
             if (defer_count > 0) {
@@ -2406,10 +2465,466 @@ static void wasm_build_code_section_body_for_end(Wasm_Builder *builder, Ast_Node
 }
 
 /**
+ * Returns the type of the subject of `match`, an `AST_NODE_TYPE_MATCH_STATEMENT`, which is the
+ * type of its locals, see `wasm_variable_slot_count`.
+ */
+static Wasm_Type wasm_match_subject_type(Wasm_Builder const *builder, Ast_Node_Index match) {
+    assert(builder->nodes[match].node_type == AST_NODE_TYPE_MATCH_STATEMENT);
+
+    return wasm_expression_type(builder, ast_match_subject(builder->nodes, match));
+}
+
+/**
+ * Returns what `pattern`, the pattern of a case of a match statement whose subject is of the type
+ * `subject`, matches, see `Wasm_Match_Pattern`. A pattern is known when the program is compiled:
+ * for an enum it is a member of the enum of the subject, written `.RED` or `Color.RED`, and for an
+ * `Int`, a `Byte` or a `Str` it is a constant of that type, or for an `Int` and a `Byte` a range of
+ * constants, which must have a number in it. The status says what is wrong otherwise.
+ */
+static Wasm_Match_Pattern wasm_match_pattern(Wasm_Builder const *builder, Wasm_Type subject,
+                                             Ast_Node_Index pattern) {
+    assert(pattern < builder->node_count);
+    assert(subject.kind == WASM_VALUE_TYPE_BYTE || subject.kind == WASM_VALUE_TYPE_ENUM ||
+           subject.kind == WASM_VALUE_TYPE_INT || subject.kind == WASM_VALUE_TYPE_STR);
+
+    Wasm_Match_Pattern result = {
+        .low = 0,
+        .high = 0,
+        .string = AST_NODE_INDEX_NONE,
+        .status = WASM_BUILD_STATUS_OK,
+    };
+    Ast_Node const *node = &builder->nodes[pattern];
+
+    if (subject.kind == WASM_VALUE_TYPE_ENUM) {
+        Str member = wasm_union_enum_member_name(builder, pattern, subject.definition);
+        size_t number = 0;
+        if (member.bytes == NULL) {
+            result.status = WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
+        } else if (wasm_enum_member_find(builder, subject.definition, member, &number) == false) {
+            result.status = WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN;
+        }
+        // An enum has fewer members than there are nodes, which is far below the largest `Int`.
+        result.low = (int64_t)number;
+        result.high = (int64_t)number;
+        return result;
+    }
+
+    // A member of an enum is not a constant of the kinds that the other subjects have, but it is
+    // known when the program is compiled, so it is a pattern of the wrong type.
+    bool is_member = node->node_type == AST_NODE_TYPE_ENUM_LITERAL ||
+                     (node->node_type == AST_NODE_TYPE_FIELD_ACCESS &&
+                      wasm_enum_of_access(builder, pattern) != AST_NODE_INDEX_NONE);
+    if (is_member) {
+        result.status = WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
+        return result;
+    }
+
+    if (node->node_type == AST_NODE_TYPE_RANGE) {
+        if (subject.kind == WASM_VALUE_TYPE_STR) {
+            result.status = WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
+            return result;
+        }
+        Ast_Node_Index ends[2] = {node->first_child, node->last_child};
+        for (size_t i = 0; i < 2; i += 1) {
+            if (wasm_is_constant(builder, ends[i]) == false) {
+                result.status = WASM_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT;
+                return result;
+            }
+            if (wasm_constant_is_accepted(subject, builder->constants[ends[i]]) == false) {
+                result.status = WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
+                return result;
+            }
+        }
+        result.low = builder->constants[ends[0]].integer;
+        int64_t end = builder->constants[ends[1]].integer;
+        // The end of an exclusive range is above its last number, so it is above the first one
+        // too, and one less than it does not overflow.
+        if (node->payload.range.is_inclusive) {
+            if (end < result.low) {
+                result.status = WASM_BUILD_STATUS_MATCH_RANGE_EMPTY;
+            }
+            result.high = end;
+        } else {
+            if (end <= result.low) {
+                result.status = WASM_BUILD_STATUS_MATCH_RANGE_EMPTY;
+                return result;
+            }
+            result.high = end - 1;
+        }
+        return result;
+    }
+
+    if (wasm_is_constant(builder, pattern) == false) {
+        result.status = WASM_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT;
+        return result;
+    }
+    Constant_Value constant = builder->constants[pattern];
+    if (wasm_constant_is_accepted(subject, constant) == false) {
+        result.status = WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
+        return result;
+    }
+    if (subject.kind == WASM_VALUE_TYPE_STR) {
+        assert(constant.string != AST_NODE_INDEX_NONE);
+        result.string = constant.string;
+    } else {
+        result.low = constant.integer;
+        result.high = constant.integer;
+    }
+    return result;
+}
+
+/**
+ * Returns whether the patterns `first` and `second` of one match statement, whose subject is of the
+ * type `subject`, match a value in common. Both are patterns that `wasm_match_pattern` accepts.
+ * Members of an enum are compared by their names and strings by their bytes, which does not need
+ * to look for the number of a member.
+ */
+static bool wasm_match_patterns_overlap(Wasm_Builder const *builder, Wasm_Type subject,
+                                        Ast_Node_Index first, Ast_Node_Index second) {
+    assert(first < builder->node_count);
+    assert(second < builder->node_count);
+
+    if (subject.kind == WASM_VALUE_TYPE_ENUM) {
+        return str_equals(wasm_union_enum_member_name(builder, first, subject.definition),
+                          wasm_union_enum_member_name(builder, second, subject.definition));
+    }
+
+    Wasm_Match_Pattern first_pattern = wasm_match_pattern(builder, subject, first);
+    Wasm_Match_Pattern second_pattern = wasm_match_pattern(builder, subject, second);
+    assert(first_pattern.status == WASM_BUILD_STATUS_OK);
+    assert(second_pattern.status == WASM_BUILD_STATUS_OK);
+    if (subject.kind == WASM_VALUE_TYPE_STR) {
+        return str_equals(builder->nodes[first_pattern.string].payload.string_literal.text,
+                          builder->nodes[second_pattern.string].payload.string_literal.text);
+    }
+    return first_pattern.low <= second_pattern.high && second_pattern.low <= first_pattern.high;
+}
+
+/**
+ * Checks the match statement `match` of the constant `definition`: its subject is an `Int`, a
+ * `Byte`, a `Str` or an enum, every pattern is one of that type, see `wasm_match_pattern`, no two
+ * patterns match a value in common, and a match of an enum without a default case has a case for
+ * every member, unless it is `#(partial)`, which only a match of an enum without a default case
+ * can be. The parser checked that the default case is last and that the last case has a block.
+ * Returns false after it recorded an error.
+ */
+static bool wasm_match_check(Wasm_Builder *builder, Ast_Node_Index definition,
+                             Ast_Node_Index match) {
+    assert(builder->nodes[match].node_type == AST_NODE_TYPE_MATCH_STATEMENT);
+
+    Ast_Node_Index subject = ast_match_subject(builder->nodes, match);
+    Wasm_Type subject_type = wasm_match_subject_type(builder, match);
+    if (subject_type.kind == WASM_VALUE_TYPE_NONE) {
+        return wasm_expression_fail(builder, definition, subject);
+    }
+    if (subject_type.kind == WASM_VALUE_TYPE_ENUM_LITERAL) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_ENUM_TYPE_UNKNOWN,
+                         builder->nodes[subject].payload.enum_literal.name);
+    }
+    if (subject_type.kind != WASM_VALUE_TYPE_BYTE && subject_type.kind != WASM_VALUE_TYPE_ENUM &&
+        subject_type.kind != WASM_VALUE_TYPE_INT && subject_type.kind != WASM_VALUE_TYPE_STR) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID,
+                         wasm_expression_subject(builder, definition, subject));
+    }
+
+    Ast_Node_Index first_case = builder->nodes[subject].next_sibling;
+    Ast_Node_Index last_case = builder->nodes[match].last_child;
+    bool has_default = ast_match_case_pattern(builder->nodes, last_case) == AST_NODE_INDEX_NONE;
+    // The analysis allows `partial` as the only attribute, once, so it is the first child if any.
+    Ast_Node_Index attribute = builder->nodes[match].first_child;
+    bool is_partial = builder->nodes[attribute].node_type == AST_NODE_TYPE_ATTRIBUTE;
+    if (is_partial && (subject_type.kind != WASM_VALUE_TYPE_ENUM || has_default)) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_MATCH_PARTIAL_INVALID,
+                         builder->nodes[attribute].payload.attribute.name);
+    }
+
+    size_t pattern_count = 0;
+    Ast_Node_Index match_case = first_case;
+    // Every case is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && match_case != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node_Index pattern = ast_match_case_pattern(builder->nodes, match_case);
+        Str keyword = builder->nodes[match_case].payload.match.keyword;
+        if (pattern == AST_NODE_INDEX_NONE) {
+            // The default case is the last one.
+            assert(match_case == last_case);
+            break;
+        }
+
+        Wasm_Match_Pattern checked = wasm_match_pattern(builder, subject_type, pattern);
+        if (checked.status == WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN) {
+            // The member that is not there says more than the word of the case.
+            return wasm_fail(builder, checked.status,
+                             wasm_union_enum_member_name(builder, pattern,
+                                                         subject_type.definition));
+        }
+        if (checked.status != WASM_BUILD_STATUS_OK) {
+            return wasm_fail(builder, checked.status, keyword);
+        }
+
+        Ast_Node_Index earlier = first_case;
+        for (size_t j = 0; j < i; j += 1) {
+            Ast_Node_Index earlier_pattern = ast_match_case_pattern(builder->nodes, earlier);
+            if (wasm_match_patterns_overlap(builder, subject_type, earlier_pattern, pattern)) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_MATCH_CASE_DUPLICATE, keyword);
+            }
+            earlier = builder->nodes[earlier].next_sibling;
+        }
+
+        pattern_count += 1;
+        match_case = builder->nodes[match_case].next_sibling;
+    }
+
+    if (subject_type.kind != WASM_VALUE_TYPE_ENUM || has_default || is_partial) {
+        return true;
+    }
+    // Every pattern is a different member, so the match has a case for each one when it has as
+    // many patterns as the enum has members.
+    Ast_Node_Index enum_node = subject_type.definition;
+    if (pattern_count == wasm_children_count(builder, enum_node)) {
+        return true;
+    }
+
+    // The message names the first member that is left out, which takes looking for it.
+    Ast_Node_Index member = builder->nodes[enum_node].first_child;
+    // Every member is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && member != AST_NODE_INDEX_NONE; i += 1) {
+        Str name = builder->nodes[member].payload.enum_member.name;
+        bool is_handled = false;
+        match_case = first_case;
+        for (size_t j = 0; j < pattern_count && is_handled == false; j += 1) {
+            Ast_Node_Index pattern = ast_match_case_pattern(builder->nodes, match_case);
+            is_handled = str_equals(
+                wasm_union_enum_member_name(builder, pattern, enum_node), name);
+            match_case = builder->nodes[match_case].next_sibling;
+        }
+        if (is_handled == false) {
+            builder->detail = name;
+            break;
+        }
+        member = builder->nodes[member].next_sibling;
+    }
+    assert(builder->detail.bytes != NULL);
+    return wasm_fail(builder, WASM_BUILD_STATUS_MATCH_NOT_EXHAUSTIVE,
+                     builder->nodes[match].payload.match.keyword);
+}
+
+/**
+ * Writes the start of the match statement `match`: its subject, which is stored in the locals of
+ * the statement, so that every case compares the same value and the subject is computed once.
+ * Returns false after it recorded an error.
+ */
+static bool wasm_build_code_section_body_match(Wasm_Builder *builder, Ast_Node_Index definition,
+                                               Ast_Node_Index match) {
+    assert(builder->nodes[match].node_type == AST_NODE_TYPE_MATCH_STATEMENT);
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index subject = ast_match_subject(builder->nodes, match);
+    if (wasm_build_code_section_body_expression(builder, definition, subject, false) == false) {
+        return false;
+    }
+    wasm_slots_set(builder, wasm_match_subject_type(builder, match), WASM_OPCODE_LOCAL_SET,
+                   wasm_variable_local_index(builder, procedure, match));
+    return true;
+}
+
+/**
+ * Writes the condition of the case `match_case` of the match statement `match`, which leaves 1 when
+ * the subject in the locals of the statement matches the pattern of the case, and 0 when it does
+ * not. The pattern was checked, see `wasm_match_check`.
+ */
+static void wasm_build_code_section_body_match_condition(Wasm_Builder *builder,
+                                                         Ast_Node_Index procedure,
+                                                         Ast_Node_Index match,
+                                                         Ast_Node_Index match_case) {
+    assert(builder->nodes[match].node_type == AST_NODE_TYPE_MATCH_STATEMENT);
+    assert(builder->nodes[match_case].node_type == AST_NODE_TYPE_MATCH_CASE);
+
+    Wasm_Writer *writer = &builder->writer;
+    Wasm_Type subject = wasm_match_subject_type(builder, match);
+    Ast_Node_Index pattern_node = ast_match_case_pattern(builder->nodes, match_case);
+    Wasm_Match_Pattern pattern = wasm_match_pattern(builder, subject, pattern_node);
+    assert(pattern.status == WASM_BUILD_STATUS_OK);
+    size_t local = wasm_variable_local_index(builder, procedure, match);
+
+    if (subject.kind == WASM_VALUE_TYPE_STR) {
+        wasm_build_code_section_body_match_string(builder, local, pattern.string);
+        return;
+    }
+
+    // A `Byte` is a 32-bit value from 0 to 255, so it is compared without a sign, and the others
+    // are 64-bit numbers with one, which the number of a member is too.
+    bool is_byte = subject.kind == WASM_VALUE_TYPE_BYTE;
+    byte equal = WASM_OPCODE_I64_EQ;
+    byte at_least = WASM_OPCODE_I64_GE_S;
+    byte at_most = WASM_OPCODE_I64_LE_S;
+    if (is_byte) {
+        equal = WASM_OPCODE_I32_EQ;
+        at_least = WASM_OPCODE_I32_GE_U;
+        at_most = WASM_OPCODE_I32_LE_U;
+    }
+
+    // One value, or a range of one number, is one comparison.
+    int64_t bounds[2] = {pattern.low, pattern.high};
+    byte comparisons[2] = {at_least, at_most};
+    size_t bound_count = 2;
+    if (pattern.low == pattern.high) {
+        comparisons[0] = equal;
+        bound_count = 1;
+    }
+    for (size_t i = 0; i < bound_count; i += 1) {
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, local);
+        if (is_byte) {
+            wasm_write_i32_const(writer, bounds[i]);
+        } else {
+            wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+            wasm_write_signed(writer, bounds[i]);
+        }
+        wasm_write_byte(writer, comparisons[i]);
+    }
+    if (bound_count == 2) {
+        wasm_write_byte(writer, WASM_OPCODE_I32_AND);
+    }
+}
+
+/**
+ * Writes the instructions that leave 1 when the `Str` in the locals from `local` on, its address
+ * and its length, has the bytes of the string literal `literal`, and 0 when it does not. The two
+ * locals after them are the index of the byte that is compared and whether the strings are equal
+ * so far, see `wasm_variable_slot_count`. When the lengths are equal a loop compares the bytes one
+ * at a time, and leaves at the first that differs.
+ */
+static void wasm_build_code_section_body_match_string(Wasm_Builder *builder, size_t local,
+                                                      Ast_Node_Index literal) {
+    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_STRING_LITERAL);
+    assert(builder->has_memory);
+
+    Wasm_Writer *writer = &builder->writer;
+    size_t address_local = local;
+    size_t length_local = local + 1;
+    size_t index_local = local + 2;
+    size_t equal_local = local + 3;
+    // Both are below 2 GiB, because `wasm_data_measure` checked the total.
+    int64_t length_bytes = (int64_t)builder->nodes[literal].payload.string_literal.text.length;
+    int64_t address = (int64_t)wasm_string_address(builder, literal);
+
+    // The empty string has no bytes to compare, so its length says it all.
+    if (length_bytes == 0) {
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, length_local);
+        wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+        return;
+    }
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, length_local);
+    wasm_write_i32_const(writer, length_bytes);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQ);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, equal_local);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_i32_const(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, index_local);
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+
+    // Label 0 is the loop, and label 1 the block around it, which is left after the last byte.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, index_local);
+    wasm_write_i32_const(writer, length_bytes);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GE_U);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, address_local);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, index_local);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_i32_const(writer, address);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, index_local);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_byte(writer, WASM_OPCODE_I32_NE);
+
+    // A byte that differs leaves the `if` that it is in, the loop and the block, which are labels
+    // 0, 1 and 2.
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_i32_const(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, equal_local);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 2);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, index_local);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, index_local);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 0);
+
+    // The loop, the block and the `if` of the lengths.
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, equal_local);
+}
+
+/**
+ * Writes the case `first` of the match statement whose frame is the innermost of `frames`, and the
+ * cases after it that have no block, up to the one that has the block that they share, which is
+ * opened as a frame of its own. The cases are a chain of `if` and `else`, like the branches of an
+ * if statement: the condition is whether the subject matches any of their patterns, which are
+ * joined with `i32.or`, and the default case is the `else` of the case above it. Each case that is
+ * written counts one `if` of the frame of the match, which its end closes.
+ */
+static void wasm_build_code_section_body_match_case(Wasm_Builder *builder,
+                                                    Ast_Node_Index procedure,
+                                                    Wasm_Statement_Frame *frames,
+                                                    size_t *frame_count, Ast_Node_Index first) {
+    assert(*frame_count > 0);
+    assert(builder->nodes[first].node_type == AST_NODE_TYPE_MATCH_CASE);
+
+    Wasm_Statement_Frame *frame = &frames[*frame_count - 1];
+    Ast_Node_Index match = frame->node;
+    assert(builder->nodes[match].node_type == AST_NODE_TYPE_MATCH_STATEMENT);
+
+    // The parser made sure that the last case has a block, so the search ends at it at the latest.
+    Ast_Node_Index last = first;
+    for (size_t i = 0; i < builder->node_count &&
+                       ast_match_case_block(builder->nodes, last) == AST_NODE_INDEX_NONE;
+         i += 1) {
+        last = builder->nodes[last].next_sibling;
+    }
+    Ast_Node_Index block = ast_match_case_block(builder->nodes, last);
+    assert(block != AST_NODE_INDEX_NONE);
+    frame->next = builder->nodes[last].next_sibling;
+
+    if (frame->if_count > 0) {
+        wasm_write_byte(&builder->writer, WASM_OPCODE_ELSE);
+    }
+    // The default case is last, and runs whatever the cases that share its block match, so it
+    // needs no condition: it is the `else` of the cases above.
+    if (ast_match_case_pattern(builder->nodes, last) != AST_NODE_INDEX_NONE) {
+        Ast_Node_Index match_case = first;
+        for (size_t i = 0; i < builder->node_count; i += 1) {
+            wasm_build_code_section_body_match_condition(builder, procedure, match, match_case);
+            if (match_case != first) {
+                wasm_write_byte(&builder->writer, WASM_OPCODE_I32_OR);
+            }
+            if (match_case == last) {
+                break;
+            }
+            match_case = builder->nodes[match_case].next_sibling;
+        }
+        wasm_structured_begin(builder, WASM_OPCODE_IF);
+        frame->if_count += 1;
+    }
+
+    wasm_frame_push(builder, frames, frame_count, block, AST_NODE_INDEX_NONE);
+}
+
+/**
  * Returns the number of locals that `variable` takes: the ones of its type for a variable
  * definition, none when it is in the frame, and for the iterator of a for statement two, which also
  * keeps the end of its range, or the ones of an element and two more when it goes through the
- * elements of an array, which keeps where it is and where it ends.
+ * elements of an array, which keeps where it is and where it ends. A match statement keeps its
+ * subject, and a `Str` two 32-bit locals more, the index of the byte that is compared and whether
+ * the bytes are equal so far, see `wasm_build_code_section_body_match_string`.
  */
 static size_t wasm_variable_slot_count(Wasm_Builder const *builder, Ast_Node_Index variable) {
     assert(variable < builder->node_count);
@@ -2417,6 +2932,13 @@ static size_t wasm_variable_slot_count(Wasm_Builder const *builder, Ast_Node_Ind
     // A variable in the frame is in memory, and takes no local.
     if (wasm_variable_is_in_memory(builder, variable)) {
         return 0;
+    }
+    if (builder->nodes[variable].node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+        Wasm_Type subject = wasm_match_subject_type(builder, variable);
+        if (subject.kind == WASM_VALUE_TYPE_STR) {
+            return wasm_type_slot_count(builder, subject) + 2;
+        }
+        return wasm_type_slot_count(builder, subject);
     }
     if (builder->nodes[variable].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
         if (wasm_for_is_each(builder, variable)) {
@@ -3012,7 +3534,8 @@ static bool wasm_build_code_section_body_variable(Wasm_Builder *builder,
  * comes after can ask for the type of a variable and assume that it is known. A variable has the
  * type that its definition gives, or else the type of its value. A variable of an array type
  * must be given an array literal, and a for statement that goes through elements must have an
- * array or an array slice to go through. Returns false after it recorded an error.
+ * array or an array slice to go through. A match statement is checked too, see
+ * `wasm_match_check`, because its subject has locals. Returns false after it recorded an error.
  */
 static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definition,
                                  Ast_Node_Index procedure) {
@@ -3022,6 +3545,12 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
     Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
     for (Ast_Node_Index statement = procedure + 1; statement < end; statement += 1) {
         Ast_Node const *statement_node = &builder->nodes[statement];
+
+        // The subject of a match has locals like a variable, so its type has to be known too.
+        if (statement_node->node_type == AST_NODE_TYPE_MATCH_STATEMENT &&
+            wasm_match_check(builder, definition, statement) == false) {
+            return false;
+        }
 
         if (statement_node->node_type == AST_NODE_TYPE_FOR_STATEMENT &&
             wasm_for_is_each(builder, statement)) {
@@ -3186,6 +3715,13 @@ static void wasm_variables_write_locals(Wasm_Builder *builder, Ast_Node_Index pr
             } else {
                 group_count += 1;
             }
+        } else if (builder->nodes[statement].node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+            // The two more locals of a `Str` are a group of their own.
+            Wasm_Type subject = wasm_match_subject_type(builder, statement);
+            group_count += wasm_type_group_count(builder, subject);
+            if (subject.kind == WASM_VALUE_TYPE_STR) {
+                group_count += 1;
+            }
         }
     }
     if (uses_arrays) {
@@ -3209,6 +3745,13 @@ static void wasm_variables_write_locals(Wasm_Builder *builder, Ast_Node_Index pr
             }
         } else if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             wasm_write_type_groups(builder, wasm_variable_type(builder, statement));
+        } else if (builder->nodes[statement].node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+            Wasm_Type subject = wasm_match_subject_type(builder, statement);
+            wasm_write_type_groups(builder, subject);
+            if (subject.kind == WASM_VALUE_TYPE_STR) {
+                wasm_write_unsigned(&builder->writer, 2);
+                wasm_write_byte(&builder->writer, WASM_TYPE_I32);
+            }
         }
     }
 
@@ -3286,14 +3829,12 @@ static size_t wasm_variable_local_index(Wasm_Builder const *builder, Ast_Node_In
 
     size_t local_index = wasm_parameter_slot_count(builder, procedure);
     for (Ast_Node_Index statement = procedure + 1; statement < variable; statement += 1) {
-        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
-            builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+        if (wasm_node_has_locals(builder->nodes[statement].node_type)) {
             local_index += wasm_variable_slot_count(builder, statement);
         }
     }
 
-    assert(builder->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
-           builder->nodes[variable].node_type == AST_NODE_TYPE_FOR_STATEMENT);
+    assert(wasm_node_has_locals(builder->nodes[variable].node_type));
     // A variable in the frame has no local.
     assert(wasm_variable_is_in_memory(builder, variable) == false);
     return local_index;
@@ -3433,6 +3974,8 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     case AST_NODE_TYPE_LABEL:
     case AST_NODE_TYPE_LABELED_STATEMENT:
     case AST_NODE_TYPE_LOOP_STATEMENT:
+    case AST_NODE_TYPE_MATCH_CASE:
+    case AST_NODE_TYPE_MATCH_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
     case AST_NODE_TYPE_PARAMETER:
@@ -4028,6 +4571,8 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
     case AST_NODE_TYPE_LABEL:
     case AST_NODE_TYPE_LABELED_STATEMENT:
     case AST_NODE_TYPE_LOOP_STATEMENT:
+    case AST_NODE_TYPE_MATCH_CASE:
+    case AST_NODE_TYPE_MATCH_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
     case AST_NODE_TYPE_PARAMETER:
@@ -4504,13 +5049,23 @@ static size_t wasm_variable_locals_end(Wasm_Builder const *builder, Ast_Node_Ind
     size_t local_index = wasm_parameter_slot_count(builder, procedure);
     Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
     for (Ast_Node_Index statement = procedure + 1; statement < end; statement += 1) {
-        if (builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
-            builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+        if (wasm_node_has_locals(builder->nodes[statement].node_type)) {
             local_index += wasm_variable_slot_count(builder, statement);
         }
     }
 
     return local_index;
+}
+
+/**
+ * Returns whether nodes of `node_type` have locals of their own, after the parameters, in the
+ * order of the source: a variable definition, a for statement for its iterator, and a match
+ * statement for its subject, see `wasm_variable_slot_count`.
+ */
+static bool wasm_node_has_locals(Ast_Node_Type node_type) {
+    return node_type == AST_NODE_TYPE_FOR_STATEMENT ||
+           node_type == AST_NODE_TYPE_MATCH_STATEMENT ||
+           node_type == AST_NODE_TYPE_VARIABLE_DEFINITION;
 }
 
 /**
@@ -5209,6 +5764,8 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
     case AST_NODE_TYPE_LABEL:
     case AST_NODE_TYPE_LABELED_STATEMENT:
     case AST_NODE_TYPE_LOOP_STATEMENT:
+    case AST_NODE_TYPE_MATCH_CASE:
+    case AST_NODE_TYPE_MATCH_STATEMENT:
     case AST_NODE_TYPE_MODULE:
     case AST_NODE_TYPE_MULTIPLICATION:
     case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:

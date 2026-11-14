@@ -185,6 +185,30 @@ typedef enum {
     // An index, or the end of a slice, that is not an `Int`.
     WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
     WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
+    // Two cases of one match statement whose patterns match a value in common: the same value,
+    // ranges that overlap or a value inside a range. The second could never run. The subject is
+    // its word `case`.
+    WASM_BUILD_STATUS_MATCH_CASE_DUPLICATE,
+    // A match statement of an enum that has no case for a member, no default case and no
+    // `#(partial)`. The subject is the word `match`, and the detail is the first member that is
+    // left out.
+    WASM_BUILD_STATUS_MATCH_NOT_EXHAUSTIVE,
+    // `#(partial)` on a match statement whose subject is not an enum, or which has a default case,
+    // where it would mean nothing. The subject is the attribute.
+    WASM_BUILD_STATUS_MATCH_PARTIAL_INVALID,
+    // A pattern that is not known when the program is compiled, such as a variable or a call. The
+    // subject is the word `case`.
+    WASM_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT,
+    // A pattern that is not of the type of the subject: a number for a `Str`, the member of
+    // another enum, a range for a `Str` or an enum, or a number that does not fit in a `Byte`.
+    // The subject is the word `case`.
+    WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH,
+    // A range pattern that has no numbers, such as `5..<5`, which would never match. The subject
+    // is the word `case`.
+    WASM_BUILD_STATUS_MATCH_RANGE_EMPTY,
+    // The subject of a match statement is not an `Int`, a `Byte`, a `Str` or an enum. The subject
+    // is the expression.
+    WASM_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID,
     // `nil` where no pointer type is known to give it one: the value of a variable that has no
     // written type, as in `p := nil`. The subject is the name of the variable.
     WASM_BUILD_STATUS_NIL_TYPE_UNKNOWN,
@@ -248,10 +272,14 @@ typedef enum {
  * `subject` is the text in the source that the error is about, as a view into the source that the
  * syntax tree was parsed from, so the caller can work out the position. `subject` has `bytes`
  * NULL for `WASM_BUILD_STATUS_OUTPUT_TOO_LARGE`, which is not about any place in the source.
+ * `detail` is a second text of the source that the message names, which is somewhere else than
+ * the place of the error: the member that a match statement leaves out, for
+ * `WASM_BUILD_STATUS_MATCH_NOT_EXHAUSTIVE`. It has `bytes` NULL for every other status.
  */
 typedef struct {
     Array_Slice bytes;
     Str subject;
+    Str detail;
     Wasm_Build_Status status;
 } Wasm_Build_Result;
 
@@ -321,6 +349,16 @@ typedef struct {
  * taken somewhere. `p^` loads from the address that `p` is, and traps when it is zero, which is
  * what a pointer that was not given a value is. A pointer to a variable is good until the
  * procedure that has the variable returns.
+ *
+ * A match statement computes its subject once and keeps it in locals of its own, as many as a
+ * variable of its type has, and two more 32-bit ones for a `Str`, the index of the byte that is
+ * compared and whether the bytes are equal so far. Its cases become a chain of `if` and `else`,
+ * like an if statement with an `else if` for each case: the condition of a case that has a block
+ * is whether the subject is equal to its pattern, or to the pattern of one of the cases without a
+ * block right above it, which share the block, and the default case is the `else`. A number is
+ * compared with `i64.eq`, or `i32.eq` for a `Byte`, a range with a comparison at each end and
+ * `i32.and`, and a member of an enum by its number. A `Str` is equal to a pattern when it has the
+ * length of the literal and the same bytes, which a loop compares one at a time.
  *
  * An enum is one `Int` (`i64`): the number of the member, counted from zero in the order of the
  * definition, whose type `enum Int ->` writes and has to be `Int`. A member, written `Color.RED`

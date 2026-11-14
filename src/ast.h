@@ -46,6 +46,8 @@ typedef enum {
     AST_NODE_TYPE_LABEL,
     AST_NODE_TYPE_LABELED_STATEMENT,
     AST_NODE_TYPE_LOOP_STATEMENT,
+    AST_NODE_TYPE_MATCH_CASE,
+    AST_NODE_TYPE_MATCH_STATEMENT,
     AST_NODE_TYPE_MODULE,
     AST_NODE_TYPE_MULTIPLICATION,
     AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT,
@@ -156,9 +158,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   `#(static)`, with the name between the parentheses in the payload. Which names are attributes
  *   that the language has is for the analysis to tell, not the parser.
  * - `AST_NODE_TYPE_BLOCK`: one child per statement. It is the body of a branch of an
- *   `AST_NODE_TYPE_IF_STATEMENT`, of a loop or of a scope statement, and it has its own scope: a
- *   variable defined in it cannot be used below it. Its payload has the end of the block, see
- *   below.
+ *   `AST_NODE_TYPE_IF_STATEMENT`, of an `AST_NODE_TYPE_MATCH_CASE`, of a loop or of a scope
+ *   statement, and it has its own scope: a variable defined in it cannot be used below it. Its
+ *   payload has the end of the block, see below.
  * - `AST_NODE_TYPE_BOOL_LITERAL`: no children. It is `true` or `false`, which is in the payload.
  * - `AST_NODE_TYPE_BREAK_STATEMENT`: no children, or one `AST_NODE_TYPE_LABEL` when the statement
  *   names the statement to leave. Without a label it leaves the innermost loop or scope that it
@@ -273,6 +275,20 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   its child instead. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_LOOP_STATEMENT`: an infinite loop, written `for ->`. It has one child, the `AST_NODE_TYPE_BLOCK` that runs again and again
  *   until a `break` or a `return` leaves it. It is a statement of a procedure body.
+ * - `AST_NODE_TYPE_MATCH_CASE`: one case of an `AST_NODE_TYPE_MATCH_STATEMENT`, written
+ *   `case pattern ->`. Its first child is the pattern, which is an expression or an
+ *   `AST_NODE_TYPE_RANGE`, and the default case, `case ->`, has none. Then comes the
+ *   `AST_NODE_TYPE_BLOCK` that runs when the pattern matches, which a case can leave out: a case
+ *   without a block runs the block of the next case that has one, so that several patterns share
+ *   one block. The parser makes sure that the last case of a match has a block and that no case
+ *   comes after the default case. Whether a pattern is a constant of the type of the subject is
+ *   for the target to tell. The word `case` is in the payload, so that an error can point at it.
+ * - `AST_NODE_TYPE_MATCH_STATEMENT`: one `AST_NODE_TYPE_ATTRIBUTE` for each attribute of its
+ *   attribute list, such as `partial` in `match #(partial) color ->`, then the subject, which is
+ *   an expression, and then one `AST_NODE_TYPE_MATCH_CASE` for each case, at least one, in the
+ *   order of the source. The subject is computed once, and the first case whose pattern it
+ *   matches runs, or the default case when none does. The word `match` is in the payload. It is a
+ *   statement of a procedure body.
  * - `AST_NODE_TYPE_MODULE`: one child per top-level definition, which is an
  *   `AST_NODE_TYPE_CONSTANT_DEFINITION` or an `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`, and one
  *   per `import foreign`, which is an `AST_NODE_TYPE_FOREIGN_IMPORT`. A procedure that a
@@ -313,8 +329,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   `AST_NODE_TYPE_TYPE_NAME`, found wherever a type is, and the type of the elements of an
  *   `AST_NODE_TYPE_ARRAY_TYPE` can be one.
  * - `AST_NODE_TYPE_RANGE`: two children, the first number and the end of the range, in that order,
- *   each one an expression (the target requires them to be `Int`). Whether the end is part of the
- *   range is in the payload. It is the child of an `AST_NODE_TYPE_FOR_STATEMENT`, and not an
+ *   each one an expression (the target requires them to be `Int`, or in a pattern of the type of
+ *   the subject). Whether the end is part of the range is in the payload. It is the child of an
+ *   `AST_NODE_TYPE_FOR_STATEMENT` or the pattern of an `AST_NODE_TYPE_MATCH_CASE`, and not an
  *   expression itself.
  * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child, the returned value. The word `return` is in the
  *   payload, like the word of a `break`.
@@ -472,6 +489,12 @@ typedef struct {
             bool has_else;
         } if_statement;
         struct {
+            // The word `match` of an `AST_NODE_TYPE_MATCH_STATEMENT`, or `case` of an
+            // `AST_NODE_TYPE_MATCH_CASE`, as a view of the source text, so that an error about
+            // the statement or the case can point at it.
+            Str keyword;
+        } match;
+        struct {
             // Whether the end is a number of the range: `..<=` is inclusive, `..<` is not.
             bool is_inclusive;
         } range;
@@ -528,6 +551,24 @@ STATIC_ASSERT(sizeof(Ast_Node) == 40, ast_node_size_is_40_bytes);
  * the children of each type above.
  */
 bool ast_node_type_is_assignment(Ast_Node_Type node_type);
+
+/**
+ * Returns the subject of `match`, an `AST_NODE_TYPE_MATCH_STATEMENT`, which is its first child
+ * after the attributes.
+ */
+Ast_Node_Index ast_match_subject(Ast_Node const *nodes, Ast_Node_Index match);
+
+/**
+ * Returns the pattern of `match_case`, an `AST_NODE_TYPE_MATCH_CASE`, or `AST_NODE_INDEX_NONE` for
+ * the default case, which has none.
+ */
+Ast_Node_Index ast_match_case_pattern(Ast_Node const *nodes, Ast_Node_Index match_case);
+
+/**
+ * Returns the block of `match_case`, an `AST_NODE_TYPE_MATCH_CASE`, or `AST_NODE_INDEX_NONE` for a
+ * case that has none and runs the block of the next case.
+ */
+Ast_Node_Index ast_match_case_block(Ast_Node const *nodes, Ast_Node_Index match_case);
 
 /**
  * Returns the return type of `procedure`, which must be an `AST_NODE_TYPE_PROCEDURE` or an

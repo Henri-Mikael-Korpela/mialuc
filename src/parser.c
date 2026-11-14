@@ -74,7 +74,7 @@ typedef struct {
 static Ast_Node_Index parse_array_literal       (Parser *parser);
 static Ast_Node_Index parse_assignment          (Parser *parser);
 static bool           parse_attributes          (Parser *parser, Ast_Node_Index definition);
-static void           parse_block_close         (Parser *parser, Ast_Node_Index block);
+static bool           parse_block_close         (Parser *parser, Ast_Node_Index block);
 static Ast_Node_Index parse_block_open          (Parser *parser, Ast_Node_Index statement);
 static Ast_Node_Index parse_branch              (Parser *parser, Ast_Node_Index statement);
 static Ast_Node_Index parse_defer_statement     (Parser *parser, Ast_Node_Index parent);
@@ -98,14 +98,16 @@ static Ast_Node_Index parse_negation            (Parser *parser);
 static Ast_Node_Index parse_sum                 (Parser *parser);
 static Ast_Node_Index parse_fail                (Parser *parser, Str expected);
 static Ast_Node_Index parse_for_statement       (Parser *parser, Ast_Node_Index parent);
-static bool           parse_for_statement_has_range(Parser const *parser);
 static Ast_Node_Index parse_global_variable_definition(Parser *parser);
 static bool           parse_typed_constant_is_next(Parser const *parser);
 static Ast_Node_Index parse_jump_statement      (Parser *parser);
+static bool           parse_line_has_range      (Parser const *parser);
 static Ast_Node_Index parse_scope_statement     (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_identifier          (Parser *parser);
 static Ast_Node_Index parse_integer_literal     (Parser *parser);
 static bool           parse_line_end_expect     (Parser *parser);
+static bool           parse_match_case          (Parser *parser, Ast_Node_Index match);
+static Ast_Node_Index parse_match_statement     (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_module              (Parser *parser);
 static void           parse_node_append_child   (Parser *parser, Ast_Node_Index parent,
                                                  Ast_Node_Index child);
@@ -140,6 +142,7 @@ static Ast_Node_Index parse_type                (Parser *parser, Str expected);
 static Ast_Node_Index parse_type_name           (Parser *parser, Str expected,
                                                  bool is_procedure_allowed);
 static Ast_Node_Index parse_procedure_type      (Parser *parser);
+static Ast_Node_Index parse_range_or_expression (Parser *parser);
 static Ast_Node_Index parse_variable_definition (Parser *parser);
 
 Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
@@ -916,7 +919,9 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
         } else {
             // A line that is indented less than the block that is open ends it.
             while (level < blocks[block_count - 1].level && block_count > 1) {
-                parse_block_close(parser, blocks[block_count - 1].node);
+                if (parse_block_close(parser, blocks[block_count - 1].node) == false) {
+                    return false;
+                }
                 block_count -= 1;
             }
             if (level < blocks[block_count - 1].level) {
@@ -930,8 +935,49 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
         }
         parse_token_advance(parser);
 
+        // The first line below a case starts its block, which is made only now, because a case
+        // that has no lines below it has no block: it runs the block of the next case.
+        if (parser->nodes[blocks[block_count - 1].node].node_type == AST_NODE_TYPE_MATCH_CASE) {
+            Ast_Node_Index case_block = parse_node_make(parser, AST_NODE_TYPE_BLOCK);
+            if (case_block == AST_NODE_INDEX_NONE) {
+                return false;
+            }
+            parse_node_append_child(parser, blocks[block_count - 1].node, case_block);
+            blocks[block_count - 1].node = case_block;
+        }
+
         Ast_Node_Index parent = blocks[block_count - 1].node;
         Token_Kind next = parse_token_current(parser)->kind;
+        // The lines of a match statement are its cases, and a case is nowhere else.
+        bool is_in_match = parser->nodes[parent].node_type == AST_NODE_TYPE_MATCH_STATEMENT;
+        if (is_in_match != (next == TOKEN_KIND_KEYWORD_CASE)) {
+            if (is_in_match) {
+                // The false return value reports the failure, so the node index is not needed.
+                (void)parse_fail(parser, STR("'case'"));
+            } else {
+                (void)parse_fail(parser, STR("a statement, as 'case' is only inside a 'match'"));
+            }
+            return false;
+        }
+        if (is_in_match) {
+            if (parse_match_case(parser, parent) == false) {
+                return false;
+            }
+            if (block_count == AST_BLOCK_DEPTH_MAX + 1) {
+                // The false return value reports the failure, so the node index is not needed.
+                (void)parse_fail(parser, STR("fewer nested blocks"));
+                return false;
+            }
+            // The case stands in for its block until the first line of the block makes it, so
+            // a line below it is in its block. A case may have none, so no line is expected.
+            blocks[block_count] = (Parse_Block){
+                .node = parser->nodes[parent].last_child,
+                .level = level + 1,
+            };
+            block_count += 1;
+            statement_count += 1;
+            continue;
+        }
         // The statement after `defer` is parsed like any other, with the defer statement as its
         // parent instead of the block, so a deferred if statement gets its block the same way.
         if (next == TOKEN_KIND_KEYWORD_DEFER) {
@@ -942,8 +988,9 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
             next = parse_token_current(parser)->kind;
         }
         if (next == TOKEN_KIND_KEYWORD_IF || next == TOKEN_KIND_KEYWORD_ELSE ||
-            next == TOKEN_KIND_KEYWORD_FOR || next == TOKEN_KIND_ARROW ||
-            next == TOKEN_KIND_LABEL) {
+            next == TOKEN_KIND_KEYWORD_FOR || next == TOKEN_KIND_KEYWORD_MATCH ||
+            next == TOKEN_KIND_ARROW || next == TOKEN_KIND_LABEL) {
+            // For a match statement this is the statement itself, whose lines are its cases.
             Ast_Node_Index block = AST_NODE_INDEX_NONE;
             if (next == TOKEN_KIND_ARROW || next == TOKEN_KIND_LABEL) {
                 block = parse_scope_statement(parser, parent);
@@ -951,6 +998,8 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
                 block = parse_if_statement(parser, parent);
             } else if (next == TOKEN_KIND_KEYWORD_FOR) {
                 block = parse_for_statement(parser, parent);
+            } else if (next == TOKEN_KIND_KEYWORD_MATCH) {
+                block = parse_match_statement(parser, parent);
             } else {
                 block = parse_else_branch(parser, parent);
             }
@@ -988,22 +1037,43 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
 
     // The body ends the blocks that are still open, innermost first.
     for (size_t open = block_count; open > 1; open -= 1) {
-        parse_block_close(parser, blocks[open - 1].node);
+        if (parse_block_close(parser, blocks[open - 1].node) == false) {
+            return false;
+        }
     }
 
     return true;
 }
 
 /**
- * Closes `block`: the nodes that were made since it was are the ones in it, so the next node that
- * is made is the end of it. The analysis and the targets tell what scope a variable is in by it.
+ * Closes `block`, which is a block, a match statement or a case of one that has no block: the nodes
+ * that were made since a block was are the ones in it, so the next node that is made is the end of
+ * it. The analysis and the targets tell what scope a variable is in by it. A case without a block
+ * runs the block of the next case, so the last case of a match must have one. Returns false after
+ * it recorded an error.
  */
-static void parse_block_close(Parser *parser, Ast_Node_Index block) {
+static bool parse_block_close(Parser *parser, Ast_Node_Index block) {
     assert(block < parser->node_count);
-    assert(parser->nodes[block].node_type == AST_NODE_TYPE_BLOCK);
     assert(parser->node_count < AST_NODE_INDEX_NONE);
 
+    Ast_Node_Type node_type = parser->nodes[block].node_type;
+    if (node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+        Ast_Node_Index last = parser->nodes[block].last_child;
+        assert(parser->nodes[last].node_type == AST_NODE_TYPE_MATCH_CASE);
+        if (ast_match_case_block(parser->nodes, last) == AST_NODE_INDEX_NONE) {
+            // The error points at the line after the match, where its block was expected.
+            (void)parse_fail(parser, STR("an indented block for the last 'case'"));
+            return false;
+        }
+        return true;
+    }
+    if (node_type == AST_NODE_TYPE_MATCH_CASE) {
+        return true;
+    }
+
+    assert(node_type == AST_NODE_TYPE_BLOCK);
     parser->nodes[block].payload.block.end = (Ast_Node_Index)parser->node_count;
+    return true;
 }
 
 /**
@@ -1093,51 +1163,22 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
     }
 
     // Without a range operator in the header, the expression is the elements to go through.
-    if (parse_for_statement_has_range(parser) == false) {
-        Ast_Node_Index elements = parse_expression(parser);
-        if (elements == AST_NODE_INDEX_NONE) {
-            return AST_NODE_INDEX_NONE;
-        }
-        parse_node_append_child(parser, statement, elements);
-        return parse_block_open(parser, statement);
-    }
-
-    Ast_Node_Index range = parse_node_make(parser, AST_NODE_TYPE_RANGE);
-    if (range == AST_NODE_INDEX_NONE) {
+    Ast_Node_Index iteration = parse_range_or_expression(parser);
+    if (iteration == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    parse_node_append_child(parser, statement, range);
-
-    Ast_Node_Index first = parse_expression(parser);
-    if (first == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
-    }
-    parse_node_append_child(parser, range, first);
-
-    Token_Kind range_operator = parse_token_current(parser)->kind;
-    if (range_operator != TOKEN_KIND_RANGE_EXCLUSIVE &&
-        range_operator != TOKEN_KIND_RANGE_INCLUSIVE) {
-        return parse_fail(parser, STR("'..<' or '..<='"));
-    }
-    parser->nodes[range].payload.range.is_inclusive = range_operator == TOKEN_KIND_RANGE_INCLUSIVE;
-    parse_token_advance(parser);
-
-    Ast_Node_Index end = parse_expression(parser);
-    if (end == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
-    }
-    parse_node_append_child(parser, range, end);
+    parse_node_append_child(parser, statement, iteration);
 
     return parse_block_open(parser, statement);
 }
 
 /**
- * Returns whether the header line of a for statement has a range operator, `..<` or `..<=`, from
- * the current token to the `->` that ends the header. The two kinds of for statement start the
- * same way, and the range has to be made before the expression that is its first number, so it has
- * to be known before that expression is parsed.
+ * Returns whether the header line has a range operator, `..<` or `..<=`, from the current token to
+ * the `->` that ends the header. The two kinds of for statement start the same way, and so do a
+ * pattern that is a range and one that is a value, and the range has to be made before the
+ * expression that is its first number, so it has to be known before that expression is parsed.
  */
-static bool parse_for_statement_has_range(Parser const *parser) {
+static bool parse_line_has_range(Parser const *parser) {
     assert(parser->token_index < parser->token_count);
 
     // The last token is `END`, which ends the line as well, so the loop stops at it.
@@ -1206,6 +1247,128 @@ static Ast_Node_Index parse_scope_statement(Parser *parser, Ast_Node_Index paren
     }
 
     return parse_block_open(parser, statement);
+}
+
+/**
+ * Parses the header line of a match statement, `match subject ->`, with an attribute list such as
+ * `#(partial)` after the word when it has one, and appends the statement to `parent`. Returns the
+ * statement, which the caller fills with the cases on the lines that follow, see
+ * `parse_match_case`. Which attributes there are is for the analysis.
+ */
+static Ast_Node_Index parse_match_statement(Parser *parser, Ast_Node_Index parent) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_MATCH);
+
+    Ast_Node_Index statement = parse_node_make(parser, AST_NODE_TYPE_MATCH_STATEMENT);
+    if (statement == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[statement].payload.match.keyword =
+        parse_token_current(parser)->payload.identifier.text;
+    parse_node_append_child(parser, parent, statement);
+    parse_token_advance(parser);
+
+    if (parse_token_current(parser)->kind == TOKEN_KIND_HASH &&
+        parse_attributes(parser, statement) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index subject = parse_expression(parser);
+    if (subject == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, statement, subject);
+
+    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (parse_line_end_expect(parser) == false) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return statement;
+}
+
+/**
+ * Parses the line of a case, `case pattern ->` or `case ->` for the default case, and appends the
+ * case to `match`. The pattern is an expression, or a range such as `0..<=5`. The block of the case
+ * is made by the caller, when a line follows that is indented deeper. The default case catches
+ * everything that the cases above it do not, so a case after it could never run, and is an error.
+ * Returns false after it recorded an error.
+ */
+static bool parse_match_case(Parser *parser, Ast_Node_Index match) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->nodes[match].node_type == AST_NODE_TYPE_MATCH_STATEMENT);
+    assert(parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_CASE);
+
+    Ast_Node_Index previous = parser->nodes[match].last_child;
+    if (parser->nodes[previous].node_type == AST_NODE_TYPE_MATCH_CASE &&
+        ast_match_case_pattern(parser->nodes, previous) == AST_NODE_INDEX_NONE) {
+        // The false return value reports the failure, so the node index is not needed.
+        (void)parse_fail(parser, STR("no 'case' after the default case 'case ->'"));
+        return false;
+    }
+
+    Ast_Node_Index match_case = parse_node_make(parser, AST_NODE_TYPE_MATCH_CASE);
+    if (match_case == AST_NODE_INDEX_NONE) {
+        return false;
+    }
+    parser->nodes[match_case].payload.match.keyword =
+        parse_token_current(parser)->payload.identifier.text;
+    parse_node_append_child(parser, match, match_case);
+    parse_token_advance(parser);
+
+    if (parse_token_current(parser)->kind != TOKEN_KIND_ARROW) {
+        Ast_Node_Index pattern = parse_range_or_expression(parser);
+        if (pattern == AST_NODE_INDEX_NONE) {
+            return false;
+        }
+        parse_node_append_child(parser, match_case, pattern);
+    }
+
+    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false) {
+        return false;
+    }
+    return parse_line_end_expect(parser);
+}
+
+/**
+ * Parses what comes after `in` in a for statement and after `case` in a match statement: a range,
+ * `first..<end` or `first..<=end`, when the line has a range operator, and otherwise an expression.
+ * Returns the range or the expression.
+ */
+static Ast_Node_Index parse_range_or_expression(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+
+    if (parse_line_has_range(parser) == false) {
+        return parse_expression(parser);
+    }
+
+    Ast_Node_Index range = parse_node_make(parser, AST_NODE_TYPE_RANGE);
+    if (range == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index first = parse_expression(parser);
+    if (first == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, range, first);
+
+    Token_Kind range_operator = parse_token_current(parser)->kind;
+    if (range_operator != TOKEN_KIND_RANGE_EXCLUSIVE &&
+        range_operator != TOKEN_KIND_RANGE_INCLUSIVE) {
+        return parse_fail(parser, STR("'..<' or '..<='"));
+    }
+    parser->nodes[range].payload.range.is_inclusive = range_operator == TOKEN_KIND_RANGE_INCLUSIVE;
+    parse_token_advance(parser);
+
+    Ast_Node_Index end = parse_expression(parser);
+    if (end == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, range, end);
+
+    return range;
 }
 
 /**

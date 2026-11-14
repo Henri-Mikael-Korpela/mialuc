@@ -39,7 +39,9 @@ typedef struct {
 static void             semantic_address_of_resolve (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index address_of);
 static bool             semantic_attributes_check   (Semantic_Analyzer *analyzer,
-                                                     Ast_Node_Index definition);
+                                                     Ast_Node_Index node, Str known,
+                                                     Semantic_Status unknown_status,
+                                                     bool *has_known);
 static bool             semantic_call_resolve       (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index procedure,
                                                      Ast_Node_Index statement,
@@ -234,9 +236,17 @@ static bool semantic_definitions_check(Semantic_Analyzer *analyzer) {
             return semantic_fail(analyzer, SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE, name);
         }
 
-        if (analyzer->nodes[definition].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION &&
-            semantic_attributes_check(analyzer, definition) == false) {
-            return false;
+        // A global variable must be `static`, because only variables with static storage duration
+        // are supported.
+        if (analyzer->nodes[definition].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            bool is_static = false;
+            if (semantic_attributes_check(analyzer, definition, STR("static"),
+                                          SEMANTIC_STATUS_ATTRIBUTE_UNKNOWN, &is_static) == false) {
+                return false;
+            }
+            if (is_static == false) {
+                return semantic_fail(analyzer, SEMANTIC_STATUS_GLOBAL_NOT_STATIC, name);
+            }
         }
 
         definition = analyzer->nodes[definition].next_sibling;
@@ -504,17 +514,20 @@ static Str semantic_constant_subject(Semantic_Analyzer const *analyzer, Ast_Node
 }
 
 /**
- * Checks the attributes of the global variable `definition`: the language has the attribute
- * `static` only, an attribute cannot be given twice, and a global variable must be `static`,
- * because only variables with static storage duration are supported. The attributes are the first
- * children of the definition. Returns false after it recorded an error.
+ * Checks the attributes of `node`, a global variable or a match statement, which are its first
+ * children. Each kind of node has one attribute, `known`, which `#(static)` and `#(partial)` give,
+ * and any other is an error of `unknown_status`, because the message says which one there is. An
+ * attribute cannot be given twice either. Returns false after it recorded an error, and sets
+ * `*has_known` to whether the attribute is given.
  */
-static bool semantic_attributes_check(Semantic_Analyzer *analyzer, Ast_Node_Index definition) {
-    assert(definition < analyzer->node_count);
-    assert(analyzer->nodes[definition].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION);
+static bool semantic_attributes_check(Semantic_Analyzer *analyzer, Ast_Node_Index node,
+                                      Str known, Semantic_Status unknown_status,
+                                      bool *has_known) {
+    assert(node < analyzer->node_count);
+    assert(known.bytes != NULL);
 
-    bool is_static = false;
-    Ast_Node_Index attribute = analyzer->nodes[definition].first_child;
+    *has_known = false;
+    Ast_Node_Index attribute = analyzer->nodes[node].first_child;
     // Every attribute is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < analyzer->node_count && attribute != AST_NODE_INDEX_NONE; i += 1) {
         Ast_Node const *attribute_node = &analyzer->nodes[attribute];
@@ -523,21 +536,17 @@ static bool semantic_attributes_check(Semantic_Analyzer *analyzer, Ast_Node_Inde
         }
 
         Str name = attribute_node->payload.attribute.name;
-        if (str_equals(name, STR("static")) == false) {
-            return semantic_fail(analyzer, SEMANTIC_STATUS_ATTRIBUTE_UNKNOWN, name);
+        if (str_equals(name, known) == false) {
+            return semantic_fail(analyzer, unknown_status, name);
         }
-        if (is_static) {
+        if (*has_known) {
             return semantic_fail(analyzer, SEMANTIC_STATUS_ATTRIBUTE_DUPLICATE, name);
         }
-        is_static = true;
+        *has_known = true;
 
         attribute = attribute_node->next_sibling;
     }
 
-    if (is_static == false) {
-        return semantic_fail(analyzer, SEMANTIC_STATUS_GLOBAL_NOT_STATIC,
-                             analyzer->nodes[definition].payload.global_variable_definition.name);
-    }
     return true;
 }
 
@@ -633,9 +642,19 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
         } else if (node_type == AST_NODE_TYPE_ADDRESS_OF) {
             // The node comes after its operand, so the names in it are resolved already.
             semantic_address_of_resolve(analyzer, current);
+        } else if (node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+            // Whether the match is partial is for the target, which knows the type of the subject.
+            statement = current;
+            bool is_partial = false;
+            if (semantic_attributes_check(analyzer, current, STR("partial"),
+                                          SEMANTIC_STATUS_MATCH_ATTRIBUTE_UNKNOWN,
+                                          &is_partial) == false) {
+                return false;
+            }
         } else if (node_type == AST_NODE_TYPE_RETURN_STATEMENT ||
                    node_type == AST_NODE_TYPE_CALL_STATEMENT ||
                    node_type == AST_NODE_TYPE_IF_STATEMENT ||
+                   node_type == AST_NODE_TYPE_MATCH_CASE ||
                    ast_node_type_is_assignment(node_type)) {
             statement = current;
         }
@@ -698,6 +717,7 @@ static bool semantic_defer_check(Semantic_Analyzer *analyzer, Ast_Node_Index def
     assert(ast_node_type_is_assignment(node_type) || node_type == AST_NODE_TYPE_CALL_STATEMENT ||
            node_type == AST_NODE_TYPE_IF_STATEMENT || node_type == AST_NODE_TYPE_FOR_STATEMENT ||
            node_type == AST_NODE_TYPE_LOOP_STATEMENT ||
+           node_type == AST_NODE_TYPE_MATCH_STATEMENT ||
            node_type == AST_NODE_TYPE_SCOPE_STATEMENT ||
            node_type == AST_NODE_TYPE_LABELED_STATEMENT);
     return true;
@@ -726,6 +746,13 @@ static Ast_Node_Index semantic_defer_end(Semantic_Analyzer const *analyzer, Ast_
         Ast_Node_Index block = analyzer->nodes[statement].last_child;
         assert(analyzer->nodes[block].node_type == AST_NODE_TYPE_BLOCK);
         assert(analyzer->nodes[block].payload.block.end > block);
+        return analyzer->nodes[block].payload.block.end;
+    }
+    if (node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+        // The parser made sure that the last case has a block, which is where the match ends.
+        Ast_Node_Index block = ast_match_case_block(analyzer->nodes,
+                                                    analyzer->nodes[statement].last_child);
+        assert(block != AST_NODE_INDEX_NONE);
         return analyzer->nodes[block].payload.block.end;
     }
     return statement + 1;

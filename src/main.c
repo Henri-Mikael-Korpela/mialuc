@@ -1139,6 +1139,43 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 "or 'not'.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
+    case WASM_BUILD_STATUS_MATCH_CASE_DUPLICATE:
+        fprintf(stderr, "%s:%zu:%zu: this case matches a value that a case above it matches "
+                "already, so it could never run for that value.\n", path, position.line,
+                position.column);
+        break;
+    case WASM_BUILD_STATUS_MATCH_NOT_EXHAUSTIVE:
+        fprintf(stderr, "%s:%zu:%zu: the match has no case for the member '%.*s' of the enum. "
+                "Add one, a default case 'case ->', or write 'match #(partial)' to leave members "
+                "out.\n", path, position.line, position.column, (int)result.detail.length,
+                result.detail.bytes);
+        break;
+    case WASM_BUILD_STATUS_MATCH_PARTIAL_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' only means something for a match of an enum that "
+                "has no default case, which is the only match that must have a case for every "
+                "value.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT:
+        fprintf(stderr, "%s:%zu:%zu: the pattern of the case is not known when the program is "
+                "compiled. It must be a literal, a constant or a member of an enum.\n", path,
+                position.line, position.column);
+        break;
+    case WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the pattern of the case is not of the type of what is "
+                "matched, as a string is not an Int, a member is of one enum only, a Byte is "
+                "from 0 to 255 and a range is only for an Int or a Byte.\n", path, position.line,
+                position.column);
+        break;
+    case WASM_BUILD_STATUS_MATCH_RANGE_EMPTY:
+        fprintf(stderr, "%s:%zu:%zu: the range of the case has no numbers in it, so it could "
+                "never match.\n", path, position.line, position.column);
+        break;
+    case WASM_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be matched. A match takes an Int, a Byte, a "
+                "Str or an enum.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case WASM_BUILD_STATUS_CONDITION_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: the condition at '%.*s' is not a Bool, and an Int is not "
                 "converted to one.\n", path, position.line, position.column, subject_length,
@@ -1404,6 +1441,11 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     case SEMANTIC_STATUS_LABEL_UNKNOWN:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not the label of a statement around this "
                 "'break' or 'continue'.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_MATCH_ATTRIBUTE_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an attribute of a match statement. The only "
+                "one is 'partial'.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     case SEMANTIC_STATUS_OK:

@@ -24,6 +24,7 @@
   - [Global variables](#global-variables)
 - [Control flow structures](#control-flow-structures)
   - [If statements](#if-statements)
+  - [Match statements](#match-statements)
   - [For statements](#for-statements)
   - [Infinite loops](#infinite-loops)
   - [Scopes](#scopes)
@@ -661,7 +662,112 @@ foo :: proc() Int ->
             return 3
 ```
 
-A block is a scope, see [Scope resolution](#scope-resolution): a variable that is defined in a block can be used in the rest of that block, but not after it.
+A block is a scope, see [Scope resolution](#scope-resolution): a variable that is defined in a block can be used in the rest of that block, but not after it. To compare one value with many others, a [match statement](#match-statements) is shorter, and it computes the value once.
+
+### Match statements
+
+A match statement compares one value, which is called its subject, with the patterns of the cases below it, and runs the block of the first case whose pattern the value matches. It is the `switch` of C, but it matches strings, enums and ranges as well as numbers. After `match` comes the subject, which is any expression, and the `->` after it starts the cases, which are indented one level deeper than the `match`. Each case is the word `case`, a pattern and `->`, and its block is indented one level deeper still:
+
+```
+describe :: proc(x: Int) Str ->
+    match x ->
+        case 5 ->
+            return "five"
+        case ->
+            return "something else"
+```
+
+`case ->` without a pattern is the default case, which runs when no other case matches. It catches everything that the cases above it leave, so it can only be the last case, and a case after it is an error. At most one case runs, and then the statement after the match runs next, as after an if statement, so there is no falling through from one case into the next, and no `break` is needed to stop it. When no case matches and there is no default case, nothing runs. The subject is computed once, before the first case, so a call in it runs once however many cases there are, and the cases all compare the same value.
+
+> **Lessons learnt from C** In C, the cases of a `switch` fall through into each other unless each ends with `break`, and a forgotten `break` is a well-known bug that compilers can only warn about. A Mialu case never falls through: its block is its own, like the branch of an `if`.
+
+The subject is an `Int`, a `Byte`, a `Str` or an enum. A pattern is known when the program is compiled: a literal, a [constant](#constants), or arithmetic of them such as `LIMIT + 1` or `0 - 1`, which is how a negative number is written. It must be of the type of the subject, and an untyped one becomes it when it fits, so a pattern of a `Byte` is a number from 0 to 255. A pattern that is a variable or a call is an error, because what it matches would not be known until the program runs. A string matches a pattern when it has the same bytes, so `"go"` does not match `"gone"` or `"Go"`, and `""` matches the empty string only:
+
+```
+command_number :: proc(command: Str) Int ->
+    match command ->
+        case "go" ->
+            return 1
+        case "stop" ->
+            return 2
+        case ->
+            return 0
+```
+
+An `Int` or a `Byte` can be matched with a range, which is written as in a [for statement](#for-statements): `first..<end` has the numbers from `first` up to, and not including, `end`, and `first..<=end` includes `end`. Both ends are constants, and a range with no numbers, such as `5..<5`, is an error, because it could never match:
+
+```
+classify :: proc(n: Int) Str ->
+    match n ->
+        case 0 ->
+            return "zero"
+        case 1..<10 ->
+            return "small"
+        case 10..<=99 ->
+            return "medium"
+        case ->
+            return "large"
+```
+
+No two cases may match a value in common: a pattern that is the same as one above it, a range that overlaps one above it, and a number that is in a range above it are errors, because the case could never run for that value. So the order of the cases does not change what a match does.
+
+A case that has no block, because the next line is another case, runs the block of the next case that has one. That is how cases share a block, as cases without statements in between do in C. The last case must have a block:
+
+```
+is_weekend :: proc(day: Int) Bool ->
+    match day ->
+        case 6 ->
+        case 7 ->
+            return true
+        case ->
+            return false
+```
+
+The subject can be an enum. The patterns are then members of that enum, written with a dot only, such as `.RED`, because the enum is the one of the subject, or with the name of the enum, such as `Color.RED`. The member of another enum is an error, and so is a range, as members have no order. A match of an enum must have a case for every member of the enum, or a default case, so a member that is added to the enum later is an error in every match that does not handle it, instead of a value that the match skips without a word:
+
+```
+Color :: enum Int ->
+    RED
+    GREEN
+    BLUE
+
+color_name :: proc(color: Color) Str ->
+    match color ->
+        case .RED ->
+            return "red"
+        case .GREEN ->
+            return "green"
+        case .BLUE ->
+            return "blue"
+```
+
+A match of an enum that is meant to leave members out has the [attribute](#attributes) `partial`, which is written after `match`. Then nothing runs for the members that it has no case for:
+
+```
+warm_color_name :: proc(color: Color) Str ->
+    match #(partial) color ->
+        case .RED ->
+            return "red"
+    return "not warm"
+```
+
+`partial` is the only attribute of a match statement, and it is an error on a match whose subject is not an enum, or which has a default case, because such a match has nothing to check: a match of a number or of a string never has a case for every value, and a default case handles every member that is left.
+
+The block of a case is a block like that of an `if`: it is a scope, see [Scope resolution](#scope-resolution), so two cases can define variables of the same name, it can have any statement, also another match statement, and a `defer` in it runs when the case ends. A match statement is not a loop or a scope that a `break` leaves, so a `break` or a `continue` in a case belongs to the loop around the match:
+
+```
+sum_of_multiples_of_three :: proc(limit: Int) Int ->
+    total := 0
+    for i in 0..<limit ->
+        match i - i / 3 * 3 ->
+            case 0 ->
+                total += i
+            case ->
+                continue
+    return total
+```
+
+A match statement can be [deferred](#defer), like an if statement, with `defer match`, and the cases follow it as without `defer`.
 
 ### For statements
 
@@ -970,7 +1076,7 @@ increment_after_return :: proc(counter: ^Int) Int ->
 
 `return_value_comes_first()` returns 1, and `increment_after_return` returns the value that `counter` pointed to before it was increased.
 
-The statement after `defer` is an assignment, a call, or an if statement, a for statement, an infinite loop or a scope statement, with or without a label. A deferred if statement has its `else if` and `else` lines below it as usual, and the `defer` is written on the `if` line only. `defer ->` defers a scope, which is how a block of statements is deferred together:
+The statement after `defer` is an assignment, a call, or an if statement, a match statement, a for statement, an infinite loop or a scope statement, with or without a label. A deferred if statement has its `else if` and `else` lines below it as usual, and the `defer` is written on the `if` line only. `defer ->` defers a scope, which is how a block of statements is deferred together:
 
 ```
 defer_a_block :: proc() ->
@@ -1694,7 +1800,7 @@ counter #(static) := 0
 
 A list can have more than one attribute, which are written one after the other, such as `#(first)(second)`, and the `#` is written once. The list is not an expression and it has no value. Spaces may be written between its tokens, but the convention is to write no space inside it and one space before the `#`, as above. A list has at least one attribute, so `#()` is an error, and so is a name that is not between parentheses, such as `#static`.
 
-The attributes are built into the language. The only one that Mialu has so far is `static`, which is an attribute of a variable, see [Global variables](#global-variables). Any other attribute is an error, and so is an attribute that is given twice in the same list. Attributes are accepted on the definition of a global variable only. A constant and a variable of a procedure take none yet, so they are errors there.
+The attributes are built into the language. Mialu has two so far: `static`, which is an attribute of a variable, see [Global variables](#global-variables), and `partial`, which is an attribute of a match statement and is written after `match`, as in `match #(partial) color ->`, see [Match statements](#match-statements). Any other attribute is an error, and so is an attribute that is given twice in the same list, or one that is not an attribute of what it is given to, such as `static` on a match statement. Attributes are accepted on the definition of a global variable and on a match statement only. A constant and a variable of a procedure take none yet, so they are errors there.
 
 ## Foreign procedures
 
@@ -1859,12 +1965,15 @@ The target rejects a program that the parser accepts when:
 - the operands of a comparison are members of two enums, or members of an enum are compared with `<`, `<=`, `>` or `>=`,
 - an operand of `and`, `or` or `not` is not a `Bool`,
 - the condition of an if statement is not a `Bool`,
+- the subject of a match statement is not an `Int`, a `Byte`, a `Str` or an enum, a pattern is not a constant or not of the type of the subject, a range is empty or is the pattern of a `Str` or an enum, two cases match a value in common, a match of an enum without a default case and without `partial` has no case for a member, or a match with `partial` is not of an enum or has a default case,
 - the first number or the end of a range is not an `Int`,
 - the variable or the value of an assignment such as `x += 2`, `x -= 2`, `x *= 2` or `x /= 2` is not an `Int`.
 
 The target is built from the result of scope resolution, so it also rejects every program that scope resolution rejects.
 
 An if statement becomes the structured instructions of WebAssembly: the condition, which leaves 1 or 0 (for a comparison, its two operands and the signed comparison of them), then `if`, the block, `else` and the next branch, up to `end`. An `else if` is written as an `else` with another `if` in it, so the statement ends with an `end` for each of its conditions. When the last statement of a procedure that returns a value is not a `return`, for example an if statement that returns in all of its branches, the body ends with the `unreachable` instruction, because WebAssembly cannot tell that the end of it cannot be reached. A body that gets there anyway traps.
+
+A match statement computes its subject and stores it in locals of its own, as many as a variable of its type has, after the variables above it, so that it is computed once. The cases become a chain of `if` and `else`, like an if statement that has an `else if` for each case, and the default case is the last `else`. The condition of a case is a comparison of the locals with its pattern: `i64.eq` for an `Int` and for the number of a member of an enum, `i32.eq` for a `Byte`, and for a range a comparison with each end, `i64.ge_s` and `i64.le_s`, or `i32.ge_u` and `i32.le_u` for a `Byte`, joined by `i32.and`. The cases that share a block have one condition, which joins theirs with `i32.or`. A `Str` is compared with a string pattern by its length first, and when the length is equal by a loop that compares the bytes one at a time with `i32.load8_u`, and leaves at the first that differs, so a `Str` subject has two 32-bit locals more, for the index of the byte and for whether the strings are equal so far. The empty string is compared by its length only.
 
 A for statement with a range becomes a `block` that holds a `loop`, and the statements of its block are in a second `block` inside the `loop`. The iterator is a local, and the end of the range is a local right after it, which is where the end is read once. First the start and the end are stored, then the loop begins with a test that leaves the `block` with `br_if` when the iterator is not below the end, or above it for an inclusive range. After the statements of the block, which the second `block` ends, the iterator is increased by one and `br` goes back to the start of the `loop`. A `continue` is a `br` to the end of the second `block`, so the increase is not skipped, and a `break` is a `br` to the end of the first. An infinite loop is the same three instructions without the test and the increase, with a `br` back to the start of the `loop`. A scope statement becomes a `block`, and a `break` that leaves it is a `br` to the end of it. An if statement with a label is inside a `block` of its own, which a `break` with the label leaves, so the `block` ends after the last `end` of the statement. The number in a `br` is the number of structured instructions between it and its target, which counts the `if` instructions of the if statements that the jump is in, one for each scope or labeled if statement that it is in and has to leave on the way, and three for each loop, because a loop is a `block`, a `loop` and a `block`. A label of a loop or of a scope has no instruction of its own: it only tells which `block` the `br` goes to. For an inclusive range the loop leaves the `block` before the increase when the iterator is equal to the end, so an inclusive range that ends at the largest `Int` stops instead of wrapping around.
 

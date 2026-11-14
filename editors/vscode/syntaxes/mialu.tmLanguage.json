@@ -275,7 +275,7 @@
                 },
                 {
                     "name": "keyword.control.match.mialu",
-                    "comment": "The word after union, and the word that starts a case of a union match, as in union match kind -> and case .IDENTIFIER ->.",
+                    "comment": "The word that starts a match statement, as in match color ->, and the word after union, and the word that starts a case of either, as in union match kind -> and case .IDENTIFIER ->.",
                     "match": "\\b(match|case)\\b"
                 },
                 {
