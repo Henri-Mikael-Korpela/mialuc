@@ -103,7 +103,8 @@ The format is:
 - A register is written with a `%` in front of it, as in `%rax` and `%r10`.
 - A number is written as an integer. A large number, such as the bytes of a string, is written in hexadecimal.
 - A memory operand is `[base + displacement]` or `[base - displacement]`, and the displacement is left out when it is zero.
-- A label is written `.name:` where it is, and `.name` where it is used. A jump over a breakpoint that checks whether a string fits has a label that is `.skip_` and a number, which is where the jump goes to in the code.
+- A label is written `.name:` where it is, and `.name` where it is used. A place inside a procedure that a jump goes to has a label that is `.L` and a number, which is where it is in the code, such as `.L94`.
+- A memory operand that is read or written as a byte, which `movzx`, `set` and the store of a byte have, has `:u8` after it, which is the size of the access.
 - A comment starts with `//`.
 
 A memory operand that is relative to the instruction pointer is written `[%rip + displacement]`, and the call of an import has the size of an address after it, `[%rip + displacement]:u64`, like any sized memory operand, `[base]:T`.
@@ -218,6 +219,8 @@ program                        1 MiB
 assembly or WebAssembly text   16 MiB
 procedures (x64-win32)         1024
 nested constant expression     1024 operators and constants
+nested expression (x64-win32)  1024 operators and operands
+frame (x64-win32)              512 KiB for a procedure, half of the stack of 1 MiB
 ```
 
 A source file or a program that is larger is an error that says so.

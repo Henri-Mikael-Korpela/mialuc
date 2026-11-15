@@ -44,6 +44,11 @@ enum {
     // A number is written in decimal if it is smaller than this, and otherwise in hexadecimal,
     // because a number that is large is mostly a pattern of bits, such as the bytes of a string.
     X64_TEXT_DECIMAL_LIMIT = 65536,
+    // The byte that starts the instructions of two bytes of opcode.
+    X64_TEXT_OPCODE_TWO_BYTE = 0x0F,
+    // A condition that the processor does not have, which stands for the jump that is always
+    // taken.
+    X64_TEXT_CONDITION_ALWAYS = 16,
 };
 
 /**
@@ -56,6 +61,8 @@ typedef struct {
     size_t capacity;
     size_t length;
     bool is_overflowed;
+    // Set while the code is read for the first time, which writes nothing.
+    bool is_silent;
 } X64_Text_Writer;
 
 /**
@@ -115,23 +122,31 @@ typedef struct {
     uint32_t address_table_size_bytes;
     uint32_t library_name_rva;
     uint32_t name_table_rva;
-    // The place in the code of the end of a jump over a breakpoint, which gets a label.
-    size_t label_offset;
+    // One byte for each byte of the code, which is not zero where a jump goes to, which gets a
+    // label, see `x64_text_format_code`.
+    byte *labels;
+    size_t label_capacity;
     size_t error_offset;
     X64_Text_Status status;
-    bool has_label;
+    // Set while the code is read for the first time, which marks the labels.
+    bool is_marking;
 } X64_Text_Formatter;
 
 static bool             x64_text_fail               (X64_Text_Formatter *formatter,
                                                      X64_Text_Status status, size_t error_offset);
 static bool             x64_text_format_code        (X64_Text_Formatter *formatter);
+static bool             x64_text_format_call        (X64_Text_Formatter *formatter,
+                                                     X64_Text_Cursor *cursor);
 static size_t           x64_text_format_instruction (X64_Text_Formatter *formatter,
                                                      X64_Text_Cursor *cursor);
-static size_t           x64_text_format_jump        (X64_Text_Formatter *formatter,
-                                                     X64_Text_Cursor *cursor);
-static size_t           x64_text_format_operands    (X64_Text_Formatter *formatter,
+static bool             x64_text_format_jump        (X64_Text_Formatter *formatter,
+                                                     X64_Text_Cursor *cursor, byte condition,
+                                                     size_t distance_size_bytes);
+static bool             x64_text_format_operands    (X64_Text_Formatter *formatter,
                                                      X64_Text_Cursor *cursor, byte opcode,
                                                      byte rex);
+static bool             x64_text_format_two_byte    (X64_Text_Formatter *formatter,
+                                                     X64_Text_Cursor *cursor, byte rex);
 static bool             x64_text_headers_read       (X64_Text_Formatter *formatter);
 static uint16_t         x64_text_load_u16           (byte const *source);
 static uint32_t         x64_text_load_u32           (byte const *source);
@@ -155,8 +170,12 @@ static void             x64_text_write_memory       (X64_Text_Writer *writer,
                                                      X64_Text_Operand operand);
 static void             x64_text_write_operand      (X64_Text_Writer *writer,
                                                      X64_Text_Operand operand, bool is_wide);
+static void             x64_text_write_operand_byte (X64_Text_Writer *writer,
+                                                     X64_Text_Operand operand);
 static void             x64_text_write_register     (X64_Text_Writer *writer,
                                                      byte register_number, bool is_wide);
+static void             x64_text_write_register_byte(X64_Text_Writer *writer,
+                                                     byte register_number);
 static void             x64_text_write_signed       (X64_Text_Writer *writer, int64_t number);
 static void             x64_text_write_unsigned     (X64_Text_Writer *writer, uint64_t number);
 
@@ -178,9 +197,31 @@ static Str const X64_TEXT_REGISTERS_NARROW[X64_TEXT_REGISTER_COUNT] = {
     {.bytes = "r15d", .length = 4},
 };
 
+// The lowest bytes of the registers, as the code names them with a prefix before the instruction,
+// which makes 4 to 7 the lowest bytes of `rsp`, `rbp`, `rsi` and `rdi`.
+static Str const X64_TEXT_REGISTERS_BYTE[X64_TEXT_REGISTER_COUNT] = {
+    {.bytes = "al", .length = 2},   {.bytes = "cl", .length = 2},   {.bytes = "dl", .length = 2},
+    {.bytes = "bl", .length = 2},   {.bytes = "spl", .length = 3},  {.bytes = "bpl", .length = 3},
+    {.bytes = "sil", .length = 3},  {.bytes = "dil", .length = 3},  {.bytes = "r8b", .length = 3},
+    {.bytes = "r9b", .length = 3},  {.bytes = "r10b", .length = 4}, {.bytes = "r11b", .length = 4},
+    {.bytes = "r12b", .length = 4}, {.bytes = "r13b", .length = 4}, {.bytes = "r14b", .length = 4},
+    {.bytes = "r15b", .length = 4},
+};
+
+// The conditions of the conditional jumps and of `set`, by their number in the opcode.
+static Str const X64_TEXT_CONDITIONS[16] = {
+    {.bytes = "o", .length = 1},  {.bytes = "no", .length = 2}, {.bytes = "b", .length = 1},
+    {.bytes = "ae", .length = 2}, {.bytes = "e", .length = 1},  {.bytes = "ne", .length = 2},
+    {.bytes = "be", .length = 2}, {.bytes = "a", .length = 1},  {.bytes = "s", .length = 1},
+    {.bytes = "ns", .length = 2}, {.bytes = "p", .length = 1},  {.bytes = "np", .length = 2},
+    {.bytes = "l", .length = 1},  {.bytes = "ge", .length = 2}, {.bytes = "le", .length = 2},
+    {.bytes = "g", .length = 1},
+};
+
 X64_Text_Result x64_text_format(Array_Slice executable, Array_Slice symbols,
-                                Array_Slice output_buffer) {
+                                Array_Slice label_buffer, Array_Slice output_buffer) {
     assert(executable.elements != NULL);
+    assert(label_buffer.elements != NULL);
     assert(output_buffer.elements != NULL);
     assert(symbols.elements != NULL || symbols.length == 0);
 
@@ -191,6 +232,7 @@ X64_Text_Result x64_text_format(Array_Slice executable, Array_Slice symbols,
                 .capacity = output_buffer.length,
                 .length = 0,
                 .is_overflowed = false,
+                .is_silent = false,
             },
         .executable = executable.elements,
         .executable_length = executable.length,
@@ -203,10 +245,11 @@ X64_Text_Result x64_text_format(Array_Slice executable, Array_Slice symbols,
         .address_table_size_bytes = 0,
         .library_name_rva = 0,
         .name_table_rva = 0,
-        .label_offset = 0,
+        .labels = label_buffer.elements,
+        .label_capacity = label_buffer.length,
         .error_offset = 0,
         .status = X64_TEXT_STATUS_OK,
-        .has_label = false,
+        .is_marking = false,
     };
 
     bool is_ok = x64_text_headers_read(&formatter);
@@ -390,50 +433,56 @@ static Str x64_text_name_find(X64_Text_Formatter const *formatter, uint32_t rva)
 
 /**
  * Formats the instructions from the start of the code to its end, with a label where a procedure
- * starts. Returns false after it recorded an error.
+ * starts and where a jump goes to. The code is read twice: the first time writes nothing and marks
+ * the places that the jumps go to in `formatter->labels`, so that the second time can write a
+ * label before an instruction that a jump further down goes back to. Returns false after it
+ * recorded an error.
  */
 static bool x64_text_format_code(X64_Text_Formatter *formatter) {
-    X64_Text_Cursor cursor = {
-        .bytes = formatter->executable + formatter->text.file_offset,
-        .length = formatter->text.size_bytes,
-        .position = 0,
-        .is_failed = false,
-    };
     X64_Text_Writer *writer = &formatter->writer;
-
-    x64_text_write(writer, STR("\n.start:\n"));
-
-    size_t symbol_index = 0;
-    // An instruction is at least one byte, so this bounds the loop.
-    for (size_t i = 0; i < cursor.length && cursor.position < cursor.length; i += 1) {
-        size_t offset = cursor.position;
-
-        if (symbol_index < formatter->symbol_count &&
-            formatter->symbols[symbol_index].offset == offset) {
-            x64_text_write(writer, STR("\n."));
-            x64_text_write(writer, formatter->symbols[symbol_index].name);
-            x64_text_write(writer, STR(":\n"));
-            symbol_index += 1;
-        }
-        if (formatter->has_label && formatter->label_offset == offset) {
-            x64_text_write_label_target(formatter, (int64_t)offset);
-            x64_text_write(writer, STR(":\n"));
-            formatter->has_label = false;
-        }
-
-        size_t length = x64_text_format_instruction(formatter, &cursor);
-        if (length == 0) {
-            return false;
-        }
-        assert(cursor.position == offset + length);
+    if (formatter->label_capacity < formatter->text.size_bytes) {
+        return x64_text_fail(formatter, X64_TEXT_STATUS_OUTPUT_TOO_LARGE, 0);
     }
+    memset(formatter->labels, 0, formatter->text.size_bytes);
 
-    // A jump whose target is past the end of the code means that the code ends in the middle of
-    // it.
-    if (formatter->has_label) {
-        return x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_MALFORMED,
-                             formatter->text.file_offset + formatter->label_offset);
+    for (size_t pass = 0; pass < 2; pass += 1) {
+        formatter->is_marking = pass == 0;
+        writer->is_silent = formatter->is_marking;
+        X64_Text_Cursor cursor = {
+            .bytes = formatter->executable + formatter->text.file_offset,
+            .length = formatter->text.size_bytes,
+            .position = 0,
+            .is_failed = false,
+        };
+
+        x64_text_write(writer, STR("\n.start:\n"));
+        size_t symbol_index = 0;
+        // An instruction is at least one byte, so this bounds the loop.
+        for (size_t i = 0; i < cursor.length && cursor.position < cursor.length; i += 1) {
+            size_t offset = cursor.position;
+
+            bool is_symbol = false;
+            if (symbol_index < formatter->symbol_count &&
+                formatter->symbols[symbol_index].offset == offset) {
+                x64_text_write(writer, STR("\n."));
+                x64_text_write(writer, formatter->symbols[symbol_index].name);
+                x64_text_write(writer, STR(":\n"));
+                symbol_index += 1;
+                is_symbol = true;
+            }
+            if (is_symbol == false && offset != 0 && formatter->labels[offset] != 0) {
+                x64_text_write_label_target(formatter, (int64_t)offset);
+                x64_text_write(writer, STR(":\n"));
+            }
+
+            size_t length = x64_text_format_instruction(formatter, &cursor);
+            if (length == 0) {
+                return false;
+            }
+            assert(cursor.position == offset + length);
+        }
     }
+    writer->is_silent = false;
     return true;
 }
 
@@ -471,50 +520,59 @@ static size_t x64_text_format_instruction(X64_Text_Formatter *formatter,
     bool is_wide = (rex & 0x08) != 0;
     byte base_extension = (rex & 0x01) != 0 ? 8 : 0;
 
-    size_t length = 0;
+    bool is_known = true;
     if (opcode >= 0x50 && opcode <= 0x5F && rex == 0) {
         x64_text_write(writer, opcode < 0x58 ? STR("push ") : STR("pop "));
         x64_text_write_register(writer, (byte)(opcode & 7), true);
-        length = cursor->position - start;
     } else if (opcode >= 0xB8 && opcode <= 0xBF && is_wide) {
         x64_text_write(writer, STR("mov "));
         x64_text_write_register(writer, (byte)((opcode & 7) | base_extension), true);
         x64_text_write(writer, STR(", "));
         x64_text_write_immediate(writer, (int64_t)x64_text_read_unsigned_64(cursor));
-        length = cursor->position - start;
+    } else if (opcode >= 0x70 && opcode <= 0x7F) {
+        is_known = x64_text_format_jump(formatter, cursor, (byte)(opcode & 0x0F), 1);
+    } else if (opcode == X64_TEXT_OPCODE_TWO_BYTE) {
+        is_known = x64_text_format_two_byte(formatter, cursor, rex);
     } else {
         switch (opcode) {
         case 0x01:
+        case 0x09:
+        case 0x21:
+        case 0x29:
+        case 0x31:
+        case 0x39:
         case 0x3D:
         case 0x81:
         case 0x83:
+        case 0x85:
+        case 0x88:
         case 0x89:
         case 0x8B:
         case 0x8D:
+        case 0xF7:
         case 0xFF:
-            length = x64_text_format_operands(formatter, cursor, opcode, rex);
-            if (length != 0) {
-                length = cursor->position - start;
-            }
+            is_known = x64_text_format_operands(formatter, cursor, opcode, rex);
             break;
-        case 0x76:
+        case 0x99:
+            x64_text_write(writer, is_wide ? STR("cqo") : STR("cdq"));
+            break;
         case 0xE8:
-            length = x64_text_format_jump(formatter, cursor);
-            if (length != 0) {
-                length = cursor->position - start;
-            }
+            is_known = x64_text_format_call(formatter, cursor);
+            break;
+        case 0xE9:
+            is_known = x64_text_format_jump(formatter, cursor, X64_TEXT_CONDITION_ALWAYS, 4);
+            break;
+        case 0xEB:
+            is_known = x64_text_format_jump(formatter, cursor, X64_TEXT_CONDITION_ALWAYS, 1);
             break;
         case 0xC3:
             x64_text_write(writer, STR("ret"));
-            length = cursor->position - start;
             break;
         case 0xC9:
             x64_text_write(writer, STR("leave"));
-            length = cursor->position - start;
             break;
         case 0xCC:
             x64_text_write(writer, STR("int3"));
-            length = cursor->position - start;
             break;
         default:
             x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED, error_offset);
@@ -526,166 +584,254 @@ static size_t x64_text_format_instruction(X64_Text_Formatter *formatter,
         x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_MALFORMED, error_offset);
         return 0;
     }
+    if (is_known == false) {
+        x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED, error_offset);
+        return 0;
+    }
     if (formatter->status != X64_TEXT_STATUS_OK) {
         return 0;
     }
     x64_text_write(writer, STR("\n"));
-    assert(length == cursor->position - start);
-    return length;
+    return cursor->position - start;
 }
 
 /**
- * Formats the instructions that have a register and an operand, or an operand and a number, which
- * is what the byte after the opcode says. Returns a value that is not zero, or zero after it
- * recorded an error.
+ * Formats the instructions of two bytes of opcode, after the 0x0F that starts them: `imul` of two
+ * registers, `movzx` of a byte, `set` of a condition and the conditional jumps with a distance of
+ * 32 bits. Returns false when the instruction is not one of them.
  */
-static size_t x64_text_format_operands(X64_Text_Formatter *formatter, X64_Text_Cursor *cursor,
-                                       byte opcode, byte rex) {
+static bool x64_text_format_two_byte(X64_Text_Formatter *formatter, X64_Text_Cursor *cursor,
+                                     byte rex) {
     X64_Text_Writer *writer = &formatter->writer;
     bool is_wide = (rex & 0x08) != 0;
-    size_t error_offset = formatter->text.file_offset + cursor->position;
+    byte opcode = x64_text_read_byte(cursor);
 
-    if (opcode == 0x3D) {
-        // A comparison of `rax` with a number of 32 bits, which the processor widens.
-        if (is_wide == false) {
-            x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED, error_offset);
-            return 0;
-        }
-        x64_text_write(writer, STR("cmp %rax, "));
-        x64_text_write_immediate(writer, x64_text_read_signed_32(cursor));
-        return 1;
+    if (opcode >= 0x80 && opcode <= 0x8F) {
+        return x64_text_format_jump(formatter, cursor, (byte)(opcode & 0x0F), 4);
     }
 
     X64_Text_Operand operand = x64_text_operand_read(cursor, rex);
     if (operand.is_supported == false) {
-        x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED, error_offset);
-        return 0;
+        return false;
+    }
+    if (opcode >= 0x90 && opcode <= 0x9F) {
+        x64_text_write(writer, STR("set"));
+        x64_text_write(writer, X64_TEXT_CONDITIONS[opcode & 0x0F]);
+        x64_text_write(writer, STR(" "));
+        x64_text_write_operand_byte(writer, operand);
+    } else if (opcode == 0xAF) {
+        x64_text_write(writer, STR("imul "));
+        x64_text_write_register(writer, operand.register_number, is_wide);
+        x64_text_write(writer, STR(", "));
+        x64_text_write_operand(writer, operand, is_wide);
+    } else if (opcode == 0xB6) {
+        x64_text_write(writer, STR("movzx "));
+        x64_text_write_register(writer, operand.register_number, is_wide);
+        x64_text_write(writer, STR(", "));
+        x64_text_write_operand_byte(writer, operand);
+    } else {
+        return false;
+    }
+    if (operand.is_rip) {
+        x64_text_write_comment(formatter, operand, cursor->position);
+    }
+    return true;
+}
+
+/**
+ * Formats the instructions that have a register and an operand, or an operand and a number, which
+ * is what the byte after the opcode says. Returns false when the instruction is not one that the
+ * code has.
+ */
+static bool x64_text_format_operands(X64_Text_Formatter *formatter, X64_Text_Cursor *cursor,
+                                     byte opcode, byte rex) {
+    X64_Text_Writer *writer = &formatter->writer;
+    bool is_wide = (rex & 0x08) != 0;
+
+    if (opcode == 0x3D) {
+        // A comparison of `rax` with a number of 32 bits, which the processor widens.
+        if (is_wide == false) {
+            return false;
+        }
+        x64_text_write(writer, STR("cmp %rax, "));
+        x64_text_write_immediate(writer, x64_text_read_signed_32(cursor));
+        return true;
     }
 
+    X64_Text_Operand operand = x64_text_operand_read(cursor, rex);
+    if (operand.is_supported == false) {
+        return false;
+    }
+
+    // The instructions that write the operand of the byte with the register.
+    Str mnemonic = STR_EMPTY;
     switch (opcode) {
     case 0x01:
-        // The operand that is written to is the one of the byte, and the register is added to it.
-        x64_text_write(writer, STR("add "));
+        mnemonic = STR("add ");
+        break;
+    case 0x09:
+        mnemonic = STR("or ");
+        break;
+    case 0x21:
+        mnemonic = STR("and ");
+        break;
+    case 0x29:
+        mnemonic = STR("sub ");
+        break;
+    case 0x31:
+        mnemonic = STR("xor ");
+        break;
+    case 0x39:
+        mnemonic = STR("cmp ");
+        break;
+    case 0x85:
+        mnemonic = STR("test ");
+        break;
+    case 0x89:
+        mnemonic = STR("mov ");
+        break;
+    default:
+        break;
+    }
+
+    if (mnemonic.bytes != NULL) {
+        x64_text_write(writer, mnemonic);
         x64_text_write_operand(writer, operand, is_wide);
         x64_text_write(writer, STR(", "));
         x64_text_write_register(writer, operand.register_number, is_wide);
-        break;
-    case 0x81:
-    case 0x83: {
-        // The three instructions that have a number, of 32 bits after 0x81 and of 8 bits after
-        // 0x83, which the processor widens, and are told apart by the middle bits instead of a
-        // register. The operand is a register.
-        Str mnemonic = STR_EMPTY;
-        if (operand.field == 0) {
-            mnemonic = STR("add ");
-        } else if (operand.field == 5) {
-            mnemonic = STR("sub ");
-        } else if (operand.field == 7) {
-            mnemonic = STR("cmp ");
-        }
+    } else if (opcode == 0x81 || opcode == 0x83) {
+        // The instructions that have a number, of 32 bits after 0x81 and of 8 bits after 0x83,
+        // which the processor widens, and are told apart by the middle bits instead of a
+        // register.
+        static Str const GROUP[8] = {
+            {.bytes = "add ", .length = 4}, {.bytes = "or ", .length = 3},
+            {.bytes = NULL, .length = 0},   {.bytes = NULL, .length = 0},
+            {.bytes = "and ", .length = 4}, {.bytes = "sub ", .length = 4},
+            {.bytes = NULL, .length = 0},   {.bytes = "cmp ", .length = 4},
+        };
         int32_t number = 0;
         if (opcode == 0x81) {
             number = x64_text_read_signed_32(cursor);
         } else {
             number = (int8_t)x64_text_read_byte(cursor);
         }
-        if (mnemonic.bytes == NULL || operand.is_register == false || is_wide == false) {
-            x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED, error_offset);
-            return 0;
+        if (GROUP[operand.field].bytes == NULL || is_wide == false) {
+            return false;
         }
-        x64_text_write(writer, mnemonic);
+        x64_text_write(writer, GROUP[operand.field]);
         x64_text_write_operand(writer, operand, true);
+        if (operand.is_register == false) {
+            x64_text_write(writer, STR(":u64"));
+        }
         x64_text_write(writer, STR(", "));
         x64_text_write_immediate(writer, number);
-        break;
-    }
-    case 0x89:
-        x64_text_write(writer, STR("mov "));
-        x64_text_write_operand(writer, operand, is_wide);
-        x64_text_write(writer, STR(", "));
-        x64_text_write_register(writer, operand.register_number, is_wide);
-        break;
-    case 0x8B:
-        x64_text_write(writer, STR("mov "));
-        x64_text_write_register(writer, operand.register_number, is_wide);
-        x64_text_write(writer, STR(", "));
-        x64_text_write_operand(writer, operand, is_wide);
-        break;
-    case 0x8D:
+    } else if (opcode == 0x88) {
+        // A store of the lowest byte of the register.
         if (operand.is_register) {
-            x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED, error_offset);
-            return 0;
+            return false;
+        }
+        x64_text_write(writer, STR("mov "));
+        x64_text_write_memory(writer, operand);
+        x64_text_write(writer, STR(":u8, "));
+        x64_text_write_register_byte(writer, operand.register_number);
+    } else if (opcode == 0x8B) {
+        x64_text_write(writer, STR("mov "));
+        x64_text_write_register(writer, operand.register_number, is_wide);
+        x64_text_write(writer, STR(", "));
+        x64_text_write_operand(writer, operand, is_wide);
+    } else if (opcode == 0x8D) {
+        if (operand.is_register) {
+            return false;
         }
         x64_text_write(writer, STR("lea "));
         x64_text_write_register(writer, operand.register_number, is_wide);
         x64_text_write(writer, STR(", "));
         x64_text_write_operand(writer, operand, is_wide);
-        break;
-    case 0xFF:
-        // A call through memory, which is how an import is called. The size is the one of an
-        // address, and says that a memory operand is read as one.
-        if (operand.field != 2 || operand.is_register) {
-            x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED, error_offset);
-            return 0;
+    } else if (opcode == 0xF7) {
+        // `neg` and `idiv`, which the middle bits tell apart.
+        if (operand.field == 3) {
+            x64_text_write(writer, STR("neg "));
+        } else if (operand.field == 7) {
+            x64_text_write(writer, STR("idiv "));
+        } else {
+            return false;
+        }
+        x64_text_write_operand(writer, operand, is_wide);
+    } else if (opcode == 0xFF) {
+        // A call through memory, which is how an import is called, or through a register, which
+        // is how a pointer to a procedure is. The size is the one of an address, and says that a
+        // memory operand is read as one.
+        if (operand.field != 2) {
+            return false;
         }
         x64_text_write(writer, STR("call "));
         x64_text_write_operand(writer, operand, true);
-        x64_text_write(writer, STR(":u64"));
-        break;
-    default:
-        assert(false);
-        return 0;
+        if (operand.is_register == false) {
+            x64_text_write(writer, STR(":u64"));
+        }
+    } else {
+        return false;
     }
 
     if (operand.is_rip) {
         x64_text_write_comment(formatter, operand, cursor->position);
     }
-    return 1;
+    return true;
 }
 
 /**
- * Formats a call of a procedure of the code, or the jump over a breakpoint that checks whether a
- * string fits. Both have the distance to go in the instruction. Returns a value that is not
- * zero, or zero after it recorded an error.
+ * Formats a jump, with `condition` for a conditional one and `X64_TEXT_CONDITION_ALWAYS` for
+ * `jmp`, whose distance of `distance_size_bytes`, 1 or 4, follows. The place that it goes to gets a
+ * label, which the first reading of the code marks. Returns false when it goes outside of the
+ * code.
  */
-static size_t x64_text_format_jump(X64_Text_Formatter *formatter, X64_Text_Cursor *cursor) {
+static bool x64_text_format_jump(X64_Text_Formatter *formatter, X64_Text_Cursor *cursor,
+                                 byte condition, size_t distance_size_bytes) {
     X64_Text_Writer *writer = &formatter->writer;
-    size_t error_offset = formatter->text.file_offset + cursor->position - 1;
 
-    // The opcode is the byte before the distance, which is at the start of the instruction.
-    byte opcode = cursor->bytes[cursor->position - 1];
-    if (opcode == 0x76) {
-        int8_t distance = (int8_t)x64_text_read_byte(cursor);
-        size_t target = cursor->position + (size_t)(int64_t)distance;
-        // The jump goes forward, and the code has one place to go to at a time, because the only
-        // jump is over the breakpoint that follows it.
-        if (distance <= 0 || formatter->has_label) {
-            x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED, error_offset);
-            return 0;
-        }
-        formatter->has_label = true;
-        formatter->label_offset = target;
-        x64_text_write(writer, STR("jbe "));
-        x64_text_write_label_target(formatter, (int64_t)target);
-        return 1;
+    int64_t distance = 0;
+    if (distance_size_bytes == 1) {
+        distance = (int8_t)x64_text_read_byte(cursor);
+    } else {
+        distance = x64_text_read_signed_32(cursor);
     }
+    int64_t target = (int64_t)cursor->position + distance;
+    if (target < 0 || (size_t)target >= cursor->length) {
+        return false;
+    }
+    if (formatter->is_marking) {
+        formatter->labels[target] = 1;
+    }
+    if (condition == X64_TEXT_CONDITION_ALWAYS) {
+        x64_text_write(writer, STR("jmp "));
+    } else {
+        x64_text_write(writer, STR("j"));
+        x64_text_write(writer, X64_TEXT_CONDITIONS[condition]);
+        x64_text_write(writer, STR(" "));
+    }
+    x64_text_write_label_target(formatter, target);
+    return true;
+}
 
-    assert(opcode == 0xE8);
+/**
+ * Formats a call of a procedure of the code, which has the distance to it in the instruction.
+ * Returns false when it goes outside of the code.
+ */
+static bool x64_text_format_call(X64_Text_Formatter *formatter, X64_Text_Cursor *cursor) {
     int32_t distance = x64_text_read_signed_32(cursor);
     int64_t target = (int64_t)cursor->position + distance;
     if (target < 0 || (size_t)target >= cursor->length) {
-        x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_MALFORMED, error_offset);
-        return 0;
+        return false;
     }
-    x64_text_write(writer, STR("call "));
+    x64_text_write(&formatter->writer, STR("call "));
     x64_text_write_label_target(formatter, target);
-    return 1;
+    return true;
 }
 
 /**
  * Writes the label of the code that starts at `target_offset`: `.start` for the start of the
  * program, `.name` for a procedure, and for a place inside a procedure, which only a jump has,
- * `.skip_` and the offset. A label that ends a line is followed by a colon by the caller.
+ * `.L` and the offset. A label that ends a line is followed by a colon by the caller.
  */
 static void x64_text_write_label_target(X64_Text_Formatter *formatter, int64_t target_offset) {
     X64_Text_Writer *writer = &formatter->writer;
@@ -701,7 +847,7 @@ static void x64_text_write_label_target(X64_Text_Formatter *formatter, int64_t t
             return;
         }
     }
-    x64_text_write(writer, STR("skip_"));
+    x64_text_write(writer, STR("L"));
     x64_text_write_unsigned(writer, (uint64_t)target_offset);
 }
 
@@ -752,8 +898,9 @@ static void x64_text_write_comment(X64_Text_Formatter *formatter, X64_Text_Opera
 }
 
 /**
- * Reads the byte that says what the operands are, and the displacement that follows it. The
- * operand is not supported when it has a byte that adds an index, which the code does not use.
+ * Reads the byte that says what the operands are, and the displacement that follows it. A base of
+ * `rsp` or `r12` needs the byte that adds an index, which the code only writes to say that there is
+ * none, so an operand with an index is not supported.
  */
 static X64_Text_Operand x64_text_operand_read(X64_Text_Cursor *cursor, byte rex) {
     byte modrm = x64_text_read_byte(cursor);
@@ -777,8 +924,13 @@ static X64_Text_Operand x64_text_operand_read(X64_Text_Cursor *cursor, byte rex)
     // Memory. The other is 4 when a byte follows that adds an index, and 5 with mode 0 when the
     // address is relative to the instruction pointer.
     if (other == 4) {
-        operand.is_supported = false;
-    } else if (mode == 0 && other == 5) {
+        byte sib = x64_text_read_byte(cursor);
+        if ((sib & 0x38) != 0x20 || (sib & 0xC0) != 0 || (sib & 7) == 5) {
+            operand.is_supported = false;
+        }
+        operand.base = (byte)((sib & 7) | ((rex & 0x01) != 0 ? 8 : 0));
+    }
+    if (mode == 0 && other == 5) {
         operand.is_rip = true;
         operand.displacement = x64_text_read_signed_32(cursor);
     } else if (mode == 1) {
@@ -819,6 +971,25 @@ static void x64_text_write_memory(X64_Text_Writer *writer, X64_Text_Operand oper
         x64_text_write_signed(writer, -(int64_t)operand.displacement);
     }
     x64_text_write(writer, STR("]"));
+}
+
+/**
+ * Writes an operand of one byte: the lowest byte of a register, or memory with the size of a byte.
+ */
+static void x64_text_write_operand_byte(X64_Text_Writer *writer, X64_Text_Operand operand) {
+    if (operand.is_register) {
+        x64_text_write_register_byte(writer, operand.base);
+    } else {
+        x64_text_write_memory(writer, operand);
+        x64_text_write(writer, STR(":u8"));
+    }
+}
+
+static void x64_text_write_register_byte(X64_Text_Writer *writer, byte register_number) {
+    assert(register_number < X64_TEXT_REGISTER_COUNT);
+
+    x64_text_write(writer, STR("%"));
+    x64_text_write(writer, X64_TEXT_REGISTERS_BYTE[register_number]);
 }
 
 static void x64_text_write_register(X64_Text_Writer *writer, byte register_number,
@@ -888,7 +1059,7 @@ static void x64_text_write(X64_Text_Writer *writer, Str text) {
     assert(writer->length <= writer->capacity);
     assert(text.bytes != NULL);
 
-    if (writer->is_overflowed) {
+    if (writer->is_overflowed || writer->is_silent) {
         return;
     }
     if (text.length > writer->capacity - writer->length) {

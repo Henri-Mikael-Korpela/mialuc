@@ -1,6 +1,8 @@
 #ifndef MIALU_X64_H
 #define MIALU_X64_H
 
+#include <stdint.h>
+
 #include <mialu/array_slice.h>
 #include <mialu/ast.h>
 #include <mialu/common_types.h>
@@ -8,6 +10,10 @@
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
+    // An operand of `+`, `-`, `*` or `/`, or the variable or the value of an assignment such as
+    // `x += 1`, is not an `Int`. The subject is the first name or string of the operand, or the
+    // name of the definition that it is in.
+    X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
     // The number of arguments of a call is not the number of parameters of the procedure. The
     // subject is the name of the procedure.
     X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH,
@@ -16,28 +22,35 @@ typedef enum {
     X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH,
     // The value of a call of a procedure that returns nothing. The subject is its name.
     X64_BUILD_STATUS_CALL_RESULT_MISSING,
+    // The operands of a comparison are not two `Int` values, or not two `Bool` values for `==` and
+    // `not=`. The subject is the first name or string of the comparison.
+    X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
     // More constants than the build has room to keep, see `X64_CONSTANT_COUNT_MAX`. The subject
     // is the name of the first one that does not fit.
     X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED,
+    // An expression that is nested deeper than `X64_EXPRESSION_DEPTH_MAX`. The subject is the name
+    // of the definition that has it.
+    X64_BUILD_STATUS_EXPRESSION_TOO_DEEP,
     // A procedure declared in a `foreign js ->` block. A program for the processor has no
     // JavaScript to import from, only the C library. The subject is the name of the procedure.
     X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED,
+    // An operand of `and`, `or` or `not` is not a `Bool`. The subject is the first name or string
+    // of the operand, or the name of the definition that it is in.
+    X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
     // There is no procedure called `main`, or it is not `main :: proc() Int ->`. The subject is
     // `main` in the source in the second case, and has `bytes` NULL in the first, which is about
     // no place in the source.
     X64_BUILD_STATUS_MAIN_INVALID,
     X64_BUILD_STATUS_OK,
     X64_BUILD_STATUS_OUTPUT_TOO_LARGE,
-    // A procedure with more parameters than the registers that carry the arguments of a call, see
-    // `X64_PARAMETER_COUNT_MAX`. The subject is the name of the procedure.
-    X64_BUILD_STATUS_PARAMETER_COUNT_UNSUPPORTED,
     // A `return` in a procedure that returns nothing. The subject is the name of the procedure.
     X64_BUILD_STATUS_RETURN_TYPE_MISSING,
     // A returned value of another type than the procedure returns. The subject is the name of
     // the procedure.
     X64_BUILD_STATUS_RETURN_TYPE_MISMATCH,
-    // A type of a parameter or of a result other than `Int` and `C_Str`. The subject is the
-    // text of the type, or the name of the parameter if the type is not a name.
+    // A type that the target does not have, of a parameter, a result or a variable. The subject is
+    // the text of the type, or the name of the parameter or the variable if the type is not a
+    // name.
     X64_BUILD_STATUS_TYPE_UNSUPPORTED,
     // Something that the target does not build yet. The subject is the name of the definition
     // that has it.
@@ -48,15 +61,46 @@ typedef enum {
 } X64_Build_Status;
 
 enum {
-    // The registers that carry arguments in the calling convention of Windows on x64 are `rcx`,
-    // `rdx`, `r8` and `r9`. The target passes no argument on the stack, so no procedure and no call
-    // has more.
-    X64_PARAMETER_COUNT_MAX = 4,
     // The number of constants, the procedures, foreign ones too, and the strings, that a program
     // can have. The build keeps one record for each in a fixed array, so that it needs no
     // allocation.
     X64_CONSTANT_COUNT_MAX = 1024,
+    // The deepest expression that is built. The build walks an expression with the path from its
+    // root in a fixed array instead of recursing, and it is the bound of the analysis of constants
+    // and of the WebAssembly target as well, so that the targets accept the same expressions.
+    X64_EXPRESSION_DEPTH_MAX = 1024,
 };
+
+// What kind of value a type is. Alphabetical, because nothing depends on the order.
+// `X64_TYPE_KIND_NONE` is the type of a call of a procedure that returns nothing, and of what the
+// target does not build.
+typedef enum {
+    X64_TYPE_KIND_BOOL,
+    X64_TYPE_KIND_C_STR,
+    X64_TYPE_KIND_INT,
+    X64_TYPE_KIND_NONE,
+} X64_Type_Kind;
+
+/**
+ * A type of the target. Only the kind says anything yet, but a type is a struct of its own, so that
+ * the types that are made of other types fit in it later.
+ */
+typedef struct {
+    X64_Type_Kind kind;
+} X64_Type;
+
+/**
+ * What the build works out about a node of the tree before it writes the code of a procedure,
+ * which the code and the debug information both read. The build keeps one for each node in the
+ * buffer that the caller gives it, so that it needs no allocation. `type` is the type of a
+ * variable, for the `AST_NODE_TYPE_VARIABLE_DEFINITION` that defines it, and `frame_offset` is
+ * where its value is in the frame of the procedure: at `rbp - frame_offset`. The entries of other
+ * nodes are not used.
+ */
+typedef struct {
+    X64_Type type;
+    uint32_t frame_offset;
+} X64_Node_Layout;
 
 /**
  * Where a procedure that has a body starts. `offset` is counted from the start of the code, which
@@ -126,21 +170,29 @@ typedef struct {
  * Builds an executable for Windows on x64 (a PE32+ file for the console) from the syntax tree below
  * `root`, which must be the `AST_NODE_TYPE_MODULE` node of a successful `parse`. `nodes` holds
  * `Ast_Node` elements, and `bindings` and `constants` hold the `Semantic_Binding` and the
- * `Constant_Value` elements that `semantic_analyze` made for the same tree. The file is written to
+ * `Constant_Value` elements that `semantic_analyze` made for the same tree. `layout_buffer` holds
+ * an `X64_Node_Layout` for each node, which the build fills. The file is written to
  * `output_buffer`, which holds `byte` elements. The symbols are written to `symbol_buffer`, which
  * holds at least `X64_CONSTANT_COUNT_MAX` `X64_Symbol` elements, so that the code can be shown with
  * the names of its procedures.
  *
  * Every procedure is machine code that follows the calling convention of Windows on x64, so that
- * the C library can be called with it. The program starts in a few instructions of its own that
- * call `main`, which has to be `main :: proc() Int ->`, and pass its result to `exit` of the C
+ * the C library can be called with it: the first four words of the arguments are in `rcx`, `rdx`,
+ * `r8` and `r9`, the others on the stack above the 32 bytes that the caller makes for the callee to
+ * keep the four in, and the result is in `rax`. The program starts in a few instructions of its own
+ * that call `main`, which has to be `main :: proc() Int ->`, and pass its result to `exit` of the C
  * library, so that the output of the program is flushed before it ends and its result is the exit
  * code of the process.
  *
- * `Int` is a 64-bit integer, and `C_Str` is the 64-bit address of bytes that end with a zero. A
- * string literal is untyped, and the target does not build a `Str`, so it is only accepted where a
- * `C_Str` is wanted, which it then becomes, and as the argument of `str_to_c_str`, which makes the
- * `C_Str` too. A constant that is a number is loaded as its value, which the analysis worked out.
+ * `Int` is a 64-bit integer, `Bool` is 0 or 1 in 64 bits, and `C_Str` is the 64-bit address of
+ * bytes that end with a zero. A string literal is untyped, and the target does not build a `Str`,
+ * so it is only accepted where a `C_Str` is wanted, which it then becomes, and as the argument of
+ * `str_to_c_str`, which makes the `C_Str` too. A constant that is a number or a truth value is
+ * loaded as its value, which the analysis worked out.
+ *
+ * The values of an expression are kept in the frame of its procedure while the expression is
+ * worked out, so that the stack pointer does not move between the start and the end of a
+ * procedure, and every call is made with the stack as the calling convention wants it.
  *
  * A foreign procedure that a `foreign libc ->` block declares is imported from `msvcrt.dll`, which
  * every installation of Windows has, by the name of the procedure. The compiler trusts the
@@ -153,15 +205,13 @@ typedef struct {
  * to find the frame of the caller of each procedure. The code is the same with it and without it,
  * so a program that is debugged runs as it does without a debugger. With NULL the file has none.
  *
- * Only a small part of the language is built: procedures with up to `X64_PARAMETER_COUNT_MAX`
- * parameters of the types `Int` and `C_Str`, whose statements are calls, returns, definitions of
- * variables of those types and assignments to them with `=`, and whose expressions are constants
- * that are numbers, strings where a `C_Str` is wanted, parameters, variables, and calls with such
- * arguments. The rest is rejected with a status other than `X64_BUILD_STATUS_OK`, so that nothing
- * is built wrongly.
+ * The program is checked for the types of its values as it is built, and a program that the
+ * target does not build is rejected with a status other than `X64_BUILD_STATUS_OK`, so that
+ * nothing is built wrongly.
  */
 X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice constants,
-                           Ast_Node_Index root, Array_Slice output_buffer,
-                           Array_Slice symbol_buffer, X64_Debug const *debug);
+                           Ast_Node_Index root, Array_Slice layout_buffer,
+                           Array_Slice output_buffer, Array_Slice symbol_buffer,
+                           X64_Debug const *debug);
 
 #endif

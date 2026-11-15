@@ -34,13 +34,15 @@ typedef struct {
  * `x64_build` wrote, as assembly: one instruction on a line, the operand that is written to first, registers with a `%`
  * in front, memory operands as `[base + displacement]`, labels as `.name:` and comments after
  * `//`. `symbols` holds the `X64_Symbol` elements that `x64_build` returned, which name the labels
- * of the procedures. The text is written to `output_buffer`, which holds `byte` elements.
+ * of the procedures. `label_buffer` holds a `byte` for each byte of the code, at least, in which
+ * the places that a jump goes to are marked, so that each gets a label, which is `.L` and the place
+ * in the code. The text is written to `output_buffer`, which holds `byte` elements.
  *
  * The formatter knows the instructions that `x64_build` writes, so it is updated together with it.
  * It is a reader of what the compiler wrote, not a disassembler for any program: it rejects what
  * it does not know.
  */
 X64_Text_Result x64_text_format(Array_Slice executable, Array_Slice symbols,
-                                Array_Slice output_buffer);
+                                Array_Slice label_buffer, Array_Slice output_buffer);
 
 #endif

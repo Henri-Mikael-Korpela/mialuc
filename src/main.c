@@ -90,6 +90,11 @@ typedef struct {
     Array_Slice constants;
     Array_Slice output;
     Array_Slice output_text;
+    // The places of the code of the x64 target that a jump goes to, one byte for each byte of the
+    // program, which the assembly gives labels.
+    Array_Slice labels;
+    // What the x64 target works out about each node: the types and the places of the variables.
+    Array_Slice layouts;
     // The procedures of the program that the x64 target builds, which name its assembly.
     Array_Slice symbols;
     // The places of the code that the debug information of the x64 target is about, and the
@@ -176,6 +181,12 @@ int main(int argc, char *argv[]) {
                                    OUTPUT_SIZE_BYTES_MAX),
         .output_text = array_slice_make(malloc(OUTPUT_TEXT_SIZE_BYTES_MAX * sizeof(byte)),
                                         OUTPUT_TEXT_SIZE_BYTES_MAX),
+        // The code is part of the program, so it is never larger than the program.
+        .labels = array_slice_make(malloc(OUTPUT_SIZE_BYTES_MAX * sizeof(byte)),
+                                   OUTPUT_SIZE_BYTES_MAX),
+        // And one layout of the x64 target for each node.
+        .layouts = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(X64_Node_Layout)),
+                                    TOKEN_COUNT_MAX),
         .symbols = array_slice_make(malloc(X64_CONSTANT_COUNT_MAX * sizeof(X64_Symbol)),
                                     X64_CONSTANT_COUNT_MAX),
         // As many nodes as tokens, see above, and the most rows that the build notes for each.
@@ -191,7 +202,9 @@ int main(int argc, char *argv[]) {
         buffers.code_tokens.elements == NULL || buffers.nodes.elements == NULL ||
         buffers.bindings.elements == NULL || buffers.constants.elements == NULL ||
         buffers.output.elements == NULL || buffers.output_text.elements == NULL ||
-        buffers.symbols.elements == NULL || buffers.debug_rows.elements == NULL ||
+        buffers.labels.elements == NULL ||
+        buffers.layouts.elements == NULL || buffers.symbols.elements == NULL ||
+        buffers.debug_rows.elements == NULL ||
         buffers.source_path.elements == NULL) {
         fprintf(stderr, "Out of memory.\n");
     } else {
@@ -201,6 +214,8 @@ int main(int argc, char *argv[]) {
     free(buffers.source_path.elements);
     free(buffers.debug_rows.elements);
     free(buffers.symbols.elements);
+    free(buffers.layouts.elements);
+    free(buffers.labels.elements);
     free(buffers.output_text.elements);
     free(buffers.output.elements);
     free(buffers.constants.elements);
@@ -513,7 +528,8 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
     }
     X64_Build_Result build_result =
         x64_build(parse_result.nodes, semantic_result.bindings, semantic_result.constants,
-                  parse_result.root, buffers->output, buffers->symbols, build_debug);
+                  parse_result.root, buffers->layouts, buffers->output, buffers->symbols,
+                  build_debug);
     if (build_result.status != X64_BUILD_STATUS_OK) {
         main_run_command_report_x64_error(path, source, build_result);
         return 1;
@@ -523,7 +539,7 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
         // The assembly is formatted from the executable file rather than written from the syntax
         // tree, so that it always shows exactly what the build wrote.
         X64_Text_Result text_result = x64_text_format(build_result.bytes, build_result.symbols,
-                                                      buffers->output_text);
+                                                      buffers->labels, buffers->output_text);
         if (text_result.status != X64_TEXT_STATUS_OK) {
             main_run_command_report_x64_text_error(path, text_result);
             return 1;
@@ -946,6 +962,10 @@ static void main_run_command_report_x64_error(char const *path, Str source,
     // The cast is needed because `%.*s` takes an `int` precision.
     int subject_length = (int)result.subject.length;
     switch (result.status) {
+    case X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: an operand of arithmetic at '%.*s' is not an Int.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: the call of '%.*s' has another number of arguments than the "
                 "procedure has parameters.\n", path, position.line, position.column,
@@ -960,14 +980,29 @@ static void main_run_command_report_x64_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' returns nothing, so its call has no value.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the operands of the comparison at '%.*s' are not two values "
+                "that can be compared with its operator.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED:
         fprintf(stderr, "%s:%zu:%zu: more than %d constants, procedures and strings.\n", path,
                 position.line, position.column, X64_CONSTANT_COUNT_MAX);
+        break;
+    case X64_BUILD_STATUS_EXPRESSION_TOO_DEEP:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' has an expression nested deeper than %d.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes,
+                X64_EXPRESSION_DEPTH_MAX);
         break;
     case X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' is declared in a 'foreign js' "
                 "block, and the x64 target imports from 'foreign libc'.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: an operand of 'and', 'or' or 'not' at '%.*s' is not a "
+                "Bool.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case X64_BUILD_STATUS_MAIN_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' must be 'main :: proc() Int ->', a procedure without "
@@ -978,11 +1013,6 @@ static void main_run_command_report_x64_error(char const *path, Str source,
     case X64_BUILD_STATUS_OUTPUT_TOO_LARGE:
         assert(false);
         break;
-    case X64_BUILD_STATUS_PARAMETER_COUNT_UNSUPPORTED:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' has more than %d parameters, which the x64 target "
-                "does not support.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes, X64_PARAMETER_COUNT_MAX);
-        break;
     case X64_BUILD_STATUS_RETURN_TYPE_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: the value that '%.*s' returns is not of its return type.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
@@ -992,9 +1022,8 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 path, position.line, position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_TYPE_UNSUPPORTED:
-        fprintf(stderr, "%s:%zu:%zu: type '%.*s' is not supported by the x64 target, which has "
-                "Int and C_Str.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
+        fprintf(stderr, "%s:%zu:%zu: type '%.*s' is not supported by the x64 target.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' has something that the x64 target does not build "
