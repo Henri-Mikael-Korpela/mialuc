@@ -62,6 +62,9 @@ typedef enum {
     X64_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID,
     X64_BUILD_STATUS_OK,
     X64_BUILD_STATUS_OUTPUT_TOO_LARGE,
+    // The first number or the end of the range of a for statement is not an `Int`. The subject is
+    // its first name or string, or the name of the definition that it is in.
+    X64_BUILD_STATUS_RANGE_TYPE_INVALID,
     // A `return` in a procedure that returns nothing. The subject is the name of the procedure.
     X64_BUILD_STATUS_RETURN_TYPE_MISSING,
     // A returned value of another type than the procedure returns. The subject is the name of

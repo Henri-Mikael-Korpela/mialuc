@@ -63,6 +63,7 @@
     - [Procedures and calls](#procedures-and-calls)
     - [Operators](#operators-1)
     - [Control flow](#control-flow)
+    - [Loops and jumps](#loops-and-jumps)
     - [What is rejected](#what-is-rejected)
     - [Debugging and temporary storage](#debugging-and-temporary-storage)
 - [Possible future features](#possible-future-features)
@@ -2022,9 +2023,15 @@ An if statement is its conditions and blocks one after the other. A condition is
 
 A match statement works out its subject once and stores it in a place of its own in the frame, like a variable, and then each case compares that place with its pattern: a number is `cmp` with the number and `je` to the block of the case, and a range is two comparisons, `jl` past the range when the subject is below its first number and `jle` to the block when it is not above its last, which is the signed order of an `Int`. Cases that share a block jump to it from each of their comparisons, and when none of them matches, a `jmp` goes over the block to the next case. The default case compares nothing. So the cases are tried in order, and at most one block runs, after which a `jmp` goes to the end of the statement. The subject of a match is an `Int` for now, and the patterns are checked as the language says: a pattern is a constant of the type of the subject, a range has a number in it, and no two cases match a value in common.
 
+#### Loops and jumps
+
+A for statement over a range stores the first number in its iterator and the end in the word after it, both in a place of the statement in the frame, so the end is read once, and the iterator is a variable that a debugger finds there. Then comes the start of the loop: a test that leaves it with `jge` when the iterator is not below the end, or with `jg` above it for an inclusive range, the statements of the block, and the step: `add` of 1 to the iterator and a `jmp` back to the test. For an inclusive range the loop leaves with `je` before the step when the iterator is the end, so a range that ends at the largest `Int` ends instead of wrapping around. An infinite loop is its block and a `jmp` back to its start, and a scope is its block. A `break` is a `jmp` to the end of the statement that it leaves, a loop, a scope or a labeled if statement, and a `continue` is a `jmp` to the step of its loop, so the step is not skipped. A label gives a statement a name for the jumps only, and has no code.
+
+A `defer` has no code where it is. The code of its deferred statement is written again at each place where its block is left: before the end of the block, and before each `break`, `continue` and `return` below the `defer` that leaves the block. A jump writes the deferred statements of each block that it leaves, the innermost block first, and in each block the last `defer` first, and then itself. A `return` works out its value first and keeps it on the stack of values while the deferred statements run, which leave the stack as deep as they found it, and then loads it to `rax` and returns. A block whose last statement is a jump writes no deferred statements at its end, which is never reached. The deferred statement has a line of its own for a debugger at each place, the line of the statement after `defer`.
+
 #### What is rejected
 
-The target builds procedures whose parameters, results and variables are of the types `Int`, `Bool` and `C_Str`, whose statements are calls, `return`, definitions of variables and assignments to them, if statements and match statements of an `Int`, and whose expressions are constants that are numbers, truth values and strings where a `C_Str` is wanted, parameters, variables, the arithmetic, comparison and logical operators, and calls of procedures and of `str_to_c_str`. The rest is rejected, and the target also rejects a program when:
+The target builds procedures whose parameters, results and variables are of the types `Int`, `Bool` and `C_Str`, whose statements are calls, `return`, definitions of variables and assignments to them, if statements, match statements of an `Int`, for statements over a range, infinite loops, scopes, labels, `break`, `continue` and `defer`, and whose expressions are constants that are numbers, truth values and strings where a `C_Str` is wanted, parameters, variables, the arithmetic, comparison and logical operators, and calls of procedures and of `str_to_c_str`. The rest is rejected, and the target also rejects a program when:
 
 - an operand of `+`, `-`, `*` or `/` is not an `Int`, or the variable or the value of `+=`, `-=`, `*=` or `/=` is not an `Int`,
 - the operands of a comparison are not both `Int`, or not both `Bool` for `==` and `not=`,
@@ -2033,6 +2040,7 @@ The target builds procedures whose parameters, results and variables are of the 
 - a procedure with no return type has a `return` statement, or the value that a procedure returns is not of its return type,
 - the value of a variable, or the value that is assigned to it, is not of the type of the variable,
 - the condition of an if statement is not a `Bool`,
+- the first number or the end of the range of a for statement is not an `Int`, or a for statement goes through the elements of an array, which the target does not build yet,
 - the subject of a match statement is not an `Int`, a pattern is not a constant of its type, a range is empty, two cases match a value in common, or the match has the attribute `partial`, which is for an enum,
 - an expression is nested deeper than 1024 operators and operands.
 

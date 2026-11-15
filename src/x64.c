@@ -330,16 +330,30 @@ typedef struct {
 
 /**
  * A list of statements that is being written, or a statement that has blocks, see
- * `x64_statements_write`. `node` is the procedure for its body, a block, an if statement or a match
- * statement, and `next` is its child that is written next. `end_jumps` are the jumps to the end of
- * an if statement or a match statement, and `false_jumps` the jumps of the condition of its branch
- * that is being written, which go to the next branch when the condition does not hold.
+ * `x64_statements_write`. `node` is the procedure for its body, a block, a `defer`, whose one
+ * statement is its list, a statement that has a block, or a jump that writes the deferred
+ * statements of the blocks that it leaves, and `next` is its child that is written next.
+ * `end_jumps` are the jumps to the end of an if statement or a match statement, and `false_jumps`
+ * the jumps of the condition of its branch that is being written, which go to the next branch when
+ * the condition does not hold.
  */
 typedef struct {
     Ast_Node_Index node;
     Ast_Node_Index next;
+    // The deferred statements of a list that are still to be written when it is left are its
+    // `defer`s before this node, the last one first, which is `AST_NODE_INDEX_NONE`, after every
+    // node, until the first one is written. For a jump it is about the list at `exit_level`, and
+    // starts at the jump, which comes after every `defer` that it has passed.
+    Ast_Node_Index defer_bound;
     uint32_t end_jumps;
     uint32_t false_jumps;
+    // The jumps of the `continue`s of a loop, which go to where it goes on with its next pass.
+    uint32_t continue_jumps;
+    // The place in the code of the start of a loop, which each pass goes back to.
+    uint32_t loop_start;
+    // For a jump, the frame of the list whose deferred statements are written, which goes down
+    // from the list that the jump is in to the one that it leaves.
+    uint32_t exit_level;
 } X64_Statement_Frame;
 
 /**
@@ -404,6 +418,10 @@ typedef struct {
     // The definition of the procedure that is being written, which a message about it names.
     Ast_Node_Index definition;
     X64_Build_Status status;
+    // The place of the start of the loop that was started last, and the jump that leaves it from
+    // its test, which its frame takes over, see `x64_for_start_write`.
+    uint32_t loop_start;
+    uint32_t loop_exit_jumps;
     // Whether the procedure that is being written makes temporary strings, which it gives back
     // when it returns.
     bool is_temporary_used;
@@ -441,6 +459,11 @@ static bool         x64_condition_write          (X64_Builder *builder,
 static bool         x64_constant_write           (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static bool         x64_constants_collect        (X64_Builder *builder);
+static Ast_Node_Index x64_defer_last_before      (X64_Builder const *builder, Ast_Node_Index list,
+                                                  Ast_Node_Index bound);
+static Ast_Node_Index x64_defer_next             (X64_Builder *builder,
+                                                  X64_Statement_Frame const *frames,
+                                                  X64_Statement_Frame *frame);
 static uint32_t     x64_debug_address_rva        (X64_Builder const *builder, size_t code_offset);
 static X64_Debug_Cursor x64_debug_cursor_move    (Str source, X64_Debug_Cursor cursor,
                                                   size_t offset);
@@ -473,14 +496,22 @@ static bool         x64_expression_write         (X64_Builder *builder, Ast_Node
 static bool         x64_fail                     (X64_Builder *builder, X64_Build_Status status,
                                                   Str subject);
 static bool         x64_fail_unsupported         (X64_Builder *builder);
+static bool         x64_for_start_write          (X64_Builder *builder, Ast_Node_Index statement);
 static void         x64_headers_write            (X64_Builder *builder, size_t text_size_bytes);
 static void         x64_image_write              (X64_Builder *builder);
 static bool         x64_is_constant              (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
+static void         x64_jump_back_write          (X64_Builder *builder, uint32_t target);
+static void         x64_jump_end_write           (X64_Builder *builder,
+                                                  X64_Statement_Frame *frames, size_t frame_count,
+                                                  Ast_Node_Index jump);
 static void         x64_jump_write               (X64_Builder *builder, byte condition,
                                                   uint32_t *jumps);
 static void         x64_jumps_resolve            (X64_Builder *builder, uint32_t jumps);
 static X64_Layout   x64_layout_make              (X64_Builder const *builder);
+static bool         x64_list_statement_write     (X64_Builder *builder, Ast_Node_Index procedure,
+                                                  Ast_Node_Index statement,
+                                                  Ast_Node_Index *pushed);
 static bool         x64_main_check               (X64_Builder *builder);
 static Ast_Node_Index x64_match_case_write       (X64_Builder *builder,
                                                   X64_Statement_Frame *frame,
@@ -488,6 +519,7 @@ static Ast_Node_Index x64_match_case_write       (X64_Builder *builder,
 static X64_Match_Pattern x64_match_pattern       (X64_Builder const *builder, X64_Type subject,
                                                   Ast_Node_Index pattern);
 static bool         x64_match_start_write        (X64_Builder *builder, Ast_Node_Index match);
+static bool         x64_node_type_is_jump        (Ast_Node_Type node_type);
 static bool         x64_operation_write          (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static size_t       x64_parameter_count          (X64_Builder const *builder,
@@ -505,12 +537,13 @@ static bool         x64_procedure_write          (X64_Builder *builder, size_t p
 static void         x64_rdata_write              (X64_Builder *builder);
 static X64_Type     x64_return_type              (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
-static bool         x64_return_write             (X64_Builder *builder, Ast_Node_Index procedure,
+static bool         x64_return_value_write       (X64_Builder *builder, Ast_Node_Index procedure,
                                                   Ast_Node_Index statement);
 static int32_t      x64_stack_displacement       (X64_Builder const *builder, size_t start,
                                                   size_t word_count);
 static void         x64_stack_pop                (X64_Builder *builder, size_t word_count);
 static int32_t      x64_stack_push               (X64_Builder *builder, size_t word_count);
+static X64_Statement_Frame x64_statement_frame_make(Ast_Node_Index node, Ast_Node_Index next);
 static bool         x64_statement_write          (X64_Builder *builder, Ast_Node_Index procedure,
                                                   Ast_Node_Index statement);
 static bool         x64_statements_write         (X64_Builder *builder, Ast_Node_Index procedure);
@@ -731,6 +764,8 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
         .stack_words = 0,
         .stack_words_max = 0,
         .outgoing_words_max = 0,
+        .loop_start = 0,
+        .loop_exit_jumps = X64_JUMP_NONE,
         .text_rva = 0,
         .data_rva = 0,
         .module = root,
@@ -1126,12 +1161,14 @@ static bool x64_code_write(X64_Builder *builder) {
 /**
  * Works out the frame of `procedure` before its code is written: the type of each of its variables
  * and the place of its value, in the order of the source, which `builder->layouts` keeps at the
- * node of the definition. A match statement has a place too, for its subject. A variable takes the
- * words of its type, see `x64_type_word_count`, and has a place of its own also when it is in a block, so that no two variables share memory and a
- * debugger finds each at one place. A variable without a type takes the type of its value, which
- * only uses variables above it, whose types are worked out already. The places start below the
- * fixed part of the frame, see `X64_FRAME_FIXED_SIZE_BYTES`, and their size is
- * `builder->locals_size_bytes`, below which the stack of values starts.
+ * node of the definition. A match statement has a place too, for its subject, and a for statement
+ * for its iterator, which is a variable, and for the end of its range after it. A variable takes
+ * the words of its type, see `x64_type_word_count`, and has a place of its own also when it is in a
+ * block, so that no two variables share memory and a debugger finds each at one place. A variable
+ * without a type takes the type of its value, which only uses variables above it, whose types are
+ * worked out already. The places start below the fixed part of the frame, see
+ * `X64_FRAME_FIXED_SIZE_BYTES`, and their size is `builder->locals_size_bytes`, below which the
+ * stack of values starts.
  */
 static void x64_procedure_layout(X64_Builder *builder, Ast_Node_Index procedure) {
     assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
@@ -1151,6 +1188,11 @@ static void x64_procedure_layout(X64_Builder *builder, Ast_Node_Index procedure)
         } else if (node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
             // The subject is worked out once, and kept for the cases to compare.
             type = x64_expression_type(builder, ast_match_subject(builder->nodes, node));
+        } else if (node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            // The iterator is an `Int`, and the end of the range, which is read once, is kept in
+            // the word after it.
+            type = x64_type_make(X64_TYPE_KIND_INT);
+            size_bytes += X64_WORD_SIZE_BYTES;
         } else {
             continue;
         }
@@ -1265,14 +1307,17 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
 
 /**
  * Writes the statements of the body of `procedure`, without recursion: a frame is kept for each
- * list of statements that is being written, which is the body or a block, and for each statement
- * that has blocks, an if statement or a match statement. A statement that has no blocks is written
- * at once. A frame is taken off when its list or its statement has nothing more to write, and then
- * the statement that the block belongs to writes what comes between its blocks.
+ * list of statements that is being written, which is the body, a block or the one statement of a
+ * `defer`, for each statement that has blocks, an if statement, a match statement, a for statement,
+ * an infinite loop or a scope, and for a `return`, a `break` or a `continue` while the deferred
+ * statements of the blocks that it leaves are written. A statement that has no blocks is written at
+ * once. A frame is taken off when it has nothing more to write, and then the statement that a block
+ * belongs to writes what comes after the block.
  *
  * A jump goes forward to a place that is not known when it is written, so its distance of 32 bits,
  * which is as long whatever the distance is, is filled in when the place is reached. The jumps that
- * go to one place are a chain, see `x64_jump_write`. Returns false after it recorded an error.
+ * go to one place are a chain, see `x64_jump_write`. A deferred statement is written again at each
+ * place where its block is left, see `x64_defer_next`. Returns false after it recorded an error.
  */
 static bool x64_statements_write(X64_Builder *builder, Ast_Node_Index procedure) {
     assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
@@ -1286,62 +1331,80 @@ static bool x64_statements_write(X64_Builder *builder, Ast_Node_Index procedure)
 
     X64_Statement_Frame frames[X64_STATEMENT_DEPTH_MAX];
     size_t frame_count = 1;
-    frames[0] = (X64_Statement_Frame){
-        .node = procedure,
-        .next = first,
-        .end_jumps = X64_JUMP_NONE,
-        .false_jumps = X64_JUMP_NONE,
-    };
+    frames[0] = x64_statement_frame_make(procedure, first);
 
-    // Every node is entered once and left once, and a frame is made for a node at most once, so
-    // twice the number of nodes steps are enough.
-    for (size_t step = 0; step < builder->node_count * 2 + 2 && frame_count > 0; step += 1) {
+    // A node is entered once and left once, a deferred statement is written once for each of the
+    // jumps and the ends of blocks that come after it, and each of those finds every `defer` that
+    // it runs with one step. So the steps are bounded by the nodes for each node.
+    size_t step_max = (builder->node_count + 2) * (builder->node_count + 2);
+    for (size_t step = 0; step < step_max && frame_count > 0; step += 1) {
         X64_Statement_Frame *frame = &frames[frame_count - 1];
         Ast_Node_Type node_type = builder->nodes[frame->node].node_type;
+        bool is_list = node_type == AST_NODE_TYPE_BLOCK || node_type == AST_NODE_TYPE_PROCEDURE ||
+                       node_type == AST_NODE_TYPE_DEFER_STATEMENT;
+        bool is_jump = node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
+                       node_type == AST_NODE_TYPE_CONTINUE_STATEMENT ||
+                       node_type == AST_NODE_TYPE_RETURN_STATEMENT;
 
-        if (frame->next == AST_NODE_INDEX_NONE) {
-            // The list or the statement ends here, so the jumps to its end come here, and the
-            // statement that a block is of goes on after it.
-            x64_jumps_resolve(builder, frame->false_jumps);
-            x64_jumps_resolve(builder, frame->end_jumps);
-            Ast_Node_Index finished = frame->node;
-            frame_count -= 1;
-            if (frame_count > 0 && node_type == AST_NODE_TYPE_BLOCK) {
-                x64_block_end(builder, &frames[frame_count - 1], finished);
-            }
-            continue;
-        }
-
-        Ast_Node_Index child = frame->next;
         Ast_Node_Index pushed = AST_NODE_INDEX_NONE;
-        bool is_ok = true;
-        if (node_type == AST_NODE_TYPE_IF_STATEMENT) {
-            frame->next = builder->nodes[child].next_sibling;
-            if (builder->nodes[child].node_type == AST_NODE_TYPE_BLOCK) {
-                pushed = child;
-            } else {
-                is_ok = x64_condition_write(builder, child, &frame->false_jumps);
+        if (is_jump) {
+            // The deferred statements of the blocks that the jump leaves come first, the innermost
+            // block first, and then the jump itself.
+            pushed = x64_defer_next(builder, frames, frame);
+            if (pushed == AST_NODE_INDEX_NONE) {
+                Ast_Node_Index jump = frame->node;
+                frame_count -= 1;
+                x64_jump_end_write(builder, frames, frame_count, jump);
+                continue;
             }
-        } else if (node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
-            pushed = x64_match_case_write(builder, frame, child);
-            is_ok = pushed != AST_NODE_INDEX_NONE;
+        } else if (frame->next == AST_NODE_INDEX_NONE) {
+            // A block that ends with a jump never gets to its end, and has written its deferred
+            // statements already.
+            if (is_list) {
+                Ast_Node_Index last = builder->nodes[frame->node].last_child;
+                if (last != AST_NODE_INDEX_NONE &&
+                    x64_node_type_is_jump(builder->nodes[last].node_type) == false) {
+                    pushed = x64_defer_next(builder, frames, frame);
+                }
+            }
+            if (pushed == AST_NODE_INDEX_NONE) {
+                // The list or the statement ends here, so the jumps to its end come here, and the
+                // statement that a block is of goes on after it.
+                x64_jumps_resolve(builder, frame->false_jumps);
+                x64_jumps_resolve(builder, frame->end_jumps);
+                Ast_Node_Index finished = frame->node;
+                frame_count -= 1;
+                if (frame_count > 0 && node_type == AST_NODE_TYPE_BLOCK) {
+                    x64_block_end(builder, &frames[frame_count - 1], finished);
+                }
+                continue;
+            }
         } else {
-            // A list of statements: the body or a block.
-            frame->next = builder->nodes[child].next_sibling;
-            x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LINE,
-                              builder->nodes[child].source_offset);
-            Ast_Node_Type child_type = builder->nodes[child].node_type;
-            if (child_type == AST_NODE_TYPE_IF_STATEMENT) {
-                pushed = child;
-            } else if (child_type == AST_NODE_TYPE_MATCH_STATEMENT) {
-                is_ok = x64_match_start_write(builder, child);
-                pushed = child;
+            Ast_Node_Index child = frame->next;
+            bool is_ok = true;
+            if (node_type == AST_NODE_TYPE_IF_STATEMENT) {
+                frame->next = builder->nodes[child].next_sibling;
+                if (builder->nodes[child].node_type == AST_NODE_TYPE_BLOCK) {
+                    pushed = child;
+                } else {
+                    is_ok = x64_condition_write(builder, child, &frame->false_jumps);
+                }
+            } else if (node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+                pushed = x64_match_case_write(builder, frame, child);
+                is_ok = pushed != AST_NODE_INDEX_NONE;
+            } else if (is_list) {
+                frame->next = builder->nodes[child].next_sibling;
+                is_ok = x64_list_statement_write(builder, procedure, child, &pushed);
             } else {
-                is_ok = x64_statement_write(builder, procedure, child);
+                // A for statement, an infinite loop or a scope, whose block is next, after the
+                // label of a scope.
+                frame->next = AST_NODE_INDEX_NONE;
+                pushed = builder->nodes[frame->node].last_child;
+                assert(builder->nodes[pushed].node_type == AST_NODE_TYPE_BLOCK);
             }
-        }
-        if (is_ok == false) {
-            return false;
+            if (is_ok == false) {
+                return false;
+            }
         }
         if (pushed == AST_NODE_INDEX_NONE) {
             continue;
@@ -1350,47 +1413,328 @@ static bool x64_statements_write(X64_Builder *builder, Ast_Node_Index procedure)
         if (frame_count == X64_STATEMENT_DEPTH_MAX) {
             return x64_fail_unsupported(builder);
         }
-        Ast_Node_Index pushed_first = builder->nodes[pushed].first_child;
-        if (builder->nodes[pushed].node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
-            // The cases follow the subject, which was written already.
-            pushed_first =
-                builder->nodes[ast_match_subject(builder->nodes, pushed)].next_sibling;
-        }
-        frames[frame_count] = (X64_Statement_Frame){
-            .node = pushed,
-            .next = pushed_first,
-            .end_jumps = X64_JUMP_NONE,
-            .false_jumps = X64_JUMP_NONE,
-        };
+        frames[frame_count] = x64_statement_frame_make(pushed,
+                                                       builder->nodes[pushed].first_child);
+        X64_Statement_Frame *pushed_frame = &frames[frame_count];
         frame_count += 1;
+        Ast_Node_Type pushed_type = builder->nodes[pushed].node_type;
+        if (pushed_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+            // The cases follow the subject, which was written already.
+            pushed_frame->next =
+                builder->nodes[ast_match_subject(builder->nodes, pushed)].next_sibling;
+        } else if (pushed_type == AST_NODE_TYPE_FOR_STATEMENT ||
+                   pushed_type == AST_NODE_TYPE_LOOP_STATEMENT) {
+            // The loop starts with its test, which `x64_list_statement_write` wrote, and a pass
+            // goes back to it.
+            pushed_frame->loop_start = builder->loop_start;
+            pushed_frame->end_jumps = builder->loop_exit_jumps;
+        } else if (x64_node_type_is_jump(pushed_type)) {
+            // The jump writes the deferred statements of the list that it is in, and then of each
+            // list around it.
+            pushed_frame->exit_level = (uint32_t)(frame_count - 2);
+            pushed_frame->defer_bound = pushed;
+        }
     }
 
-    assert(frame_count == 0);
+    if (frame_count != 0) {
+        return x64_fail_unsupported(builder);
+    }
     return true;
 }
 
 /**
- * Writes what comes after the block `block` of the if statement or the match statement of `frame`,
- * when that has more branches: a jump to its end, over the other branches, and then the place
- * that the jump of the condition of the branch goes to when it does not hold, which is the next
- * branch. A block that ends with a `return` never gets to its end, so it needs no jump.
+ * Returns the frame of the statements of `node`, whose next child to write is `next`, with no jumps
+ * that wait for it.
+ */
+static X64_Statement_Frame x64_statement_frame_make(Ast_Node_Index node, Ast_Node_Index next) {
+    return (X64_Statement_Frame){
+        .node = node,
+        .next = next,
+        .defer_bound = AST_NODE_INDEX_NONE,
+        .end_jumps = X64_JUMP_NONE,
+        .false_jumps = X64_JUMP_NONE,
+        .continue_jumps = X64_JUMP_NONE,
+        .loop_start = 0,
+        .exit_level = 0,
+    };
+}
+
+/**
+ * Returns whether a statement of `node_type` leaves its block, so that the statements after it are
+ * not reached.
+ */
+static bool x64_node_type_is_jump(Ast_Node_Type node_type) {
+    return node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
+           node_type == AST_NODE_TYPE_CONTINUE_STATEMENT ||
+           node_type == AST_NODE_TYPE_RETURN_STATEMENT;
+}
+
+/**
+ * Writes the start of the statement `statement` of a list: the whole of a statement that has no
+ * blocks, or the start of one that has, which the caller then makes a frame for, and which is set
+ * in `pushed`. A `defer` writes nothing where it is, and a label gives its statement a name that
+ * only the jumps need, so the statement after it is written instead. Returns false after it
+ * recorded an error.
+ */
+static bool x64_list_statement_write(X64_Builder *builder, Ast_Node_Index procedure,
+                                     Ast_Node_Index statement, Ast_Node_Index *pushed) {
+    assert(*pushed == AST_NODE_INDEX_NONE);
+
+    x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LINE, builder->nodes[statement].source_offset);
+    Ast_Node_Index current = statement;
+    if (builder->nodes[current].node_type == AST_NODE_TYPE_LABELED_STATEMENT) {
+        current = builder->nodes[current].first_child;
+    }
+
+    switch (builder->nodes[current].node_type) {
+    case AST_NODE_TYPE_DEFER_STATEMENT:
+        return true;
+    case AST_NODE_TYPE_BREAK_STATEMENT:
+    case AST_NODE_TYPE_CONTINUE_STATEMENT:
+    case AST_NODE_TYPE_IF_STATEMENT:
+    case AST_NODE_TYPE_SCOPE_STATEMENT:
+        *pushed = current;
+        return true;
+    case AST_NODE_TYPE_FOR_STATEMENT:
+        *pushed = current;
+        return x64_for_start_write(builder, current);
+    case AST_NODE_TYPE_LOOP_STATEMENT:
+        *pushed = current;
+        builder->loop_start = (uint32_t)(builder->writer.length - builder->text_start);
+        builder->loop_exit_jumps = X64_JUMP_NONE;
+        return true;
+    case AST_NODE_TYPE_MATCH_STATEMENT:
+        *pushed = current;
+        return x64_match_start_write(builder, current);
+    case AST_NODE_TYPE_RETURN_STATEMENT:
+        *pushed = current;
+        return x64_return_value_write(builder, procedure, current);
+    default:
+        break;
+    }
+    return x64_statement_write(builder, procedure, current);
+}
+
+/**
+ * Writes the start of the for statement `statement` over a range: the first number goes to the
+ * iterator and the end to the place after it, see `x64_procedure_layout`, so that the end is read
+ * once, and then the test that the loop starts with, which leaves the loop when the iterator is not
+ * below the end, or above it for an inclusive range. The place of the test and the jump that leaves
+ * are kept in `builder` for the frame of the loop. Returns false after it recorded an error.
+ */
+static bool x64_for_start_write(X64_Builder *builder, Ast_Node_Index statement) {
+    assert(builder->nodes[statement].node_type == AST_NODE_TYPE_FOR_STATEMENT);
+
+    Ast_Node_Index range = builder->nodes[statement].first_child;
+    if (builder->nodes[range].node_type != AST_NODE_TYPE_RANGE) {
+        // The elements of an array or of an array slice are not built yet.
+        return x64_fail_unsupported(builder);
+    }
+    int32_t iterator = -(int32_t)builder->layouts[statement].frame_offset;
+    int32_t end = iterator + X64_WORD_SIZE_BYTES;
+    X64_Type int_type = x64_type_make(X64_TYPE_KIND_INT);
+    Ast_Node_Index bounds[2] = {builder->nodes[range].first_child, builder->nodes[range].last_child};
+    int32_t places[2] = {iterator, end};
+    for (size_t i = 0; i < 2; i += 1) {
+        if (x64_type_accepts(builder, int_type, bounds[i]) == false) {
+            return x64_fail(builder, X64_BUILD_STATUS_RANGE_TYPE_INVALID,
+                            x64_expression_subject(builder, bounds[i]));
+        }
+        if (x64_expression_write(builder, bounds[i], int_type, true) == false) {
+            return false;
+        }
+        x64_value_store(builder, int_type, places[i]);
+    }
+
+    builder->loop_start = (uint32_t)(builder->writer.length - builder->text_start);
+    builder->loop_exit_jumps = X64_JUMP_NONE;
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, iterator);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, end);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    byte condition = X64_CONDITION_GREATER_EQUAL;
+    if (builder->nodes[range].payload.range.is_inclusive) {
+        condition = X64_CONDITION_GREATER;
+    }
+    x64_jump_write(builder, condition, &builder->loop_exit_jumps);
+    return true;
+}
+
+/**
+ * Returns the next deferred statement that `frame` writes, after the ones that it wrote, or
+ * `AST_NODE_INDEX_NONE` when there are no more, and moves the frame on. A list at its end writes
+ * the deferred statements of its own `defer`s, and a jump those of every list that it leaves, from
+ * the one that it is in out to the one of the statement that it goes to, or the body for a
+ * `return`. In each list they run in the reverse order of the `defer`s, and only the ones that the
+ * jump has passed, which are the ones before it: the nodes are in the order of the source, so they
+ * are the `defer`s whose nodes are before the jump. The statement that a deferred statement is is
+ * written by a frame of the `defer`, which is a list with that one statement.
+ */
+static Ast_Node_Index x64_defer_next(X64_Builder *builder, X64_Statement_Frame const *frames,
+                                     X64_Statement_Frame *frame) {
+    Ast_Node_Type node_type = builder->nodes[frame->node].node_type;
+    bool is_jump = x64_node_type_is_jump(node_type);
+
+    if (is_jump == false) {
+        Ast_Node_Index defer = x64_defer_last_before(builder, frame->node, frame->defer_bound);
+        if (defer != AST_NODE_INDEX_NONE) {
+            frame->defer_bound = defer;
+        }
+        return defer;
+    }
+
+    // The lowest list that the jump leaves is the body for a `return`, and the block of the
+    // statement that it goes to for a `break` or a `continue`, which is the frame right above the
+    // frame of that statement.
+    size_t lowest = 0;
+    if (node_type != AST_NODE_TYPE_RETURN_STATEMENT) {
+        Ast_Node_Index target = builder->bindings[frame->node].target;
+        for (size_t i = frame->exit_level + 1; i > 0; i -= 1) {
+            if (frames[i - 1].node == target) {
+                lowest = i;
+                break;
+            }
+        }
+    }
+    // Each step goes to a list further out, so there are fewer steps than frames.
+    for (size_t i = 0; i <= X64_STATEMENT_DEPTH_MAX; i += 1) {
+        Ast_Node_Index list = frames[frame->exit_level].node;
+        Ast_Node_Type list_type = builder->nodes[list].node_type;
+        if (list_type == AST_NODE_TYPE_BLOCK || list_type == AST_NODE_TYPE_PROCEDURE) {
+            Ast_Node_Index defer = x64_defer_last_before(builder, list, frame->defer_bound);
+            if (defer != AST_NODE_INDEX_NONE) {
+                frame->defer_bound = defer;
+                return defer;
+            }
+        }
+        if (frame->exit_level <= lowest) {
+            return AST_NODE_INDEX_NONE;
+        }
+        // The jump is after every `defer` before it in the lists further out too.
+        frame->exit_level -= 1;
+        frame->defer_bound = frame->node;
+    }
+    assert(false);
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Returns the last `defer` among the statements of `list`, a block or the body of a procedure,
+ * whose node is before `bound`, or `AST_NODE_INDEX_NONE` when there is none. `bound` is
+ * `AST_NODE_INDEX_NONE`, which is after every node, for all of them.
+ */
+static Ast_Node_Index x64_defer_last_before(X64_Builder const *builder, Ast_Node_Index list,
+                                            Ast_Node_Index bound) {
+    Ast_Node_Index found = AST_NODE_INDEX_NONE;
+    Ast_Node_Index child = builder->nodes[list].first_child;
+    // Every child is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && child != AST_NODE_INDEX_NONE && child < bound;
+         i += 1) {
+        if (builder->nodes[child].node_type == AST_NODE_TYPE_DEFER_STATEMENT) {
+            found = child;
+        }
+        child = builder->nodes[child].next_sibling;
+    }
+    return found;
+}
+
+/**
+ * Writes the jump `jump` itself, after the deferred statements of the blocks that it leaves: a
+ * `return` gives the value that it left on the stack of values to the caller in `rax` and returns,
+ * and a `break` or a `continue` jumps to the end of the statement that it leaves, or to where the
+ * loop that it goes on with goes on, which join the chains of that statement. `frames` are the
+ * `frame_count` frames below the jump.
+ */
+static void x64_jump_end_write(X64_Builder *builder, X64_Statement_Frame *frames,
+                               size_t frame_count, Ast_Node_Index jump) {
+    assert(frame_count > 0);
+
+    Ast_Node_Type node_type = builder->nodes[jump].node_type;
+    if (node_type == AST_NODE_TYPE_RETURN_STATEMENT) {
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                         x64_stack_displacement(builder, builder->stack_words - 1, 1));
+        x64_stack_pop(builder, 1);
+        x64_epilogue_write(builder);
+        return;
+    }
+
+    Ast_Node_Index target = builder->bindings[jump].target;
+    for (size_t i = frame_count; i > 0; i -= 1) {
+        X64_Statement_Frame *frame = &frames[i - 1];
+        if (frame->node != target) {
+            continue;
+        }
+        if (node_type == AST_NODE_TYPE_BREAK_STATEMENT) {
+            x64_jump_write(builder, X64_CONDITION_ALWAYS, &frame->end_jumps);
+        } else {
+            x64_jump_write(builder, X64_CONDITION_ALWAYS, &frame->continue_jumps);
+        }
+        return;
+    }
+    // The analysis binds every jump to a statement around it.
+    assert(false);
+}
+
+/**
+ * Writes what comes after the block `block` of the statement of `frame`. When an if statement or a
+ * match statement has more branches, that is a jump to its end, over the other branches, and then
+ * the place that the jump of the condition of the branch goes to when it does not hold, which is
+ * the next branch. A block that ends with a jump never gets to its end, so it needs no jump. A
+ * loop goes on with its next pass: a for statement makes its iterator one more, which `continue`
+ * comes to as well, and then the loop jumps back to its start. An inclusive range leaves before it
+ * makes the iterator more when the iterator is the end, so that a range that ends at the largest
+ * `Int` ends instead of wrapping around.
  */
 static void x64_block_end(X64_Builder *builder, X64_Statement_Frame *frame,
                           Ast_Node_Index block) {
     assert(builder->nodes[block].node_type == AST_NODE_TYPE_BLOCK);
 
-    Ast_Node_Type node_type = builder->nodes[frame->node].node_type;
+    Ast_Node_Index statement = frame->node;
+    Ast_Node_Type node_type = builder->nodes[statement].node_type;
+    if (node_type == AST_NODE_TYPE_FOR_STATEMENT || node_type == AST_NODE_TYPE_LOOP_STATEMENT) {
+        x64_jumps_resolve(builder, frame->continue_jumps);
+        frame->continue_jumps = X64_JUMP_NONE;
+        if (node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            int32_t iterator = -(int32_t)builder->layouts[statement].frame_offset;
+            Ast_Node_Index range = builder->nodes[statement].first_child;
+            x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                             iterator);
+            if (builder->nodes[range].payload.range.is_inclusive) {
+                x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP,
+                                 iterator + X64_WORD_SIZE_BYTES);
+                x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+                x64_jump_write(builder, X64_CONDITION_EQUAL, &frame->end_jumps);
+            }
+            x64_write_load_integer(builder, X64_REGISTER_RCX, 1);
+            x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
+            x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                             iterator);
+        }
+        x64_jump_back_write(builder, frame->loop_start);
+        return;
+    }
+
     if (node_type != AST_NODE_TYPE_IF_STATEMENT && node_type != AST_NODE_TYPE_MATCH_STATEMENT) {
         return;
     }
     if (frame->next != AST_NODE_INDEX_NONE) {
         Ast_Node_Index last = builder->nodes[block].last_child;
-        if (builder->nodes[last].node_type != AST_NODE_TYPE_RETURN_STATEMENT) {
+        if (x64_node_type_is_jump(builder->nodes[last].node_type) == false) {
             x64_jump_write(builder, X64_CONDITION_ALWAYS, &frame->end_jumps);
         }
     }
     x64_jumps_resolve(builder, frame->false_jumps);
     frame->false_jumps = X64_JUMP_NONE;
+}
+
+/**
+ * Writes `jmp` back to `target`, a place in the code that is written already, which is how a loop
+ * goes back to its start. The distance is negative, in two's complement.
+ */
+static void x64_jump_back_write(X64_Builder *builder, uint32_t target) {
+    x64_write_byte(&builder->writer, 0xE9);
+    size_t end = builder->writer.length + 4 - builder->text_start;
+    assert(target < end);
+    x64_write_u32(&builder->writer, (uint32_t)((int64_t)target - (int64_t)end));
 }
 
 /**
@@ -1537,10 +1881,10 @@ static X64_Match_Pattern x64_match_pattern(X64_Builder const *builder, X64_Type 
  * Writes the case `first` of the match statement of `frame`, and the cases after it that have no
  * block of their own and share the block of the last of them: the subject is compared with the
  * pattern of each, and a pattern that matches jumps to the block, which comes after the
- * comparisons, and when none does the jump over the block goes to the next case. A range compares the subject
- * with its two ends, with the signed order of an `Int`. The default case has no pattern, and its
- * block always runs when it is reached. The next case of the frame is set to the one after the
- * block. Returns the block, which the caller writes next.
+ * comparisons, and when none does the jump over the block goes to the next case. A range compares
+ * the subject with its two ends, with the signed order of an `Int`. The default case has no
+ * pattern, and its block always runs when it is reached. The next case of the frame is set to the
+ * one after the block. Returns the block, which the caller writes next.
  */
 static Ast_Node_Index x64_match_case_write(X64_Builder *builder, X64_Statement_Frame *frame,
                                            Ast_Node_Index first) {
@@ -1648,13 +1992,14 @@ static void x64_jumps_resolve(X64_Builder *builder, uint32_t jumps) {
 }
 
 /**
- * Writes the statement `statement` of `procedure`, which has no blocks. Returns false after it
- * recorded an error.
+ * Writes the statement `statement` of `procedure`, which has no blocks and does not leave its
+ * block. It leaves the stack of values as deep as it found it. Returns false after it recorded an
+ * error.
  */
 static bool x64_statement_write(X64_Builder *builder, Ast_Node_Index procedure,
                                 Ast_Node_Index statement) {
     assert(statement < builder->node_count);
-    assert(builder->stack_words == 0);
+    (void)procedure;
 
     Ast_Node const *statement_node = &builder->nodes[statement];
     switch (statement_node->node_type) {
@@ -1667,8 +2012,6 @@ static bool x64_statement_write(X64_Builder *builder, Ast_Node_Index procedure,
     case AST_NODE_TYPE_CALL_STATEMENT:
         return x64_expression_write(builder, statement_node->first_child,
                                     x64_type_make(X64_TYPE_KIND_NONE), false);
-    case AST_NODE_TYPE_RETURN_STATEMENT:
-        return x64_return_write(builder, procedure, statement);
     case AST_NODE_TYPE_VARIABLE_DEFINITION:
         return x64_variable_definition_write(builder, statement);
     default:
@@ -1716,12 +2059,13 @@ static bool x64_procedure_uses_temporary(X64_Builder const *builder, Ast_Node_In
 }
 
 /**
- * Writes a `return` statement: the value is worked out on the stack of values and goes to `rax`,
- * which is where the caller looks for it, and the end of the procedure gives the stack back and
- * returns. Returns false after it recorded an error.
+ * Writes the value of a `return` statement, which is worked out on the stack of values and stays
+ * there while the deferred statements of the blocks that the return leaves are written, see
+ * `x64_jump_end_write`, which then gives it to the caller. Returns false after it recorded an
+ * error.
  */
-static bool x64_return_write(X64_Builder *builder, Ast_Node_Index procedure,
-                             Ast_Node_Index statement) {
+static bool x64_return_value_write(X64_Builder *builder, Ast_Node_Index procedure,
+                                   Ast_Node_Index statement) {
     assert(builder->nodes[statement].node_type == AST_NODE_TYPE_RETURN_STATEMENT);
 
     Str name = builder->nodes[builder->definition].payload.constant_definition.name;
@@ -1753,15 +2097,7 @@ static bool x64_return_write(X64_Builder *builder, Ast_Node_Index procedure,
         return x64_fail_unsupported(builder);
     }
 
-    if (x64_expression_write(builder, value, return_type, true) == false) {
-        return false;
-    }
-    assert(x64_type_is_scalar(return_type));
-    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
-                     x64_stack_displacement(builder, 0, 1));
-    x64_stack_pop(builder, 1);
-    x64_epilogue_write(builder);
-    return true;
+    return x64_expression_write(builder, value, return_type, true);
 }
 
 /**
@@ -1873,7 +2209,7 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
     // `mov rax, [variable]` and `mov rcx, value`, the operator, and `mov [variable], rax`.
     x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, displacement);
     x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP,
-                     x64_stack_displacement(builder, 0, 1));
+                     x64_stack_displacement(builder, builder->stack_words - 1, 1));
     x64_stack_pop(builder, 1);
     switch (node_type) {
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:

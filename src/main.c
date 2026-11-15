@@ -1047,6 +1047,10 @@ static void main_run_command_report_x64_error(char const *path, Str source,
     case X64_BUILD_STATUS_OUTPUT_TOO_LARGE:
         assert(false);
         break;
+    case X64_BUILD_STATUS_RANGE_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: a number of the range at '%.*s' is not an Int.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_RETURN_TYPE_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: the value that '%.*s' returns is not of its return type.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
