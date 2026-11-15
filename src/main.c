@@ -962,8 +962,38 @@ static void main_run_command_report_x64_error(char const *path, Str source,
     // The cast is needed because `%.*s` takes an `int` precision.
     int subject_length = (int)result.subject.length;
     switch (result.status) {
+    case X64_BUILD_STATUS_ADDRESS_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' has no address. A variable, an element and what a "
+                "pointer points to have one, but not a parameter, an iterator, a value that is "
+                "computed, or an array.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: an operand of arithmetic at '%.*s' is not an Int.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the element at '%.*s' is not of the type of the elements of "
+                "the array.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_ARRAY_EXPECTED:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an array or an array slice.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_ARRAY_INITIALIZER_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the array '%.*s' is not copied, so it is defined with an "
+                "array literal and is not assigned to as a whole.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_ARRAY_LENGTH_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the array literal of '%.*s' has another number of elements "
+                "than its length.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_ARRAY_TYPE_MISPLACED:
+        fprintf(stderr, "%s:%zu:%zu: the parameter '%.*s' cannot be an array, which is in the "
+                "frame of its procedure, so it takes an array slice, written '[]Type'.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH:
@@ -1002,6 +1032,10 @@ static void main_run_command_report_x64_error(char const *path, Str source,
     case X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' is declared in a 'foreign js' "
                 "block, and the x64 target imports from 'foreign libc'.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_INDEX_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the index at '%.*s' is not an Int.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID:
@@ -1043,9 +1077,23 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 "an Int.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
+    case X64_BUILD_STATUS_NIL_TYPE_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: 'nil' does not say what '%.*s' points to, so its type is "
+                "written, as in 'p : ^Int = nil'.\n", path, position.line, position.column,
+                subject_length, result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_OK:
     case X64_BUILD_STATUS_OUTPUT_TOO_LARGE:
         assert(false);
+        break;
+    case X64_BUILD_STATUS_POINTER_EXPECTED:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a pointer, so '^' cannot follow it.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_POINTER_TARGET_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the value that is assigned through '%.*s' is not of the type "
+                "that it points to.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case X64_BUILD_STATUS_RANGE_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: a number of the range at '%.*s' is not an Int.\n", path,

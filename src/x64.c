@@ -57,6 +57,8 @@ enum {
     // address of the operand in the register, and the others write the operand: `mov` stores the
     // register in it, and the arithmetic sets it to itself and the register.
     X64_OPCODE_ADD = 0x01,
+    // `mov` of the lowest byte of the register to memory.
+    X64_OPCODE_STORE_BYTE = 0x88,
     X64_OPCODE_OR = 0x09,
     X64_OPCODE_AND = 0x21,
     X64_OPCODE_SUB = 0x29,
@@ -76,10 +78,16 @@ enum {
     X64_OPCODE_TWO_BYTE_SET = 0x90,
     // The numbers of the conditions of `set` and of the conditional jumps, which are added to their
     // opcodes. The signed ones are used for an `Int`, whose order is signed.
+    X64_CONDITION_BELOW = 0x2,
+    X64_CONDITION_ABOVE_EQUAL = 0x3,
     X64_CONDITION_EQUAL = 0x4,
     // Not a condition of the processor: the jump that is always taken, see `x64_jump_write`.
     X64_CONDITION_ALWAYS = 0x10,
     X64_CONDITION_NOT_EQUAL = 0x5,
+    // The unsigned conditions, which an index and an address are compared with, so that a negative
+    // index is above every length.
+    X64_CONDITION_BELOW_EQUAL = 0x6,
+    X64_CONDITION_ABOVE = 0x7,
     X64_CONDITION_LESS = 0xC,
     X64_CONDITION_GREATER_EQUAL = 0xD,
     X64_CONDITION_LESS_EQUAL = 0xE,
@@ -94,6 +102,8 @@ enum {
     // The size of a word of a value, which every value is made of, see `x64_type_word_count`. It is
     // also the size of a slot of the stack.
     X64_WORD_SIZE_BYTES = 8,
+    // The largest number that a `Byte` holds.
+    X64_BYTE_MAX = 255,
     // The processor pushes the address to return to, and the procedure pushes `rbp`, so the first
     // word of the arguments, which the procedure keeps there, is this far above `rbp`.
     X64_ARGUMENT_HOME_OFFSET_BYTES = 16,
@@ -428,6 +438,8 @@ typedef struct {
     X64_Constant constants[X64_CONSTANT_COUNT_MAX];
 } X64_Builder;
 
+static bool         x64_address_write            (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame);
 static size_t       x64_align_up                 (size_t value, size_t alignment);
 static size_t       x64_argument_word_offset     (X64_Builder const *builder,
                                                   Ast_Node_Index procedure, size_t position);
@@ -435,6 +447,8 @@ static bool         x64_assignment_write         (X64_Builder *builder, Ast_Node
 static void         x64_block_end                (X64_Builder *builder,
                                                   X64_Statement_Frame *frame,
                                                   Ast_Node_Index block);
+static bool         x64_built_in_write           (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame);
 static bool         x64_c_str_write              (X64_Builder *builder, Ast_Node_Index literal,
                                                   byte register_number);
 static bool         x64_call_is_built_in         (X64_Builder const *builder,
@@ -445,8 +459,14 @@ static Ast_Node_Index x64_call_procedure         (X64_Builder const *builder, As
 static bool         x64_call_write               (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame,
                                                   bool is_result_used);
+static bool         x64_child_done               (X64_Builder *builder,
+                                                  X64_Expression_Frame const *parent,
+                                                  X64_Expression_Frame const *child);
 static Ast_Node_Index x64_child_first            (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
+static X64_Mode     x64_child_mode               (X64_Builder const *builder,
+                                                  X64_Expression_Frame const *parent,
+                                                  size_t index);
 static X64_Type     x64_child_wanted             (X64_Builder const *builder,
                                                   X64_Expression_Frame const *parent,
                                                   Ast_Node_Index child, size_t index);
@@ -459,11 +479,9 @@ static bool         x64_condition_write          (X64_Builder *builder,
 static bool         x64_constant_write           (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static bool         x64_constants_collect        (X64_Builder *builder);
-static Ast_Node_Index x64_defer_last_before      (X64_Builder const *builder, Ast_Node_Index list,
-                                                  Ast_Node_Index bound);
-static Ast_Node_Index x64_defer_next             (X64_Builder *builder,
-                                                  X64_Statement_Frame const *frames,
-                                                  X64_Statement_Frame *frame);
+static void         x64_conversion_write         (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame);
+static void         x64_copy_write               (X64_Builder *builder);
 static uint32_t     x64_debug_address_rva        (X64_Builder const *builder, size_t code_offset);
 static X64_Debug_Cursor x64_debug_cursor_move    (Str source, X64_Debug_Cursor cursor,
                                                   size_t offset);
@@ -480,6 +498,11 @@ static void         x64_debug_sections_write     (X64_Builder *builder, size_t t
 static uint32_t     x64_debug_type_reference     (X64_Debug_Types types, X64_Type type);
 static void         x64_debug_unwind_write       (X64_Builder *builder, size_t text_size_bytes,
                                                   uint32_t section_rva);
+static Ast_Node_Index x64_defer_last_before      (X64_Builder const *builder, Ast_Node_Index list,
+                                                  Ast_Node_Index bound);
+static Ast_Node_Index x64_defer_next             (X64_Builder *builder,
+                                                  X64_Statement_Frame const *frames,
+                                                  X64_Statement_Frame *frame);
 static void         x64_dos_header_write         (byte *header);
 static void         x64_epilogue_write           (X64_Builder *builder);
 static bool         x64_expression_node_write    (X64_Builder *builder,
@@ -492,12 +515,16 @@ static X64_Type     x64_expression_type          (X64_Builder const *builder,
 static X64_Type     x64_expression_type_for      (X64_Builder const *builder,
                                                   Ast_Node_Index expression, X64_Type wanted);
 static bool         x64_expression_write         (X64_Builder *builder, Ast_Node_Index expression,
-                                                  X64_Type wanted, bool is_result_used);
+                                                  X64_Type wanted, X64_Mode mode,
+                                                  bool is_result_used);
 static bool         x64_fail                     (X64_Builder *builder, X64_Build_Status status,
                                                   Str subject);
 static bool         x64_fail_unsupported         (X64_Builder *builder);
+static bool         x64_for_each_start_write     (X64_Builder *builder, Ast_Node_Index statement);
 static bool         x64_for_start_write          (X64_Builder *builder, Ast_Node_Index statement);
 static void         x64_headers_write            (X64_Builder *builder, size_t text_size_bytes);
+static bool         x64_identifier_place         (X64_Builder const *builder,
+                                                  Ast_Node_Index identifier, int32_t *place);
 static void         x64_image_write              (X64_Builder *builder);
 static bool         x64_is_constant              (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
@@ -509,6 +536,8 @@ static void         x64_jump_write               (X64_Builder *builder, byte con
                                                   uint32_t *jumps);
 static void         x64_jumps_resolve            (X64_Builder *builder, uint32_t jumps);
 static X64_Layout   x64_layout_make              (X64_Builder const *builder);
+static X64_Type     x64_leaf_type                (X64_Builder const *builder,
+                                                  Ast_Node_Index expression);
 static bool         x64_list_statement_write     (X64_Builder *builder, Ast_Node_Index procedure,
                                                   Ast_Node_Index statement,
                                                   Ast_Node_Index *pushed);
@@ -519,6 +548,8 @@ static Ast_Node_Index x64_match_case_write       (X64_Builder *builder,
 static X64_Match_Pattern x64_match_pattern       (X64_Builder const *builder, X64_Type subject,
                                                   Ast_Node_Index pattern);
 static bool         x64_match_start_write        (X64_Builder *builder, Ast_Node_Index match);
+static void         x64_memory_load              (X64_Builder *builder, X64_Type type, byte base);
+static void         x64_memory_store             (X64_Builder *builder, X64_Type type, byte base);
 static bool         x64_node_type_is_jump        (Ast_Node_Type node_type);
 static bool         x64_operation_write          (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
@@ -534,11 +565,16 @@ static void         x64_procedure_layout         (X64_Builder *builder, Ast_Node
 static bool         x64_procedure_uses_temporary (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
 static bool         x64_procedure_write          (X64_Builder *builder, size_t position);
+static bool         x64_range_assignment_write   (X64_Builder *builder, Ast_Node_Index statement);
 static void         x64_rdata_write              (X64_Builder *builder);
 static X64_Type     x64_return_type              (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
 static bool         x64_return_value_write       (X64_Builder *builder, Ast_Node_Index procedure,
                                                   Ast_Node_Index statement);
+static void         x64_sequence_length_load     (X64_Builder *builder, X64_Type type,
+                                                  byte register_number, int32_t place);
+static bool         x64_slice_write              (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame);
 static int32_t      x64_stack_displacement       (X64_Builder const *builder, size_t start,
                                                   size_t word_count);
 static void         x64_stack_pop                (X64_Builder *builder, size_t word_count);
@@ -557,17 +593,27 @@ static size_t       x64_string_offset            (X64_Builder const *builder,
                                                   Ast_Node_Index literal);
 static bool         x64_type_accepts             (X64_Builder const *builder, X64_Type wanted,
                                                   Ast_Node_Index expression);
+static X64_Type     x64_type_element             (X64_Type sequence);
 static bool         x64_type_equals              (X64_Type first, X64_Type second);
 static bool         x64_type_is_scalar           (X64_Type type);
 static X64_Type     x64_type_make                (X64_Type_Kind kind);
+static X64_Type     x64_type_of_element_node     (X64_Builder const *builder, Ast_Node_Index type);
 static X64_Type     x64_type_of_name             (Str name);
 static X64_Type     x64_type_of_node             (X64_Builder const *builder, Ast_Node_Index type);
+static X64_Type     x64_type_pointee             (X64_Type pointer);
+static X64_Type     x64_type_pointer_to          (X64_Type target);
+static X64_Type     x64_type_sequence_of         (X64_Type element, X64_Type_Kind kind,
+                                                  int64_t length);
+static size_t       x64_type_stride_bytes        (X64_Type type);
+static Str          x64_type_subject             (X64_Builder const *builder, Ast_Node_Index type);
 static size_t       x64_type_word_count          (X64_Type type);
 static bool         x64_value_store              (X64_Builder *builder, X64_Type type,
                                                   int32_t displacement);
 static bool         x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index statement);
 static Ast_Node_Index x64_variable_type_node     (X64_Builder const *builder,
                                                   Ast_Node_Index definition);
+static void         x64_write_add_immediate      (X64_Builder *builder, byte register_number,
+                                                  int8_t number);
 static void         x64_write_byte               (X64_Writer *writer, byte content);
 static void         x64_write_bytes              (X64_Writer *writer, byte const *content,
                                                   size_t count);
@@ -579,6 +625,11 @@ static void         x64_write_load_integer       (X64_Builder *builder, byte reg
 static void         x64_write_memory             (X64_Builder *builder, byte opcode,
                                                   byte register_number, byte base,
                                                   int32_t displacement);
+static void         x64_write_memory_operand     (X64_Builder *builder, byte register_number,
+                                                  byte base, int32_t displacement);
+static void         x64_write_memory_two_byte    (X64_Builder *builder, byte opcode,
+                                                  byte register_number, byte base,
+                                                  int32_t displacement);
 static void         x64_write_move_from_r10      (X64_Builder *builder, byte register_number);
 static void         x64_write_multiply           (X64_Builder *builder, byte target, byte source);
 static void         x64_write_registers          (X64_Builder *builder, byte opcode, byte source,
@@ -587,6 +638,7 @@ static void         x64_write_rip_displacement   (X64_Builder *builder, uint64_t
 static void         x64_write_set                (X64_Builder *builder, byte condition);
 static void         x64_write_signed_leb128      (X64_Writer *writer, int64_t number);
 static void         x64_write_string             (X64_Writer *writer, Str text);
+static void         x64_write_trap_unless        (X64_Builder *builder, byte condition);
 static void         x64_write_u16                (X64_Writer *writer, uint16_t number);
 static void         x64_write_u32                (X64_Writer *writer, uint32_t number);
 static void         x64_write_u64                (X64_Writer *writer, uint64_t number);
@@ -910,7 +962,13 @@ static bool x64_constants_collect(X64_Builder *builder) {
             assert(parameter != AST_NODE_INDEX_NONE);
 
             Ast_Node_Index type = builder->nodes[parameter].first_child;
-            if (x64_type_of_node(builder, type).kind == X64_TYPE_KIND_NONE) {
+            X64_Type parameter_type = x64_type_of_node(builder, type);
+            if (parameter_type.kind == X64_TYPE_KIND_ARRAY) {
+                return x64_fail(builder, X64_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
+                                builder->nodes[parameter].payload.parameter.name);
+            }
+            if (parameter_type.kind == X64_TYPE_KIND_NONE ||
+                (is_foreign && x64_type_is_scalar(parameter_type) == false)) {
                 Str subject = builder->nodes[parameter].payload.parameter.name;
                 if (builder->nodes[type].node_type == AST_NODE_TYPE_TYPE_NAME) {
                     subject = builder->nodes[type].payload.type_name.name;
@@ -1162,7 +1220,8 @@ static bool x64_code_write(X64_Builder *builder) {
  * Works out the frame of `procedure` before its code is written: the type of each of its variables
  * and the place of its value, in the order of the source, which `builder->layouts` keeps at the
  * node of the definition. A match statement has a place too, for its subject, and a for statement
- * for its iterator, which is a variable, and for the end of its range after it. A variable takes
+ * for its iterator, which is a variable, and for what its loop keeps after it, and an array
+ * literal for its elements. A variable takes
  * the words of its type, see `x64_type_word_count`, and has a place of its own also when it is in a
  * block, so that no two variables share memory and a debugger finds each at one place. A variable
  * without a type takes the type of its value, which only uses variables above it, whose types are
@@ -1189,10 +1248,37 @@ static void x64_procedure_layout(X64_Builder *builder, Ast_Node_Index procedure)
             // The subject is worked out once, and kept for the cases to compare.
             type = x64_expression_type(builder, ast_match_subject(builder->nodes, node));
         } else if (node_type == AST_NODE_TYPE_FOR_STATEMENT) {
-            // The iterator is an `Int`, and the end of the range, which is read once, is kept in
-            // the word after it.
+            // The iterator of a range is an `Int`, and the end of the range, which is read once,
+            // is kept in the word after it. The iterator of the elements of an array is an
+            // element, and the address of the next element and the end are kept after it.
+            Ast_Node_Index range = builder->nodes[node].first_child;
             type = x64_type_make(X64_TYPE_KIND_INT);
             size_bytes += X64_WORD_SIZE_BYTES;
+            if (builder->nodes[range].node_type != AST_NODE_TYPE_RANGE) {
+                X64_Type sequence = x64_expression_type(builder, range);
+                type = x64_type_make(X64_TYPE_KIND_NONE);
+                if (sequence.kind == X64_TYPE_KIND_ARRAY || sequence.kind == X64_TYPE_KIND_SLICE) {
+                    type = x64_type_element(sequence);
+                }
+                size_bytes += X64_WORD_SIZE_BYTES;
+            }
+        } else if (node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
+            // The elements, after which a place is aligned again.
+            type = x64_leaf_type(builder, node);
+            if (type.kind != X64_TYPE_KIND_NONE) {
+                size_t elements_bytes =
+                    (size_t)type.length * x64_type_stride_bytes(x64_type_element(type));
+                size_bytes += x64_align_up(elements_bytes, X64_WORD_SIZE_BYTES);
+                if (size_bytes > X64_FRAME_SIZE_BYTES_MAX) {
+                    size_bytes = X64_FRAME_SIZE_BYTES_MAX;
+                }
+            }
+            assert(size_bytes <= UINT32_MAX);
+            builder->layouts[node] = (X64_Node_Layout){
+                .type = type,
+                .frame_offset = (uint32_t)size_bytes,
+            };
+            continue;
         } else {
             continue;
         }
@@ -1527,20 +1613,22 @@ static bool x64_for_start_write(X64_Builder *builder, Ast_Node_Index statement) 
 
     Ast_Node_Index range = builder->nodes[statement].first_child;
     if (builder->nodes[range].node_type != AST_NODE_TYPE_RANGE) {
-        // The elements of an array or of an array slice are not built yet.
-        return x64_fail_unsupported(builder);
+        return x64_for_each_start_write(builder, statement);
     }
     int32_t iterator = -(int32_t)builder->layouts[statement].frame_offset;
     int32_t end = iterator + X64_WORD_SIZE_BYTES;
     X64_Type int_type = x64_type_make(X64_TYPE_KIND_INT);
-    Ast_Node_Index bounds[2] = {builder->nodes[range].first_child, builder->nodes[range].last_child};
+    Ast_Node_Index bounds[2] = {
+        builder->nodes[range].first_child,
+        builder->nodes[range].last_child,
+    };
     int32_t places[2] = {iterator, end};
     for (size_t i = 0; i < 2; i += 1) {
         if (x64_type_accepts(builder, int_type, bounds[i]) == false) {
             return x64_fail(builder, X64_BUILD_STATUS_RANGE_TYPE_INVALID,
                             x64_expression_subject(builder, bounds[i]));
         }
-        if (x64_expression_write(builder, bounds[i], int_type, true) == false) {
+        if (x64_expression_write(builder, bounds[i], int_type, X64_MODE_VALUE, true) == false) {
             return false;
         }
         x64_value_store(builder, int_type, places[i]);
@@ -1556,6 +1644,60 @@ static bool x64_for_start_write(X64_Builder *builder, Ast_Node_Index statement) 
         condition = X64_CONDITION_GREATER;
     }
     x64_jump_write(builder, condition, &builder->loop_exit_jumps);
+    return true;
+}
+
+/**
+ * Writes the start of the for statement `statement` that goes through the elements of an array or
+ * an array slice: the address of the first element and the address after the last one are kept
+ * after the iterator, see `x64_procedure_layout`, which reads the address and the length once.
+ * Then comes the start of the loop: a test that leaves it when the next address is not below the
+ * end, the copy of the element there to the iterator, and the move of the address to the next
+ * element, so that a `continue` needs only to go back to the test. Returns false after it recorded
+ * an error.
+ */
+static bool x64_for_each_start_write(X64_Builder *builder, Ast_Node_Index statement) {
+    Ast_Node_Index sequence = builder->nodes[statement].first_child;
+    X64_Type type = x64_expression_type(builder, sequence);
+    if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+        return x64_fail(builder, X64_BUILD_STATUS_ARRAY_EXPECTED,
+                        x64_expression_subject(builder, sequence));
+    }
+    X64_Type element = x64_type_element(type);
+    size_t stride = x64_type_stride_bytes(element);
+    int32_t iterator = -(int32_t)builder->layouts[statement].frame_offset;
+    int32_t next = iterator + (int32_t)(x64_type_word_count(element) * X64_WORD_SIZE_BYTES);
+    int32_t end = next + X64_WORD_SIZE_BYTES;
+
+    if (x64_expression_write(builder, sequence, type, X64_MODE_VALUE, true) == false) {
+        return false;
+    }
+    size_t sequence_words = x64_type_word_count(type);
+    int32_t place = x64_stack_displacement(builder, builder->stack_words - sequence_words,
+                                           sequence_words);
+    // The address, and the end: the address plus the length times the size of an element.
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, next);
+    x64_sequence_length_load(builder, type, X64_REGISTER_RCX, place);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, (int64_t)stride);
+    x64_write_multiply(builder, X64_REGISTER_RCX, X64_REGISTER_RDX);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RAX, X64_REGISTER_RCX);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RCX, X64_REGISTER_RBP, end);
+    x64_stack_pop(builder, sequence_words);
+
+    builder->loop_start = (uint32_t)(builder->writer.length - builder->text_start);
+    builder->loop_exit_jumps = X64_JUMP_NONE;
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, next);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, end);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_jump_write(builder, X64_CONDITION_ABOVE_EQUAL, &builder->loop_exit_jumps);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_R10);
+    x64_memory_load(builder, element, X64_REGISTER_R10);
+    x64_value_store(builder, element, iterator);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, next);
+    x64_write_load_integer(builder, X64_REGISTER_RCX, (int64_t)stride);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, next);
     return true;
 }
 
@@ -1693,9 +1835,11 @@ static void x64_block_end(X64_Builder *builder, X64_Statement_Frame *frame,
     if (node_type == AST_NODE_TYPE_FOR_STATEMENT || node_type == AST_NODE_TYPE_LOOP_STATEMENT) {
         x64_jumps_resolve(builder, frame->continue_jumps);
         frame->continue_jumps = X64_JUMP_NONE;
-        if (node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+        Ast_Node_Index range = builder->nodes[statement].first_child;
+        bool is_range = node_type == AST_NODE_TYPE_FOR_STATEMENT &&
+                        builder->nodes[range].node_type == AST_NODE_TYPE_RANGE;
+        if (is_range) {
             int32_t iterator = -(int32_t)builder->layouts[statement].frame_offset;
-            Ast_Node_Index range = builder->nodes[statement].first_child;
             x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
                              iterator);
             if (builder->nodes[range].payload.range.is_inclusive) {
@@ -1751,7 +1895,7 @@ static bool x64_condition_write(X64_Builder *builder, Ast_Node_Index condition,
                         x64_expression_subject(builder, condition));
     }
     x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LINE, builder->nodes[condition].source_offset);
-    if (x64_expression_write(builder, condition, bool_type, true) == false) {
+    if (x64_expression_write(builder, condition, bool_type, X64_MODE_VALUE, true) == false) {
         return false;
     }
     x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
@@ -1819,7 +1963,7 @@ static bool x64_match_start_write(X64_Builder *builder, Ast_Node_Index match) {
         match_case = builder->nodes[match_case].next_sibling;
     }
 
-    if (x64_expression_write(builder, subject, subject_type, true) == false) {
+    if (x64_expression_write(builder, subject, subject_type, X64_MODE_VALUE, true) == false) {
         return false;
     }
     return x64_value_store(builder, subject_type,
@@ -2011,7 +2155,7 @@ static bool x64_statement_write(X64_Builder *builder, Ast_Node_Index procedure,
         return x64_assignment_write(builder, statement);
     case AST_NODE_TYPE_CALL_STATEMENT:
         return x64_expression_write(builder, statement_node->first_child,
-                                    x64_type_make(X64_TYPE_KIND_NONE), false);
+                                    x64_type_make(X64_TYPE_KIND_NONE), X64_MODE_VALUE, false);
     case AST_NODE_TYPE_VARIABLE_DEFINITION:
         return x64_variable_definition_write(builder, statement);
     default:
@@ -2097,14 +2241,17 @@ static bool x64_return_value_write(X64_Builder *builder, Ast_Node_Index procedur
         return x64_fail_unsupported(builder);
     }
 
-    return x64_expression_write(builder, value, return_type, true);
+    return x64_expression_write(builder, value, return_type, X64_MODE_VALUE, true);
 }
 
 /**
  * Writes the definition of a variable, `name := value`, `name : Type = value` or `name : Type`,
  * which stores the value in the place of the variable. Without a value the variable gets the
- * default value of its type, which is 0 for an `Int`, `false` for a `Bool` and the address 0 for
- * a `C_Str`. Returns false after it recorded an error.
+ * default value of its type, which is zero in each of its words: 0 for an `Int` and a `Byte`,
+ * `false` for a `Bool`, the address 0 for a `C_Str` and `nil` for a pointer, and an array slice of
+ * no elements. A variable of an array type holds the address of the elements of the array literal
+ * that it is defined with, which are in a place of their own in the frame, and it has no default
+ * value. Returns false after it recorded an error.
  */
 static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index statement) {
     assert(builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
@@ -2116,13 +2263,15 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
     int32_t displacement = -(int32_t)builder->layouts[statement].frame_offset;
     if (type_node != AST_NODE_INDEX_NONE) {
         if (type.kind == X64_TYPE_KIND_NONE) {
-            Str subject = name;
-            if (builder->nodes[type_node].node_type == AST_NODE_TYPE_TYPE_NAME) {
-                subject = builder->nodes[type_node].payload.type_name.name;
-            }
-            return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED, subject);
+            return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
+                            x64_type_subject(builder, type_node));
         }
         value = builder->nodes[type_node].next_sibling;
+    }
+    if (type.kind == X64_TYPE_KIND_ARRAY &&
+        (value == AST_NODE_INDEX_NONE ||
+         builder->nodes[value].node_type != AST_NODE_TYPE_ARRAY_LITERAL)) {
+        return x64_fail(builder, X64_BUILD_STATUS_ARRAY_INITIALIZER_INVALID, name);
     }
 
     if (value == AST_NODE_INDEX_NONE) {
@@ -2135,6 +2284,10 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
         return true;
     }
 
+    if (type.kind == X64_TYPE_KIND_NIL) {
+        // `nil` does not say what it points to.
+        return x64_fail(builder, X64_BUILD_STATUS_NIL_TYPE_UNKNOWN, name);
+    }
     if (type.kind == X64_TYPE_KIND_NONE) {
         // A variable without a type takes the type of its value, which the target does not build
         // when it has none. The call of a procedure that returns nothing has none either, which
@@ -2142,23 +2295,24 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
         if (builder->nodes[value].node_type != AST_NODE_TYPE_CALL) {
             return x64_fail_unsupported(builder);
         }
-        return x64_expression_write(builder, value, type, true);
+        return x64_expression_write(builder, value, type, X64_MODE_VALUE, true);
     }
     if (type_node != AST_NODE_INDEX_NONE && x64_type_accepts(builder, type, value) == false) {
         return x64_fail(builder, X64_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, name);
     }
-    if (x64_expression_write(builder, value, type, true) == false) {
+    if (x64_expression_write(builder, value, type, X64_MODE_VALUE, true) == false) {
         return false;
     }
     return x64_value_store(builder, type, displacement);
 }
 
 /**
- * Writes an assignment: `name = value`, which stores the value in the place of the variable, or
- * one of `+=`, `-=`, `*=` and `/=`, which works out the variable and the value with the operator
- * and stores the result. Only a variable of the procedure is assigned to: a global variable, a
- * field, an element and what a pointer points to are not built. Returns false after it recorded
- * an error.
+ * Writes an assignment: `place = value`, which stores the value in the place, or one of `+=`, `-=`,
+ * `*=` and `/=`, which works out the place and the value with the operator and stores the result.
+ * The place is a variable of the procedure, an element of an array or an array slice, or what a
+ * pointer points to, and its address is worked out before the value. A slice as the place copies
+ * the elements of the value to the range, see `x64_range_assignment_write`. A global variable and a
+ * field are not built. Returns false after it recorded an error.
  */
 static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement) {
     assert(ast_node_type_is_assignment(builder->nodes[statement].node_type));
@@ -2166,70 +2320,177 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
     Ast_Node_Type node_type = builder->nodes[statement].node_type;
     Ast_Node_Index target = builder->nodes[statement].first_child;
     Ast_Node_Index value = builder->nodes[target].next_sibling;
-    Semantic_Binding binding = builder->bindings[target];
-    if (builder->nodes[target].node_type != AST_NODE_TYPE_IDENTIFIER ||
-        binding.kind != SEMANTIC_BINDING_KIND_VARIABLE) {
+    Ast_Node_Type target_type = builder->nodes[target].node_type;
+    Str subject = x64_expression_subject(builder, target);
+
+    X64_Type type = x64_type_make(X64_TYPE_KIND_NONE);
+    X64_Build_Status mismatch = X64_BUILD_STATUS_VARIABLE_TYPE_MISMATCH;
+    if (target_type == AST_NODE_TYPE_IDENTIFIER) {
+        if (builder->bindings[target].kind != SEMANTIC_BINDING_KIND_VARIABLE) {
+            return x64_fail_unsupported(builder);
+        }
+        type = x64_expression_type(builder, target);
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            // An array is not assigned to as a whole.
+            return x64_fail(builder, X64_BUILD_STATUS_ARRAY_INITIALIZER_INVALID, subject);
+        }
+    } else if (target_type == AST_NODE_TYPE_SUBSCRIPT || target_type == AST_NODE_TYPE_DEREFERENCE) {
+        type = x64_expression_type(builder, target);
+        mismatch = X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH;
+        if (target_type == AST_NODE_TYPE_DEREFERENCE) {
+            mismatch = X64_BUILD_STATUS_POINTER_TARGET_TYPE_MISMATCH;
+        }
+    } else if (target_type == AST_NODE_TYPE_SLICE && node_type == AST_NODE_TYPE_ASSIGNMENT) {
+        return x64_range_assignment_write(builder, statement);
+    } else {
         return x64_fail_unsupported(builder);
     }
 
-    // The definition of the variable is above, and was checked when it was written.
-    X64_Type type = builder->layouts[binding.target].type;
-    assert(type.kind != X64_TYPE_KIND_NONE);
-    int32_t displacement = -(int32_t)builder->layouts[binding.target].frame_offset;
-    Str name = builder->nodes[target].payload.identifier.name;
-
-    if (node_type == AST_NODE_TYPE_ASSIGNMENT) {
-        if (x64_type_accepts(builder, type, value) == false) {
-            // An expression that the target does not build has no type.
-            if (x64_expression_type_for(builder, value, type).kind == X64_TYPE_KIND_NONE &&
-                builder->nodes[value].node_type != AST_NODE_TYPE_CALL) {
-                return x64_fail_unsupported(builder);
-            }
-            return x64_fail(builder, X64_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, name);
+    // The address of the place, which the checks of the place report about, comes first.
+    if (x64_expression_write(builder, target, type, X64_MODE_ADDRESS, true) == false) {
+        return false;
+    }
+    X64_Type value_type = type;
+    if (node_type != AST_NODE_TYPE_ASSIGNMENT) {
+        // The operators work on an `Int` only, the place and the value alike.
+        value_type = x64_type_make(X64_TYPE_KIND_INT);
+        if (type.kind != X64_TYPE_KIND_INT) {
+            return x64_fail(builder, X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, subject);
         }
-        if (x64_expression_write(builder, value, type, true) == false) {
-            return false;
+        mismatch = X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID;
+        subject = x64_expression_subject(builder, value);
+    }
+    if (x64_type_accepts(builder, value_type, value) == false) {
+        // An expression that the target does not build has no type.
+        if (x64_expression_type_for(builder, value, value_type).kind == X64_TYPE_KIND_NONE &&
+            builder->nodes[value].node_type != AST_NODE_TYPE_CALL) {
+            return x64_fail_unsupported(builder);
         }
-        return x64_value_store(builder, type, displacement);
+        if (type.kind == X64_TYPE_KIND_NIL) {
+            return x64_fail(builder, X64_BUILD_STATUS_NIL_TYPE_UNKNOWN, subject);
+        }
+        return x64_fail(builder, mismatch, subject);
     }
-
-    // The operators work on an `Int` only, the variable and the value alike.
-    X64_Type int_type = x64_type_make(X64_TYPE_KIND_INT);
-    if (type.kind != X64_TYPE_KIND_INT) {
-        return x64_fail(builder, X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, name);
-    }
-    if (x64_type_accepts(builder, int_type, value) == false) {
-        return x64_fail(builder, X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
-                        x64_expression_subject(builder, value));
-    }
-    if (x64_expression_write(builder, value, int_type, true) == false) {
+    if (x64_expression_write(builder, value, value_type, X64_MODE_VALUE, true) == false) {
         return false;
     }
 
-    // `mov rax, [variable]` and `mov rcx, value`, the operator, and `mov [variable], rax`.
-    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, displacement);
-    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP,
-                     x64_stack_displacement(builder, builder->stack_words - 1, 1));
-    x64_stack_pop(builder, 1);
-    switch (node_type) {
-    case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
-        x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
-        break;
-    case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
-        x64_write_divide(builder, X64_REGISTER_RCX);
-        break;
-    case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
-        x64_write_multiply(builder, X64_REGISTER_RAX, X64_REGISTER_RCX);
-        break;
-    case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
-        x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_RCX, X64_REGISTER_RAX);
-        break;
-    default:
-        assert(false);
-        break;
+    // The address is below the value on the stack.
+    size_t value_words = x64_type_word_count(value_type);
+    int32_t address = x64_stack_displacement(builder, builder->stack_words - value_words - 1, 1);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, address);
+    if (node_type != AST_NODE_TYPE_ASSIGNMENT) {
+        // `mov rax, [place]` and `mov rcx, value`, the operator, and the result is the value.
+        int32_t operand = x64_stack_displacement(builder, builder->stack_words - 1, 1);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_R10, 0);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, operand);
+        switch (node_type) {
+        case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+            x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
+            break;
+        case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+            x64_write_divide(builder, X64_REGISTER_RCX);
+            break;
+        case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
+            x64_write_multiply(builder, X64_REGISTER_RAX, X64_REGISTER_RCX);
+            break;
+        case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
+            x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_RCX, X64_REGISTER_RAX);
+            break;
+        default:
+            assert(false);
+            break;
+        }
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, operand);
     }
-    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, displacement);
+    x64_memory_store(builder, type, X64_REGISTER_R10);
+    x64_stack_pop(builder, 1);
     return true;
+}
+
+/**
+ * Writes the assignment `a[low:high] = value` of `statement`, which copies the elements of the
+ * value, an array or an array slice, to the range of elements of the slice on the left. It traps
+ * unless the two have as many elements, and the copy is right also when the two ranges overlap,
+ * see `x64_copy_write`. Returns false after it recorded an error.
+ */
+static bool x64_range_assignment_write(X64_Builder *builder, Ast_Node_Index statement) {
+    Ast_Node_Index target = builder->nodes[statement].first_child;
+    Ast_Node_Index value = builder->nodes[target].next_sibling;
+    X64_Type type = x64_expression_type(builder, target);
+    if (type.kind == X64_TYPE_KIND_NONE) {
+        return x64_fail(builder, X64_BUILD_STATUS_ARRAY_EXPECTED,
+                        x64_expression_subject(builder, target));
+    }
+    if (x64_type_accepts(builder, type, value) == false) {
+        return x64_fail(builder, X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
+                        x64_expression_subject(builder, value));
+    }
+    if (x64_expression_write(builder, target, type, X64_MODE_VALUE, true) == false) {
+        return false;
+    }
+    if (x64_expression_write(builder, value, type, X64_MODE_VALUE, true) == false) {
+        return false;
+    }
+
+    int32_t source = x64_stack_displacement(builder, builder->stack_words - 2, 2);
+    int32_t destination = x64_stack_displacement(builder, builder->stack_words - 4, 2);
+    // `cmp` of the lengths and `je` over a breakpoint.
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP,
+                     destination + X64_WORD_SIZE_BYTES);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                     source + X64_WORD_SIZE_BYTES);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_write_trap_unless(builder, X64_CONDITION_EQUAL);
+    size_t stride = x64_type_stride_bytes(x64_type_element(type));
+    if (stride != 1) {
+        x64_write_load_integer(builder, X64_REGISTER_RAX, (int64_t)stride);
+        x64_write_multiply(builder, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    }
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, destination);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R11, X64_REGISTER_RBP, source);
+    x64_copy_write(builder);
+    x64_stack_pop(builder, 4);
+    return true;
+}
+
+/**
+ * Writes the copy of `rcx` bytes from the address in `r11` to the address in `r10`, one byte at a
+ * time through `al`. When the target is above the source the bytes are copied from the last one
+ * down, so that a byte is read before the copy of another one writes over it, and otherwise from
+ * the first one up, which makes the copy right however the two overlap, like `memmove` of C.
+ */
+static void x64_copy_write(X64_Builder *builder) {
+    uint32_t backward_jumps = X64_JUMP_NONE;
+    uint32_t done_jumps = X64_JUMP_NONE;
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_R11, X64_REGISTER_R10);
+    x64_jump_write(builder, X64_CONDITION_ABOVE, &backward_jumps);
+
+    uint32_t forward = (uint32_t)(builder->writer.length - builder->text_start);
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_RCX, X64_REGISTER_RCX);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &done_jumps);
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RAX,
+                              X64_REGISTER_R11, 0);
+    x64_write_memory(builder, X64_OPCODE_STORE_BYTE, X64_REGISTER_RAX, X64_REGISTER_R10, 0);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    x64_write_add_immediate(builder, X64_REGISTER_R11, 1);
+    x64_write_add_immediate(builder, X64_REGISTER_RCX, -1);
+    x64_jump_back_write(builder, forward);
+
+    x64_jumps_resolve(builder, backward_jumps);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_R10);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_R11);
+    uint32_t backward = (uint32_t)(builder->writer.length - builder->text_start);
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_RCX, X64_REGISTER_RCX);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &done_jumps);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, -1);
+    x64_write_add_immediate(builder, X64_REGISTER_R11, -1);
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RAX,
+                              X64_REGISTER_R11, 0);
+    x64_write_memory(builder, X64_OPCODE_STORE_BYTE, X64_REGISTER_RAX, X64_REGISTER_R10, 0);
+    x64_write_add_immediate(builder, X64_REGISTER_RCX, -1);
+    x64_jump_back_write(builder, backward);
+    x64_jumps_resolve(builder, done_jumps);
 }
 
 /**
@@ -2256,15 +2517,17 @@ static bool x64_value_store(X64_Builder *builder, X64_Type type, int32_t displac
 
 /**
  * Writes the expression `expression`, which leaves its value on the top of the stack of values,
- * as a value of `wanted` when it is an untyped constant, or nothing when `is_result_used` is not
- * set and it is a call. The tree is walked without recursion, with the path from the root to the
- * current node in a fixed array: a node is entered, then its children are written one after the
- * other, each of which leaves its value on the stack, and then the node itself, which takes the
- * values of its children off the stack and leaves its own. A constant is its value, so its
- * children are not written. Returns false after it recorded an error.
+ * as a value of `wanted` when it is an untyped constant or an array where an array slice is
+ * wanted, or nothing when `is_result_used` is not set and it is a call. With `X64_MODE_ADDRESS` it
+ * leaves the address of the place that it is instead, which an assignment writes to. The tree is
+ * walked without recursion, with the path from the root to the current node in a fixed array: a
+ * node is entered, then its children are written one after the other, each of which leaves its
+ * value on the stack, and then the node itself, which takes the values of its children off the
+ * stack and leaves its own. A constant is its value, so its children are not written. Returns false
+ * after it recorded an error.
  */
 static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression,
-                                 X64_Type wanted, bool is_result_used) {
+                                 X64_Type wanted, X64_Mode mode, bool is_result_used) {
     assert(expression < builder->node_count);
     assert(builder->stack_words <= UINT32_MAX);
 
@@ -2276,7 +2539,7 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
         .node = expression,
         .stack_start = (uint32_t)builder->stack_words,
         .index = 0,
-        .mode = X64_MODE_VALUE,
+        .mode = mode,
     };
 
     // False once the children of the last node have been written.
@@ -2297,7 +2560,7 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
                     .node = first_child,
                     .stack_start = (uint32_t)builder->stack_words,
                     .index = 0,
-                    .mode = X64_MODE_VALUE,
+                    .mode = x64_child_mode(builder, frame, 0),
                 };
                 frame_count += 1;
                 continue;
@@ -2311,13 +2574,18 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
             false) {
             return false;
         }
+        x64_conversion_write(builder, frame);
         if (is_root) {
             return true;
         }
 
-        // Go on with the next sibling, or finish the parent when there is none.
-        Ast_Node_Index next = builder->nodes[frame->node].next_sibling;
+        // What the parent does with the value of each child, and then the next sibling, or the
+        // parent itself when there is none.
         X64_Expression_Frame const *parent = &frames[frame_count - 2];
+        if (x64_child_done(builder, parent, frame) == false) {
+            return false;
+        }
+        Ast_Node_Index next = builder->nodes[frame->node].next_sibling;
         if (next != AST_NODE_INDEX_NONE) {
             uint32_t index = frame->index + 1;
             *frame = (X64_Expression_Frame){
@@ -2325,7 +2593,7 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
                 .node = next,
                 .stack_start = (uint32_t)builder->stack_words,
                 .index = index,
-                .mode = X64_MODE_VALUE,
+                .mode = x64_child_mode(builder, parent, index),
             };
             is_descending = true;
         } else {
@@ -2340,9 +2608,77 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
 }
 
 /**
+ * Returns how `parent` wants its child at `index`: the operand of `%` as the address of its place,
+ * and every other child as its value. An array and a pointer are addresses already, so what is
+ * subscripted and what is followed are values.
+ */
+static X64_Mode x64_child_mode(X64_Builder const *builder, X64_Expression_Frame const *parent,
+                               size_t index) {
+    (void)index;
+    if (builder->nodes[parent->node].node_type == AST_NODE_TYPE_ADDRESS_OF) {
+        return X64_MODE_ADDRESS;
+    }
+    return X64_MODE_VALUE;
+}
+
+/**
+ * Writes what `parent` does with the value of its child of `child`, which is on the top of the
+ * stack of values, before the next child is written: an element of an array literal is stored in
+ * its place among the elements of the literal, see `x64_procedure_layout`, and taken off the
+ * stack, so that the literal is the only value that it leaves. Returns false after it recorded an
+ * error.
+ */
+static bool x64_child_done(X64_Builder *builder, X64_Expression_Frame const *parent,
+                           X64_Expression_Frame const *child) {
+    if (builder->nodes[parent->node].node_type != AST_NODE_TYPE_ARRAY_LITERAL) {
+        return true;
+    }
+
+    X64_Type element = x64_type_element(builder->layouts[parent->node].type);
+    if (x64_type_accepts(builder, element, child->node) == false) {
+        return x64_fail(builder, X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
+                        x64_expression_subject(builder, child->node));
+    }
+    // `lea r10, [element]` and the store of the value there.
+    int32_t place = -(int32_t)builder->layouts[parent->node].frame_offset +
+                    (int32_t)(child->index * x64_type_stride_bytes(element));
+    x64_write_memory(builder, X64_OPCODE_LEA, X64_REGISTER_R10, X64_REGISTER_RBP, place);
+    x64_memory_store(builder, element, X64_REGISTER_R10);
+    return true;
+}
+
+/**
+ * Makes the value of `frame`, which is on the top of the stack of values, a value of the type
+ * that its place wants, where that is not what it is: an array where an array slice is wanted
+ * becomes a slice of all of its elements, the address and the length, which is part of the type
+ * of the array. Nothing else is converted.
+ */
+static void x64_conversion_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
+    if (frame->wanted.kind != X64_TYPE_KIND_SLICE || frame->mode != X64_MODE_VALUE) {
+        return;
+    }
+    X64_Type type = x64_expression_type(builder, frame->node);
+    if (type.kind != X64_TYPE_KIND_ARRAY) {
+        return;
+    }
+    assert(type.length >= 0);
+
+    // The address is the first word of the slice, which starts a word lower on the stack.
+    int32_t array = x64_stack_displacement(builder, builder->stack_words - 1, 1);
+    x64_stack_pop(builder, 1);
+    int32_t slice = x64_stack_push(builder, 2);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, array);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, slice);
+    x64_write_load_integer(builder, X64_REGISTER_RAX, type.length);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                     slice + X64_WORD_SIZE_BYTES);
+}
+
+/**
  * Returns the first child of `expression` that is written before it, or `AST_NODE_INDEX_NONE` when
  * it has none: a constant is its value, and the argument of `str_to_c_str` is copied by the call
- * itself, since it is a string that is known when the program is compiled.
+ * itself, since it is a string that is known when the program is compiled. The elements of an
+ * array literal follow its type, which is not written.
  */
 static Ast_Node_Index x64_child_first(X64_Builder const *builder, Ast_Node_Index expression) {
     assert(expression < builder->node_count);
@@ -2352,15 +2688,21 @@ static Ast_Node_Index x64_child_first(X64_Builder const *builder, Ast_Node_Index
     }
     switch (builder->nodes[expression].node_type) {
     case AST_NODE_TYPE_ADDITION:
+    case AST_NODE_TYPE_ADDRESS_OF:
     case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_CALL:
     case AST_NODE_TYPE_COMPARISON:
+    case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_MULTIPLICATION:
     case AST_NODE_TYPE_NOT:
     case AST_NODE_TYPE_OR:
+    case AST_NODE_TYPE_SLICE:
+    case AST_NODE_TYPE_SUBSCRIPT:
     case AST_NODE_TYPE_SUBTRACTION:
         return builder->nodes[expression].first_child;
+    case AST_NODE_TYPE_ARRAY_LITERAL:
+        return builder->nodes[builder->nodes[expression].first_child].next_sibling;
     default:
         break;
     }
@@ -2369,15 +2711,17 @@ static Ast_Node_Index x64_child_first(X64_Builder const *builder, Ast_Node_Index
 
 /**
  * Returns the type that `parent` wants its child `child` at `index` to have, which an untyped
- * constant becomes: the type of the parameter for an argument, and `Int` and `Bool` for the
- * operands of the operators that take them. The kind is `X64_TYPE_KIND_NONE` where the parent does
- * not say, as for the operands of a comparison, which take the type that they have.
+ * constant becomes: the type of the parameter for an argument, `Int` and `Bool` for the operands of
+ * the operators that take them and for an index, the type of the elements for an element of an
+ * array literal, and for an operand of a comparison that is an untyped constant or `nil` the type
+ * of the other operand. The kind is `X64_TYPE_KIND_NONE` where the parent does not say.
  */
 static X64_Type x64_child_wanted(X64_Builder const *builder, X64_Expression_Frame const *parent,
                                  Ast_Node_Index child, size_t index) {
     assert(child < builder->node_count);
 
-    switch (builder->nodes[parent->node].node_type) {
+    Ast_Node const *node = &builder->nodes[parent->node];
+    switch (node->node_type) {
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_MULTIPLICATION:
@@ -2387,7 +2731,36 @@ static X64_Type x64_child_wanted(X64_Builder const *builder, X64_Expression_Fram
     case AST_NODE_TYPE_NOT:
     case AST_NODE_TYPE_OR:
         return x64_type_make(X64_TYPE_KIND_BOOL);
+    case AST_NODE_TYPE_ARRAY_LITERAL:
+        return x64_type_element(builder->layouts[parent->node].type);
+    case AST_NODE_TYPE_SLICE:
+    case AST_NODE_TYPE_SUBSCRIPT:
+        if (index > 0) {
+            return x64_type_make(X64_TYPE_KIND_INT);
+        }
+        break;
+    case AST_NODE_TYPE_COMPARISON: {
+        Ast_Node_Index other = node->first_child;
+        if (index == 0) {
+            other = node->last_child;
+        }
+        bool is_untyped = x64_is_constant(builder, child) ||
+                          builder->nodes[child].node_type == AST_NODE_TYPE_NIL_LITERAL;
+        if (is_untyped) {
+            return x64_expression_type(builder, other);
+        }
+        break;
+    }
     case AST_NODE_TYPE_CALL: {
+        if (x64_call_is_built_in(builder, parent->node)) {
+            if (str_equals(node->payload.call.name, STR("int_to_byte"))) {
+                return x64_type_make(X64_TYPE_KIND_INT);
+            }
+            if (str_equals(node->payload.call.name, STR("byte_to_int"))) {
+                return x64_type_make(X64_TYPE_KIND_BYTE);
+            }
+            break;
+        }
         Ast_Node_Index procedure = x64_call_procedure(builder, parent->node);
         if (procedure != AST_NODE_INDEX_NONE && index < x64_parameter_count(builder, procedure)) {
             return x64_parameter_type(builder, procedure, index);
@@ -2402,15 +2775,18 @@ static X64_Type x64_child_wanted(X64_Builder const *builder, X64_Expression_Fram
 
 /**
  * Writes the node of `frame`, whose children are on the top of the stack of values, from
- * `frame->stack_start` on: it takes them off and leaves its own value there. `is_result_used` is
- * not set for a call whose value is dropped, which leaves nothing. Returns false after it recorded
- * an error.
+ * `frame->stack_start` on: it takes them off and leaves its own value there, or the address of its
+ * place for `X64_MODE_ADDRESS`. `is_result_used` is not set for a call whose value is dropped,
+ * which leaves nothing. Returns false after it recorded an error.
  */
 static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame const *frame,
                                       bool is_result_used) {
     Ast_Node_Index node = frame->node;
     Ast_Node const *expression = &builder->nodes[node];
 
+    if (frame->mode == X64_MODE_ADDRESS) {
+        return x64_address_write(builder, frame);
+    }
     if (x64_is_constant(builder, node)) {
         return x64_constant_write(builder, frame);
     }
@@ -2424,29 +2800,59 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
     case AST_NODE_TYPE_OR:
     case AST_NODE_TYPE_SUBTRACTION:
         return x64_operation_write(builder, frame);
+    case AST_NODE_TYPE_ADDRESS_OF:
+        // The operand left the address of its place, which is the value of the pointer.
+        return true;
+    case AST_NODE_TYPE_ARRAY_LITERAL: {
+        // The elements are in their places already, and the value is the address of the first.
+        X64_Type type = builder->layouts[node].type;
+        Ast_Node_Index type_node = expression->first_child;
+        if (type.kind == X64_TYPE_KIND_NONE) {
+            return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
+                            x64_type_subject(builder, type_node));
+        }
+        X64_Type written = x64_type_of_node(builder, type_node);
+        if (written.length >= 0 && written.length != type.length) {
+            return x64_fail(builder, X64_BUILD_STATUS_ARRAY_LENGTH_MISMATCH,
+                            x64_type_subject(builder, type_node));
+        }
+        int32_t target = x64_stack_push(builder, 1);
+        x64_write_memory(builder, X64_OPCODE_LEA, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                         -(int32_t)builder->layouts[node].frame_offset);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+        return true;
+    }
     case AST_NODE_TYPE_CALL:
         if (x64_call_is_str_to_c_str(builder, node)) {
             return x64_str_to_c_str_write(builder, node);
         }
+        if (x64_call_is_built_in(builder, node)) {
+            return x64_built_in_write(builder, frame);
+        }
         return x64_call_write(builder, frame, is_result_used);
     case AST_NODE_TYPE_COMPARISON:
         return x64_comparison_write(builder, frame);
+    case AST_NODE_TYPE_DEREFERENCE:
+    case AST_NODE_TYPE_SUBSCRIPT: {
+        // The address of the place, and then what is there.
+        if (x64_address_write(builder, frame) == false) {
+            return false;
+        }
+        X64_Type type = x64_expression_type(builder, node);
+        int32_t address = x64_stack_displacement(builder, builder->stack_words - 1, 1);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, address);
+        x64_stack_pop(builder, 1);
+        x64_memory_load(builder, type, X64_REGISTER_R10);
+        return true;
+    }
     case AST_NODE_TYPE_IDENTIFIER: {
         // The value of a parameter is in the words of the arguments, and that of a variable in its
         // place in the frame.
-        Semantic_Binding binding = builder->bindings[node];
         int32_t source = 0;
-        X64_Type type = x64_expression_type(builder, node);
-        if (binding.kind == SEMANTIC_BINDING_KIND_PARAMETER) {
-            Ast_Node_Index procedure = builder->nodes[builder->definition].first_child;
-            source = (int32_t)(X64_ARGUMENT_HOME_OFFSET_BYTES +
-                               x64_argument_word_offset(builder, procedure, binding.position) *
-                                   X64_WORD_SIZE_BYTES);
-        } else if (binding.kind == SEMANTIC_BINDING_KIND_VARIABLE) {
-            source = -(int32_t)builder->layouts[binding.target].frame_offset;
-        } else {
+        if (x64_identifier_place(builder, node, &source) == false) {
             return x64_fail_unsupported(builder);
         }
+        X64_Type type = x64_expression_type(builder, node);
         if (type.kind == X64_TYPE_KIND_NONE) {
             return x64_fail_unsupported(builder);
         }
@@ -2461,10 +2867,311 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
         }
         return true;
     }
+    case AST_NODE_TYPE_NIL_LITERAL: {
+        // `nil` is the address 0, which is not the address of anything that can be pointed to.
+        int32_t target = x64_stack_push(builder, 1);
+        x64_write_load_integer(builder, X64_REGISTER_RAX, 0);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+        return true;
+    }
+    case AST_NODE_TYPE_SLICE:
+        return x64_slice_write(builder, frame);
     default:
         break;
     }
     return x64_fail_unsupported(builder);
+}
+
+/**
+ * Sets `*place` to the distance from `rbp` of the value of the name `identifier`: a parameter is in
+ * the words of the arguments, and a variable or the iterator of a for statement in its place in the
+ * frame. Returns false for a name that is neither, which has no place in the frame.
+ */
+static bool x64_identifier_place(X64_Builder const *builder, Ast_Node_Index identifier,
+                                 int32_t *place) {
+    assert(builder->nodes[identifier].node_type == AST_NODE_TYPE_IDENTIFIER);
+
+    Semantic_Binding binding = builder->bindings[identifier];
+    if (binding.kind == SEMANTIC_BINDING_KIND_PARAMETER) {
+        Ast_Node_Index procedure = builder->nodes[builder->definition].first_child;
+        *place = (int32_t)(X64_ARGUMENT_HOME_OFFSET_BYTES +
+                           x64_argument_word_offset(builder, procedure, binding.position) *
+                               X64_WORD_SIZE_BYTES);
+        return true;
+    }
+    if (binding.kind == SEMANTIC_BINDING_KIND_VARIABLE) {
+        *place = -(int32_t)builder->layouts[binding.target].frame_offset;
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Writes the address of the place that the node of `frame` is, whose children are on the stack of
+ * values, and leaves it there: a variable is its place in the frame, an element is the address of
+ * the first element plus its index times the size of an element, after the index was checked
+ * against the length, which traps when it is not below it, and what a pointer points to is the
+ * pointer, which traps when it is `nil`. A parameter and the iterator of a for statement cannot be
+ * assigned to, so they have no address, and neither has a value that is computed, or a variable of
+ * an array or array slice type, which cannot be pointed to. Returns false after it recorded an
+ * error.
+ */
+static bool x64_address_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
+    Ast_Node_Index node = frame->node;
+    Ast_Node const *expression = &builder->nodes[node];
+    Str subject = x64_expression_subject(builder, node);
+
+    if (expression->node_type == AST_NODE_TYPE_IDENTIFIER) {
+        Semantic_Binding binding = builder->bindings[node];
+        X64_Type type = x64_expression_type(builder, node);
+        bool is_variable =
+            binding.kind == SEMANTIC_BINDING_KIND_VARIABLE &&
+            builder->nodes[binding.target].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION;
+        if (is_variable == false || type.kind == X64_TYPE_KIND_ARRAY ||
+            type.kind == X64_TYPE_KIND_SLICE) {
+            return x64_fail(builder, X64_BUILD_STATUS_ADDRESS_INVALID, subject);
+        }
+        int32_t target = x64_stack_push(builder, 1);
+        x64_write_memory(builder, X64_OPCODE_LEA, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                         -(int32_t)builder->layouts[binding.target].frame_offset);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+        return true;
+    }
+
+    if (expression->node_type == AST_NODE_TYPE_DEREFERENCE) {
+        X64_Type pointer = x64_expression_type(builder, expression->first_child);
+        if (pointer.kind != X64_TYPE_KIND_POINTER) {
+            return x64_fail(builder, X64_BUILD_STATUS_POINTER_EXPECTED, subject);
+        }
+        // The pointer is the address, once it is known not to be `nil`: `test rax, rax` and `jne`
+        // over a breakpoint.
+        int32_t place = x64_stack_displacement(builder, frame->stack_start, 1);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+        x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_RAX, X64_REGISTER_RAX);
+        x64_write_trap_unless(builder, X64_CONDITION_NOT_EQUAL);
+        return true;
+    }
+
+    if (expression->node_type == AST_NODE_TYPE_SUBSCRIPT) {
+        Ast_Node_Index sequence = expression->first_child;
+        Ast_Node_Index index = builder->nodes[sequence].next_sibling;
+        X64_Type type = x64_expression_type(builder, sequence);
+        if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+            return x64_fail(builder, X64_BUILD_STATUS_ARRAY_EXPECTED, subject);
+        }
+        if (x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_INT), index) == false) {
+            return x64_fail(builder, X64_BUILD_STATUS_INDEX_TYPE_INVALID,
+                            x64_expression_subject(builder, index));
+        }
+        size_t sequence_words = x64_type_word_count(type);
+        int32_t first = x64_stack_displacement(builder, frame->stack_start, sequence_words);
+        int32_t place = x64_stack_displacement(builder, frame->stack_start + sequence_words, 1);
+        // `mov rax, index`, the length in `rcx`, and `cmp` and `jb` over a breakpoint, which is
+        // unsigned, so that a negative index is above every length.
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+        x64_sequence_length_load(builder, type, X64_REGISTER_RCX, first);
+        x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+        x64_write_trap_unless(builder, X64_CONDITION_BELOW);
+        size_t stride = x64_type_stride_bytes(x64_type_element(type));
+        if (stride != 1) {
+            x64_write_load_integer(builder, X64_REGISTER_RCX, (int64_t)stride);
+            x64_write_multiply(builder, X64_REGISTER_RAX, X64_REGISTER_RCX);
+        }
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, first);
+        x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
+        x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+        int32_t target = x64_stack_push(builder, 1);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+        return true;
+    }
+
+    return x64_fail(builder, X64_BUILD_STATUS_ADDRESS_INVALID, subject);
+}
+
+/**
+ * Writes the slice `a[low:high]` of `frame`, whose array or array slice and bounds are on the
+ * stack of values, and leaves the slice: the address of the element at `low` and the number of
+ * elements up to `high`. It traps unless `low` is not above `high` and `high` is not above the
+ * length, which are unsigned comparisons, so that a negative bound traps too. Returns false after
+ * it recorded an error.
+ */
+static bool x64_slice_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
+    Ast_Node_Index node = frame->node;
+    Ast_Node_Index sequence = builder->nodes[node].first_child;
+    X64_Type type = x64_expression_type(builder, sequence);
+    if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+        return x64_fail(builder, X64_BUILD_STATUS_ARRAY_EXPECTED,
+                        x64_expression_subject(builder, node));
+    }
+    X64_Type int_type = x64_type_make(X64_TYPE_KIND_INT);
+    for (Ast_Node_Index bound = builder->nodes[sequence].next_sibling;
+         bound != AST_NODE_INDEX_NONE; bound = builder->nodes[bound].next_sibling) {
+        if (x64_type_accepts(builder, int_type, bound) == false) {
+            return x64_fail(builder, X64_BUILD_STATUS_INDEX_TYPE_INVALID,
+                            x64_expression_subject(builder, bound));
+        }
+    }
+
+    size_t sequence_words = x64_type_word_count(type);
+    int32_t first = x64_stack_displacement(builder, frame->stack_start, sequence_words);
+    int32_t low = x64_stack_displacement(builder, frame->stack_start + sequence_words, 1);
+    int32_t high = x64_stack_displacement(builder, frame->stack_start + sequence_words + 1, 1);
+    // `rax` is the low bound and `rcx` the high one, and `rdx` the length.
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, low);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, high);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_write_trap_unless(builder, X64_CONDITION_BELOW_EQUAL);
+    x64_sequence_length_load(builder, type, X64_REGISTER_RDX, first);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RCX);
+    x64_write_trap_unless(builder, X64_CONDITION_BELOW_EQUAL);
+    // The length of the slice, and the address of its first element.
+    x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_RAX, X64_REGISTER_RCX);
+    size_t stride = x64_type_stride_bytes(x64_type_element(type));
+    if (stride != 1) {
+        x64_write_load_integer(builder, X64_REGISTER_RDX, (int64_t)stride);
+        x64_write_multiply(builder, X64_REGISTER_RAX, X64_REGISTER_RDX);
+    }
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RDX, X64_REGISTER_RBP, first);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RDX, X64_REGISTER_RAX);
+
+    x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+    int32_t target = x64_stack_push(builder, 2);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RCX, X64_REGISTER_RBP,
+                     target + X64_WORD_SIZE_BYTES);
+    return true;
+}
+
+/**
+ * Writes the load of the number of elements of the array or array slice of `type`, whose value is
+ * at `rbp + place`, to `register_number`: the length of an array is part of its type, and the
+ * length of a slice is its second word.
+ */
+static void x64_sequence_length_load(X64_Builder *builder, X64_Type type, byte register_number,
+                                     int32_t place) {
+    assert(type.kind == X64_TYPE_KIND_ARRAY || type.kind == X64_TYPE_KIND_SLICE);
+
+    if (type.kind == X64_TYPE_KIND_ARRAY) {
+        assert(type.length >= 0);
+        x64_write_load_integer(builder, register_number, type.length);
+    } else {
+        x64_write_memory(builder, X64_OPCODE_LOAD, register_number, X64_REGISTER_RBP,
+                         place + X64_WORD_SIZE_BYTES);
+    }
+}
+
+/**
+ * Writes a call of the built-in procedure `length_of`, `byte_to_int` or `int_to_byte` of `frame`,
+ * whose argument is on the stack of values. `length_of` is the length of an array, which is part
+ * of its type, or the second word of an array slice. A `Byte` is a number from 0 to 255 in a word,
+ * so `byte_to_int` changes nothing, and `int_to_byte` traps unless the number is at most 255, as an
+ * unsigned number, which a negative one is not. Returns false after it recorded an error.
+ */
+static bool x64_built_in_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
+    Ast_Node_Index call = frame->node;
+    Str name = builder->nodes[call].payload.call.name;
+    Ast_Node_Index argument = builder->nodes[call].first_child;
+    if (argument == AST_NODE_INDEX_NONE ||
+        builder->nodes[argument].next_sibling != AST_NODE_INDEX_NONE) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
+    }
+    X64_Type type = x64_expression_type(builder, argument);
+    int32_t place = x64_stack_displacement(builder, frame->stack_start,
+                                           builder->stack_words - frame->stack_start);
+
+    if (str_equals(name, STR("length_of"))) {
+        if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+            return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        }
+        x64_sequence_length_load(builder, type, X64_REGISTER_RAX, place);
+    } else if (str_equals(name, STR("byte_to_int"))) {
+        if (x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_BYTE), argument) == false) {
+            return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        }
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+    } else if (str_equals(name, STR("int_to_byte"))) {
+        if (x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_INT), argument) == false) {
+            return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        }
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+        x64_write_load_integer(builder, X64_REGISTER_RCX, X64_BYTE_MAX);
+        x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+        x64_write_trap_unless(builder, X64_CONDITION_BELOW_EQUAL);
+    } else {
+        return x64_fail_unsupported(builder);
+    }
+
+    x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+    int32_t target = x64_stack_push(builder, 1);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+    return true;
+}
+
+/**
+ * Puts the value of `type` that is in memory at the address in `base` on the stack of values. A
+ * `Byte` is one byte there, which `movzx` widens to its word, and every other value is its words.
+ * `base` is `r10` or `r11`, which the copy does not use.
+ */
+static void x64_memory_load(X64_Builder *builder, X64_Type type, byte base) {
+    assert(base == X64_REGISTER_R10 || base == X64_REGISTER_R11);
+
+    size_t word_count = x64_type_word_count(type);
+    int32_t target = x64_stack_push(builder, word_count);
+    if (type.kind == X64_TYPE_KIND_BYTE) {
+        x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RAX, base,
+                                  0);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+        return;
+    }
+    for (size_t i = 0; i < word_count; i += 1) {
+        int32_t offset = (int32_t)(i * X64_WORD_SIZE_BYTES);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, base, offset);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                         target + offset);
+    }
+}
+
+/**
+ * Moves the value of `type` on the top of the stack of values to the memory at the address in
+ * `base`, and takes it off the stack: a `Byte` is stored as one byte, and every other value as its
+ * words. `base` is `r10` or `r11`, which the copy does not use.
+ */
+static void x64_memory_store(X64_Builder *builder, X64_Type type, byte base) {
+    assert(base == X64_REGISTER_R10 || base == X64_REGISTER_R11);
+
+    size_t word_count = x64_type_word_count(type);
+    int32_t source = x64_stack_displacement(builder, builder->stack_words - word_count,
+                                            word_count);
+    for (size_t i = 0; i < word_count; i += 1) {
+        int32_t offset = (int32_t)(i * X64_WORD_SIZE_BYTES);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                         source + offset);
+        if (type.kind == X64_TYPE_KIND_BYTE) {
+            x64_write_memory(builder, X64_OPCODE_STORE_BYTE, X64_REGISTER_RAX, base, offset);
+        } else {
+            x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, base, offset);
+        }
+    }
+    x64_stack_pop(builder, word_count);
+}
+
+/**
+ * Returns the text in the source that an error about the type node `type` points at: the name at
+ * the end of its carets and brackets.
+ */
+static Str x64_type_subject(X64_Builder const *builder, Ast_Node_Index type) {
+    Ast_Node_Index current = type;
+    // Each step goes down one level, so there are fewer steps than nodes.
+    for (size_t i = 0; i < builder->node_count &&
+                       builder->nodes[current].node_type != AST_NODE_TYPE_TYPE_NAME &&
+                       builder->nodes[current].first_child != AST_NODE_INDEX_NONE;
+         i += 1) {
+        current = builder->nodes[current].first_child;
+    }
+    if (builder->nodes[current].node_type == AST_NODE_TYPE_TYPE_NAME) {
+        return builder->nodes[current].payload.type_name.name;
+    }
+    return ast_definition_name(&builder->nodes[builder->definition]);
 }
 
 /**
@@ -2486,7 +3193,8 @@ static bool x64_constant_write(X64_Builder *builder, X64_Expression_Frame const 
             return false;
         }
     } else {
-        X64_Type type = x64_expression_type(builder, frame->node);
+        // A number that is a `Byte` where one is wanted is the same word as the number.
+        X64_Type type = x64_expression_type_for(builder, frame->node, frame->wanted);
         if (type.kind == X64_TYPE_KIND_NONE) {
             return x64_fail_unsupported(builder);
         }
@@ -2573,10 +3281,12 @@ static bool x64_operation_write(X64_Builder *builder, X64_Expression_Frame const
 }
 
 /**
- * Writes a comparison, whose operands are on the stack of values: two `Int` values with any of the
- * six operators, whose order is signed, or two `Bool` values with `==` and `not=`. `cmp` compares
- * them and `set` makes the `Bool` of the condition, which `movzx` widens to the 64 bits of the
- * value. Returns false after it recorded an error.
+ * Writes a comparison, whose operands are on the stack of values: two `Int` values or two `Byte`
+ * values with any of the six operators, two `Bool` values with `==` and `not=`, and two pointers of
+ * one type, or a pointer and `nil`, with `==` and `not=`. The order of an `Int` is signed, and a
+ * `Byte` is a number from 0 to 255 in a word, which compares the same way. `cmp` compares them and
+ * `set` makes the `Bool` of the condition, which `movzx` widens to the 64 bits of the value.
+ * Returns false after it recorded an error.
  */
 static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
     Ast_Node_Index node = frame->node;
@@ -2584,16 +3294,18 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     Ast_Node_Index right = builder->nodes[left].next_sibling;
     Ast_Comparison_Operator operator = builder->nodes[node].payload.comparison.operator;
 
-    // An untyped operand takes the type of the other one, so the type of the comparison is the
-    // type of the operand that has one.
+    // An untyped operand and `nil` take the type of the other one, so the type of the comparison
+    // is the type of the operand that has one.
     X64_Type type = x64_expression_type(builder, left);
-    if (x64_is_constant(builder, left) && x64_is_constant(builder, right) == false) {
+    bool is_left_untyped = x64_is_constant(builder, left) || type.kind == X64_TYPE_KIND_NIL;
+    if (is_left_untyped && x64_is_constant(builder, right) == false) {
         type = x64_expression_type(builder, right);
     }
     bool is_equality = operator == AST_COMPARISON_OPERATOR_EQUAL ||
                        operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
-    bool is_valid = type.kind == X64_TYPE_KIND_INT ||
-                    (type.kind == X64_TYPE_KIND_BOOL && is_equality);
+    bool is_ordered = type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_BYTE;
+    bool is_equatable = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_POINTER;
+    bool is_valid = is_ordered || (is_equatable && is_equality);
     if (is_valid == false || x64_type_accepts(builder, type, left) == false ||
         x64_type_accepts(builder, type, right) == false) {
         return x64_fail(builder, X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
@@ -2958,9 +3670,11 @@ static bool x64_type_accepts(X64_Builder const *builder, X64_Type wanted,
 /**
  * Returns the type that `expression` has where a value of `wanted` is wanted, or
  * `X64_TYPE_KIND_NONE` for no type in particular. It is the type of the expression, except that an
- * untyped string is a `C_Str` where one is wanted: the address of a copy of its bytes with a zero
- * after them. The caller compares the type with `wanted`, so an untyped constant that does not
- * become it keeps the type that it has where nothing else says.
+ * untyped constant becomes the type that is wanted when it fits in it: an untyped string is a
+ * `C_Str`, the address of a copy of its bytes with a zero after them, and an untyped integer from 0
+ * to 255 is a `Byte`. `nil` is a pointer of any type, and an array is an array slice of all of its
+ * elements, which `x64_conversion_write` makes of it. The caller compares the type with `wanted`,
+ * so an expression that does not become it keeps the type that it has where nothing else says.
  */
 static X64_Type x64_expression_type_for(X64_Builder const *builder, Ast_Node_Index expression,
                                         X64_Type wanted) {
@@ -2969,18 +3683,89 @@ static X64_Type x64_expression_type_for(X64_Builder const *builder, Ast_Node_Ind
         wanted.kind == X64_TYPE_KIND_C_STR) {
         return wanted;
     }
-    return x64_expression_type(builder, expression);
+    if (constant.status == CONSTANT_STATUS_OK && constant_is_byte(constant) &&
+        wanted.kind == X64_TYPE_KIND_BYTE) {
+        return wanted;
+    }
+    X64_Type type = x64_expression_type(builder, expression);
+    if (type.kind == X64_TYPE_KIND_NIL && wanted.kind == X64_TYPE_KIND_POINTER) {
+        return wanted;
+    }
+    if (type.kind == X64_TYPE_KIND_ARRAY && wanted.kind == X64_TYPE_KIND_SLICE) {
+        X64_Type slice = type;
+        slice.kind = X64_TYPE_KIND_SLICE;
+        slice.length = -1;
+        if (x64_type_equals(slice, wanted)) {
+            return wanted;
+        }
+    }
+    return type;
 }
 
 /**
  * Returns the type of `expression`, or a type of the kind `X64_TYPE_KIND_NONE` if it has none,
  * which is the case for a call of a procedure that returns nothing and for everything that the
- * target does not build. A constant has the type that it has where nothing else says, see
- * `constant_type_default`, which is `Int` for an untyped integer and `Bool` for an untyped truth
- * value, and the target has no `Byte` or `Str` yet. A variable has the type that the layout of its
- * procedure worked out, see `x64_procedure_layout`.
+ * target does not build. The type of a place that is reached through others, such as `a[1]^`, is
+ * worked out without recursion: the path down to the expression that the places start from is
+ * kept, and its type is changed by each step back up. A pointer has the type of a pointer to what
+ * it points to, a subscript the type of the elements, and a slice the type of a slice of them.
  */
 static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index expression) {
+    assert(expression < builder->node_count);
+
+    Ast_Node_Index path[X64_EXPRESSION_DEPTH_MAX];
+    size_t path_count = 0;
+    Ast_Node_Index current = expression;
+    while (path_count < X64_EXPRESSION_DEPTH_MAX && x64_is_constant(builder, current) == false) {
+        Ast_Node_Type node_type = builder->nodes[current].node_type;
+        if (node_type != AST_NODE_TYPE_ADDRESS_OF && node_type != AST_NODE_TYPE_DEREFERENCE &&
+            node_type != AST_NODE_TYPE_SUBSCRIPT && node_type != AST_NODE_TYPE_SLICE) {
+            break;
+        }
+        path[path_count] = current;
+        path_count += 1;
+        current = builder->nodes[current].first_child;
+    }
+
+    X64_Type type = x64_leaf_type(builder, current);
+    for (size_t i = path_count; i > 0 && type.kind != X64_TYPE_KIND_NONE; i -= 1) {
+        switch (builder->nodes[path[i - 1]].node_type) {
+        case AST_NODE_TYPE_ADDRESS_OF:
+            type = x64_type_pointer_to(type);
+            break;
+        case AST_NODE_TYPE_DEREFERENCE:
+            if (type.kind != X64_TYPE_KIND_POINTER) {
+                return x64_type_make(X64_TYPE_KIND_NONE);
+            }
+            type = x64_type_pointee(type);
+            break;
+        case AST_NODE_TYPE_SLICE:
+        case AST_NODE_TYPE_SUBSCRIPT:
+            if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+                return x64_type_make(X64_TYPE_KIND_NONE);
+            }
+            if (builder->nodes[path[i - 1]].node_type == AST_NODE_TYPE_SUBSCRIPT) {
+                type = x64_type_element(type);
+            } else {
+                type = x64_type_sequence_of(x64_type_element(type), X64_TYPE_KIND_SLICE, -1);
+            }
+            break;
+        default:
+            assert(false);
+            break;
+        }
+    }
+    return type;
+}
+
+/**
+ * Returns the type of `expression`, which is not a place that is reached through another, see
+ * `x64_expression_type`. A constant has the type that it has where nothing else says, see
+ * `constant_type_default`, which is `Int` for an untyped integer and `Bool` for an untyped truth
+ * value, and the target has no `Str` yet. A variable has the type that the layout of its procedure
+ * worked out, see `x64_procedure_layout`.
+ */
+static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index expression) {
     assert(expression < builder->node_count);
 
     Ast_Node const *node = &builder->nodes[expression];
@@ -2989,9 +3774,10 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
         switch (constant_type_default(constant.type)) {
         case CONSTANT_TYPE_BOOL:
             return x64_type_make(X64_TYPE_KIND_BOOL);
+        case CONSTANT_TYPE_BYTE:
+            return x64_type_make(X64_TYPE_KIND_BYTE);
         case CONSTANT_TYPE_INT:
             return x64_type_make(X64_TYPE_KIND_INT);
-        case CONSTANT_TYPE_BYTE:
         case CONSTANT_TYPE_STR:
         case CONSTANT_TYPE_UNTYPED_BOOL:
         case CONSTANT_TYPE_UNTYPED_INTEGER:
@@ -3012,9 +3798,31 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
     case AST_NODE_TYPE_NOT:
     case AST_NODE_TYPE_OR:
         return x64_type_make(X64_TYPE_KIND_BOOL);
+    case AST_NODE_TYPE_ARRAY_LITERAL: {
+        X64_Type type = x64_type_of_node(builder, node->first_child);
+        if (type.kind != X64_TYPE_KIND_ARRAY) {
+            return x64_type_make(X64_TYPE_KIND_NONE);
+        }
+        // The elements are the children after the type, and the type of a literal has the length
+        // of its elements, which is checked against the length that is written.
+        int64_t count = 0;
+        for (Ast_Node_Index child = builder->nodes[node->first_child].next_sibling;
+             child != AST_NODE_INDEX_NONE; child = builder->nodes[child].next_sibling) {
+            count += 1;
+        }
+        type.length = count;
+        return type;
+    }
     case AST_NODE_TYPE_CALL: {
-        if (x64_call_is_str_to_c_str(builder, expression)) {
-            return x64_type_make(X64_TYPE_KIND_C_STR);
+        if (x64_call_is_built_in(builder, expression)) {
+            Str name = node->payload.call.name;
+            if (str_equals(name, STR("str_to_c_str"))) {
+                return x64_type_make(X64_TYPE_KIND_C_STR);
+            }
+            if (str_equals(name, STR("int_to_byte"))) {
+                return x64_type_make(X64_TYPE_KIND_BYTE);
+            }
+            return x64_type_make(X64_TYPE_KIND_INT);
         }
         Ast_Node_Index procedure = x64_call_procedure(builder, expression);
         if (procedure == AST_NODE_INDEX_NONE) {
@@ -3032,6 +3840,8 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
         }
         break;
     }
+    case AST_NODE_TYPE_NIL_LITERAL:
+        return x64_type_make(X64_TYPE_KIND_NIL);
     default:
         break;
     }
@@ -3058,15 +3868,121 @@ static X64_Type x64_return_type(X64_Builder const *builder, Ast_Node_Index proce
  */
 static X64_Type x64_type_make(X64_Type_Kind kind) {
     return (X64_Type){
+        .length = -1,
         .kind = kind,
+        .element_kind = X64_TYPE_KIND_NONE,
+        .pointee_kind = X64_TYPE_KIND_NONE,
+        .element_pointee_kind = X64_TYPE_KIND_NONE,
+        .definition = AST_NODE_INDEX_NONE,
+        .element_definition = AST_NODE_INDEX_NONE,
+        .depth = 0,
+        .element_depth = 0,
     };
 }
 
 /**
- * Returns whether two types are the same.
+ * Returns the type of a pointer to a value of `target`, which is a pointer with one more caret when
+ * `target` is a pointer already. There is no pointer to an array or to an array slice, which are
+ * addresses already, so those, and a type that the target does not have, give a type of the kind
+ * `X64_TYPE_KIND_NONE`.
+ */
+static X64_Type x64_type_pointer_to(X64_Type target) {
+    switch (target.kind) {
+    case X64_TYPE_KIND_BOOL:
+    case X64_TYPE_KIND_BYTE:
+    case X64_TYPE_KIND_C_STR:
+    case X64_TYPE_KIND_INT: {
+        X64_Type pointer = x64_type_make(X64_TYPE_KIND_POINTER);
+        pointer.pointee_kind = target.kind;
+        pointer.definition = target.definition;
+        pointer.depth = 1;
+        return pointer;
+    }
+    case X64_TYPE_KIND_POINTER: {
+        assert(target.depth >= 1);
+        assert(target.depth < UINT32_MAX);
+        X64_Type pointer = target;
+        pointer.depth += 1;
+        return pointer;
+    }
+    case X64_TYPE_KIND_ARRAY:
+    case X64_TYPE_KIND_NIL:
+    case X64_TYPE_KIND_NONE:
+    case X64_TYPE_KIND_SLICE:
+        break;
+    }
+    return x64_type_make(X64_TYPE_KIND_NONE);
+}
+
+/**
+ * Returns the type that the pointer type `pointer` points to: the pointer type with one caret
+ * less, or the type at the end of the carets when it has one.
+ */
+static X64_Type x64_type_pointee(X64_Type pointer) {
+    assert(pointer.kind == X64_TYPE_KIND_POINTER);
+    assert(pointer.depth >= 1);
+
+    if (pointer.depth > 1) {
+        X64_Type inner = pointer;
+        inner.depth -= 1;
+        return inner;
+    }
+    X64_Type pointee = x64_type_make(pointer.pointee_kind);
+    pointee.definition = pointer.definition;
+    return pointee;
+}
+
+/**
+ * Returns the type of the elements of the array or array slice type `sequence`.
+ */
+static X64_Type x64_type_element(X64_Type sequence) {
+    assert(sequence.kind == X64_TYPE_KIND_ARRAY || sequence.kind == X64_TYPE_KIND_SLICE);
+
+    X64_Type element = x64_type_make(sequence.element_kind);
+    element.definition = sequence.element_definition;
+    element.pointee_kind = sequence.element_pointee_kind;
+    element.depth = sequence.element_depth;
+    return element;
+}
+
+/**
+ * Returns the type of an array of `length` elements of `element`, or of an array slice of them for
+ * `X64_TYPE_KIND_SLICE` as `kind`. The elements are an `Int`, a `Bool`, a `Byte` or a pointer, and
+ * any other type gives a type of the kind `X64_TYPE_KIND_NONE`.
+ */
+static X64_Type x64_type_sequence_of(X64_Type element, X64_Type_Kind kind, int64_t length) {
+    assert(kind == X64_TYPE_KIND_ARRAY || kind == X64_TYPE_KIND_SLICE);
+
+    if (element.kind != X64_TYPE_KIND_BOOL && element.kind != X64_TYPE_KIND_BYTE &&
+        element.kind != X64_TYPE_KIND_INT && element.kind != X64_TYPE_KIND_POINTER) {
+        return x64_type_make(X64_TYPE_KIND_NONE);
+    }
+    X64_Type sequence = x64_type_make(kind);
+    sequence.length = length;
+    if (kind == X64_TYPE_KIND_SLICE) {
+        sequence.length = -1;
+    }
+    sequence.element_kind = element.kind;
+    sequence.element_definition = element.definition;
+    sequence.element_pointee_kind = element.pointee_kind;
+    sequence.element_depth = element.depth;
+    return sequence;
+}
+
+/**
+ * Returns whether two types are the same. An array whose length is not known, which is the type of
+ * `[const]Int`, has the length of any array.
  */
 static bool x64_type_equals(X64_Type first, X64_Type second) {
-    return first.kind == second.kind;
+    bool is_length_equal = first.length == second.length || first.length < 0 ||
+                           second.length < 0;
+    return first.kind == second.kind && first.element_kind == second.element_kind &&
+           first.pointee_kind == second.pointee_kind &&
+           first.element_pointee_kind == second.element_pointee_kind &&
+           first.definition == second.definition &&
+           first.element_definition == second.element_definition &&
+           first.depth == second.depth && first.element_depth == second.element_depth &&
+           is_length_equal;
 }
 
 /**
@@ -3079,14 +3995,23 @@ static bool x64_type_is_scalar(X64_Type type) {
 /**
  * Returns the number of words of 8 bytes that a value of `type` takes: one for an `Int`, which is
  * a 64-bit integer, one for a `Bool`, which is 0 or 1 in a word, so that it is passed to and from
- * the C library like an integer, and one for a `C_Str`, which is an address.
+ * the C library like an integer, one for a `Byte`, from 0 to 255 in a word, and one for a `C_Str`
+ * and a pointer, which are addresses. An array is the address of its first element, because its
+ * length is part of its type, and an array slice is the address of its first element and its
+ * number of elements.
  */
 static size_t x64_type_word_count(X64_Type type) {
     switch (type.kind) {
+    case X64_TYPE_KIND_ARRAY:
     case X64_TYPE_KIND_BOOL:
+    case X64_TYPE_KIND_BYTE:
     case X64_TYPE_KIND_C_STR:
     case X64_TYPE_KIND_INT:
+    case X64_TYPE_KIND_NIL:
+    case X64_TYPE_KIND_POINTER:
         return 1;
+    case X64_TYPE_KIND_SLICE:
+        return 2;
     case X64_TYPE_KIND_NONE:
         break;
     }
@@ -3097,33 +4022,110 @@ static size_t x64_type_word_count(X64_Type type) {
 }
 
 /**
- * Returns the type that the name `name` stands for, or a type of the kind `X64_TYPE_KIND_NONE` if
- * the target does not have a type of that name.
+ * Returns the number of bytes that a value of `type` takes in memory as an element of an array or
+ * as what a pointer points to: 8 for each of its words, so that every word is aligned, except a
+ * `Byte`, which takes one byte, so that an array of bytes is as small as the bytes in it and is
+ * what the C library takes as a buffer.
+ */
+static size_t x64_type_stride_bytes(X64_Type type) {
+    if (type.kind == X64_TYPE_KIND_BYTE) {
+        return 1;
+    }
+    return x64_type_word_count(type) * X64_WORD_SIZE_BYTES;
+}
+
+/**
+ * Returns the type that the name `name` stands for, which can have the carets of a pointer type
+ * before it, such as `^Int`, or a type of the kind `X64_TYPE_KIND_NONE` if the target does not have
+ * a type of that name.
  */
 static X64_Type x64_type_of_name(Str name) {
-    if (str_equals(name, STR("Bool"))) {
-        return x64_type_make(X64_TYPE_KIND_BOOL);
+    size_t start = 0;
+    uint32_t depth = 0;
+    // Every step reads a byte, so there are at most as many steps as bytes.
+    for (size_t i = 0; i < name.length; i += 1) {
+        char character = name.bytes[start];
+        if (character == '^') {
+            depth += 1;
+        } else if (character != ' ' && character != '\t') {
+            break;
+        }
+        start += 1;
     }
-    if (str_equals(name, STR("C_Str"))) {
-        return x64_type_make(X64_TYPE_KIND_C_STR);
+    Str base_name = str_make(name.bytes + start, name.length - start);
+
+    X64_Type base = x64_type_make(X64_TYPE_KIND_NONE);
+    if (str_equals(base_name, STR("Bool"))) {
+        base = x64_type_make(X64_TYPE_KIND_BOOL);
+    } else if (str_equals(base_name, STR("Byte"))) {
+        base = x64_type_make(X64_TYPE_KIND_BYTE);
+    } else if (str_equals(base_name, STR("C_Str"))) {
+        base = x64_type_make(X64_TYPE_KIND_C_STR);
+    } else if (str_equals(base_name, STR("Int"))) {
+        base = x64_type_make(X64_TYPE_KIND_INT);
     }
-    if (str_equals(name, STR("Int"))) {
-        return x64_type_make(X64_TYPE_KIND_INT);
+    if (depth == 0 || base.kind == X64_TYPE_KIND_NONE) {
+        return base;
     }
-    return x64_type_make(X64_TYPE_KIND_NONE);
+    // A pointer to a pointer is one with more carets, so the pointer is made from the base once
+    // and has the carets that were counted.
+    X64_Type pointer = x64_type_pointer_to(base);
+    pointer.depth = depth;
+    return pointer;
 }
 
 /**
  * Returns the type that the type node `type` stands for, or a type of the kind
- * `X64_TYPE_KIND_NONE` if the target does not have it, which is any type that is not a name yet.
+ * `X64_TYPE_KIND_NONE` if the target does not have it. An array type is an array slice when it has
+ * no length, and has the length that is written, or -1 for `[const]`, which takes the number of
+ * elements of its literal.
  */
 static X64_Type x64_type_of_node(X64_Builder const *builder, Ast_Node_Index type) {
     assert(type < builder->node_count);
 
-    if (builder->nodes[type].node_type != AST_NODE_TYPE_TYPE_NAME) {
+    Ast_Node const *node = &builder->nodes[type];
+    if (node->node_type != AST_NODE_TYPE_ARRAY_TYPE) {
+        return x64_type_of_element_node(builder, type);
+    }
+    X64_Type element = x64_type_of_element_node(builder, node->first_child);
+    if (node->payload.array_type.length_kind == AST_ARRAY_LENGTH_OMITTED) {
+        return x64_type_sequence_of(element, X64_TYPE_KIND_SLICE, -1);
+    }
+    int64_t length = -1;
+    if (node->payload.array_type.length_kind == AST_ARRAY_LENGTH_FIXED) {
+        length = node->payload.array_type.length;
+    }
+    return x64_type_sequence_of(element, X64_TYPE_KIND_ARRAY, length);
+}
+
+/**
+ * Returns the type that the type node `type` stands for, which is a name or a pointer type, as
+ * the elements of an array type are, or a type of the kind `X64_TYPE_KIND_NONE` if the target does
+ * not have it. Each caret of a pointer type is a node with the rest of the type as its child.
+ */
+static X64_Type x64_type_of_element_node(X64_Builder const *builder, Ast_Node_Index type) {
+    assert(type < builder->node_count);
+
+    uint32_t depth = 0;
+    Ast_Node_Index current = type;
+    // Each step goes down one level, so there are fewer steps than nodes.
+    for (size_t i = 0; i < builder->node_count &&
+                       builder->nodes[current].node_type == AST_NODE_TYPE_POINTER_TYPE;
+         i += 1) {
+        depth += 1;
+        current = builder->nodes[current].first_child;
+    }
+    if (builder->nodes[current].node_type != AST_NODE_TYPE_TYPE_NAME) {
+        // A pointer to a procedure, a struct of a field and an array of arrays are not built.
         return x64_type_make(X64_TYPE_KIND_NONE);
     }
-    return x64_type_of_name(builder->nodes[type].payload.type_name.name);
+    X64_Type base = x64_type_of_name(builder->nodes[current].payload.type_name.name);
+    if (depth == 0 || base.kind == X64_TYPE_KIND_NONE) {
+        return base;
+    }
+    X64_Type pointer = x64_type_pointer_to(base);
+    pointer.depth += depth - 1;
+    return pointer;
 }
 
 /**
@@ -3308,25 +4310,51 @@ static void x64_write_load_integer(X64_Builder *builder, byte register_number,
 /**
  * Writes an instruction of 64 bits with `opcode` between the register `register_number` and the
  * memory at `base + displacement`, such as `mov register, [base + displacement]` for
- * `X64_OPCODE_LOAD`. The displacement takes no byte when it is zero, which `rbp` cannot have,
- * because that form of it means an address relative to the instruction pointer, one byte when it
- * fits in one and four otherwise. Both writes of the code make the same choice, because the
- * displacement depends only on the procedure. A base of `rsp` needs the byte that adds an index,
- * which says that there is none.
+ * `X64_OPCODE_LOAD`. The prefix says that the operands are 64-bit, and has the extensions of the
+ * register and of the base when they are one of `r8` to `r15`, which also makes the lowest byte of
+ * `rax` `al` for `X64_OPCODE_STORE_BYTE`.
  */
 static void x64_write_memory(X64_Builder *builder, byte opcode, byte register_number, byte base,
                              int32_t displacement) {
     assert(register_number < 16);
     assert(base < 16);
 
-    // The prefix says that the operands are 64-bit, and has the extensions of the register and of
-    // the base when they are one of `r8` to `r15`.
     x64_write_byte(&builder->writer,
                    (byte)(X64_REX_WIDE | ((register_number >> 3) << 2) | (base >> 3)));
     x64_write_byte(&builder->writer, opcode);
+    x64_write_memory_operand(builder, register_number, base, displacement);
+}
+
+/**
+ * Writes an instruction of two bytes of opcode, `0x0F` and `opcode`, between the register
+ * `register_number` and the memory at `base + displacement`, such as `movzx`.
+ */
+static void x64_write_memory_two_byte(X64_Builder *builder, byte opcode, byte register_number,
+                                      byte base, int32_t displacement) {
+    assert(register_number < 16);
+    assert(base < 16);
+
+    x64_write_byte(&builder->writer,
+                   (byte)(X64_REX_WIDE | ((register_number >> 3) << 2) | (base >> 3)));
+    x64_write_byte(&builder->writer, X64_OPCODE_TWO_BYTE);
+    x64_write_byte(&builder->writer, opcode);
+    x64_write_memory_operand(builder, register_number, base, displacement);
+}
+
+/**
+ * Writes the bytes after the opcode that say that the operands are the register `register_number`
+ * and the memory at `base + displacement`. The displacement takes no byte when it is zero, which
+ * `rbp` cannot have, because that form of it means an address relative to the instruction
+ * pointer, one byte when it fits in one and four otherwise. Both writes of the code make the same
+ * choice, because the displacement depends only on the procedure. A base of `rsp` needs the byte
+ * that adds an index, which says that there is none.
+ */
+static void x64_write_memory_operand(X64_Builder *builder, byte register_number, byte base,
+                                     int32_t displacement) {
     byte modrm = (byte)(((register_number & 7) << 3) | (base & 7));
     bool is_short = displacement >= INT8_MIN && displacement <= INT8_MAX;
-    if (displacement == 0 && (base & 7) != X64_REGISTER_RBP) {
+    bool is_none = displacement == 0 && (base & 7) != X64_REGISTER_RBP;
+    if (is_none) {
         x64_write_byte(&builder->writer, modrm);
     } else if (is_short) {
         x64_write_byte(&builder->writer, (byte)(0x40 | modrm));
@@ -3336,7 +4364,7 @@ static void x64_write_memory(X64_Builder *builder, byte opcode, byte register_nu
     if ((base & 7) == X64_REGISTER_RSP) {
         x64_write_byte(&builder->writer, 0x24);
     }
-    if (displacement == 0 && (base & 7) != X64_REGISTER_RBP) {
+    if (is_none) {
         return;
     }
     if (is_short) {
@@ -3344,6 +4372,34 @@ static void x64_write_memory(X64_Builder *builder, byte opcode, byte register_nu
     } else {
         x64_write_u32(&builder->writer, (uint32_t)displacement);
     }
+}
+
+/**
+ * Writes `add register, number`, with a number that fits in a byte, which the processor widens with
+ * its sign, so that a negative number subtracts.
+ */
+static void x64_write_add_immediate(X64_Builder *builder, byte register_number, int8_t number) {
+    assert(register_number < 16);
+
+    x64_write_byte(&builder->writer, (byte)(X64_REX_WIDE | (register_number >> 3)));
+    x64_write_byte(&builder->writer, 0x83);
+    // The middle bits are 0, which say that the instruction is `add`.
+    x64_write_byte(&builder->writer, (byte)(0xC0 | (register_number & 7)));
+    x64_write_byte(&builder->writer, (byte)number);
+}
+
+/**
+ * Writes a trap that is taken unless the flags of the last comparison hold `condition`: a short
+ * jump of that condition over a breakpoint. The breakpoint stops a program that is not debugged
+ * with an exception of Windows, and a debugger stops at it, which is how an index outside of an
+ * array, a `nil` that is followed and a number that is not a `Byte` stop the program.
+ */
+static void x64_write_trap_unless(X64_Builder *builder, byte condition) {
+    assert(condition < 16);
+
+    x64_write_byte(&builder->writer, (byte)(0x70 | condition));
+    x64_write_byte(&builder->writer, 1);
+    x64_write_byte(&builder->writer, 0xCC);
 }
 
 /**
@@ -3868,7 +4924,8 @@ static void x64_debug_info_write(X64_Builder *builder, size_t text_size_bytes) {
         cursor = x64_debug_cursor_move(debug->source, cursor,
                                        builder->nodes[definition].source_offset);
 
-        if (return_type.kind == X64_TYPE_KIND_NONE) {
+        uint32_t return_reference = x64_debug_type_reference(types, return_type);
+        if (return_reference == 0) {
             x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_SUBPROGRAM_VOID);
         } else {
             x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_SUBPROGRAM);
@@ -3880,8 +4937,8 @@ static void x64_debug_info_write(X64_Builder *builder, size_t text_size_bytes) {
         x64_write_u64(writer, end - start);
         x64_write_unsigned_leb128(writer, 1);
         x64_write_byte(writer, X64_DWARF_OP_CALL_FRAME_CFA);
-        if (return_type.kind != X64_TYPE_KIND_NONE) {
-            x64_write_u32(writer, x64_debug_type_reference(types, return_type));
+        if (return_reference != 0) {
+            x64_write_u32(writer, return_reference);
         }
 
         // The words of the arguments are kept in the space that the caller made, at the CFA and
@@ -3889,15 +4946,19 @@ static void x64_debug_info_write(X64_Builder *builder, size_t text_size_bytes) {
         size_t parameter_count = x64_parameter_count(builder, procedure);
         Ast_Node_Index parameter = builder->nodes[procedure].first_child;
         for (size_t j = 0; j < parameter_count; j += 1) {
+            uint32_t parameter_reference =
+                x64_debug_type_reference(types, x64_parameter_type(builder, procedure, j));
+            if (parameter_reference == 0) {
+                parameter = builder->nodes[parameter].next_sibling;
+                continue;
+            }
             cursor = x64_debug_cursor_move(debug->source, cursor,
                                            builder->nodes[parameter].source_offset);
             x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_PARAMETER);
             x64_write_string(writer, builder->nodes[parameter].payload.parameter.name);
             x64_write_byte(writer, 1);
             x64_write_u32(writer, cursor.line);
-            x64_write_u32(writer, x64_debug_type_reference(types,
-                                                           x64_parameter_type(builder, procedure,
-                                                                              j)));
+            x64_write_u32(writer, parameter_reference);
             x64_debug_location_write(
                 writer, (int64_t)(x64_argument_word_offset(builder, procedure, j) *
                                   X64_WORD_SIZE_BYTES));
@@ -3915,6 +4976,9 @@ static void x64_debug_info_write(X64_Builder *builder, size_t text_size_bytes) {
             // The build checked the type of every variable, so it is one that the target has.
             X64_Type type = builder->layouts[node].type;
             assert(type.kind != X64_TYPE_KIND_NONE);
+            if (x64_debug_type_reference(types, type) == 0) {
+                continue;
+            }
             cursor = x64_debug_cursor_move(debug->source, cursor,
                                            builder->nodes[node].source_offset);
             x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_VARIABLE);
@@ -4169,20 +5233,26 @@ static uint32_t x64_debug_address_rva(X64_Builder const *builder, size_t code_of
 }
 
 /**
- * Returns where the entry of `type` is in `.debug_info`, which `type` must have.
+ * Returns where the entry of `type` is in `.debug_info`, or 0, which no entry is at, for a type
+ * that the debug information does not describe yet, whose parameters and variables it leaves out.
  */
 static uint32_t x64_debug_type_reference(X64_Debug_Types types, X64_Type type) {
     switch (type.kind) {
     case X64_TYPE_KIND_BOOL:
         return types.bool_type;
+    case X64_TYPE_KIND_BYTE:
+        return types.byte_type;
     case X64_TYPE_KIND_C_STR:
         return types.c_str_type;
     case X64_TYPE_KIND_INT:
         return types.int_type;
+    case X64_TYPE_KIND_ARRAY:
+    case X64_TYPE_KIND_NIL:
     case X64_TYPE_KIND_NONE:
+    case X64_TYPE_KIND_POINTER:
+    case X64_TYPE_KIND_SLICE:
         break;
     }
-    assert(false);
     return 0;
 }
 

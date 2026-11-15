@@ -10,10 +10,29 @@
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
+    // The operand of `%` has no address: a parameter, the iterator of a for statement, a value that
+    // is computed, or a variable of an array or array slice type. The subject is its first name or
+    // string, or the name of the definition that it is in.
+    X64_BUILD_STATUS_ADDRESS_INVALID,
     // An operand of `+`, `-`, `*` or `/`, or the variable or the value of an assignment such as
     // `x += 1`, is not an `Int`. The subject is the first name or string of the operand, or the
     // name of the definition that it is in.
     X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
+    // An element of an array literal, or the value that is assigned to an element or to a range of
+    // elements, is not of the type of the elements. The subject is its first name or string.
+    X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
+    // What is subscripted, sliced, gone through by a for statement or assigned to as a range is not
+    // an array or an array slice. The subject is its first name or string.
+    X64_BUILD_STATUS_ARRAY_EXPECTED,
+    // A variable of an array type is not defined with an array literal, or is assigned to as a
+    // whole. The subject is the name of the variable.
+    X64_BUILD_STATUS_ARRAY_INITIALIZER_INVALID,
+    // An array literal has another number of elements than the length of its type. The subject is
+    // the name of the type of the elements.
+    X64_BUILD_STATUS_ARRAY_LENGTH_MISMATCH,
+    // A parameter of an array type, which has to be an array slice. The subject is the name of the
+    // parameter.
+    X64_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
     // The number of arguments of a call is not the number of parameters of the procedure. The
     // subject is the name of the procedure.
     X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH,
@@ -37,6 +56,9 @@ typedef enum {
     // A procedure declared in a `foreign js ->` block. A program for the processor has no
     // JavaScript to import from, only the C library. The subject is the name of the procedure.
     X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED,
+    // An index of a subscript or a bound of a slice is not an `Int`. The subject is its first name
+    // or string.
+    X64_BUILD_STATUS_INDEX_TYPE_INVALID,
     // An operand of `and`, `or` or `not` is not a `Bool`. The subject is the first name or string
     // of the operand, or the name of the definition that it is in.
     X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
@@ -60,8 +82,16 @@ typedef enum {
     // The subject of a match statement is not of a type that can be matched. The subject is its
     // first name or string.
     X64_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID,
+    // A variable that is defined with `nil` and no type, which does not say what it points to. The
+    // subject is the name of the variable.
+    X64_BUILD_STATUS_NIL_TYPE_UNKNOWN,
     X64_BUILD_STATUS_OK,
     X64_BUILD_STATUS_OUTPUT_TOO_LARGE,
+    // `^` follows a value that is not a pointer. The subject is its first name or string.
+    X64_BUILD_STATUS_POINTER_EXPECTED,
+    // The value that is assigned through a pointer is not of the type that it points to. The
+    // subject is the first name or string of the place.
+    X64_BUILD_STATUS_POINTER_TARGET_TYPE_MISMATCH,
     // The first number or the end of the range of a for statement is not an `Int`. The subject is
     // its first name or string, or the name of the definition that it is in.
     X64_BUILD_STATUS_RANGE_TYPE_INVALID,
@@ -96,28 +126,55 @@ enum {
 // What kind of value a type is. Alphabetical, because nothing depends on the order.
 // `X64_TYPE_KIND_NONE` is the type of a call of a procedure that returns nothing, and of what the
 // target does not build.
+// `X64_TYPE_KIND_NIL` is the type of `nil`, a pointer to nothing in particular, which is accepted
+// where any pointer is wanted and is the type of no variable.
 typedef enum {
+    X64_TYPE_KIND_ARRAY,
     X64_TYPE_KIND_BOOL,
+    X64_TYPE_KIND_BYTE,
     X64_TYPE_KIND_C_STR,
     X64_TYPE_KIND_INT,
+    X64_TYPE_KIND_NIL,
     X64_TYPE_KIND_NONE,
+    X64_TYPE_KIND_POINTER,
+    X64_TYPE_KIND_SLICE,
 } X64_Type_Kind;
 
 /**
- * A type of the target. Only the kind says anything yet, but a type is a struct of its own, so that
- * the types that are made of other types fit in it later.
+ * A type of the target, with what the kind alone does not say. An array has `length` elements,
+ * which is part of its type, and is -1 for an array type whose length is the number of elements of
+ * its literal, `[const]Int`, which is equal to any length. For an array and an array slice,
+ * `element_kind` and `element_definition` say what their elements are. `definition` is the
+ * definition of a type that has one, which none has yet, and is `AST_NODE_INDEX_NONE` otherwise.
+ *
+ * A pointer type such as `^^Int` has `depth`, the number of carets, which is at least 1, and the
+ * type at the end of them, which is never a pointer, an array or an array slice: `pointee_kind` is
+ * its kind, with `definition`. So a pointer is described without a type inside a type. The elements
+ * of an array that are pointers are described the same way by `element_depth`,
+ * `element_pointee_kind` and `element_definition`. `depth` and `element_depth` are zero when there
+ * is no pointer.
  */
 typedef struct {
+    int64_t length;
     X64_Type_Kind kind;
+    X64_Type_Kind element_kind;
+    X64_Type_Kind pointee_kind;
+    X64_Type_Kind element_pointee_kind;
+    Ast_Node_Index definition;
+    Ast_Node_Index element_definition;
+    uint32_t depth;
+    uint32_t element_depth;
 } X64_Type;
 
 /**
  * What the build works out about a node of the tree before it writes the code of a procedure,
  * which the code and the debug information both read. The build keeps one for each node in the
  * buffer that the caller gives it, so that it needs no allocation. `type` is the type of a
- * variable, for the `AST_NODE_TYPE_VARIABLE_DEFINITION` that defines it, and `frame_offset` is
- * where its value is in the frame of the procedure: at `rbp - frame_offset`. The entries of other
- * nodes are not used.
+ * variable, for the `AST_NODE_TYPE_VARIABLE_DEFINITION` that defines it, of the iterator of an
+ * `AST_NODE_TYPE_FOR_STATEMENT`, of the subject of an `AST_NODE_TYPE_MATCH_STATEMENT` and of an
+ * `AST_NODE_TYPE_ARRAY_LITERAL`, and `frame_offset` is where the value of each of them is in the
+ * frame of the procedure: at `rbp - frame_offset`, which for an array literal is its elements. The
+ * entries of other nodes are not used.
  */
 typedef struct {
     X64_Type type;
