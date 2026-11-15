@@ -31,8 +31,9 @@ The syntax tree is the one that `mialuc dump-ast` prints, one node per line, ind
 there even when the analysis rejects the program, and null when the source does not parse.
 
 The assembly is the one that `mialuc dump-asm --target x64-win32` prints. The x64-win32 target builds
-much less of the language than the WebAssembly targets, so a program that compiles to WebAssembly is
-often one that it rejects. Then "asm" is null and "asm_error" is what the compiler printed, which is
+the language that the WebAssembly targets build, but a program for it starts with `main :: proc() Int
+->` and has no `foreign js` block, so a program that compiles to WebAssembly is often one that it
+rejects. Then "asm" is null and "asm_error" is what the compiler printed, which is
 not an error of the program as a whole: "error" is only about the WebAssembly targets.
 
 A program that does not compile is a normal answer, so it comes with status 200 too.

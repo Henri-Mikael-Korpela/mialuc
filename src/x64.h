@@ -41,6 +41,9 @@ typedef enum {
     X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH,
     // The value of a call of a procedure that returns nothing. The subject is its name.
     X64_BUILD_STATUS_CALL_RESULT_MISSING,
+    // The call of a variable, a parameter or a global variable that does not hold a pointer to a
+    // procedure. The subject is its name.
+    X64_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE,
     // The operands of a comparison are not two `Int` values, or not two `Bool` values for `==` and
     // `not=`. The subject is the first name or string of the comparison.
     X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
@@ -50,6 +53,11 @@ typedef enum {
     // More constants than the build has room to keep, see `X64_CONSTANT_COUNT_MAX`. The subject
     // is the name of the first one that does not fit.
     X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED,
+    // A member of an enum that the enum does not have. The subject is the name of the member.
+    X64_BUILD_STATUS_ENUM_MEMBER_UNKNOWN,
+    // A member such as `.RED` where no enum is wanted, which does not say what enum it is of. The
+    // subject is the name of the member, or of the variable that it is given to.
+    X64_BUILD_STATUS_ENUM_TYPE_UNKNOWN,
     // An expression that is nested deeper than `X64_EXPRESSION_DEPTH_MAX`. The subject is the name
     // of the definition that has it.
     X64_BUILD_STATUS_EXPRESSION_TOO_DEEP,
@@ -62,6 +70,9 @@ typedef enum {
     // subject is the first name of the place.
     X64_BUILD_STATUS_FIELD_TARGET_READ_ONLY,
     X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED,
+    // A name of a struct or an enum where a value is wanted, which is a type and not a value. The
+    // subject is the name.
+    X64_BUILD_STATUS_IDENTIFIER_NOT_VALUE,
     // An index of a subscript or a bound of a slice is not an `Int`. The subject is its first name
     // or string.
     X64_BUILD_STATUS_INDEX_TYPE_INVALID,
@@ -75,6 +86,9 @@ typedef enum {
     // Two cases of a match statement match a value in common. The subject is the word `case` of
     // the second.
     X64_BUILD_STATUS_MATCH_CASE_DUPLICATE,
+    // A match of an enum, without a default case and without `partial`, that has no case for a
+    // member of the enum. The subject is the word `match`.
+    X64_BUILD_STATUS_MATCH_NOT_EXHAUSTIVE,
     // The attribute `partial` of a match statement whose subject is not an enum. The subject is the
     // attribute.
     X64_BUILD_STATUS_MATCH_PARTIAL_INVALID,
@@ -121,10 +135,31 @@ typedef enum {
     // A struct that contains itself, through its fields and the fields of its fields. The subject
     // is its first field.
     X64_BUILD_STATUS_STRUCT_RECURSIVE,
+    // `type_info_of` that is not followed by a field right away. The subject is the type that it
+    // is asked about.
+    X64_BUILD_STATUS_TYPE_INFO_MISPLACED,
+    // `type_info_of` of a type that is not an enum. The subject is the type, or the name of the
+    // global variable that it is the value of.
+    X64_BUILD_STATUS_TYPE_INFO_UNSUPPORTED,
     // A type that the target does not have, of a parameter, a result or a variable. The subject is
     // the text of the type, or the name of the parameter or the variable if the type is not a
     // name.
     X64_BUILD_STATUS_TYPE_UNSUPPORTED,
+    // The case of a union match is not a member of the enum of the field that it is matched
+    // against. The subject is the member.
+    X64_BUILD_STATUS_UNION_CASE_UNKNOWN,
+    // The field that a union match is matched against is not a field of the struct of an enum
+    // type, outside of a case. The subject is its name.
+    X64_BUILD_STATUS_UNION_DISCRIMINANT_INVALID,
+    // A struct literal gives a field of a case that is not the case of the member that it gives
+    // the matched field. The subject is the field.
+    X64_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH,
+    // A field of a case of a union match is read or assigned where the program does not show that
+    // its object is in the case. The subject is the field.
+    X64_BUILD_STATUS_UNION_FIELD_UNMATCHED,
+    // A struct literal gives a field of a case, but does not give the matched field a member that
+    // is written out. The subject is the field.
+    X64_BUILD_STATUS_UNION_KIND_NOT_CONSTANT,
     // Something that the target does not build yet. The subject is the name of the definition
     // that has it.
     X64_BUILD_STATUS_UNSUPPORTED,
@@ -148,17 +183,23 @@ enum {
 // `X64_TYPE_KIND_NONE` is the type of a call of a procedure that returns nothing, and of what the
 // target does not build.
 // `X64_TYPE_KIND_NIL` is the type of `nil`, a pointer to nothing in particular, which is accepted
-// where any pointer is wanted and is the type of no variable.
+// where any pointer is wanted and is the type of no variable. `X64_TYPE_KIND_ENUM_LITERAL` is the
+// type of a member of an enum written without the enum, such as `.RED`, which is accepted where an
+// enum that has the member is wanted, and is the type of no variable either.
 typedef enum {
     X64_TYPE_KIND_ARRAY,
     X64_TYPE_KIND_BOOL,
     X64_TYPE_KIND_BYTE,
     X64_TYPE_KIND_C_STR,
+    X64_TYPE_KIND_ENUM,
+    X64_TYPE_KIND_ENUM_LITERAL,
     X64_TYPE_KIND_INT,
     X64_TYPE_KIND_NIL,
     X64_TYPE_KIND_NONE,
     X64_TYPE_KIND_POINTER,
+    X64_TYPE_KIND_PROCEDURE,
     X64_TYPE_KIND_SLICE,
+    X64_TYPE_KIND_STR,
     X64_TYPE_KIND_STRUCT,
 } X64_Type_Kind;
 
@@ -167,8 +208,9 @@ typedef enum {
  * which is part of its type, and is -1 for an array type whose length is the number of elements of
  * its literal, `[const]Int`, which is equal to any length. For an array and an array slice,
  * `element_kind` and `element_definition` say what their elements are. `definition` is the
- * `AST_NODE_TYPE_STRUCT_TYPE` of a struct, which is what makes two structs the same type, and is
- * `AST_NODE_INDEX_NONE` for a type that has no definition.
+ * `AST_NODE_TYPE_STRUCT_TYPE` of a struct and the `AST_NODE_TYPE_ENUM_TYPE` of an enum, which is
+ * what makes two of them the same type, and is `AST_NODE_INDEX_NONE` for a type that has no
+ * definition.
  *
  * A pointer type such as `^^Int` has `depth`, the number of carets, which is at least 1, and the
  * type at the end of them, which is never a pointer, an array or an array slice: `pointee_kind` is
@@ -176,6 +218,11 @@ typedef enum {
  * of an array that are pointers are described the same way by `element_depth`,
  * `element_pointee_kind` and `element_definition`. `depth` and `element_depth` are zero when there
  * is no pointer.
+ *
+ * A pointer to a procedure, written `^proc(Int) Int`, has the kind `X64_TYPE_KIND_PROCEDURE`, and
+ * its `definition` is the first procedure or procedure type of the program that has its signature,
+ * so that signatures with the same types of parameters and return type are one type. A pointer to
+ * it is a pointer whose `pointee_kind` is `X64_TYPE_KIND_PROCEDURE`.
  */
 typedef struct {
     int64_t length;
@@ -196,7 +243,9 @@ typedef struct {
  * variable, for the `AST_NODE_TYPE_VARIABLE_DEFINITION` that defines it, of the iterator of an
  * `AST_NODE_TYPE_FOR_STATEMENT`, of the subject of an `AST_NODE_TYPE_MATCH_STATEMENT` and of an
  * `AST_NODE_TYPE_ARRAY_LITERAL`, and `frame_offset` is where the value of each of them is in the
- * frame of the procedure: at `rbp - frame_offset`, which for an array literal is its elements. The
+ * frame of the procedure: at `rbp - frame_offset`, which for an array literal is its elements. For
+ * an `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION` they are its type and its place in `.data`, and for
+ * an `AST_NODE_TYPE_TYPE_INFO_OF` the place of the table of the members of its enum there. The
  * entries of other nodes are not used.
  */
 typedef struct {

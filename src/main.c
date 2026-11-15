@@ -1010,6 +1010,11 @@ static void main_run_command_report_x64_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' returns nothing, so its call has no value.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case X64_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is called, but it does not hold a pointer to a "
+                "procedure.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: the operands of the comparison at '%.*s' are not two values "
                 "that can be compared with its operator.\n", path, position.line,
@@ -1023,6 +1028,15 @@ static void main_run_command_report_x64_error(char const *path, Str source,
     case X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED:
         fprintf(stderr, "%s:%zu:%zu: more than %d constants, procedures and strings.\n", path,
                 position.line, position.column, X64_CONSTANT_COUNT_MAX);
+        break;
+    case X64_BUILD_STATUS_ENUM_MEMBER_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: the enum has no member '%.*s'.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_ENUM_TYPE_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: nothing says what enum '%.*s' is of, so it is written with "
+                "its enum, as in 'Color.RED', or given to a place of an enum type.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_EXPRESSION_TOO_DEEP:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' has an expression nested deeper than %d.\n", path,
@@ -1045,6 +1059,10 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 "block, and the x64 target imports from 'foreign libc'.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
+    case X64_BUILD_STATUS_IDENTIFIER_NOT_VALUE:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is a type and not a value.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_INDEX_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: the index at '%.*s' is not an Int.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
@@ -1063,6 +1081,11 @@ static void main_run_command_report_x64_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: this case matches a value that a case above it matches "
                 "already, so it could never run for that value.\n", path, position.line,
                 position.column);
+        break;
+    case X64_BUILD_STATUS_MATCH_NOT_EXHAUSTIVE:
+        fprintf(stderr, "%s:%zu:%zu: the match has no case for a member of the enum, and no "
+                "default case. A match that leaves members out has '#(partial)'.\n", path,
+                position.line, position.column);
         break;
     case X64_BUILD_STATUS_MATCH_PARTIAL_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' only means something for a match of an enum that "
@@ -1084,8 +1107,8 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 "never match.\n", path, position.line, position.column);
         break;
     case X64_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be matched by the x64 target, which matches "
-                "an Int.\n", path, position.line, position.column, subject_length,
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be matched. A match takes an Int, a Byte, a "
+                "Str or an enum.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     case X64_BUILD_STATUS_NIL_TYPE_UNKNOWN:
@@ -1145,9 +1168,45 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 "would never end, so it has a pointer to itself instead.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
+    case X64_BUILD_STATUS_TYPE_INFO_MISPLACED:
+        fprintf(stderr, "%s:%zu:%zu: the information about '%.*s' is not a value, so a field of "
+                "it, such as '.members' or '.name', is read right away.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_TYPE_INFO_UNSUPPORTED:
+        fprintf(stderr, "%s:%zu:%zu: 'type_info_of' at '%.*s' is about an enum, and the x64 "
+                "target gives no information about another type.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_TYPE_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: type '%.*s' is not supported by the x64 target.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_UNION_CASE_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a member of the enum of the field that the "
+                "union is matched against.\n", path, position.line, position.column,
+                subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_UNION_DISCRIMINANT_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the union is matched against '%.*s', which is not a field "
+                "of the struct that has an enum type and is not in a case itself.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is in another case than the member that "
+                "the literal gives the field that the union is matched against.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_UNION_FIELD_UNMATCHED:
+        fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is in a case of a union, and is read or "
+                "assigned only where an if statement shows that its object is in the case.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_UNION_KIND_NOT_CONSTANT:
+        fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is in a case of a union, so the literal "
+                "writes out the member that it gives the field that the union is matched "
+                "against.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case X64_BUILD_STATUS_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' has something that the x64 target does not build "

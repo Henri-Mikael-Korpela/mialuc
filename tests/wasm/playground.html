@@ -666,9 +666,10 @@
         }
 
         /*
-         * The assembly is what `mialuc dump-asm --target x64-win32` prints. The x64 target is a
-         * work in progress that builds only a small part of the language, so most programs have
-         * none, and then the tab says so and why, instead of showing nothing.
+         * The assembly is what `mialuc dump-asm --target x64-win32` prints. The x64 target builds a
+         * program that starts with `main :: proc() Int ->` and has no `foreign js` block, which
+         * most programs of the playground are not, so they have none, and then the tab says so and
+         * why, instead of showing nothing.
          */
         function showAssembly(answer) {
             const isAvailable = answer.asm !== null;

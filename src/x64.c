@@ -104,6 +104,9 @@ enum {
     X64_WORD_SIZE_BYTES = 8,
     // The largest number that a `Byte` holds.
     X64_BYTE_MAX = 255,
+    // An `Enum_Member_Type_Info` of the table of an enum, which is the `Str` of the name of the
+    // member and its number, see `x64_data_layout`.
+    X64_TYPE_INFO_MEMBER_SIZE_BYTES = 3 * X64_WORD_SIZE_BYTES,
     // The processor pushes the address to return to, and the procedure pushes `rbp`, so the first
     // word of the arguments, which the procedure keeps there, is this far above `rbp`.
     X64_ARGUMENT_HOME_OFFSET_BYTES = 16,
@@ -228,6 +231,9 @@ static size_t const X64_WORD_COUNT_INVALID = SIZE_MAX;
 typedef enum {
     // A procedure of a `foreign libc ->` block, which is imported and has no code.
     X64_CONSTANT_KIND_FOREIGN,
+    // The member of an enum, such as `DEFAULT :: Color.RED`, which has no code: a use of it is the
+    // number of the member.
+    X64_CONSTANT_KIND_MEMBER,
     // A procedure with a body, which has code.
     X64_CONSTANT_KIND_PROCEDURE,
     // A string, such as `greeting :: "Hello"`, whose bytes are in `.rdata` with the other string
@@ -242,12 +248,13 @@ typedef enum {
 // How an expression is wanted by what it is part of. Alphabetical, because nothing depends on the
 // order.
 typedef enum {
-    // The address of the place that the expression is, which is what an assignment writes to and
-    // what `%` takes.
+    // The address of the place that the expression is, which is what `%` takes.
     X64_MODE_ADDRESS,
     // The address of a place that is only read, which can also be a parameter or an iterator: the
     // struct whose field is read.
     X64_MODE_PLACE,
+    // The address of the place that an assignment writes to, which can also be a global variable.
+    X64_MODE_TARGET,
     // The value of the expression.
     X64_MODE_VALUE,
 } X64_Mode;
@@ -290,6 +297,8 @@ typedef struct {
     size_t names_offset;
     size_t library_name_offset;
     size_t strings_offset;
+    // The names of the enums and of their members that `type_info_of` gives, after the strings.
+    size_t type_names_offset;
     size_t rdata_size_bytes;
     // The number of imports, which is one more than the number of foreign procedures, because the
     // first is `exit`, which the program ends with.
@@ -344,12 +353,15 @@ typedef struct {
 
 /**
  * What the pattern of a case of a match statement matches, see `x64_match_pattern`: the numbers
- * from `low` to `high`, both included. When `status` is not `X64_BUILD_STATUS_OK` the pattern is
- * wrong, and the rest means nothing.
+ * from `low` to `high`, both included, for an `Int`, a `Byte` and an enum, whose members are their
+ * numbers, and the bytes of `string` for a `Str`. When `status` is not `X64_BUILD_STATUS_OK` the
+ * pattern is wrong, and the rest means nothing.
  */
 typedef struct {
     int64_t low;
     int64_t high;
+    // The string literal that a `Str` is compared with, or `AST_NODE_INDEX_NONE` for the others.
+    Ast_Node_Index string;
     X64_Build_Status status;
 } X64_Match_Pattern;
 
@@ -415,6 +427,8 @@ typedef struct {
     size_t node_count;
     // The size of the headers, which is one or two units of file alignment, as the sections need.
     size_t headers_size_bytes;
+    // The size of `.data`, see `x64_data_layout`.
+    size_t data_size_bytes;
     // The place in the file of the start of the code, and of the data that precedes it.
     size_t text_start;
     // The rows that the code has noted, and how many it can note, see `x64_debug_row_add`.
@@ -497,6 +511,8 @@ static bool         x64_constants_collect        (X64_Builder *builder);
 static void         x64_conversion_write         (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static void         x64_copy_write               (X64_Builder *builder);
+static bool         x64_data_layout              (X64_Builder *builder);
+static void         x64_data_start_write         (X64_Builder *builder);
 static uint32_t     x64_debug_address_rva        (X64_Builder const *builder, size_t code_offset);
 static X64_Debug_Cursor x64_debug_cursor_move    (Str source, X64_Debug_Cursor cursor,
                                                   size_t offset);
@@ -519,6 +535,15 @@ static Ast_Node_Index x64_defer_next             (X64_Builder *builder,
                                                   X64_Statement_Frame const *frames,
                                                   X64_Statement_Frame *frame);
 static void         x64_dos_header_write         (byte *header);
+static Ast_Node_Index x64_enum_find              (X64_Builder const *builder, Str name);
+static bool         x64_enum_member_find         (X64_Builder const *builder,
+                                                  Ast_Node_Index enum_node, Str member,
+                                                  int64_t *number);
+static Str          x64_enum_member_name_of      (X64_Builder const *builder,
+                                                  Ast_Node_Index expression,
+                                                  Ast_Node_Index enum_node);
+static Ast_Node_Index x64_enum_of_access         (X64_Builder const *builder,
+                                                  Ast_Node_Index access);
 static void         x64_epilogue_write           (X64_Builder *builder);
 static bool         x64_expression_node_write    (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame,
@@ -539,9 +564,13 @@ static bool         x64_field_address_write      (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static bool         x64_field_target_is_read_only(X64_Builder const *builder,
                                                   Ast_Node_Index target);
+static Ast_Node_Index x64_field_union_match      (X64_Builder const *builder,
+                                                  Ast_Node_Index field);
 static bool         x64_for_each_start_write     (X64_Builder *builder, Ast_Node_Index statement);
 static bool         x64_for_start_write          (X64_Builder *builder, Ast_Node_Index statement);
 static void         x64_headers_write            (X64_Builder *builder, size_t text_size_bytes);
+static bool         x64_identifier_address_load  (X64_Builder *builder, Ast_Node_Index identifier,
+                                                  byte register_number);
 static bool         x64_identifier_place         (X64_Builder const *builder,
                                                   Ast_Node_Index identifier, int32_t *place);
 static void         x64_image_write              (X64_Builder *builder);
@@ -566,8 +595,16 @@ static Ast_Node_Index x64_match_case_write       (X64_Builder *builder,
                                                   Ast_Node_Index first);
 static X64_Match_Pattern x64_match_pattern       (X64_Builder const *builder, X64_Type subject,
                                                   Ast_Node_Index pattern);
+static bool         x64_match_patterns_overlap   (X64_Builder const *builder, X64_Type subject,
+                                                  X64_Match_Pattern first,
+                                                  X64_Match_Pattern second);
 static bool         x64_match_start_write        (X64_Builder *builder, Ast_Node_Index match);
+static void         x64_match_string_write       (X64_Builder *builder, int32_t subject,
+                                                  Ast_Node_Index literal, uint32_t *block_jumps);
+static bool         x64_member_write             (X64_Builder *builder, Ast_Node_Index enum_node,
+                                                  Str member);
 static void         x64_memory_load              (X64_Builder *builder, X64_Type type, byte base);
+static void         x64_memory_load_words        (X64_Builder *builder, X64_Type type, byte base);
 static void         x64_memory_store             (X64_Builder *builder, X64_Type type, byte base);
 static bool         x64_node_enter               (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
@@ -578,10 +615,17 @@ static size_t       x64_parameter_count          (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
 static X64_Type     x64_parameter_type           (X64_Builder const *builder,
                                                   Ast_Node_Index procedure, size_t position);
+static Ast_Node_Index x64_parameter_type_node    (X64_Builder const *builder,
+                                                  Ast_Node_Index signature, size_t position);
 static size_t       x64_parameter_word_count     (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
+static Ast_Node_Index x64_parent_find            (X64_Builder const *builder,
+                                                  Ast_Node_Index child);
 static void         x64_patch_u32                (X64_Writer *writer, size_t offset,
                                                   uint32_t number);
+static bool         x64_path_equals              (X64_Builder const *builder, Ast_Node_Index first,
+                                                  Ast_Node_Index second);
+static bool         x64_procedure_address_write  (X64_Builder *builder, size_t position);
 static void         x64_procedure_layout         (X64_Builder *builder, Ast_Node_Index procedure);
 static bool         x64_procedure_uses_temporary (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
@@ -596,6 +640,9 @@ static bool         x64_return_value_write       (X64_Builder *builder, Ast_Node
                                                   Ast_Node_Index statement);
 static void         x64_sequence_length_load     (X64_Builder *builder, X64_Type type,
                                                   byte register_number, int32_t place);
+static Ast_Node_Index x64_signature_canonical    (X64_Builder const *builder,
+                                                  Ast_Node_Index signature);
+static bool         x64_signatures_check         (X64_Builder *builder);
 static bool         x64_slice_write              (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static int32_t      x64_stack_displacement       (X64_Builder const *builder, size_t start,
@@ -614,9 +661,13 @@ static Ast_Node_Index x64_string_literal_of      (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
 static size_t       x64_string_offset            (X64_Builder const *builder,
                                                   Ast_Node_Index literal);
+static uint64_t     x64_string_rva               (X64_Builder const *builder,
+                                                  Ast_Node_Index literal);
 static bool         x64_struct_field_find        (X64_Builder const *builder,
                                                   Ast_Node_Index struct_node, Str name,
                                                   size_t *word_offset, X64_Type *type);
+static Ast_Node_Index x64_struct_field_node_find (X64_Builder const *builder,
+                                                  Ast_Node_Index struct_node, Str name);
 static Ast_Node_Index x64_struct_find            (X64_Builder const *builder, Str name);
 static size_t       x64_struct_word_count        (X64_Builder const *builder,
                                                   Ast_Node_Index struct_node);
@@ -625,8 +676,20 @@ static bool         x64_type_accepts             (X64_Builder const *builder, X6
                                                   Ast_Node_Index expression);
 static X64_Type     x64_type_element             (X64_Type sequence);
 static bool         x64_type_equals              (X64_Type first, X64_Type second);
+static bool         x64_type_info_access_is      (X64_Builder const *builder,
+                                                  Ast_Node_Index access);
+static Ast_Node_Index x64_type_info_enum         (X64_Builder const *builder, Ast_Node_Index info);
+static X64_Type     x64_type_info_type           (X64_Builder const *builder,
+                                                  Ast_Node_Index access);
+static bool         x64_type_info_write          (X64_Builder *builder, Ast_Node_Index access);
 static bool         x64_type_is_scalar           (X64_Builder const *builder, X64_Type type);
 static X64_Type     x64_type_make                (X64_Type_Kind kind);
+static void         x64_type_name_address_write  (X64_Builder *builder, Ast_Node_Index info,
+                                                  byte register_number);
+static size_t       x64_type_names_offset        (X64_Builder const *builder,
+                                                  Ast_Node_Index before);
+static bool         x64_type_nodes_equal         (X64_Builder const *builder, Ast_Node_Index first,
+                                                  Ast_Node_Index second);
 static X64_Type     x64_type_of_element_node     (X64_Builder const *builder, Ast_Node_Index type);
 static X64_Type     x64_type_of_name             (X64_Builder const *builder, Str name);
 static X64_Type     x64_type_of_node             (X64_Builder const *builder, Ast_Node_Index type);
@@ -638,6 +701,24 @@ static size_t       x64_type_stride_bytes        (X64_Builder const *builder,
                                                   X64_Type type);
 static Str          x64_type_subject             (X64_Builder const *builder, Ast_Node_Index type);
 static size_t       x64_type_word_count          (X64_Builder const *builder, X64_Type type);
+static bool         x64_union_block_changes      (X64_Builder const *builder, Ast_Node_Index block,
+                                                  Ast_Node_Index container, Str discriminant);
+static bool         x64_union_condition_matches  (X64_Builder const *builder,
+                                                  Ast_Node_Index condition,
+                                                  Ast_Node_Index container,
+                                                  Ast_Node_Index union_match,
+                                                  Ast_Node_Index enum_node);
+static Ast_Node_Index x64_union_enum             (X64_Builder const *builder,
+                                                  Ast_Node_Index struct_node,
+                                                  Ast_Node_Index union_match);
+static bool         x64_union_is_matched         (X64_Builder const *builder, Ast_Node_Index access,
+                                                  Ast_Node_Index struct_node,
+                                                  Ast_Node_Index union_match);
+static Str          x64_union_literal_member     (X64_Builder const *builder,
+                                                  Ast_Node_Index literal,
+                                                  Ast_Node_Index union_match,
+                                                  Ast_Node_Index enum_node);
+static bool         x64_unions_check             (X64_Builder *builder);
 static bool         x64_value_store              (X64_Builder *builder, X64_Type type,
                                                   int32_t displacement);
 static bool         x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index statement);
@@ -645,11 +726,14 @@ static Ast_Node_Index x64_variable_type_node     (X64_Builder const *builder,
                                                   Ast_Node_Index definition);
 static void         x64_write_add_immediate      (X64_Builder *builder, byte register_number,
                                                   int8_t number);
+static void         x64_write_and_immediate      (X64_Builder *builder, byte register_number,
+                                                  int8_t number);
 static void         x64_write_byte               (X64_Writer *writer, byte content);
 static void         x64_write_bytes              (X64_Writer *writer, byte const *content,
                                                   size_t count);
 static void         x64_write_call_import        (X64_Builder *builder, uint32_t import_slot);
 static void         x64_write_call_local         (X64_Builder *builder, size_t target_offset);
+static void         x64_write_call_register      (X64_Builder *builder, byte register_number);
 static void         x64_write_divide             (X64_Builder *builder, byte divisor);
 static void         x64_write_load_integer       (X64_Builder *builder, byte register_number,
                                                   int64_t number);
@@ -666,6 +750,8 @@ static void         x64_write_multiply           (X64_Builder *builder, byte tar
 static void         x64_write_registers          (X64_Builder *builder, byte opcode, byte source,
                                                   byte target);
 static void         x64_write_rip_displacement   (X64_Builder *builder, uint64_t target_rva);
+static void         x64_write_rip_memory         (X64_Builder *builder, byte opcode,
+                                                  byte register_number, uint64_t target_rva);
 static void         x64_write_set                (X64_Builder *builder, byte condition);
 static void         x64_write_signed_leb128      (X64_Writer *writer, int64_t number);
 static void         x64_write_string             (X64_Writer *writer, Str text);
@@ -837,6 +923,7 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
         .layout = {0},
         .node_count = nodes.length,
         .headers_size_bytes = headers_size_bytes,
+        .data_size_bytes = 0,
         .text_start = 0,
         .row_count = 0,
         .row_capacity = row_capacity,
@@ -860,10 +947,19 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
 
     bool is_ok = x64_structs_check(&builder);
     if (is_ok) {
+        is_ok = x64_unions_check(&builder);
+    }
+    if (is_ok) {
+        is_ok = x64_signatures_check(&builder);
+    }
+    if (is_ok) {
         is_ok = x64_constants_collect(&builder);
     }
     if (is_ok) {
         is_ok = x64_main_check(&builder);
+    }
+    if (is_ok) {
+        is_ok = x64_data_layout(&builder);
     }
     if (is_ok) {
         builder.layout = x64_layout_make(&builder);
@@ -954,13 +1050,18 @@ static bool x64_constants_collect(X64_Builder *builder) {
 
         Str name = ast_definition_name(definition_node);
         builder->definition = definition;
-        if (definition_node->node_type != AST_NODE_TYPE_CONSTANT_DEFINITION) {
-            return x64_fail(builder, X64_BUILD_STATUS_UNSUPPORTED, name);
-        }
 
         Ast_Node_Index procedure = definition_node->first_child;
         if (builder->constant_count == X64_CONSTANT_COUNT_MAX) {
             return x64_fail(builder, X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED, name);
+        }
+        // A global variable is not a constant: its place is in `.data`, see `x64_data_layout`.
+        if (definition_node->node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            definition = definition_node->next_sibling;
+            continue;
+        }
+        if (definition_node->node_type != AST_NODE_TYPE_CONSTANT_DEFINITION) {
+            return x64_fail(builder, X64_BUILD_STATUS_UNSUPPORTED, name);
         }
         // A value needs nothing more: its uses are its value, and the bytes of a string are written
         // with the other string literals.
@@ -979,16 +1080,42 @@ static bool x64_constants_collect(X64_Builder *builder) {
             definition = definition_node->next_sibling;
             continue;
         }
-        if (builder->nodes[procedure].node_type == AST_NODE_TYPE_STRUCT_TYPE) {
-            // A struct is a type, which has no code, and the analysis does not count it among the
-            // constants that a binding is the position of.
+        Ast_Node_Type value_type = builder->nodes[procedure].node_type;
+        if (value_type == AST_NODE_TYPE_STRUCT_TYPE || value_type == AST_NODE_TYPE_ENUM_TYPE) {
+            // A struct and an enum are types, which have no code, and the analysis does not count
+            // them among the constants that a binding is the position of. The numbers of the
+            // members of an enum are an `Int`, which is the only type of them.
+            if (value_type == AST_NODE_TYPE_ENUM_TYPE &&
+                str_equals(builder->nodes[procedure].payload.enum_type.value_type, STR("Int")) ==
+                    false) {
+                return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
+                                builder->nodes[procedure].payload.enum_type.value_type);
+            }
             definition = definition_node->next_sibling;
             continue;
         }
-        if (builder->nodes[procedure].node_type != AST_NODE_TYPE_PROCEDURE) {
-            // An enum or the member of one is not built.
-            return x64_fail(builder, X64_BUILD_STATUS_UNSUPPORTED, name);
+        if (value_type == AST_NODE_TYPE_FIELD_ACCESS) {
+            // The member of an enum, such as `DEFAULT :: Color.RED`, whose uses are its number.
+            Ast_Node_Index enum_node = x64_enum_of_access(builder, procedure);
+            int64_t number = 0;
+            if (enum_node == AST_NODE_INDEX_NONE ||
+                x64_enum_member_find(builder, enum_node,
+                                     builder->nodes[procedure].payload.field_access.name,
+                                     &number) == false) {
+                return x64_fail(builder, X64_BUILD_STATUS_ENUM_MEMBER_UNKNOWN,
+                                builder->nodes[procedure].payload.field_access.name);
+            }
+            builder->constants[builder->constant_count] = (X64_Constant){
+                .definition = definition,
+                .offset = 0,
+                .import_slot = 0,
+                .kind = X64_CONSTANT_KIND_MEMBER,
+            };
+            builder->constant_count += 1;
+            definition = definition_node->next_sibling;
+            continue;
         }
+        assert(value_type == AST_NODE_TYPE_PROCEDURE);
 
         bool is_foreign = ast_procedure_is_foreign(builder->nodes, procedure);
         if (is_foreign &&
@@ -1117,8 +1244,229 @@ static X64_Layout x64_layout_make(X64_Builder const *builder) {
             strings_bytes += builder->nodes[i].payload.string_literal.text.length + 1;
         }
     }
-    layout.rdata_size_bytes = layout.strings_offset + strings_bytes;
+    layout.type_names_offset = layout.strings_offset + strings_bytes;
+    layout.rdata_size_bytes = layout.type_names_offset +
+                              x64_type_names_offset(builder, (Ast_Node_Index)builder->node_count);
     return layout;
+}
+
+/**
+ * Returns where the names of the `type_info_of` before the node `before` end, counted from the
+ * start of the names in `.rdata`: each one that is about an enum has the name of the enum and then
+ * the names of its members, each with a zero after it. With the number of nodes as `before` it is
+ * the size of all the names.
+ */
+static size_t x64_type_names_offset(X64_Builder const *builder, Ast_Node_Index before) {
+    assert(before <= builder->node_count);
+
+    size_t offset = 0;
+    for (Ast_Node_Index node = 0; node < before; node += 1) {
+        if (builder->nodes[node].node_type != AST_NODE_TYPE_TYPE_INFO_OF) {
+            continue;
+        }
+        Ast_Node_Index enum_node = x64_type_info_enum(builder, node);
+        if (enum_node == AST_NODE_INDEX_NONE) {
+            continue;
+        }
+        Ast_Node_Index type = builder->nodes[node].first_child;
+        offset += builder->nodes[type].payload.type_name.name.length + 1;
+        for (Ast_Node_Index member = builder->nodes[enum_node].first_child;
+             member != AST_NODE_INDEX_NONE; member = builder->nodes[member].next_sibling) {
+            offset += builder->nodes[member].payload.enum_member.name.length + 1;
+        }
+    }
+    return offset;
+}
+
+/**
+ * Lays out `.data`, which has the temporary storage first, then a table for each `type_info_of` of
+ * an enum, and then the global variables, in the order of the source, and checks the global
+ * variables. A table has an `Enum_Member_Type_Info` for each member of the enum, which is its name
+ * and its number, 3 words, and it is filled when the program starts, like the global variables get
+ * their initial values, see `x64_data_start_write`. A global variable takes the words of its type,
+ * which is written or the type of its initial value, and the initial value is a constant or a
+ * field of the information about an enum. `builder->layouts` keeps the place of each in `.data`.
+ * Returns false after it recorded an error.
+ */
+static bool x64_data_layout(X64_Builder *builder) {
+    size_t size_bytes = X64_TEMPORARY_USED_SIZE_BYTES + X64_TEMPORARY_STORAGE_SIZE_BYTES;
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (builder->nodes[node].node_type != AST_NODE_TYPE_TYPE_INFO_OF) {
+            continue;
+        }
+        Ast_Node_Index enum_node = x64_type_info_enum(builder, node);
+        if (enum_node == AST_NODE_INDEX_NONE) {
+            continue;
+        }
+        size_t member_count = 0;
+        for (Ast_Node_Index member = builder->nodes[enum_node].first_child;
+             member != AST_NODE_INDEX_NONE; member = builder->nodes[member].next_sibling) {
+            member_count += 1;
+        }
+        builder->layouts[node].frame_offset = (uint32_t)size_bytes;
+        size_bytes += member_count * X64_TYPE_INFO_MEMBER_SIZE_BYTES;
+    }
+
+    Ast_Node_Index definition = builder->nodes[builder->module].first_child;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node const *node = &builder->nodes[definition];
+        if (node->node_type != AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            definition = node->next_sibling;
+            continue;
+        }
+        builder->definition = definition;
+        Str name = node->payload.global_variable_definition.name;
+        Ast_Node_Index value = node->last_child;
+        Ast_Node_Index type_node = AST_NODE_INDEX_NONE;
+        for (Ast_Node_Index child = node->first_child; child != value;
+             child = builder->nodes[child].next_sibling) {
+            if (builder->nodes[child].node_type != AST_NODE_TYPE_ATTRIBUTE) {
+                type_node = child;
+            }
+        }
+
+        X64_Type type = x64_type_make(X64_TYPE_KIND_NONE);
+        if (x64_type_info_access_is(builder, value)) {
+            type = x64_type_info_type(builder, value);
+            if (type.kind == X64_TYPE_KIND_NONE) {
+                return x64_fail(builder, X64_BUILD_STATUS_TYPE_INFO_UNSUPPORTED, name);
+            }
+        } else if (x64_is_constant(builder, value)) {
+            type = x64_leaf_type(builder, value);
+        }
+        if (type_node != AST_NODE_INDEX_NONE) {
+            X64_Type written = x64_type_of_node(builder, type_node);
+            if (x64_type_accepts(builder, written, value) == false) {
+                if (written.kind == X64_TYPE_KIND_NONE) {
+                    return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
+                                    x64_type_subject(builder, type_node));
+                }
+                return x64_fail(builder, X64_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, name);
+            }
+            type = written;
+        }
+        // A global variable is a number, a truth value, a string or the members of an enum, which
+        // are the values that a constant expression or the information about a type has.
+        bool is_valid = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_BYTE ||
+                        type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_STR ||
+                        (type.kind == X64_TYPE_KIND_ARRAY && x64_type_info_access_is(builder,
+                                                                                   value));
+        if (is_valid == false) {
+            return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED, name);
+        }
+        builder->layouts[definition] = (X64_Node_Layout){
+            .type = type,
+            .frame_offset = (uint32_t)size_bytes,
+        };
+        size_bytes += x64_type_word_count(builder, type) * X64_WORD_SIZE_BYTES;
+        definition = node->next_sibling;
+    }
+
+    builder->definition = AST_NODE_INDEX_NONE;
+    builder->data_size_bytes = size_bytes;
+    return true;
+}
+
+/**
+ * Writes what the program does before `main`: the tables of the information about enums are filled
+ * with the names and the numbers of their members, and every global variable is given its initial
+ * value, which is a constant or a field of such information, so that every global variable has its
+ * value before any procedure runs, see `x64_data_layout`.
+ */
+static void x64_data_start_write(X64_Builder *builder) {
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (builder->nodes[node].node_type != AST_NODE_TYPE_TYPE_INFO_OF) {
+            continue;
+        }
+        Ast_Node_Index enum_node = x64_type_info_enum(builder, node);
+        if (enum_node == AST_NODE_INDEX_NONE) {
+            continue;
+        }
+        uint64_t table = builder->data_rva + builder->layouts[node].frame_offset;
+        uint64_t name = X64_RDATA_RVA + builder->layout.type_names_offset +
+                        x64_type_names_offset(builder, node) +
+                        builder->nodes[builder->nodes[node].first_child]
+                            .payload.type_name.name.length + 1;
+        int64_t number = 0;
+        for (Ast_Node_Index member = builder->nodes[enum_node].first_child;
+             member != AST_NODE_INDEX_NONE; member = builder->nodes[member].next_sibling) {
+            Str member_name = builder->nodes[member].payload.enum_member.name;
+            x64_write_rip_memory(builder, X64_OPCODE_LEA, X64_REGISTER_RAX, name);
+            x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, table);
+            x64_write_load_integer(builder, X64_REGISTER_RAX, (int64_t)member_name.length);
+            x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX,
+                                 table + X64_WORD_SIZE_BYTES);
+            x64_write_load_integer(builder, X64_REGISTER_RAX, number);
+            x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX,
+                                 table + 2 * X64_WORD_SIZE_BYTES);
+            table += X64_TYPE_INFO_MEMBER_SIZE_BYTES;
+            name += member_name.length + 1;
+            number += 1;
+        }
+    }
+
+    Ast_Node_Index definition = builder->nodes[builder->module].first_child;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node const *node = &builder->nodes[definition];
+        if (node->node_type != AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            definition = node->next_sibling;
+            continue;
+        }
+        uint64_t place = builder->data_rva + builder->layouts[definition].frame_offset;
+        Ast_Node_Index value = node->last_child;
+        Constant_Value constant = builder->constant_values[value];
+        if (x64_type_info_access_is(builder, value)) {
+            Ast_Node_Index info = builder->nodes[value].first_child;
+            if (builder->layouts[definition].type.kind == X64_TYPE_KIND_ARRAY) {
+                x64_write_rip_memory(builder, X64_OPCODE_LEA, X64_REGISTER_RAX,
+                                     builder->data_rva + builder->layouts[info].frame_offset);
+                x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, place);
+            } else {
+                x64_type_name_address_write(builder, info, X64_REGISTER_RAX);
+                x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, place);
+                x64_write_load_integer(
+                    builder, X64_REGISTER_RAX,
+                    (int64_t)builder->nodes[builder->nodes[info].first_child]
+                        .payload.type_name.name.length);
+                x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX,
+                                     place + X64_WORD_SIZE_BYTES);
+            }
+        } else if (constant.string != AST_NODE_INDEX_NONE) {
+            x64_write_rip_memory(builder, X64_OPCODE_LEA, X64_REGISTER_RAX,
+                                 x64_string_rva(builder, constant.string));
+            x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, place);
+            x64_write_load_integer(
+                builder, X64_REGISTER_RAX,
+                (int64_t)builder->nodes[constant.string].payload.string_literal.text.length);
+            x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX,
+                                 place + X64_WORD_SIZE_BYTES);
+        } else {
+            x64_write_load_integer(builder, X64_REGISTER_RAX, constant.integer);
+            x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, place);
+        }
+        definition = node->next_sibling;
+    }
+}
+
+/**
+ * Writes `lea register, [name]` of the name of the enum of the information `info`, which is the
+ * first of its names in `.rdata`.
+ */
+static void x64_type_name_address_write(X64_Builder *builder, Ast_Node_Index info,
+                                        byte register_number) {
+    x64_write_rip_memory(builder, X64_OPCODE_LEA, register_number,
+                         X64_RDATA_RVA + builder->layout.type_names_offset +
+                             x64_type_names_offset(builder, info));
+}
+
+/**
+ * Returns the address in memory, relative to the image, of the bytes of the string literal
+ * `literal` in `.rdata`.
+ */
+static uint64_t x64_string_rva(X64_Builder const *builder, Ast_Node_Index literal) {
+    return X64_RDATA_RVA + builder->layout.strings_offset + x64_string_offset(builder, literal);
 }
 
 /**
@@ -1139,8 +1487,7 @@ static void x64_image_write(X64_Builder *builder) {
     builder->data_rva = (uint32_t)(X64_RDATA_RVA + x64_align_up(builder->layout.rdata_size_bytes,
                                                                  X64_SECTION_ALIGNMENT_BYTES));
     builder->text_rva = (uint32_t)(builder->data_rva +
-                                   x64_align_up(X64_TEMPORARY_USED_SIZE_BYTES +
-                                                    X64_TEMPORARY_STORAGE_SIZE_BYTES,
+                                   x64_align_up(builder->data_size_bytes,
                                                 X64_SECTION_ALIGNMENT_BYTES));
 }
 
@@ -1205,6 +1552,24 @@ static void x64_rdata_write(X64_Builder *builder) {
         }
     }
 
+    // The names of the enums and their members, each with a zero after it, in the order of the
+    // `type_info_of` that gives them, see `x64_type_names_offset`.
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (builder->nodes[node].node_type != AST_NODE_TYPE_TYPE_INFO_OF) {
+            continue;
+        }
+        Ast_Node_Index enum_node = x64_type_info_enum(builder, node);
+        if (enum_node == AST_NODE_INDEX_NONE) {
+            continue;
+        }
+        x64_write_string(writer, builder->nodes[builder->nodes[node].first_child]
+                                     .payload.type_name.name);
+        for (Ast_Node_Index member = builder->nodes[enum_node].first_child;
+             member != AST_NODE_INDEX_NONE; member = builder->nodes[member].next_sibling) {
+            x64_write_string(writer, builder->nodes[member].payload.enum_member.name);
+        }
+    }
+
     assert(writer->is_overflowed ||
            writer->length == builder->headers_size_bytes + layout->rdata_size_bytes);
 }
@@ -1226,6 +1591,7 @@ static bool x64_code_write(X64_Builder *builder) {
     // arguments in, which is `sub rsp, 40`.
     static byte const START_PROLOGUE[] = {0x48, 0x83, 0xEC, 0x28};
     x64_write_bytes(writer, START_PROLOGUE, sizeof(START_PROLOGUE));
+    x64_data_start_write(builder);
 
     size_t main_position = builder->constant_count;
     for (size_t i = 0; i < builder->constant_count; i += 1) {
@@ -1965,17 +2331,26 @@ static bool x64_condition_write(X64_Builder *builder, Ast_Node_Index condition,
 /**
  * Checks the match statement `match` and writes its start: the subject, which is stored in the
  * place of the statement in the frame, see `x64_procedure_layout`, so that it is worked out once
- * and every case compares the same value. The subject is an `Int`, every pattern is a constant of
- * that type or a range of them, which has a number in it, and no two patterns match a value in
- * common, so the order of the cases does not change what the statement does. Returns false after
- * it recorded an error.
+ * and every case compares the same value. The subject is an `Int`, a `Byte`, a `Str` or an enum,
+ * every pattern is one of that type, see `x64_match_pattern`, and no two patterns match a value in
+ * common, so the order of the cases does not change what the statement does. A match of an enum
+ * without a default case has a case for every member, unless it is `#(partial)`, which only a
+ * match of an enum without a default case can be. Returns false after it recorded an error.
  */
 static bool x64_match_start_write(X64_Builder *builder, Ast_Node_Index match) {
     assert(builder->nodes[match].node_type == AST_NODE_TYPE_MATCH_STATEMENT);
 
     Ast_Node_Index subject = ast_match_subject(builder->nodes, match);
     X64_Type subject_type = builder->layouts[match].type;
-    if (subject_type.kind != X64_TYPE_KIND_INT) {
+    if (subject_type.kind == X64_TYPE_KIND_ENUM_LITERAL) {
+        return x64_fail(builder, X64_BUILD_STATUS_ENUM_TYPE_UNKNOWN,
+                        builder->nodes[subject].payload.enum_literal.name);
+    }
+    bool is_valid = subject_type.kind == X64_TYPE_KIND_BYTE ||
+                    subject_type.kind == X64_TYPE_KIND_ENUM ||
+                    subject_type.kind == X64_TYPE_KIND_INT ||
+                    subject_type.kind == X64_TYPE_KIND_STR;
+    if (is_valid == false) {
         if (subject_type.kind == X64_TYPE_KIND_NONE &&
             builder->nodes[subject].node_type != AST_NODE_TYPE_CALL) {
             return x64_fail_unsupported(builder);
@@ -1984,15 +2359,18 @@ static bool x64_match_start_write(X64_Builder *builder, Ast_Node_Index match) {
                         x64_expression_subject(builder, subject));
     }
 
-    // The analysis allows `partial` as the only attribute, once, so it is the first child if any,
-    // and it is only for a match of an enum.
+    Ast_Node_Index first_case = builder->nodes[subject].next_sibling;
+    Ast_Node_Index last_case = builder->nodes[match].last_child;
+    bool has_default = ast_match_case_pattern(builder->nodes, last_case) == AST_NODE_INDEX_NONE;
+    // The analysis allows `partial` as the only attribute, once, so it is the first child if any.
     Ast_Node_Index attribute = builder->nodes[match].first_child;
-    if (builder->nodes[attribute].node_type == AST_NODE_TYPE_ATTRIBUTE) {
+    bool is_partial = builder->nodes[attribute].node_type == AST_NODE_TYPE_ATTRIBUTE;
+    if (is_partial && (subject_type.kind != X64_TYPE_KIND_ENUM || has_default)) {
         return x64_fail(builder, X64_BUILD_STATUS_MATCH_PARTIAL_INVALID,
                         builder->nodes[attribute].payload.attribute.name);
     }
 
-    Ast_Node_Index first_case = builder->nodes[subject].next_sibling;
+    size_t pattern_count = 0;
     Ast_Node_Index match_case = first_case;
     // Every case is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < builder->node_count && match_case != AST_NODE_INDEX_NONE; i += 1) {
@@ -2003,6 +2381,11 @@ static bool x64_match_start_write(X64_Builder *builder, Ast_Node_Index match) {
             break;
         }
         X64_Match_Pattern checked = x64_match_pattern(builder, subject_type, pattern);
+        if (checked.status == X64_BUILD_STATUS_ENUM_MEMBER_UNKNOWN) {
+            // The member that is not there says more than the word of the case.
+            return x64_fail(builder, checked.status,
+                            x64_enum_member_name_of(builder, pattern, subject_type.definition));
+        }
         if (checked.status != X64_BUILD_STATUS_OK) {
             return x64_fail(builder, checked.status, keyword);
         }
@@ -2011,12 +2394,27 @@ static bool x64_match_start_write(X64_Builder *builder, Ast_Node_Index match) {
             X64_Match_Pattern other = x64_match_pattern(
                 builder, subject_type, ast_match_case_pattern(builder->nodes, earlier));
             assert(other.status == X64_BUILD_STATUS_OK);
-            if (other.low <= checked.high && checked.low <= other.high) {
+            if (x64_match_patterns_overlap(builder, subject_type, other, checked)) {
                 return x64_fail(builder, X64_BUILD_STATUS_MATCH_CASE_DUPLICATE, keyword);
             }
             earlier = builder->nodes[earlier].next_sibling;
         }
+        pattern_count += 1;
         match_case = builder->nodes[match_case].next_sibling;
+    }
+
+    // Every pattern is a different member, so the match has a case for each one when it has as
+    // many patterns as the enum has members.
+    if (subject_type.kind == X64_TYPE_KIND_ENUM && has_default == false && is_partial == false) {
+        size_t member_count = 0;
+        for (Ast_Node_Index member = builder->nodes[subject_type.definition].first_child;
+             member != AST_NODE_INDEX_NONE; member = builder->nodes[member].next_sibling) {
+            member_count += 1;
+        }
+        if (pattern_count != member_count) {
+            return x64_fail(builder, X64_BUILD_STATUS_MATCH_NOT_EXHAUSTIVE,
+                            builder->nodes[match].payload.match.keyword);
+        }
     }
 
     if (x64_expression_write(builder, subject, subject_type, X64_MODE_VALUE, true) == false) {
@@ -2028,23 +2426,47 @@ static bool x64_match_start_write(X64_Builder *builder, Ast_Node_Index match) {
 
 /**
  * Returns what `pattern`, the pattern of a case of a match statement whose subject is of the type
- * `subject`, matches: the numbers from `low` to `high`, both included, which are one number for a
- * pattern that is not a range. A pattern is a constant of the type of the subject, or a range of
- * them, which must have a number in it. The status says what is wrong otherwise.
+ * `subject`, matches, see `X64_Match_Pattern`. A pattern is known when the program is compiled: for
+ * an enum it is a member of the enum of the subject, written `.RED` or `Color.RED`, and for an
+ * `Int`, a `Byte` or a `Str` it is a constant of that type, or for an `Int` and a `Byte` a range of
+ * constants, which must have a number in it. The status says what is wrong otherwise.
  */
 static X64_Match_Pattern x64_match_pattern(X64_Builder const *builder, X64_Type subject,
                                            Ast_Node_Index pattern) {
     assert(pattern < builder->node_count);
-    assert(subject.kind == X64_TYPE_KIND_INT);
 
     X64_Match_Pattern result = {
         .low = 0,
         .high = 0,
+        .string = AST_NODE_INDEX_NONE,
         .status = X64_BUILD_STATUS_OK,
     };
     Ast_Node const *node = &builder->nodes[pattern];
+    if (subject.kind == X64_TYPE_KIND_ENUM) {
+        Str member = x64_enum_member_name_of(builder, pattern, subject.definition);
+        if (member.bytes == NULL) {
+            result.status = X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
+        } else if (x64_enum_member_find(builder, subject.definition, member, &result.low) ==
+                   false) {
+            result.status = X64_BUILD_STATUS_ENUM_MEMBER_UNKNOWN;
+        }
+        result.high = result.low;
+        return result;
+    }
+    // A member of an enum is known when the program is compiled, but it is a pattern of the wrong
+    // type for the other subjects.
+    if (node->node_type == AST_NODE_TYPE_ENUM_LITERAL ||
+        x64_enum_of_access(builder, pattern) != AST_NODE_INDEX_NONE) {
+        result.status = X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
+        return result;
+    }
+
     Ast_Node_Index ends[2] = {pattern, pattern};
     if (node->node_type == AST_NODE_TYPE_RANGE) {
+        if (subject.kind == X64_TYPE_KIND_STR) {
+            result.status = X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
+            return result;
+        }
         ends[0] = node->first_child;
         ends[1] = node->last_child;
     }
@@ -2057,6 +2479,11 @@ static X64_Match_Pattern x64_match_pattern(X64_Builder const *builder, X64_Type 
             result.status = X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
             return result;
         }
+    }
+    if (subject.kind == X64_TYPE_KIND_STR) {
+        result.string = builder->constant_values[pattern].string;
+        assert(result.string != AST_NODE_INDEX_NONE);
+        return result;
     }
     result.low = builder->constant_values[ends[0]].integer;
     result.high = builder->constant_values[ends[1]].integer;
@@ -2078,11 +2505,26 @@ static X64_Match_Pattern x64_match_pattern(X64_Builder const *builder, X64_Type 
 }
 
 /**
+ * Returns whether the patterns `first` and `second`, which `x64_match_pattern` accepts for a
+ * subject of `subject`, match a value in common: strings with the same bytes, or numbers whose
+ * ranges overlap.
+ */
+static bool x64_match_patterns_overlap(X64_Builder const *builder, X64_Type subject,
+                                       X64_Match_Pattern first, X64_Match_Pattern second) {
+    if (subject.kind == X64_TYPE_KIND_STR) {
+        return str_equals(builder->nodes[first.string].payload.string_literal.text,
+                          builder->nodes[second.string].payload.string_literal.text);
+    }
+    return first.low <= second.high && second.low <= first.high;
+}
+
+/**
  * Writes the case `first` of the match statement of `frame`, and the cases after it that have no
  * block of their own and share the block of the last of them: the subject is compared with the
  * pattern of each, and a pattern that matches jumps to the block, which comes after the
  * comparisons, and when none does the jump over the block goes to the next case. A range compares
- * the subject with its two ends, with the signed order of an `Int`. The default case has no
+ * the subject with its two ends, with the signed order of an `Int`, and a `Str` is compared by its
+ * length and its bytes, see `x64_match_string_write`. The default case has no
  * pattern, and its block always runs when it is reached. The next case of the frame is set to the
  * one after the block. Returns the block, which the caller writes next.
  */
@@ -2105,6 +2547,10 @@ static Ast_Node_Index x64_match_case_write(X64_Builder *builder, X64_Statement_F
         Ast_Node_Index pattern = ast_match_case_pattern(builder->nodes, match_case);
         if (pattern == AST_NODE_INDEX_NONE) {
             has_default = true;
+        } else if (subject_type.kind == X64_TYPE_KIND_STR) {
+            X64_Match_Pattern checked = x64_match_pattern(builder, subject_type, pattern);
+            assert(checked.status == X64_BUILD_STATUS_OK);
+            x64_match_string_write(builder, subject, checked.string, &block_jumps);
         } else {
             X64_Match_Pattern checked = x64_match_pattern(builder, subject_type, pattern);
             assert(checked.status == X64_BUILD_STATUS_OK);
@@ -2142,6 +2588,34 @@ static Ast_Node_Index x64_match_case_write(X64_Builder *builder, X64_Statement_F
     x64_jumps_resolve(builder, block_jumps);
     frame->next = builder->nodes[match_case].next_sibling;
     return block;
+}
+
+/**
+ * Writes the comparison of the `Str` at `rbp + subject` with the string literal `literal`, which
+ * jumps to the block of the case, joining `block_jumps`, when they have the same bytes, and goes on
+ * after it when they do not. The lengths are compared first, and then each byte of the subject with
+ * the byte of the literal, which is a number in the instruction, because the literal is known when
+ * the program is compiled. The empty string is compared by its length only.
+ */
+static void x64_match_string_write(X64_Builder *builder, int32_t subject, Ast_Node_Index literal,
+                                   uint32_t *block_jumps) {
+    Str text = builder->nodes[literal].payload.string_literal.text;
+    uint32_t different_jumps = X64_JUMP_NONE;
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                     subject + X64_WORD_SIZE_BYTES);
+    x64_write_load_integer(builder, X64_REGISTER_RCX, (int64_t)text.length);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &different_jumps);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, subject);
+    for (size_t i = 0; i < text.length; i += 1) {
+        x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RAX,
+                                  X64_REGISTER_R10, (int32_t)i);
+        x64_write_load_integer(builder, X64_REGISTER_RCX, (byte)text.bytes[i]);
+        x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+        x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &different_jumps);
+    }
+    x64_jump_write(builder, X64_CONDITION_ALWAYS, block_jumps);
+    x64_jumps_resolve(builder, different_jumps);
 }
 
 /**
@@ -2288,14 +2762,13 @@ static bool x64_return_value_write(X64_Builder *builder, Ast_Node_Index procedur
     }
     // The temporary strings are given back by the return, so a pointer to one must not leave. A
     // string that is a `C_Str` is one, and a `C_Str` variable may hold one, so neither can be
-    // returned either.
-    if (x64_call_is_str_to_c_str(builder, value) ||
-        x64_string_literal_of(builder, value) != AST_NODE_INDEX_NONE) {
-        return x64_fail_unsupported(builder);
-    }
-    if (return_type.kind == X64_TYPE_KIND_C_STR &&
-        builder->bindings[value].kind == SEMANTIC_BINDING_KIND_VARIABLE) {
-        return x64_fail_unsupported(builder);
+    // returned either. A string that is a `Str` is a view of the bytes of the program, which stay.
+    if (return_type.kind == X64_TYPE_KIND_C_STR) {
+        if (x64_call_is_str_to_c_str(builder, value) ||
+            x64_string_literal_of(builder, value) != AST_NODE_INDEX_NONE ||
+            builder->bindings[value].kind == SEMANTIC_BINDING_KIND_VARIABLE) {
+            return x64_fail_unsupported(builder);
+        }
     }
 
     return x64_expression_write(builder, value, return_type, X64_MODE_VALUE, true);
@@ -2325,9 +2798,11 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
         }
         value = builder->nodes[type_node].next_sibling;
     }
+    // The members of an enum are an array that is in `.data`, whose address is not copied either.
     if (type.kind == X64_TYPE_KIND_ARRAY &&
         (value == AST_NODE_INDEX_NONE ||
-         builder->nodes[value].node_type != AST_NODE_TYPE_ARRAY_LITERAL)) {
+         (builder->nodes[value].node_type != AST_NODE_TYPE_ARRAY_LITERAL &&
+          x64_type_info_access_is(builder, value) == false))) {
         return x64_fail(builder, X64_BUILD_STATUS_ARRAY_INITIALIZER_INVALID, name);
     }
 
@@ -2344,6 +2819,10 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
     if (type.kind == X64_TYPE_KIND_NIL) {
         // `nil` does not say what it points to.
         return x64_fail(builder, X64_BUILD_STATUS_NIL_TYPE_UNKNOWN, name);
+    }
+    if (type.kind == X64_TYPE_KIND_ENUM_LITERAL) {
+        // `.RED` does not say which enum it is of.
+        return x64_fail(builder, X64_BUILD_STATUS_ENUM_TYPE_UNKNOWN, name);
     }
     if (type.kind == X64_TYPE_KIND_NONE) {
         // A variable without a type takes the type of its value, which the target does not build
@@ -2370,10 +2849,10 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
 /**
  * Writes an assignment: `place = value`, which stores the value in the place, or one of `+=`, `-=`,
  * `*=` and `/=`, which works out the place and the value with the operator and stores the result.
- * The place is a variable of the procedure, an element of an array or an array slice, or what a
- * pointer points to, and its address is worked out before the value. A slice as the place copies
- * the elements of the value to the range, see `x64_range_assignment_write`. A global variable and a
- * field are not built. Returns false after it recorded an error.
+ * The place is a variable of the procedure, a global variable, an element of an array or an array
+ * slice, a field, or what a pointer points to, and its address is worked out before the value. A
+ * slice as the place copies the elements of the value to the range, see
+ * `x64_range_assignment_write`. Returns false after it recorded an error.
  */
 static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement) {
     assert(ast_node_type_is_assignment(builder->nodes[statement].node_type));
@@ -2387,7 +2866,8 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
     X64_Type type = x64_type_make(X64_TYPE_KIND_NONE);
     X64_Build_Status mismatch = X64_BUILD_STATUS_VARIABLE_TYPE_MISMATCH;
     if (target_type == AST_NODE_TYPE_IDENTIFIER) {
-        if (builder->bindings[target].kind != SEMANTIC_BINDING_KIND_VARIABLE) {
+        Semantic_Binding_Kind kind = builder->bindings[target].kind;
+        if (kind != SEMANTIC_BINDING_KIND_VARIABLE && kind != SEMANTIC_BINDING_KIND_GLOBAL) {
             return x64_fail_unsupported(builder);
         }
         type = x64_expression_type(builder, target);
@@ -2417,7 +2897,7 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
     }
 
     // The address of the place, which the checks of the place report about, comes first.
-    if (x64_expression_write(builder, target, type, X64_MODE_ADDRESS, true) == false) {
+    if (x64_expression_write(builder, target, type, X64_MODE_TARGET, true) == false) {
         return false;
     }
     X64_Type value_type = type;
@@ -2722,8 +3202,8 @@ static X64_Mode x64_child_mode(X64_Builder const *builder, X64_Expression_Frame 
     }
     if (node_type == AST_NODE_TYPE_FIELD_ACCESS &&
         x64_expression_type(builder, child).kind != X64_TYPE_KIND_POINTER) {
-        if (parent->mode == X64_MODE_ADDRESS) {
-            return X64_MODE_ADDRESS;
+        if (parent->mode == X64_MODE_ADDRESS || parent->mode == X64_MODE_TARGET) {
+            return parent->mode;
         }
         return X64_MODE_PLACE;
     }
@@ -2735,7 +3215,8 @@ static X64_Mode x64_child_mode(X64_Builder const *builder, X64_Expression_Frame 
  * its value on the stack of values, with each word zero, which is the value of a literal with
  * empty braces, so that the values of the fields can be stored in it as they are written, see
  * `x64_child_done`. The fields of a literal are checked here: each is a field of the struct, is
- * given once, and either every field is given or none is. A call of a procedure whose result is
+ * given once, and either every field is given or none is, where a field in a case of a union is
+ * given only with the member of its case. A call of a procedure whose result is
  * more than a word makes the place for the result, see `x64_result_is_hidden`. Returns false
  * after it recorded an error.
  */
@@ -2782,13 +3263,53 @@ static bool x64_node_enter(X64_Builder *builder, X64_Expression_Frame const *fra
         }
         given_count += 1;
     }
-    size_t field_count = 0;
-    for (Ast_Node_Index field = builder->nodes[type.definition].first_child;
-         field != AST_NODE_INDEX_NONE; field = builder->nodes[field].next_sibling) {
-        field_count += 1;
+    // A field in a case of a union match is given a value only when the literal gives the field
+    // that the union is matched against the member of the case, or leaves it out, and so the first
+    // member, which is the default value of an enum. The member is written out, because the case
+    // is decided when the program is compiled. Once one field is given, every field is, except
+    // the fields of the cases that the literal does not choose.
+    for (Ast_Node_Index given = builder->nodes[node].first_child; given != AST_NODE_INDEX_NONE;
+         given = builder->nodes[given].next_sibling) {
+        Str name = builder->nodes[given].payload.field_initializer.name;
+        Ast_Node_Index union_match = x64_field_union_match(
+            builder, x64_struct_field_node_find(builder, type.definition, name));
+        if (union_match == AST_NODE_INDEX_NONE) {
+            continue;
+        }
+        Ast_Node_Index enum_node = x64_union_enum(builder, type.definition, union_match);
+        Str given_member = x64_union_literal_member(builder, node, union_match, enum_node);
+        if (given_member.bytes == NULL) {
+            return x64_fail(builder, X64_BUILD_STATUS_UNION_KIND_NOT_CONSTANT, name);
+        }
+        Str case_member =
+            builder->nodes[builder->nodes[union_match].first_child].payload.union_case.member;
+        if (str_equals(given_member, case_member) == false) {
+            return x64_fail(builder, X64_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH, name);
+        }
     }
-    if (given_count != 0 && given_count != field_count) {
-        return x64_fail(builder, X64_BUILD_STATUS_STRUCT_FIELD_MISSING, subject);
+    for (Ast_Node_Index field = builder->nodes[type.definition].first_child;
+         field != AST_NODE_INDEX_NONE && given_count != 0;
+         field = builder->nodes[field].next_sibling) {
+        Str field_name = builder->nodes[field].payload.field.name;
+        bool is_given = false;
+        for (Ast_Node_Index given = builder->nodes[node].first_child;
+             given != AST_NODE_INDEX_NONE && is_given == false;
+             given = builder->nodes[given].next_sibling) {
+            is_given = str_equals(builder->nodes[given].payload.field_initializer.name,
+                                  field_name);
+        }
+        Ast_Node_Index union_match = x64_field_union_match(builder, field);
+        bool is_required = true;
+        if (union_match != AST_NODE_INDEX_NONE) {
+            Ast_Node_Index enum_node = x64_union_enum(builder, type.definition, union_match);
+            Str given_member = x64_union_literal_member(builder, node, union_match, enum_node);
+            Str case_member =
+                builder->nodes[builder->nodes[union_match].first_child].payload.union_case.member;
+            is_required = given_member.bytes != NULL && str_equals(given_member, case_member);
+        }
+        if (is_given == false && is_required) {
+            return x64_fail(builder, X64_BUILD_STATUS_STRUCT_FIELD_MISSING, field_name);
+        }
     }
 
     size_t word_count = x64_type_word_count(builder, type);
@@ -2888,14 +3409,29 @@ static void x64_conversion_write(X64_Builder *builder, X64_Expression_Frame cons
 
 /**
  * Returns the first child of `expression` that is written before it, or `AST_NODE_INDEX_NONE` when
- * it has none: a constant is its value, and the argument of `str_to_c_str` is copied by the call
- * itself, since it is a string that is known when the program is compiled. The elements of an
- * array literal follow its type, which is not written.
+ * it has none: a constant is its value, and so is the member of an enum, and the argument of
+ * `str_to_c_str` is copied by the call itself when it is a string that is known when the program
+ * is compiled. The elements of an array literal follow its type, which is not written.
  */
 static Ast_Node_Index x64_child_first(X64_Builder const *builder, Ast_Node_Index expression) {
     assert(expression < builder->node_count);
 
-    if (x64_is_constant(builder, expression) || x64_call_is_str_to_c_str(builder, expression)) {
+    if (x64_is_constant(builder, expression)) {
+        return AST_NODE_INDEX_NONE;
+    }
+    // The member of an enum is its number, and the information about an enum is in `.data`.
+    if (x64_enum_of_access(builder, expression) != AST_NODE_INDEX_NONE ||
+        x64_type_info_access_is(builder, expression)) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (x64_call_is_str_to_c_str(builder, expression)) {
+        // A string that is known is copied as it is, and a `Str` that is worked out is copied
+        // when the program runs.
+        Ast_Node_Index argument = builder->nodes[expression].first_child;
+        if (argument != AST_NODE_INDEX_NONE && x64_string_literal_of(builder, argument) ==
+                                                   AST_NODE_INDEX_NONE) {
+            return argument;
+        }
         return AST_NODE_INDEX_NONE;
     }
     switch (builder->nodes[expression].node_type) {
@@ -2975,7 +3511,8 @@ static X64_Type x64_child_wanted(X64_Builder const *builder, X64_Expression_Fram
             other = node->last_child;
         }
         bool is_untyped = x64_is_constant(builder, child) ||
-                          builder->nodes[child].node_type == AST_NODE_TYPE_NIL_LITERAL;
+                          builder->nodes[child].node_type == AST_NODE_TYPE_NIL_LITERAL ||
+                          builder->nodes[child].node_type == AST_NODE_TYPE_ENUM_LITERAL;
         if (is_untyped) {
             return x64_expression_type(builder, other);
         }
@@ -2988,6 +3525,9 @@ static X64_Type x64_child_wanted(X64_Builder const *builder, X64_Expression_Fram
             }
             if (str_equals(node->payload.call.name, STR("byte_to_int"))) {
                 return x64_type_make(X64_TYPE_KIND_BYTE);
+            }
+            if (str_equals(node->payload.call.name, STR("str_to_c_str"))) {
+                return x64_type_make(X64_TYPE_KIND_STR);
             }
             break;
         }
@@ -3067,8 +3607,39 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
         // The value of the field is on the stack for the literal, see `x64_child_done`, and the
         // value of the literal is in the place that it made, see `x64_node_enter`.
         return true;
-    case AST_NODE_TYPE_DEREFERENCE:
+    case AST_NODE_TYPE_ENUM_LITERAL: {
+        Str member = expression->payload.enum_literal.name;
+        if (frame->wanted.kind != X64_TYPE_KIND_ENUM) {
+            return x64_fail(builder, X64_BUILD_STATUS_ENUM_TYPE_UNKNOWN, member);
+        }
+        return x64_member_write(builder, frame->wanted.definition, member);
+    }
+    case AST_NODE_TYPE_TYPE_INFO_OF:
+        // The information is not a value, so a field of it is read right away.
+        return x64_fail(builder, X64_BUILD_STATUS_TYPE_INFO_MISPLACED,
+                        x64_type_subject(builder, expression->first_child));
     case AST_NODE_TYPE_FIELD_ACCESS:
+        if (x64_enum_of_access(builder, node) != AST_NODE_INDEX_NONE) {
+            return x64_member_write(builder, x64_enum_of_access(builder, node),
+                                    expression->payload.field_access.name);
+        }
+        if (x64_type_info_access_is(builder, node)) {
+            return x64_type_info_write(builder, node);
+        }
+        // A field of a struct.
+        if (x64_address_write(builder, frame) == false) {
+            return false;
+        }
+        {
+            X64_Type type = x64_expression_type(builder, node);
+            int32_t address = x64_stack_displacement(builder, builder->stack_words - 1, 1);
+            x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP,
+                             address);
+            x64_stack_pop(builder, 1);
+            x64_memory_load(builder, type, X64_REGISTER_R10);
+        }
+        return true;
+    case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_SUBSCRIPT: {
         // The address of the place, and then what is there.
         if (x64_address_write(builder, frame) == false) {
@@ -3082,25 +3653,30 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
         return true;
     }
     case AST_NODE_TYPE_IDENTIFIER: {
-        // The value of a parameter is in the words of the arguments, and that of a variable in its
-        // place in the frame.
-        int32_t source = 0;
-        if (x64_identifier_place(builder, node, &source) == false) {
-            return x64_fail_unsupported(builder);
+        // The value of a parameter is in the words of the arguments, that of a variable in its
+        // place in the frame, and that of a global variable in `.data`. A constant that is the
+        // member of an enum is its number.
+        Semantic_Binding binding = builder->bindings[node];
+        if (binding.kind == SEMANTIC_BINDING_KIND_CONSTANT) {
+            Ast_Node_Index value = builder->nodes[binding.target].first_child;
+            Ast_Node_Index enum_node = x64_enum_of_access(builder, value);
+            if (enum_node != AST_NODE_INDEX_NONE) {
+                return x64_member_write(builder, enum_node,
+                                        builder->nodes[value].payload.field_access.name);
+            }
+            if (builder->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE) {
+                return x64_procedure_address_write(builder, binding.position);
+            }
+            // A struct or an enum is a type, and has no value.
+            return x64_fail(builder, X64_BUILD_STATUS_IDENTIFIER_NOT_VALUE,
+                            expression->payload.identifier.name);
         }
         X64_Type type = x64_expression_type(builder, node);
-        if (type.kind == X64_TYPE_KIND_NONE) {
+        if (type.kind == X64_TYPE_KIND_NONE ||
+            x64_identifier_address_load(builder, node, X64_REGISTER_R11) == false) {
             return x64_fail_unsupported(builder);
         }
-        size_t word_count = x64_type_word_count(builder, type);
-        int32_t target = x64_stack_push(builder, word_count);
-        for (size_t i = 0; i < word_count; i += 1) {
-            int32_t offset = (int32_t)(i * X64_WORD_SIZE_BYTES);
-            x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
-                             source + offset);
-            x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
-                             target + offset);
-        }
+        x64_memory_load_words(builder, type, X64_REGISTER_R11);
         return true;
     }
     case AST_NODE_TYPE_NIL_LITERAL: {
@@ -3125,7 +3701,9 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
  */
 static bool x64_identifier_place(X64_Builder const *builder, Ast_Node_Index identifier,
                                  int32_t *place) {
-    assert(builder->nodes[identifier].node_type == AST_NODE_TYPE_IDENTIFIER);
+    // The name of a call through a pointer is bound like a name, see `x64_call_write`.
+    assert(builder->nodes[identifier].node_type == AST_NODE_TYPE_IDENTIFIER ||
+           builder->nodes[identifier].node_type == AST_NODE_TYPE_CALL);
 
     Semantic_Binding binding = builder->bindings[identifier];
     if (binding.kind == SEMANTIC_BINDING_KIND_PARAMETER) {
@@ -3140,6 +3718,101 @@ static bool x64_identifier_place(X64_Builder const *builder, Ast_Node_Index iden
         return true;
     }
     return false;
+}
+
+/**
+ * Writes `lea register, [place]` of the place of the value of the name `identifier`: its place in
+ * the frame, see `x64_identifier_place`, or for a global variable its place in `.data`, which is
+ * relative to the instruction pointer. Returns false for a name that has no place.
+ */
+static bool x64_identifier_address_load(X64_Builder *builder, Ast_Node_Index identifier,
+                                        byte register_number) {
+    Semantic_Binding binding = builder->bindings[identifier];
+    if (binding.kind == SEMANTIC_BINDING_KIND_GLOBAL) {
+        x64_write_rip_memory(builder, X64_OPCODE_LEA, register_number,
+                             builder->data_rva + builder->layouts[binding.target].frame_offset);
+        return true;
+    }
+    int32_t place = 0;
+    if (x64_identifier_place(builder, identifier, &place) == false) {
+        return false;
+    }
+    x64_write_memory(builder, X64_OPCODE_LEA, register_number, X64_REGISTER_RBP, place);
+    return true;
+}
+
+/**
+ * Puts the pointer to the procedure at `position` of the constants on the stack of values, which is
+ * the address of its code, `lea` of it relative to the instruction pointer, or for a foreign
+ * procedure the address that the loader wrote to its place in the table of imports. Returns true,
+ * so that a caller can return it.
+ */
+static bool x64_procedure_address_write(X64_Builder *builder, size_t position) {
+    assert(position < builder->constant_count);
+
+    X64_Constant const *constant = &builder->constants[position];
+    if (constant->kind == X64_CONSTANT_KIND_FOREIGN) {
+        x64_write_rip_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX,
+                             X64_RDATA_RVA + builder->layout.address_table_offset +
+                                 (uint64_t)constant->import_slot * X64_IMPORT_ENTRY_SIZE_BYTES);
+    } else {
+        assert(constant->kind == X64_CONSTANT_KIND_PROCEDURE);
+        x64_write_rip_memory(builder, X64_OPCODE_LEA, X64_REGISTER_RAX,
+                             (uint64_t)builder->text_rva + constant->offset);
+    }
+    int32_t target = x64_stack_push(builder, 1);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+    return true;
+}
+
+/**
+ * Puts the number of the member called `member` of the enum `enum_node` on the stack of values,
+ * which is all that a member is. Returns false after it recorded an error, which is a member that
+ * the enum does not have.
+ */
+static bool x64_member_write(X64_Builder *builder, Ast_Node_Index enum_node, Str member) {
+    int64_t number = 0;
+    if (x64_enum_member_find(builder, enum_node, member, &number) == false) {
+        return x64_fail(builder, X64_BUILD_STATUS_ENUM_MEMBER_UNKNOWN, member);
+    }
+    x64_write_load_integer(builder, X64_REGISTER_RAX, number);
+    int32_t target = x64_stack_push(builder, 1);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+    return true;
+}
+
+/**
+ * Writes the field `access` of the information about an enum: `members` is the address of the
+ * table of its members in `.data`, see `x64_data_layout`, and `name` is the `Str` of its name in
+ * `.rdata`. Returns false after it recorded an error.
+ */
+static bool x64_type_info_write(X64_Builder *builder, Ast_Node_Index access) {
+    Ast_Node_Index info = builder->nodes[access].first_child;
+    if (x64_type_info_enum(builder, info) == AST_NODE_INDEX_NONE) {
+        return x64_fail(builder, X64_BUILD_STATUS_TYPE_INFO_UNSUPPORTED,
+                        x64_type_subject(builder, builder->nodes[info].first_child));
+    }
+    X64_Type type = x64_type_info_type(builder, access);
+    if (type.kind == X64_TYPE_KIND_NONE) {
+        return x64_fail(builder, X64_BUILD_STATUS_STRUCT_FIELD_UNKNOWN,
+                        builder->nodes[access].payload.field_access.name);
+    }
+    if (type.kind == X64_TYPE_KIND_ARRAY) {
+        int32_t target = x64_stack_push(builder, 1);
+        x64_write_rip_memory(builder, X64_OPCODE_LEA, X64_REGISTER_RAX,
+                             builder->data_rva + builder->layouts[info].frame_offset);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+        return true;
+    }
+    int32_t target = x64_stack_push(builder, 2);
+    x64_type_name_address_write(builder, info, X64_REGISTER_RAX);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+    x64_write_load_integer(
+        builder, X64_REGISTER_RAX,
+        (int64_t)builder->nodes[builder->nodes[info].first_child].payload.type_name.name.length);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                     target + X64_WORD_SIZE_BYTES);
+    return true;
 }
 
 /**
@@ -3159,23 +3832,29 @@ static bool x64_address_write(X64_Builder *builder, X64_Expression_Frame const *
     Str subject = x64_expression_subject(builder, node);
 
     if (expression->node_type == AST_NODE_TYPE_IDENTIFIER) {
-        // A place that is only read can be a parameter or an iterator, which is where a field of
-        // one is read from.
+        // A variable has an address, and is assigned to there. A global variable is assigned to
+        // in `.data`, but has no address for `%`, because it is not in the frame where the other
+        // places are. A place that is only read can also be a parameter or an iterator, which is
+        // where a field of one is read from.
         Semantic_Binding binding = builder->bindings[node];
         X64_Type type = x64_expression_type(builder, node);
         bool is_variable =
             binding.kind == SEMANTIC_BINDING_KIND_VARIABLE &&
             builder->nodes[binding.target].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION;
-        int32_t place = 0;
-        bool is_readable = frame->mode == X64_MODE_PLACE &&
-                           x64_identifier_place(builder, node, &place);
-        if ((is_variable == false && is_readable == false) || type.kind == X64_TYPE_KIND_ARRAY ||
-            type.kind == X64_TYPE_KIND_SLICE) {
+        bool is_global = binding.kind == SEMANTIC_BINDING_KIND_GLOBAL;
+        bool is_valid = is_variable;
+        if (frame->mode == X64_MODE_TARGET) {
+            is_valid = is_variable || is_global;
+        } else if (frame->mode == X64_MODE_PLACE) {
+            is_valid = binding.kind == SEMANTIC_BINDING_KIND_VARIABLE || is_global ||
+                       binding.kind == SEMANTIC_BINDING_KIND_PARAMETER;
+        }
+        bool is_sequence = type.kind == X64_TYPE_KIND_ARRAY || type.kind == X64_TYPE_KIND_SLICE;
+        if (is_valid == false || (is_sequence && frame->mode == X64_MODE_ADDRESS)) {
             return x64_fail(builder, X64_BUILD_STATUS_ADDRESS_INVALID, subject);
         }
-        x64_identifier_place(builder, node, &place);
         int32_t target = x64_stack_push(builder, 1);
-        x64_write_memory(builder, X64_OPCODE_LEA, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+        x64_identifier_address_load(builder, node, X64_REGISTER_RAX);
         x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
         return true;
     }
@@ -3239,7 +3918,9 @@ static bool x64_address_write(X64_Builder *builder, X64_Expression_Frame const *
  * values: the address of a struct, or a pointer to one, which is followed, and traps when it is
  * `nil`. The field is that address plus 8 bytes for each word of the fields before it. A field is
  * read through a pointer that is one caret away from the struct, so `pp.age` of a `^^Person` is an
- * error, and through a place, so not through the value of a call. Returns false after it recorded
+ * error, and through a place, so not through the value of a call. A field in a case of a union
+ * match is only read and assigned where the program shows that its object is in the case, see
+ * `x64_union_is_matched`. Returns false after it recorded
  * an error.
  */
 static bool x64_field_address_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
@@ -3256,6 +3937,12 @@ static bool x64_field_address_write(X64_Builder *builder, X64_Expression_Frame c
     X64_Type field_type = x64_type_make(X64_TYPE_KIND_NONE);
     if (x64_struct_field_find(builder, type.definition, name, &offset, &field_type) == false) {
         return x64_fail(builder, X64_BUILD_STATUS_STRUCT_FIELD_UNKNOWN, name);
+    }
+    Ast_Node_Index union_match = x64_field_union_match(
+        builder, x64_struct_field_node_find(builder, type.definition, name));
+    if (union_match != AST_NODE_INDEX_NONE &&
+        x64_union_is_matched(builder, node, type.definition, union_match) == false) {
+        return x64_fail(builder, X64_BUILD_STATUS_UNION_FIELD_UNMATCHED, name);
     }
 
     int32_t place = x64_stack_displacement(builder, frame->stack_start, 1);
@@ -3417,6 +4104,24 @@ static void x64_memory_load(X64_Builder *builder, X64_Type type, byte base) {
 }
 
 /**
+ * Puts the value of `type` that is in memory at the address in `base` on the stack of values, as
+ * its words, also for a `Byte`, which is a word in the place of a variable, see `x64_memory_load`.
+ * `base` is `r10` or `r11`, which the copy does not use.
+ */
+static void x64_memory_load_words(X64_Builder *builder, X64_Type type, byte base) {
+    assert(base == X64_REGISTER_R10 || base == X64_REGISTER_R11);
+
+    size_t word_count = x64_type_word_count(builder, type);
+    int32_t target = x64_stack_push(builder, word_count);
+    for (size_t i = 0; i < word_count; i += 1) {
+        int32_t offset = (int32_t)(i * X64_WORD_SIZE_BYTES);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, base, offset);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                         target + offset);
+    }
+}
+
+/**
  * Moves the value of `type` on the top of the stack of values to the memory at the address in
  * `base`, and takes it off the stack: a `Byte` is stored as one byte, and every other value as its
  * words. `base` is `r10` or `r11`, which the copy does not use.
@@ -3462,29 +4167,43 @@ static Str x64_type_subject(X64_Builder const *builder, Ast_Node_Index type) {
 /**
  * Writes the value of the constant of `frame`, which the analysis worked out, as a value of the
  * type that its place wants: a number or a truth value is one `mov` of its 64 bits, and a string is
- * a `C_Str`, a copy in the temporary storage, which is the only string that the target has. Returns
- * false after it recorded an error.
+ * a `Str`, the address of its bytes in `.rdata` and their number, or where a `C_Str` is wanted and
+ * it is untyped, a copy in the temporary storage, which ends with a zero. Returns false after it
+ * recorded an error.
  */
 static bool x64_constant_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
     Constant_Value constant = builder->constant_values[frame->node];
     assert(constant.status == CONSTANT_STATUS_OK);
 
     if (constant.string != AST_NODE_INDEX_NONE) {
-        if (frame->wanted.kind != X64_TYPE_KIND_C_STR ||
-            constant.type != CONSTANT_TYPE_UNTYPED_STRING) {
-            return x64_fail_unsupported(builder);
+        if (frame->wanted.kind == X64_TYPE_KIND_C_STR &&
+            constant.type == CONSTANT_TYPE_UNTYPED_STRING) {
+            if (x64_c_str_write(builder, constant.string, X64_REGISTER_RAX) == false) {
+                return false;
+            }
+            int32_t target = x64_stack_push(builder, 1);
+            x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                             target);
+            return true;
         }
-        if (x64_c_str_write(builder, constant.string, X64_REGISTER_RAX) == false) {
-            return false;
-        }
-    } else {
-        // A number that is a `Byte` where one is wanted is the same word as the number.
-        X64_Type type = x64_expression_type_for(builder, frame->node, frame->wanted);
-        if (type.kind == X64_TYPE_KIND_NONE) {
-            return x64_fail_unsupported(builder);
-        }
-        x64_write_load_integer(builder, X64_REGISTER_RAX, constant.integer);
+        int32_t target = x64_stack_push(builder, 2);
+        x64_write_rip_memory(builder, X64_OPCODE_LEA, X64_REGISTER_RAX,
+                             x64_string_rva(builder, constant.string));
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+        x64_write_load_integer(
+            builder, X64_REGISTER_RAX,
+            (int64_t)builder->nodes[constant.string].payload.string_literal.text.length);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                         target + X64_WORD_SIZE_BYTES);
+        return true;
     }
+
+    // A number that is a `Byte` where one is wanted is the same word as the number.
+    X64_Type type = x64_expression_type_for(builder, frame->node, frame->wanted);
+    if (type.kind == X64_TYPE_KIND_NONE) {
+        return x64_fail_unsupported(builder);
+    }
+    x64_write_load_integer(builder, X64_REGISTER_RAX, constant.integer);
     int32_t target = x64_stack_push(builder, 1);
     x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
     return true;
@@ -3567,11 +4286,11 @@ static bool x64_operation_write(X64_Builder *builder, X64_Expression_Frame const
 
 /**
  * Writes a comparison, whose operands are on the stack of values: two `Int` values or two `Byte`
- * values with any of the six operators, two `Bool` values with `==` and `not=`, and two pointers of
- * one type, or a pointer and `nil`, with `==` and `not=`. The order of an `Int` is signed, and a
- * `Byte` is a number from 0 to 255 in a word, which compares the same way. `cmp` compares them and
- * `set` makes the `Bool` of the condition, which `movzx` widens to the 64 bits of the value.
- * Returns false after it recorded an error.
+ * values with any of the six operators, two `Bool` values, two members of one enum, and two
+ * pointers of one type, or a pointer and `nil`, with `==` and `not=`. The order of an `Int` is
+ * signed, and a `Byte` is a number from 0 to 255 in a word, which compares the same way. `cmp`
+ * compares them and `set` makes the `Bool` of the condition, which `movzx` widens to the 64 bits of
+ * the value. Returns false after it recorded an error.
  */
 static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
     Ast_Node_Index node = frame->node;
@@ -3582,14 +4301,17 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     // An untyped operand and `nil` take the type of the other one, so the type of the comparison
     // is the type of the operand that has one.
     X64_Type type = x64_expression_type(builder, left);
-    bool is_left_untyped = x64_is_constant(builder, left) || type.kind == X64_TYPE_KIND_NIL;
+    bool is_left_untyped = x64_is_constant(builder, left) || type.kind == X64_TYPE_KIND_NIL ||
+                           type.kind == X64_TYPE_KIND_ENUM_LITERAL;
     if (is_left_untyped && x64_is_constant(builder, right) == false) {
         type = x64_expression_type(builder, right);
     }
     bool is_equality = operator == AST_COMPARISON_OPERATOR_EQUAL ||
                        operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
     bool is_ordered = type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_BYTE;
-    bool is_equatable = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_POINTER;
+    bool is_equatable = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_ENUM ||
+                        type.kind == X64_TYPE_KIND_POINTER ||
+                        type.kind == X64_TYPE_KIND_PROCEDURE;
     bool is_valid = is_ordered || (is_equatable && is_equality);
     if (is_valid == false || x64_type_accepts(builder, type, left) == false ||
         x64_type_accepts(builder, type, right) == false) {
@@ -3640,7 +4362,8 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
  * passed in order: the first four in `rcx`, `rdx`, `r8` and `r9`, and the others on the stack, at
  * the bottom of the frame above the 32 bytes of space that the callee may keep the four in. The
  * stack words are stored first, through `rax`, which no argument is in, and then the registers are
- * loaded. A foreign procedure is called through its place in the table of imports. The arguments
+ * loaded. A foreign procedure is called through its place in the table of imports, and a pointer
+ * to a procedure through a register, after a test that traps when it is `nil`. The arguments
  * are taken off the stack of values, and the result, which is in `rax`, is put on it when
  * `is_result_used` is set. Returns false after it recorded an error.
  */
@@ -3651,19 +4374,22 @@ static bool x64_call_write(X64_Builder *builder, X64_Expression_Frame const *fra
 
     Str name = builder->nodes[call].payload.call.name;
     Semantic_Binding binding = builder->bindings[call];
-    // A call through a variable that holds a pointer to a procedure is not built, and neither is a
-    // built-in procedure other than `str_to_c_str`.
-    if (binding.kind != SEMANTIC_BINDING_KIND_CONSTANT) {
-        return x64_fail_unsupported(builder);
+    // A call of a variable, a parameter or a global variable is a call through the pointer to a
+    // procedure that it holds, whose type says what the procedure takes and returns.
+    Ast_Node_Index procedure = x64_call_procedure(builder, call);
+    if (procedure == AST_NODE_INDEX_NONE) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE, name);
     }
-    assert(binding.position < builder->constant_count);
-    assert(builder->constants[binding.position].definition == binding.target);
-
-    X64_Constant const *callee = &builder->constants[binding.position];
-    // The analysis does not bind a call to a value, such as a string, which is not a procedure.
-    assert(callee->kind != X64_CONSTANT_KIND_STRING);
-    assert(callee->kind != X64_CONSTANT_KIND_VALUE);
-    Ast_Node_Index procedure = builder->nodes[callee->definition].first_child;
+    X64_Constant const *callee = NULL;
+    if (binding.kind == SEMANTIC_BINDING_KIND_CONSTANT) {
+        assert(binding.position < builder->constant_count);
+        assert(builder->constants[binding.position].definition == binding.target);
+        callee = &builder->constants[binding.position];
+        // The analysis does not bind a call to a value, such as a string, which is not a
+        // procedure.
+        assert(callee->kind == X64_CONSTANT_KIND_FOREIGN ||
+               callee->kind == X64_CONSTANT_KIND_PROCEDURE);
+    }
 
     size_t parameter_count = x64_parameter_count(builder, procedure);
     Ast_Node_Index argument = builder->nodes[call].first_child;
@@ -3756,7 +4482,15 @@ static bool x64_call_write(X64_Builder *builder, X64_Expression_Frame const *fra
         argument_start += argument_words;
     }
 
-    if (callee->kind == X64_CONSTANT_KIND_FOREIGN) {
+    if (callee == NULL) {
+        // `mov r11, pointer`, `test` and `jne` over a breakpoint, because `nil` cannot be called,
+        // and `call r11`, which no argument is in.
+        x64_identifier_address_load(builder, call, X64_REGISTER_R11);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R11, X64_REGISTER_R11, 0);
+        x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_R11, X64_REGISTER_R11);
+        x64_write_trap_unless(builder, X64_CONDITION_NOT_EQUAL);
+        x64_write_call_register(builder, X64_REGISTER_R11);
+    } else if (callee->kind == X64_CONSTANT_KIND_FOREIGN) {
         x64_write_call_import(builder, callee->import_slot);
     } else {
         x64_write_call_local(builder, callee->offset);
@@ -3776,11 +4510,12 @@ static bool x64_call_write(X64_Builder *builder, X64_Expression_Frame const *fra
 }
 
 /**
- * Writes `str_to_c_str("text")`, which makes a copy of the string with the zero that ends it in the
- * temporary storage, and puts its address on the stack of values. The argument must be a string
- * literal or a constant that is a string, because the target does not have `Str` values, so the
- * string and its size are known when the program is built. Returns false after it recorded an
- * error.
+ * Writes `str_to_c_str` of `call`, which makes a copy of the string with a zero after it in the
+ * temporary storage, and puts its address on the stack of values. A string that is known when the
+ * program is compiled is copied with stores of 8 bytes, see `x64_c_str_write`, and any other `Str`,
+ * which is on the stack of values, is copied one byte at a time by a loop: the copy takes its
+ * length and the zero, rounded up to 8, of the storage, and stops the program with a breakpoint
+ * when that does not fit. Returns false after it recorded an error.
  */
 static bool x64_str_to_c_str_write(X64_Builder *builder, Ast_Node_Index call) {
     assert(x64_call_is_str_to_c_str(builder, call));
@@ -3792,14 +4527,47 @@ static bool x64_str_to_c_str_write(X64_Builder *builder, Ast_Node_Index call) {
         return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
     }
     Ast_Node_Index literal = x64_string_literal_of(builder, argument);
-    if (literal == AST_NODE_INDEX_NONE) {
-        return x64_fail_unsupported(builder);
+    if (literal != AST_NODE_INDEX_NONE) {
+        if (x64_c_str_write(builder, literal, X64_REGISTER_RAX) == false) {
+            return false;
+        }
+        int32_t target = x64_stack_push(builder, 1);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+        return true;
     }
-    if (x64_c_str_write(builder, literal, X64_REGISTER_RAX) == false) {
-        return false;
+    if (x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_STR), argument) == false) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
     }
+
+    // `r11` is the source and `rcx` the length, and `rax` how much of the storage is in use. The
+    // size is the length and the zero rounded up to 8, which is `(length + 8) & -8`.
+    int32_t text = x64_stack_displacement(builder, builder->stack_words - 2, 2);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R11, X64_REGISTER_RBP, text);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP,
+                     text + X64_WORD_SIZE_BYTES);
+    x64_stack_pop(builder, 2);
+    x64_write_rip_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, builder->data_rva);
+    x64_write_memory(builder, X64_OPCODE_LEA, X64_REGISTER_RDX, X64_REGISTER_RCX,
+                     X64_TEMPORARY_ALIGNMENT_BYTES);
+    x64_write_and_immediate(builder, X64_REGISTER_RDX, -X64_TEMPORARY_ALIGNMENT_BYTES);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RAX, X64_REGISTER_RDX);
+    x64_write_load_integer(builder, X64_REGISTER_R10, X64_TEMPORARY_STORAGE_SIZE_BYTES);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_R10, X64_REGISTER_RDX);
+    x64_write_trap_unless(builder, X64_CONDITION_BELOW_EQUAL);
+    x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RDX, builder->data_rva);
+    // `r10` is the copy, whose zero is written first, and whose address is kept in `rdx`.
+    x64_write_rip_memory(builder, X64_OPCODE_LEA, X64_REGISTER_R10,
+                         builder->data_rva + X64_TEMPORARY_USED_SIZE_BYTES);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RAX, X64_REGISTER_R10);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_R10, X64_REGISTER_RDX);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_R10, X64_REGISTER_RAX);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_write_load_integer(builder, X64_REGISTER_R8, 0);
+    x64_write_memory(builder, X64_OPCODE_STORE_BYTE, X64_REGISTER_R8, X64_REGISTER_RAX, 0);
+    x64_copy_write(builder);
+
     int32_t target = x64_stack_push(builder, 1);
-    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RDX, X64_REGISTER_RBP, target);
     return true;
 }
 
@@ -3900,21 +4668,33 @@ static bool x64_call_is_str_to_c_str(X64_Builder const *builder, Ast_Node_Index 
 }
 
 /**
- * Returns the `AST_NODE_TYPE_PROCEDURE` that `call` calls, or `AST_NODE_INDEX_NONE` when it is not
- * the call of a procedure of the module, which a built-in procedure is not.
+ * Returns the signature that `call` calls with: the `AST_NODE_TYPE_PROCEDURE` of a procedure of the
+ * module, or the signature of the type of the pointer to a procedure that the variable, the
+ * parameter or the global variable of the call holds. Returns `AST_NODE_INDEX_NONE` for the call
+ * of a built-in procedure, and of a name that does not hold a pointer to a procedure.
  */
 static Ast_Node_Index x64_call_procedure(X64_Builder const *builder, Ast_Node_Index call) {
     assert(builder->nodes[call].node_type == AST_NODE_TYPE_CALL);
 
     Semantic_Binding binding = builder->bindings[call];
-    if (binding.kind != SEMANTIC_BINDING_KIND_CONSTANT) {
+    if (binding.kind == SEMANTIC_BINDING_KIND_CONSTANT) {
+        Ast_Node_Index procedure = builder->nodes[binding.target].first_child;
+        if (builder->nodes[procedure].node_type != AST_NODE_TYPE_PROCEDURE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        return procedure;
+    }
+    X64_Type type = x64_type_make(X64_TYPE_KIND_NONE);
+    if (binding.kind == SEMANTIC_BINDING_KIND_PARAMETER) {
+        type = x64_type_of_node(builder, builder->nodes[binding.target].first_child);
+    } else if (binding.kind == SEMANTIC_BINDING_KIND_VARIABLE ||
+               binding.kind == SEMANTIC_BINDING_KIND_GLOBAL) {
+        type = builder->layouts[binding.target].type;
+    }
+    if (type.kind != X64_TYPE_KIND_PROCEDURE) {
         return AST_NODE_INDEX_NONE;
     }
-    Ast_Node_Index procedure = builder->nodes[binding.target].first_child;
-    if (builder->nodes[procedure].node_type != AST_NODE_TYPE_PROCEDURE) {
-        return AST_NODE_INDEX_NONE;
-    }
-    return procedure;
+    return type.definition;
 }
 
 /**
@@ -3982,8 +4762,9 @@ static bool x64_type_accepts(X64_Builder const *builder, X64_Type wanted,
  * `X64_TYPE_KIND_NONE` for no type in particular. It is the type of the expression, except that an
  * untyped constant becomes the type that is wanted when it fits in it: an untyped string is a
  * `C_Str`, the address of a copy of its bytes with a zero after them, and an untyped integer from 0
- * to 255 is a `Byte`. A struct literal without a name is of the struct that is wanted. `nil` is a
- * pointer of any type, and an array is an array slice of all of its
+ * to 255 is a `Byte`. A struct literal without a name is of the struct that is wanted, and a member
+ * of an enum written without its enum, such as `.RED`, is of the enum that is wanted, when it has
+ * the member. `nil` is a pointer of any type, and an array is an array slice of all of its
  * elements, which `x64_conversion_write` makes of it. The caller compares the type with `wanted`,
  * so an expression that does not become it keeps the type that it has where nothing else says.
  */
@@ -4004,8 +4785,16 @@ static X64_Type x64_expression_type_for(X64_Builder const *builder, Ast_Node_Ind
         return wanted;
     }
     X64_Type type = x64_expression_type(builder, expression);
-    if (type.kind == X64_TYPE_KIND_NIL && wanted.kind == X64_TYPE_KIND_POINTER) {
+    if (type.kind == X64_TYPE_KIND_NIL &&
+        (wanted.kind == X64_TYPE_KIND_POINTER || wanted.kind == X64_TYPE_KIND_PROCEDURE)) {
         return wanted;
+    }
+    if (type.kind == X64_TYPE_KIND_ENUM_LITERAL && wanted.kind == X64_TYPE_KIND_ENUM) {
+        int64_t number = 0;
+        if (x64_enum_member_find(builder, wanted.definition,
+                                 builder->nodes[expression].payload.enum_literal.name, &number)) {
+            return wanted;
+        }
     }
     if (type.kind == X64_TYPE_KIND_ARRAY && wanted.kind == X64_TYPE_KIND_SLICE) {
         X64_Type slice = type;
@@ -4038,6 +4827,11 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
         if (node_type != AST_NODE_TYPE_ADDRESS_OF && node_type != AST_NODE_TYPE_DEREFERENCE &&
             node_type != AST_NODE_TYPE_FIELD_ACCESS && node_type != AST_NODE_TYPE_SUBSCRIPT &&
             node_type != AST_NODE_TYPE_SLICE) {
+            break;
+        }
+        // The member of an enum and a field of the information about an enum are no places.
+        if (x64_enum_of_access(builder, current) != AST_NODE_INDEX_NONE ||
+            x64_type_info_access_is(builder, current)) {
             break;
         }
         path[path_count] = current;
@@ -4096,8 +4890,9 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
  * Returns the type of `expression`, which is not a place that is reached through another, see
  * `x64_expression_type`. A constant has the type that it has where nothing else says, see
  * `constant_type_default`, which is `Int` for an untyped integer and `Bool` for an untyped truth
- * value, and the target has no `Str` yet. A variable has the type that the layout of its procedure
- * worked out, see `x64_procedure_layout`.
+ * value and `Str` for an untyped string. A variable has the type that the layout of its procedure
+ * worked out, see `x64_procedure_layout`, and a global variable the type that the layout of `.data`
+ * worked out, see `x64_data_layout`.
  */
 static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index expression) {
     assert(expression < builder->node_count);
@@ -4113,6 +4908,7 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
         case CONSTANT_TYPE_INT:
             return x64_type_make(X64_TYPE_KIND_INT);
         case CONSTANT_TYPE_STR:
+            return x64_type_make(X64_TYPE_KIND_STR);
         case CONSTANT_TYPE_UNTYPED_BOOL:
         case CONSTANT_TYPE_UNTYPED_INTEGER:
         case CONSTANT_TYPE_UNTYPED_STRING:
@@ -4169,8 +4965,40 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
         if (binding.kind == SEMANTIC_BINDING_KIND_PARAMETER) {
             return x64_type_of_node(builder, builder->nodes[binding.target].first_child);
         }
-        if (binding.kind == SEMANTIC_BINDING_KIND_VARIABLE) {
+        if (binding.kind == SEMANTIC_BINDING_KIND_VARIABLE ||
+            binding.kind == SEMANTIC_BINDING_KIND_GLOBAL) {
             return builder->layouts[binding.target].type;
+        }
+        if (binding.kind == SEMANTIC_BINDING_KIND_CONSTANT) {
+            Ast_Node_Index value = builder->nodes[binding.target].first_child;
+            Ast_Node_Index enum_node = x64_enum_of_access(builder, value);
+            if (enum_node != AST_NODE_INDEX_NONE) {
+                X64_Type member = x64_type_make(X64_TYPE_KIND_ENUM);
+                member.definition = enum_node;
+                return member;
+            }
+            // The name of a procedure that is not called is a pointer to it.
+            if (builder->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE) {
+                X64_Type procedure = x64_type_make(X64_TYPE_KIND_PROCEDURE);
+                procedure.definition = x64_signature_canonical(builder, value);
+                return procedure;
+            }
+        }
+        break;
+    }
+    case AST_NODE_TYPE_ENUM_LITERAL:
+        return x64_type_make(X64_TYPE_KIND_ENUM_LITERAL);
+    case AST_NODE_TYPE_FIELD_ACCESS: {
+        // The member of an enum written with its enum, and a field of the information about an
+        // enum, which are not places.
+        if (x64_type_info_access_is(builder, expression)) {
+            return x64_type_info_type(builder, expression);
+        }
+        Ast_Node_Index enum_node = x64_enum_of_access(builder, expression);
+        if (enum_node != AST_NODE_INDEX_NONE) {
+            X64_Type member = x64_type_make(X64_TYPE_KIND_ENUM);
+            member.definition = enum_node;
+            return member;
         }
         break;
     }
@@ -4192,16 +5020,154 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
 
 /**
  * Returns the type that a procedure returns, or a type of the kind `X64_TYPE_KIND_NONE` when it
- * returns nothing. `procedure` is an `AST_NODE_TYPE_PROCEDURE`.
+ * returns nothing. `procedure` is an `AST_NODE_TYPE_PROCEDURE` or an
+ * `AST_NODE_TYPE_PROCEDURE_TYPE`.
  */
 static X64_Type x64_return_type(X64_Builder const *builder, Ast_Node_Index procedure) {
-    assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+    assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE ||
+           builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE_TYPE);
 
     Str name = ast_procedure_return_type(&builder->nodes[procedure]);
     if (name.bytes == NULL) {
         return x64_type_make(X64_TYPE_KIND_NONE);
     }
     return x64_type_of_name(builder, name);
+}
+
+/**
+ * Returns the enum called `name`, which is the `AST_NODE_TYPE_ENUM_TYPE` that is the value of the
+ * constant of that name, or `AST_NODE_INDEX_NONE` when the module has no enum of that name.
+ */
+static Ast_Node_Index x64_enum_find(X64_Builder const *builder, Str name) {
+    Ast_Node_Index definition = builder->nodes[builder->module].first_child;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node const *node = &builder->nodes[definition];
+        if (node->node_type == AST_NODE_TYPE_CONSTANT_DEFINITION &&
+            builder->nodes[node->first_child].node_type == AST_NODE_TYPE_ENUM_TYPE &&
+            str_equals(node->payload.constant_definition.name, name)) {
+            return node->first_child;
+        }
+        definition = node->next_sibling;
+    }
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Sets `*number` to the number of the member called `member` of the enum `enum_node`, which is its
+ * place among the members, counted from 0. Returns false when the enum has no such member.
+ */
+static bool x64_enum_member_find(X64_Builder const *builder, Ast_Node_Index enum_node, Str member,
+                                 int64_t *number) {
+    assert(builder->nodes[enum_node].node_type == AST_NODE_TYPE_ENUM_TYPE);
+
+    int64_t count = 0;
+    Ast_Node_Index child = builder->nodes[enum_node].first_child;
+    // Every member is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && child != AST_NODE_INDEX_NONE; i += 1) {
+        if (str_equals(builder->nodes[child].payload.enum_member.name, member)) {
+            *number = count;
+            return true;
+        }
+        count += 1;
+        child = builder->nodes[child].next_sibling;
+    }
+    return false;
+}
+
+/**
+ * Returns the enum of `access` when it is the member of an enum written with the name of the enum,
+ * such as `Color.RED`, which is a field access of the name of the enum, or `AST_NODE_INDEX_NONE`
+ * for any other node.
+ */
+static Ast_Node_Index x64_enum_of_access(X64_Builder const *builder, Ast_Node_Index access) {
+    if (builder->nodes[access].node_type != AST_NODE_TYPE_FIELD_ACCESS) {
+        return AST_NODE_INDEX_NONE;
+    }
+    Ast_Node_Index base = builder->nodes[access].first_child;
+    Semantic_Binding binding = builder->bindings[base];
+    if (builder->nodes[base].node_type != AST_NODE_TYPE_IDENTIFIER ||
+        binding.kind != SEMANTIC_BINDING_KIND_CONSTANT) {
+        return AST_NODE_INDEX_NONE;
+    }
+    Ast_Node_Index value = builder->nodes[binding.target].first_child;
+    if (builder->nodes[value].node_type != AST_NODE_TYPE_ENUM_TYPE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return value;
+}
+
+/**
+ * Returns the name of the member of the enum `enum_node` that `expression` is, when that is known
+ * from the text of the program: `.RED`, or `Color.RED` where `Color` is that enum. Otherwise
+ * returns a `Str` whose `bytes` is NULL.
+ */
+static Str x64_enum_member_name_of(X64_Builder const *builder, Ast_Node_Index expression,
+                                   Ast_Node_Index enum_node) {
+    Ast_Node const *node = &builder->nodes[expression];
+    if (node->node_type == AST_NODE_TYPE_ENUM_LITERAL) {
+        return node->payload.enum_literal.name;
+    }
+    if (x64_enum_of_access(builder, expression) == enum_node &&
+        enum_node != AST_NODE_INDEX_NONE) {
+        return node->payload.field_access.name;
+    }
+    return STR_EMPTY;
+}
+
+/**
+ * Returns whether `access` is a field of the information about a type, such as
+ * `type_info_of(Color).members`, which is a field access of an `AST_NODE_TYPE_TYPE_INFO_OF`.
+ */
+static bool x64_type_info_access_is(X64_Builder const *builder, Ast_Node_Index access) {
+    return builder->nodes[access].node_type == AST_NODE_TYPE_FIELD_ACCESS &&
+           builder->nodes[builder->nodes[access].first_child].node_type ==
+               AST_NODE_TYPE_TYPE_INFO_OF;
+}
+
+/**
+ * Returns the enum that the information `info`, an `AST_NODE_TYPE_TYPE_INFO_OF`, is about, or
+ * `AST_NODE_INDEX_NONE` when its type is not an enum, which are the only types that the target
+ * gives information about.
+ */
+static Ast_Node_Index x64_type_info_enum(X64_Builder const *builder, Ast_Node_Index info) {
+    assert(builder->nodes[info].node_type == AST_NODE_TYPE_TYPE_INFO_OF);
+
+    Ast_Node_Index type = builder->nodes[info].first_child;
+    if (type == AST_NODE_INDEX_NONE || builder->nodes[type].node_type != AST_NODE_TYPE_TYPE_NAME) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return x64_enum_find(builder, builder->nodes[type].payload.type_name.name);
+}
+
+/**
+ * Returns the type of the field access `access` of the information about a type: `members` is an
+ * array of `Enum_Member_Type_Info`, which the parser adds to the program, and `name` is a `Str`.
+ * The kind is `X64_TYPE_KIND_NONE` for a type that is not an enum and for any other field.
+ */
+static X64_Type x64_type_info_type(X64_Builder const *builder, Ast_Node_Index access) {
+    assert(x64_type_info_access_is(builder, access));
+
+    Ast_Node_Index enum_node = x64_type_info_enum(builder, builder->nodes[access].first_child);
+    if (enum_node == AST_NODE_INDEX_NONE) {
+        return x64_type_make(X64_TYPE_KIND_NONE);
+    }
+    Str field = builder->nodes[access].payload.field_access.name;
+    if (str_equals(field, STR("name"))) {
+        return x64_type_make(X64_TYPE_KIND_STR);
+    }
+    Ast_Node_Index member_struct = x64_struct_find(builder, STR("Enum_Member_Type_Info"));
+    if (str_equals(field, STR("members")) == false || member_struct == AST_NODE_INDEX_NONE) {
+        return x64_type_make(X64_TYPE_KIND_NONE);
+    }
+    X64_Type element = x64_type_make(X64_TYPE_KIND_STRUCT);
+    element.definition = member_struct;
+    int64_t count = 0;
+    for (Ast_Node_Index member = builder->nodes[enum_node].first_child;
+         member != AST_NODE_INDEX_NONE; member = builder->nodes[member].next_sibling) {
+        count += 1;
+    }
+    return x64_type_sequence_of(element, X64_TYPE_KIND_ARRAY, count);
 }
 
 /**
@@ -4228,12 +5194,12 @@ static Ast_Node_Index x64_struct_find(X64_Builder const *builder, Str name) {
  * are the words of its fields one after the other, where a field that is a struct takes the words
  * of its own fields in its place, and nothing else: there is no padding, because every word is 8
  * bytes, so every word is aligned. A `Byte` takes a word too, so that every field is a number of
- * words. A pointer is one word, and the struct that it points to is not walked, so a struct can
- * have a pointer to itself. The struct is walked without recursion, with the field that is next in
- * each struct that is open, as deep as `X64_STRUCT_DEPTH_MAX`. Returns `X64_WORD_COUNT_INVALID`
- * when the structs are inside each other deeper than that, which is the case for a struct that
- * contains itself, and a field of a type that the target does not have counts as a word, because
- * `x64_structs_check` rejects it.
+ * words, and a `Str` takes two. A pointer is one word, and the struct that it points to is not
+ * walked, so a struct can have a pointer to itself. The struct is walked without recursion, with
+ * the field that is next in each struct that is open, as deep as `X64_STRUCT_DEPTH_MAX`. Returns
+ * `X64_WORD_COUNT_INVALID` when the structs are inside each other deeper than that, which is the
+ * case for a struct that contains itself, and a field of a type that the target does not have
+ * counts as a word, because `x64_structs_check` rejects it.
  */
 static size_t x64_struct_word_count(X64_Builder const *builder, Ast_Node_Index struct_node) {
     assert(builder->nodes[struct_node].node_type == AST_NODE_TYPE_STRUCT_TYPE);
@@ -4255,13 +5221,18 @@ static size_t x64_struct_word_count(X64_Builder const *builder, Ast_Node_Index s
 
         Ast_Node_Index type_node = builder->nodes[field].first_child;
         Ast_Node_Index nested = AST_NODE_INDEX_NONE;
+        size_t leaf_words = 1;
         if (builder->nodes[type_node].node_type == AST_NODE_TYPE_STRUCT_TYPE) {
             nested = type_node;
         } else if (builder->nodes[type_node].node_type == AST_NODE_TYPE_TYPE_NAME) {
-            nested = x64_struct_find(builder, builder->nodes[type_node].payload.type_name.name);
+            Str name = builder->nodes[type_node].payload.type_name.name;
+            nested = x64_struct_find(builder, name);
+            if (str_equals(name, STR("Str"))) {
+                leaf_words = 2;
+            }
         }
         if (nested == AST_NODE_INDEX_NONE) {
-            count += 1;
+            count += leaf_words;
             continue;
         }
         if (depth == X64_STRUCT_DEPTH_MAX) {
@@ -4299,9 +5270,327 @@ static bool x64_struct_field_find(X64_Builder const *builder, Ast_Node_Index str
 }
 
 /**
+ * Returns the `AST_NODE_TYPE_UNION_MATCH` after the type of `field`, which says that the field is
+ * in a case of a union match, or `AST_NODE_INDEX_NONE` for a field that is not.
+ */
+static Ast_Node_Index x64_field_union_match(X64_Builder const *builder, Ast_Node_Index field) {
+    assert(builder->nodes[field].node_type == AST_NODE_TYPE_FIELD);
+
+    Ast_Node_Index match = builder->nodes[builder->nodes[field].first_child].next_sibling;
+    assert(match == AST_NODE_INDEX_NONE ||
+           builder->nodes[match].node_type == AST_NODE_TYPE_UNION_MATCH);
+    return match;
+}
+
+/**
+ * Returns the `AST_NODE_TYPE_FIELD` of the struct `struct_node` that is called `name`, or
+ * `AST_NODE_INDEX_NONE` when it has none.
+ */
+static Ast_Node_Index x64_struct_field_node_find(X64_Builder const *builder,
+                                                 Ast_Node_Index struct_node, Str name) {
+    assert(builder->nodes[struct_node].node_type == AST_NODE_TYPE_STRUCT_TYPE);
+
+    Ast_Node_Index field = builder->nodes[struct_node].first_child;
+    // Every field is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && field != AST_NODE_INDEX_NONE; i += 1) {
+        if (str_equals(builder->nodes[field].payload.field.name, name)) {
+            return field;
+        }
+        field = builder->nodes[field].next_sibling;
+    }
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Returns the enum of the field that the union match `union_match`, a child of a field of
+ * `struct_node`, is matched against, or `AST_NODE_INDEX_NONE` when that is not a field of the
+ * struct that has an enum for its type, or is in a case itself: what the cases are members of must
+ * exist whatever the case is.
+ */
+static Ast_Node_Index x64_union_enum(X64_Builder const *builder, Ast_Node_Index struct_node,
+                                     Ast_Node_Index union_match) {
+    assert(builder->nodes[union_match].node_type == AST_NODE_TYPE_UNION_MATCH);
+
+    Ast_Node_Index discriminant = x64_struct_field_node_find(
+        builder, struct_node, builder->nodes[union_match].payload.union_match.discriminant);
+    if (discriminant == AST_NODE_INDEX_NONE ||
+        x64_field_union_match(builder, discriminant) != AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    Ast_Node_Index type = builder->nodes[discriminant].first_child;
+    if (builder->nodes[type].node_type != AST_NODE_TYPE_TYPE_NAME) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return x64_enum_find(builder, builder->nodes[type].payload.type_name.name);
+}
+
+/**
+ * Returns the node whose child `child` is, or `AST_NODE_INDEX_NONE` for the root. The tree has no
+ * links to the parents, so they are looked for, which only the checks of unions need.
+ */
+static Ast_Node_Index x64_parent_find(X64_Builder const *builder, Ast_Node_Index child) {
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        Ast_Node_Index sibling = builder->nodes[node].first_child;
+        // Every child is a distinct node, so there cannot be more than there are nodes.
+        for (size_t i = 0; i < builder->node_count && sibling != AST_NODE_INDEX_NONE; i += 1) {
+            if (sibling == child) {
+                return node;
+            }
+            sibling = builder->nodes[sibling].next_sibling;
+        }
+    }
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Checks the union matches of the structs: the field that is matched must be a field of an enum
+ * type that is not in a case, and every case must be a member of that enum. Returns false after it
+ * recorded an error.
+ */
+static bool x64_unions_check(X64_Builder *builder) {
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (builder->nodes[node].node_type != AST_NODE_TYPE_FIELD) {
+            continue;
+        }
+        Ast_Node_Index match = x64_field_union_match(builder, node);
+        if (match == AST_NODE_INDEX_NONE) {
+            continue;
+        }
+        Ast_Node_Index struct_node = x64_parent_find(builder, node);
+        assert(struct_node != AST_NODE_INDEX_NONE);
+        Ast_Node_Index enum_node = x64_union_enum(builder, struct_node, match);
+        if (enum_node == AST_NODE_INDEX_NONE) {
+            return x64_fail(builder, X64_BUILD_STATUS_UNION_DISCRIMINANT_INVALID,
+                            builder->nodes[match].payload.union_match.discriminant);
+        }
+        Str member = builder->nodes[builder->nodes[match].first_child].payload.union_case.member;
+        int64_t number = 0;
+        if (x64_enum_member_find(builder, enum_node, member, &number) == false) {
+            return x64_fail(builder, X64_BUILD_STATUS_UNION_CASE_UNKNOWN, member);
+        }
+    }
+    return true;
+}
+
+/**
+ * Returns whether `first` and `second` are the same place: the same variable or parameter, or the
+ * same field or what the same pointer points to, of places that are the same. Such a place has the
+ * same value at two points of the program as long as nothing assigns to it in between. An element
+ * of an array is never taken as the same place as another, because its index may differ.
+ */
+static bool x64_path_equals(X64_Builder const *builder, Ast_Node_Index first,
+                            Ast_Node_Index second) {
+    Ast_Node_Index a = first;
+    Ast_Node_Index b = second;
+    // Each step goes down one node of both, so there are fewer steps than nodes.
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        Ast_Node const *node_a = &builder->nodes[a];
+        Ast_Node const *node_b = &builder->nodes[b];
+        if (node_a->node_type != node_b->node_type) {
+            return false;
+        }
+        if (node_a->node_type == AST_NODE_TYPE_IDENTIFIER) {
+            Semantic_Binding binding_a = builder->bindings[a];
+            Semantic_Binding binding_b = builder->bindings[b];
+            return binding_a.kind == binding_b.kind && binding_a.target == binding_b.target &&
+                   binding_a.position == binding_b.position;
+        }
+        if (node_a->node_type == AST_NODE_TYPE_FIELD_ACCESS) {
+            if (str_equals(node_a->payload.field_access.name,
+                           node_b->payload.field_access.name) == false) {
+                return false;
+            }
+        } else if (node_a->node_type != AST_NODE_TYPE_DEREFERENCE) {
+            return false;
+        }
+        a = node_a->first_child;
+        b = node_b->first_child;
+    }
+    return false;
+}
+
+/**
+ * Returns whether the statements in `block` can change which case the object `container` is in,
+ * which they do when they assign to the field called `discriminant` of it, to the object itself, or
+ * to a place it is in, or take the address of one of them, because the address can be used to
+ * assign later. `container` is the expression before the dot, such as `t` in `t.identifier`.
+ */
+static bool x64_union_block_changes(X64_Builder const *builder, Ast_Node_Index block,
+                                    Ast_Node_Index container, Str discriminant) {
+    assert(builder->nodes[block].node_type == AST_NODE_TYPE_BLOCK);
+
+    // The nodes of the block are the ones from its own index up to its end.
+    for (Ast_Node_Index node = block + 1; node < builder->nodes[block].payload.block.end;
+         node += 1) {
+        Ast_Node_Type node_type = builder->nodes[node].node_type;
+        if (ast_node_type_is_assignment(node_type) == false &&
+            node_type != AST_NODE_TYPE_ADDRESS_OF) {
+            continue;
+        }
+        // The place that is assigned to, or whose address is taken, is the first child.
+        Ast_Node_Index place = builder->nodes[node].first_child;
+        if (builder->nodes[place].node_type == AST_NODE_TYPE_FIELD_ACCESS &&
+            str_equals(builder->nodes[place].payload.field_access.name, discriminant) &&
+            x64_path_equals(builder, builder->nodes[place].first_child, container)) {
+            return true;
+        }
+        // The object itself or a place that it is in: `t`, and for `a.b.t` also `a.b` and `a`. A
+        // pointer that the object is reached through counts as such a place.
+        Ast_Node_Index outer = container;
+        for (size_t i = 0; i < builder->node_count; i += 1) {
+            if (x64_path_equals(builder, place, outer)) {
+                return true;
+            }
+            Ast_Node_Type outer_type = builder->nodes[outer].node_type;
+            if (outer_type != AST_NODE_TYPE_FIELD_ACCESS &&
+                outer_type != AST_NODE_TYPE_DEREFERENCE) {
+                break;
+            }
+            outer = builder->nodes[outer].first_child;
+        }
+    }
+    return false;
+}
+
+/**
+ * Returns whether `condition` holds only when the field of the union match `union_match` of the
+ * object `container` is the member of its case, which is when it is a comparison with `==` of the
+ * two, or an `and` that has such a comparison among its operands, however deep. The comparison can
+ * have either side first. `enum_node` is the enum of the field.
+ */
+static bool x64_union_condition_matches(X64_Builder const *builder, Ast_Node_Index condition,
+                                        Ast_Node_Index container, Ast_Node_Index union_match,
+                                        Ast_Node_Index enum_node) {
+    assert(builder->nodes[union_match].node_type == AST_NODE_TYPE_UNION_MATCH);
+
+    Str discriminant = builder->nodes[union_match].payload.union_match.discriminant;
+    Str member = builder->nodes[builder->nodes[union_match].first_child].payload.union_case.member;
+
+    // The operands of the `and`s that are still to be looked at, kept in an array instead of
+    // calling this function again. A condition with more `and`s than fit is not matched.
+    Ast_Node_Index pending[X64_STRUCT_DEPTH_MAX];
+    size_t pending_count = 1;
+    pending[0] = condition;
+    // Each step takes a node from the condition, so there are fewer steps than nodes.
+    for (size_t step = 0; step < builder->node_count && pending_count > 0; step += 1) {
+        pending_count -= 1;
+        Ast_Node const *node = &builder->nodes[pending[pending_count]];
+        if (node->node_type == AST_NODE_TYPE_AND) {
+            if (pending_count + 2 > X64_STRUCT_DEPTH_MAX) {
+                return false;
+            }
+            pending[pending_count] = node->first_child;
+            pending[pending_count + 1] = node->last_child;
+            pending_count += 2;
+            continue;
+        }
+        if (node->node_type != AST_NODE_TYPE_COMPARISON ||
+            node->payload.comparison.operator != AST_COMPARISON_OPERATOR_EQUAL) {
+            continue;
+        }
+        Ast_Node_Index sides[2] = {node->first_child, node->last_child};
+        for (size_t side = 0; side < 2; side += 1) {
+            Ast_Node const *matched = &builder->nodes[sides[side]];
+            if (matched->node_type != AST_NODE_TYPE_FIELD_ACCESS ||
+                str_equals(matched->payload.field_access.name, discriminant) == false ||
+                x64_path_equals(builder, matched->first_child, container) == false) {
+                continue;
+            }
+            Str other_member = x64_enum_member_name_of(builder, sides[1 - side], enum_node);
+            if (other_member.bytes != NULL && str_equals(other_member, member)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Returns whether the compiler can tell that the field in a case of the union match `union_match`,
+ * which the field access `access` reads or assigns, exists. The field is of the object that is the
+ * expression before the dot, and that must be known to be in the case. It is where the access is in
+ * the block of an if statement, or in an `and` after a comparison, whose condition compares the
+ * field that is matched with the member of the case, and where the statements of the block do not
+ * change the object, see `x64_union_block_changes`. The search goes outwards from the access, one
+ * node at a time, through all of the if statements around it. `struct_node` is the struct that
+ * the field is in.
+ */
+static bool x64_union_is_matched(X64_Builder const *builder, Ast_Node_Index access,
+                                 Ast_Node_Index struct_node, Ast_Node_Index union_match) {
+    assert(builder->nodes[access].node_type == AST_NODE_TYPE_FIELD_ACCESS);
+
+    Ast_Node_Index enum_node = x64_union_enum(builder, struct_node, union_match);
+    assert(enum_node != AST_NODE_INDEX_NONE);
+    Ast_Node_Index container = builder->nodes[access].first_child;
+    Str discriminant = builder->nodes[union_match].payload.union_match.discriminant;
+
+    Ast_Node_Index node = access;
+    // Each step goes up one node, so there are fewer steps than nodes.
+    for (size_t step = 0; step < builder->node_count; step += 1) {
+        Ast_Node_Index parent = x64_parent_find(builder, node);
+        if (parent == AST_NODE_INDEX_NONE ||
+            builder->nodes[parent].node_type == AST_NODE_TYPE_PROCEDURE ||
+            builder->nodes[parent].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION) {
+            return false;
+        }
+        // The right operand of an `and` is only evaluated when the left one holds.
+        if (builder->nodes[parent].node_type == AST_NODE_TYPE_AND &&
+            builder->nodes[parent].last_child == node &&
+            x64_union_condition_matches(builder, builder->nodes[parent].first_child, container,
+                                        union_match, enum_node)) {
+            return true;
+        }
+        if (builder->nodes[parent].node_type == AST_NODE_TYPE_BLOCK) {
+            Ast_Node_Index statement = x64_parent_find(builder, parent);
+            // The children of an if statement are a condition and its block, again and again, and
+            // the block of the `else` comes last, with a block before it instead of a condition.
+            Ast_Node_Index previous = AST_NODE_INDEX_NONE;
+            if (statement != AST_NODE_INDEX_NONE &&
+                builder->nodes[statement].node_type == AST_NODE_TYPE_IF_STATEMENT) {
+                Ast_Node_Index child = builder->nodes[statement].first_child;
+                // The block is one of the children, so there are fewer steps than nodes.
+                for (size_t j = 0; j < builder->node_count && child != parent; j += 1) {
+                    previous = child;
+                    child = builder->nodes[child].next_sibling;
+                }
+            }
+            if (previous != AST_NODE_INDEX_NONE &&
+                builder->nodes[previous].node_type != AST_NODE_TYPE_BLOCK &&
+                x64_union_condition_matches(builder, previous, container, union_match,
+                                            enum_node) &&
+                x64_union_block_changes(builder, parent, container, discriminant) == false) {
+                return true;
+            }
+        }
+        node = parent;
+    }
+    return false;
+}
+
+/**
+ * Returns the name of the member that the struct literal `literal` gives the field that the union
+ * match `union_match` is matched against, which is the member written in the literal, or the
+ * first member of `enum_node`, the default value of an enum, when the literal does not give the
+ * field. A value that is not a member written out has no name, whose `bytes` is NULL.
+ */
+static Str x64_union_literal_member(X64_Builder const *builder, Ast_Node_Index literal,
+                                    Ast_Node_Index union_match, Ast_Node_Index enum_node) {
+    Str matched_name = builder->nodes[union_match].payload.union_match.discriminant;
+    for (Ast_Node_Index matched = builder->nodes[literal].first_child;
+         matched != AST_NODE_INDEX_NONE; matched = builder->nodes[matched].next_sibling) {
+        if (str_equals(builder->nodes[matched].payload.field_initializer.name, matched_name)) {
+            return x64_enum_member_name_of(builder, builder->nodes[matched].first_child,
+                                           enum_node);
+        }
+    }
+    return builder->nodes[builder->nodes[enum_node].first_child].payload.enum_member.name;
+}
+
+/**
  * Checks every struct of the module, also the structs of fields, which have no name: a struct does
  * not contain itself, and every field is of a type that a field can have, which is an `Int`, a
- * `Bool`, a `Byte`, another struct or a pointer. Returns false after it recorded an error.
+ * `Bool`, a `Byte`, a `Str`, an enum, another struct or a pointer. Returns false after it recorded
+ * an error.
  */
 static bool x64_structs_check(X64_Builder *builder) {
     for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
@@ -4321,8 +5610,10 @@ static bool x64_structs_check(X64_Builder *builder) {
             Ast_Node_Index type_node = builder->nodes[field].first_child;
             X64_Type type = x64_type_of_element_node(builder, type_node);
             bool is_valid = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_BYTE ||
-                            type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_POINTER ||
-                            type.kind == X64_TYPE_KIND_STRUCT;
+                            type.kind == X64_TYPE_KIND_ENUM || type.kind == X64_TYPE_KIND_INT ||
+                            type.kind == X64_TYPE_KIND_POINTER ||
+                            type.kind == X64_TYPE_KIND_PROCEDURE ||
+                            type.kind == X64_TYPE_KIND_STR || type.kind == X64_TYPE_KIND_STRUCT;
             if (is_valid == false) {
                 return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
                                 x64_type_subject(builder, type_node));
@@ -4361,7 +5652,10 @@ static X64_Type x64_type_pointer_to(X64_Type target) {
     case X64_TYPE_KIND_BOOL:
     case X64_TYPE_KIND_BYTE:
     case X64_TYPE_KIND_C_STR:
+    case X64_TYPE_KIND_ENUM:
     case X64_TYPE_KIND_INT:
+    case X64_TYPE_KIND_PROCEDURE:
+    case X64_TYPE_KIND_STR:
     case X64_TYPE_KIND_STRUCT: {
         X64_Type pointer = x64_type_make(X64_TYPE_KIND_POINTER);
         pointer.pointee_kind = target.kind;
@@ -4377,6 +5671,7 @@ static X64_Type x64_type_pointer_to(X64_Type target) {
         return pointer;
     }
     case X64_TYPE_KIND_ARRAY:
+    case X64_TYPE_KIND_ENUM_LITERAL:
     case X64_TYPE_KIND_NIL:
     case X64_TYPE_KIND_NONE:
     case X64_TYPE_KIND_SLICE:
@@ -4418,15 +5713,16 @@ static X64_Type x64_type_element(X64_Type sequence) {
 
 /**
  * Returns the type of an array of `length` elements of `element`, or of an array slice of them for
- * `X64_TYPE_KIND_SLICE` as `kind`. The elements are an `Int`, a `Bool`, a `Byte`, a struct or a
- * pointer, and any other type gives a type of the kind `X64_TYPE_KIND_NONE`.
+ * `X64_TYPE_KIND_SLICE` as `kind`. The elements are an `Int`, a `Bool`, a `Byte`, a `Str`, an enum,
+ * a struct or a pointer, and any other type gives a type of the kind `X64_TYPE_KIND_NONE`.
  */
 static X64_Type x64_type_sequence_of(X64_Type element, X64_Type_Kind kind, int64_t length) {
     assert(kind == X64_TYPE_KIND_ARRAY || kind == X64_TYPE_KIND_SLICE);
 
     if (element.kind != X64_TYPE_KIND_BOOL && element.kind != X64_TYPE_KIND_BYTE &&
-        element.kind != X64_TYPE_KIND_INT && element.kind != X64_TYPE_KIND_POINTER &&
-        element.kind != X64_TYPE_KIND_STRUCT) {
+        element.kind != X64_TYPE_KIND_ENUM && element.kind != X64_TYPE_KIND_INT &&
+        element.kind != X64_TYPE_KIND_POINTER && element.kind != X64_TYPE_KIND_PROCEDURE &&
+        element.kind != X64_TYPE_KIND_STR && element.kind != X64_TYPE_KIND_STRUCT) {
         return x64_type_make(X64_TYPE_KIND_NONE);
     }
     X64_Type sequence = x64_type_make(kind);
@@ -4468,9 +5764,11 @@ static bool x64_type_is_scalar(X64_Builder const *builder, X64_Type type) {
  * Returns the number of words of 8 bytes that a value of `type` takes: one for an `Int`, which is
  * a 64-bit integer, one for a `Bool`, which is 0 or 1 in a word, so that it is passed to and from
  * the C library like an integer, one for a `Byte`, from 0 to 255 in a word, and one for a `C_Str`
- * and a pointer, which are addresses. An array is the address of its first element, because its
- * length is part of its type, and an array slice is the address of its first element and its
- * number of elements. A struct is the words of its fields, see `x64_struct_word_count`.
+ * and a pointer, which are addresses. An enum is the number of its member, counted from 0 in the
+ * order of the definition. A `Str` is the address of its bytes and their number. An array is the
+ * address of its first element, because its length is part of its type, and an array slice is the
+ * address of its first element and its number of elements. A struct is the words of its fields,
+ * see `x64_struct_word_count`.
  */
 static size_t x64_type_word_count(X64_Builder const *builder, X64_Type type) {
     switch (type.kind) {
@@ -4478,11 +5776,15 @@ static size_t x64_type_word_count(X64_Builder const *builder, X64_Type type) {
     case X64_TYPE_KIND_BOOL:
     case X64_TYPE_KIND_BYTE:
     case X64_TYPE_KIND_C_STR:
+    case X64_TYPE_KIND_ENUM:
+    case X64_TYPE_KIND_ENUM_LITERAL:
     case X64_TYPE_KIND_INT:
     case X64_TYPE_KIND_NIL:
     case X64_TYPE_KIND_POINTER:
+    case X64_TYPE_KIND_PROCEDURE:
         return 1;
     case X64_TYPE_KIND_SLICE:
+    case X64_TYPE_KIND_STR:
         return 2;
     case X64_TYPE_KIND_STRUCT: {
         size_t word_count = x64_struct_word_count(builder, type.definition);
@@ -4540,6 +5842,11 @@ static X64_Type x64_type_of_name(X64_Builder const *builder, Str name) {
         base = x64_type_make(X64_TYPE_KIND_C_STR);
     } else if (str_equals(base_name, STR("Int"))) {
         base = x64_type_make(X64_TYPE_KIND_INT);
+    } else if (str_equals(base_name, STR("Str"))) {
+        base = x64_type_make(X64_TYPE_KIND_STR);
+    } else if (x64_enum_find(builder, base_name) != AST_NODE_INDEX_NONE) {
+        base = x64_type_make(X64_TYPE_KIND_ENUM);
+        base.definition = x64_enum_find(builder, base_name);
     } else {
         Ast_Node_Index definition = x64_struct_find(builder, base_name);
         if (definition != AST_NODE_INDEX_NONE) {
@@ -4604,8 +5911,19 @@ static X64_Type x64_type_of_element_node(X64_Builder const *builder, Ast_Node_In
         nested.definition = current;
         return nested;
     }
+    if (builder->nodes[current].node_type == AST_NODE_TYPE_PROCEDURE_TYPE) {
+        // The first caret is the pointer to the procedure, and each one more is a pointer to that.
+        X64_Type procedure = x64_type_make(X64_TYPE_KIND_PROCEDURE);
+        procedure.definition = x64_signature_canonical(builder, current);
+        if (depth == 1) {
+            return procedure;
+        }
+        X64_Type pointer = x64_type_pointer_to(procedure);
+        pointer.depth = depth - 1;
+        return pointer;
+    }
     if (builder->nodes[current].node_type != AST_NODE_TYPE_TYPE_NAME) {
-        // A pointer to a procedure and an array of arrays are not built.
+        // An array of arrays is not built.
         return x64_type_make(X64_TYPE_KIND_NONE);
     }
     X64_Type base = x64_type_of_name(builder, builder->nodes[current].payload.type_name.name);
@@ -4636,16 +5954,20 @@ static Ast_Node_Index x64_variable_type_node(X64_Builder const *builder,
 }
 
 /**
- * Returns the number of parameters of `procedure`, which are its first children.
+ * Returns the number of parameters of `signature`, an `AST_NODE_TYPE_PROCEDURE`, whose parameters
+ * are its first children, or an `AST_NODE_TYPE_PROCEDURE_TYPE`, whose children are all types of
+ * parameters.
  */
-static size_t x64_parameter_count(X64_Builder const *builder, Ast_Node_Index procedure) {
-    assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+static size_t x64_parameter_count(X64_Builder const *builder, Ast_Node_Index signature) {
+    Ast_Node_Type node_type = builder->nodes[signature].node_type;
+    assert(node_type == AST_NODE_TYPE_PROCEDURE || node_type == AST_NODE_TYPE_PROCEDURE_TYPE);
 
     size_t count = 0;
-    Ast_Node_Index child = builder->nodes[procedure].first_child;
+    Ast_Node_Index child = builder->nodes[signature].first_child;
     // Every child is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < builder->node_count && child != AST_NODE_INDEX_NONE; i += 1) {
-        if (builder->nodes[child].node_type != AST_NODE_TYPE_PARAMETER) {
+        if (node_type == AST_NODE_TYPE_PROCEDURE &&
+            builder->nodes[child].node_type != AST_NODE_TYPE_PARAMETER) {
             break;
         }
         count += 1;
@@ -4656,19 +5978,120 @@ static size_t x64_parameter_count(X64_Builder const *builder, Ast_Node_Index pro
 }
 
 /**
- * Returns the type of the parameter at `position` of `procedure`, which the collecting of the
- * procedures checked is one that the target has.
+ * Returns the type of the parameter at `position` of `signature`, see `x64_parameter_count`.
  */
-static X64_Type x64_parameter_type(X64_Builder const *builder, Ast_Node_Index procedure,
+static X64_Type x64_parameter_type(X64_Builder const *builder, Ast_Node_Index signature,
                                    size_t position) {
-    assert(position < x64_parameter_count(builder, procedure));
+    assert(position < x64_parameter_count(builder, signature));
 
-    Ast_Node_Index parameter = builder->nodes[procedure].first_child;
+    return x64_type_of_node(builder, x64_parameter_type_node(builder, signature, position));
+}
+
+/**
+ * Returns the type node of the parameter at `position` of `signature`, see `x64_parameter_count`.
+ */
+static Ast_Node_Index x64_parameter_type_node(X64_Builder const *builder, Ast_Node_Index signature,
+                                              size_t position) {
+    assert(position < x64_parameter_count(builder, signature));
+
+    Ast_Node_Index parameter = builder->nodes[signature].first_child;
     for (size_t i = 0; i < position; i += 1) {
         parameter = builder->nodes[parameter].next_sibling;
     }
+    if (builder->nodes[signature].node_type == AST_NODE_TYPE_PROCEDURE_TYPE) {
+        return parameter;
+    }
+    return builder->nodes[parameter].first_child;
+}
 
-    return x64_type_of_node(builder, builder->nodes[parameter].first_child);
+/**
+ * Returns whether the type nodes `first` and `second` are written as the same type: the same
+ * carets and brackets, with the same lengths, and the same name at their end. A name stands for
+ * one thing in the whole program, so the same name is the same type, and this compares types
+ * without working them out.
+ */
+static bool x64_type_nodes_equal(X64_Builder const *builder, Ast_Node_Index first,
+                                 Ast_Node_Index second) {
+    Ast_Node_Index a = first;
+    Ast_Node_Index b = second;
+    // Each step goes down one level of both, so there are fewer steps than nodes.
+    for (size_t i = 0; i < builder->node_count; i += 1) {
+        Ast_Node const *node_a = &builder->nodes[a];
+        Ast_Node const *node_b = &builder->nodes[b];
+        if (node_a->node_type != node_b->node_type) {
+            return false;
+        }
+        if (node_a->node_type == AST_NODE_TYPE_TYPE_NAME) {
+            return str_equals(node_a->payload.type_name.name, node_b->payload.type_name.name);
+        }
+        if (node_a->node_type == AST_NODE_TYPE_ARRAY_TYPE &&
+            (node_a->payload.array_type.length_kind != node_b->payload.array_type.length_kind ||
+             node_a->payload.array_type.length != node_b->payload.array_type.length)) {
+            return false;
+        }
+        if (node_a->node_type != AST_NODE_TYPE_ARRAY_TYPE &&
+            node_a->node_type != AST_NODE_TYPE_POINTER_TYPE) {
+            return false;
+        }
+        a = node_a->first_child;
+        b = node_b->first_child;
+    }
+    return false;
+}
+
+/**
+ * Returns the first procedure or procedure type of the program that has the signature of
+ * `signature`: the same types of parameters, in the same order, and the same return type. It is
+ * what makes two pointers to procedures the same type, whatever names the procedures and their
+ * parameters have, see `X64_Type`.
+ */
+static Ast_Node_Index x64_signature_canonical(X64_Builder const *builder,
+                                              Ast_Node_Index signature) {
+    size_t parameter_count = x64_parameter_count(builder, signature);
+    X64_Type return_type = x64_return_type(builder, signature);
+    for (Ast_Node_Index node = 0; node < signature; node += 1) {
+        Ast_Node_Type node_type = builder->nodes[node].node_type;
+        if ((node_type != AST_NODE_TYPE_PROCEDURE && node_type != AST_NODE_TYPE_PROCEDURE_TYPE) ||
+            x64_parameter_count(builder, node) != parameter_count ||
+            x64_type_equals(x64_return_type(builder, node), return_type) == false) {
+            continue;
+        }
+        bool is_equal = true;
+        for (size_t i = 0; i < parameter_count && is_equal; i += 1) {
+            is_equal = x64_type_nodes_equal(builder, x64_parameter_type_node(builder, node, i),
+                                            x64_parameter_type_node(builder, signature, i));
+        }
+        if (is_equal) {
+            return node;
+        }
+    }
+    return signature;
+}
+
+/**
+ * Checks the types of the pointers to procedures of the program: every type of a parameter and the
+ * return type are types that the target has. Returns false after it recorded an error.
+ */
+static bool x64_signatures_check(X64_Builder *builder) {
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (builder->nodes[node].node_type != AST_NODE_TYPE_PROCEDURE_TYPE) {
+            continue;
+        }
+        size_t parameter_count = x64_parameter_count(builder, node);
+        for (size_t i = 0; i < parameter_count; i += 1) {
+            Ast_Node_Index type_node = x64_parameter_type_node(builder, node, i);
+            if (x64_type_of_node(builder, type_node).kind == X64_TYPE_KIND_NONE) {
+                return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
+                                x64_type_subject(builder, type_node));
+            }
+        }
+        Str return_type = ast_procedure_return_type(&builder->nodes[node]);
+        if (return_type.bytes != NULL &&
+            x64_type_of_name(builder, return_type).kind == X64_TYPE_KIND_NONE) {
+            return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED, return_type);
+        }
+    }
+    return true;
 }
 
 /**
@@ -4880,6 +6303,35 @@ static void x64_write_memory_operand(X64_Builder *builder, byte register_number,
 }
 
 /**
+ * Writes an instruction of 64 bits with `opcode` between the register `register_number` and the
+ * memory at the address `target_rva`, relative to the image, which the instruction has as a
+ * distance from its end: `mov`, `lea` and the stores of `.data`.
+ */
+static void x64_write_rip_memory(X64_Builder *builder, byte opcode, byte register_number,
+                                 uint64_t target_rva) {
+    assert(register_number < 16);
+
+    x64_write_byte(&builder->writer, (byte)(X64_REX_WIDE | ((register_number >> 3) << 2)));
+    x64_write_byte(&builder->writer, opcode);
+    x64_write_byte(&builder->writer, (byte)(((register_number & 7) << 3) | X64_REGISTER_RBP));
+    x64_write_rip_displacement(builder, target_rva);
+}
+
+/**
+ * Writes `and register, number`, with a number that fits in a byte, which the processor widens with
+ * its sign, so that -8 clears the lowest three bits.
+ */
+static void x64_write_and_immediate(X64_Builder *builder, byte register_number, int8_t number) {
+    assert(register_number < 16);
+
+    x64_write_byte(&builder->writer, (byte)(X64_REX_WIDE | (register_number >> 3)));
+    x64_write_byte(&builder->writer, 0x83);
+    // The middle bits are 4, which say that the instruction is `and`.
+    x64_write_byte(&builder->writer, (byte)(0xC0 | (4 << 3) | (register_number & 7)));
+    x64_write_byte(&builder->writer, (byte)number);
+}
+
+/**
  * Writes `add register, number`, with a number that fits in a byte, which the processor widens with
  * its sign, so that a negative number subtracts.
  */
@@ -4983,6 +6435,20 @@ static void x64_write_call_local(X64_Builder *builder, size_t target_offset) {
 }
 
 /**
+ * Writes `call register`, which calls the address in the register.
+ */
+static void x64_write_call_register(X64_Builder *builder, byte register_number) {
+    assert(register_number < 16);
+
+    if (register_number >= 8) {
+        x64_write_byte(&builder->writer, 0x41);
+    }
+    x64_write_byte(&builder->writer, 0xFF);
+    // The middle bits are 2, which say that the instruction is `call`.
+    x64_write_byte(&builder->writer, (byte)(0xC0 | (2 << 3) | (register_number & 7)));
+}
+
+/**
  * Writes `call [rip + distance]` of the import in the place `import_slot` of the address table,
  * which the loader fills with the address of the import.
  */
@@ -5046,8 +6512,7 @@ static void x64_headers_write(X64_Builder *builder, size_t text_size_bytes) {
     optional[3] = 0;
     x64_store_u32(optional + 4, (uint32_t)text_raw_bytes);   // The size of the code.
     x64_store_u32(optional + 8, (uint32_t)rdata_raw_bytes);  // The size of the data.
-    x64_store_u32(optional + 12,
-                  X64_TEMPORARY_USED_SIZE_BYTES + X64_TEMPORARY_STORAGE_SIZE_BYTES);
+    x64_store_u32(optional + 12, (uint32_t)builder->data_size_bytes);
     x64_store_u32(optional + 16, builder->text_rva);         // Where the program starts.
     x64_store_u32(optional + 20, builder->text_rva);         // Where the code starts.
     x64_store_u64(optional + 24, X64_IMAGE_BASE);
@@ -5097,9 +6562,10 @@ static void x64_headers_write(X64_Builder *builder, size_t text_size_bytes) {
     x64_store_u32(section + 20, (uint32_t)builder->headers_size_bytes);
     x64_store_u32(section + 36, 0x40000040);              // Data that is read and was initialized.
     section += X64_SECTION_HEADER_SIZE_BYTES;
-    // The temporary storage: it has no bytes in the file, and the system gives it zeroed.
+    // The temporary storage and the global variables: it has no bytes in the file, and the
+    // system gives it zeroed.
     memcpy(section, ".data\0\0\0", 8);
-    x64_store_u32(section + 8, X64_TEMPORARY_USED_SIZE_BYTES + X64_TEMPORARY_STORAGE_SIZE_BYTES);
+    x64_store_u32(section + 8, (uint32_t)builder->data_size_bytes);
     x64_store_u32(section + 12, builder->data_rva);
     x64_store_u32(section + 16, 0);
     x64_store_u32(section + 20, 0);
@@ -5749,13 +7215,17 @@ static uint32_t x64_debug_type_reference(X64_Debug_Types types, X64_Type type) {
         return types.byte_type;
     case X64_TYPE_KIND_C_STR:
         return types.c_str_type;
+    case X64_TYPE_KIND_ENUM:
     case X64_TYPE_KIND_INT:
         return types.int_type;
     case X64_TYPE_KIND_ARRAY:
     case X64_TYPE_KIND_NIL:
     case X64_TYPE_KIND_NONE:
+    case X64_TYPE_KIND_ENUM_LITERAL:
     case X64_TYPE_KIND_POINTER:
+    case X64_TYPE_KIND_PROCEDURE:
     case X64_TYPE_KIND_SLICE:
+    case X64_TYPE_KIND_STR:
     case X64_TYPE_KIND_STRUCT:
         break;
     }

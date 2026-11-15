@@ -7,7 +7,7 @@ The playground provides a code editor and is able to compile Mialu to WebAssembl
 
 See [Getting Started](getting-started.md) for the prerequisites of each platform.
 
-The panel below the console has three tabs: the parsed code (what `mialuc dump-ast` shows), the x64 assembly (what `mialuc dump-asm --target x64-win32` shows) and the WebAssembly text. The `x64-win32` target is still a work in progress and builds only a small part of the language, so most programs of the playground have no assembly yet. The tab then says so, and shows what the compiler said.
+The panel below the console has three tabs: the parsed code (what `mialuc dump-ast` shows), the x64 assembly (what `mialuc dump-asm --target x64-win32` shows) and the WebAssembly text. The `x64-win32` target builds a program that starts with `main :: proc() Int ->` and imports from the C library instead of JavaScript, so most programs of the playground, which have no `main` and call JavaScript, have no assembly. Add a `main` to one to see it. The tab then says so, and shows what the compiler said.
 
 ## Launching the Playground using Docker
 
