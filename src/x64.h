@@ -245,8 +245,10 @@ typedef struct {
  * `AST_NODE_TYPE_ARRAY_LITERAL`, and `frame_offset` is where the value of each of them is in the
  * frame of the procedure: at `rbp - frame_offset`, which for an array literal is its elements. For
  * an `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION` they are its type and its place in `.data`, and for
- * an `AST_NODE_TYPE_TYPE_INFO_OF` the place of the table of the members of its enum there. The
- * entries of other nodes are not used.
+ * an `AST_NODE_TYPE_TYPE_INFO_OF` the place of the table of the members of its enum there. With debug
+ * information, the `frame_offset` of an `AST_NODE_TYPE_STRUCT_TYPE` and of an
+ * `AST_NODE_TYPE_ENUM_TYPE` is where its entry is in `.debug_info`, and that of an
+ * `AST_NODE_TYPE_FIELD` where the entry of its type is. The entries of other nodes are not used.
  */
 typedef struct {
     X64_Type type;

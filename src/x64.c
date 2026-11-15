@@ -178,6 +178,13 @@ enum {
     X64_DWARF_ABBREVIATION_ARRAY_TYPE = 9,
     X64_DWARF_ABBREVIATION_SUBRANGE_TYPE = 10,
     X64_DWARF_ABBREVIATION_START = 11,
+    X64_DWARF_ABBREVIATION_STRUCTURE_TYPE = 12,
+    X64_DWARF_ABBREVIATION_STRUCTURE_TYPE_ANONYMOUS = 13,
+    X64_DWARF_ABBREVIATION_MEMBER = 14,
+    X64_DWARF_ABBREVIATION_ENUMERATION_TYPE = 15,
+    X64_DWARF_ABBREVIATION_ENUMERATOR = 16,
+    X64_DWARF_ABBREVIATION_SUBROUTINE_TYPE = 17,
+    X64_DWARF_ABBREVIATION_SUBROUTINE_TYPE_VOID = 18,
     // The frame of a procedure, see `x64_procedure_write`: on entry the address to return to is at
     // `rsp`, so the frame of the caller, the CFA, starts 8 bytes above it. `push rbp` makes that
     // 16, and keeps `rbp` 16 bytes below the CFA, and from `mov rbp, rsp` on the CFA is `rbp + 16`.
@@ -334,6 +341,9 @@ typedef struct {
     uint32_t byte_type;
     uint32_t c_str_type;
     uint32_t int_type;
+    uint32_t str_type;
+    // The start of the unit in `.debug_info`, which the places of the entries are counted from.
+    size_t unit_start;
 } X64_Debug_Types;
 
 /**
@@ -517,16 +527,31 @@ static uint32_t     x64_debug_address_rva        (X64_Builder const *builder, si
 static X64_Debug_Cursor x64_debug_cursor_move    (Str source, X64_Debug_Cursor cursor,
                                                   size_t offset);
 static void         x64_debug_entry_close        (X64_Builder *builder, size_t entry_start);
+static void         x64_debug_enums_write        (X64_Builder *builder, X64_Debug_Types types);
 static void         x64_debug_frame_write        (X64_Builder *builder, size_t text_size_bytes);
 static void         x64_debug_info_write         (X64_Builder *builder, size_t text_size_bytes);
 static void         x64_debug_line_write         (X64_Builder *builder, size_t text_size_bytes);
 static void         x64_debug_location_write     (X64_Writer *writer, int64_t cfa_offset);
+static void         x64_debug_member_write       (X64_Writer *writer, Str name, uint32_t type,
+                                                  size_t offset);
+static uint32_t     x64_debug_pointers_write     (X64_Builder *builder, X64_Debug_Types types,
+                                                  uint32_t target, uint32_t depth);
 static size_t       x64_debug_procedure_end      (X64_Builder const *builder, size_t position,
                                                   size_t text_size_bytes);
 static void         x64_debug_row_add            (X64_Builder *builder, X64_Debug_Row_Kind kind,
                                                   uint32_t source_offset);
+static uint32_t     x64_debug_scalar_type_write  (X64_Builder *builder, X64_Debug_Types types,
+                                                  X64_Type type);
 static void         x64_debug_sections_write     (X64_Builder *builder, size_t text_size_bytes);
-static uint32_t     x64_debug_type_reference     (X64_Debug_Types types, X64_Type type);
+static void         x64_debug_structs_write      (X64_Builder *builder, X64_Debug_Types types);
+static uint32_t     x64_debug_subroutine_write   (X64_Builder *builder, X64_Debug_Types types,
+                                                  Ast_Node_Index signature);
+static uint32_t     x64_debug_type_reference     (X64_Builder const *builder,
+                                                  X64_Debug_Types types, X64_Type_Kind kind,
+                                                  Ast_Node_Index definition);
+static uint32_t     x64_debug_type_write         (X64_Builder *builder, X64_Debug_Types types,
+                                                  X64_Type type);
+static void         x64_debug_unit_write         (X64_Builder *builder, size_t text_size_bytes);
 static void         x64_debug_unwind_write       (X64_Builder *builder, size_t text_size_bytes,
                                                   uint32_t section_rva);
 static Ast_Node_Index x64_defer_last_before      (X64_Builder const *builder, Ast_Node_Index list,
@@ -843,6 +868,27 @@ static byte const X64_DEBUG_ABBREVIATIONS[] = {
     // high_pc as a size.
     X64_DWARF_ABBREVIATION_START, 0x2E, 0,
     0x03, 0x08, 0x11, 0x01, 0x12, 0x07, 0, 0,
+    // A struct, with its fields as its children: name, size.
+    X64_DWARF_ABBREVIATION_STRUCTURE_TYPE, 0x13, 1,
+    0x03, 0x08, 0x0B, 0x0F, 0, 0,
+    // A struct without a name, which is the type of a field or an array slice: size.
+    X64_DWARF_ABBREVIATION_STRUCTURE_TYPE_ANONYMOUS, 0x13, 1,
+    0x0B, 0x0F, 0, 0,
+    // A field of a struct: name, type, the place in the struct.
+    X64_DWARF_ABBREVIATION_MEMBER, 0x0D, 0,
+    0x03, 0x08, 0x49, 0x13, 0x38, 0x0F, 0, 0,
+    // An enum, with its members as its children: name, size, the type of the numbers.
+    X64_DWARF_ABBREVIATION_ENUMERATION_TYPE, 0x04, 1,
+    0x03, 0x08, 0x0B, 0x0B, 0x49, 0x13, 0, 0,
+    // A member of an enum: name, number.
+    X64_DWARF_ABBREVIATION_ENUMERATOR, 0x28, 0,
+    0x03, 0x08, 0x1C, 0x0D, 0, 0,
+    // The procedure that a pointer to a procedure points to: the type of its result.
+    X64_DWARF_ABBREVIATION_SUBROUTINE_TYPE, 0x15, 0,
+    0x49, 0x13, 0, 0,
+    // The same for a procedure that returns nothing.
+    X64_DWARF_ABBREVIATION_SUBROUTINE_TYPE_VOID, 0x15, 0,
+    0, 0,
     0,
 };
 
@@ -6770,13 +6816,34 @@ static void x64_debug_unwind_write(X64_Builder *builder, size_t text_size_bytes,
 }
 
 /**
- * Writes `.debug_info`: one unit, which is the source file, with the types, the constants that are
- * strings, and the procedures with their parameters and variables. A location is where the value
- * is relative to the CFA of the procedure, see `X64_DEBUG_CFA_FRAME_OFFSET_BYTES`, which gdb works
- * out from `.debug_frame`, and the procedures say that with `DW_OP_call_frame_cfa`. The language is
- * C, because gdb has no Mialu, and the C of gdb shows an `Int` and a `C_Str` as they are.
+ * Writes `.debug_info`. An entry refers to another by its place, and a struct can refer to one that
+ * comes after it, so the unit is written twice: the first time finds where the entries of the
+ * structs and the enums are, which `builder->layouts` keeps at their definitions, and the second
+ * time writes the unit with their places. The size of every entry is the same whatever the places
+ * that it refers to are, which are 4 bytes each, so both times write the same entries at the same
+ * places.
  */
 static void x64_debug_info_write(X64_Builder *builder, size_t text_size_bytes) {
+    size_t start = builder->writer.length;
+    x64_debug_unit_write(builder, text_size_bytes);
+    if (builder->writer.is_overflowed) {
+        return;
+    }
+    builder->writer.length = start;
+    x64_debug_unit_write(builder, text_size_bytes);
+}
+
+/**
+ * Writes the one unit of `.debug_info`, which is the source file, with the types, the constants
+ * that are strings, and the procedures with their parameters and variables. A location is where
+ * the value is relative to the CFA of the procedure, see `X64_DEBUG_CFA_FRAME_OFFSET_BYTES`, which
+ * gdb works out from `.debug_frame`, and the procedures say that with `DW_OP_call_frame_cfa`. The
+ * language is C, because gdb has no Mialu, and the C of gdb shows the types of the target as they
+ * are: a `Str` and an array slice are structs of an address and a length, a struct is a struct,
+ * an enum is an enum, so its members are shown by their names, and an array is the address of its
+ * elements, a pointer to an array of its length, see `x64_debug_type_write`.
+ */
+static void x64_debug_unit_write(X64_Builder *builder, size_t text_size_bytes) {
     X64_Writer *writer = &builder->writer;
     X64_Debug const *debug = builder->debug;
     size_t unit_start = writer->length;
@@ -6832,6 +6899,20 @@ static void x64_debug_info_write(X64_Builder *builder, size_t text_size_bytes) {
     x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_TYPEDEF);
     x64_write_string(writer, STR("C_Str"));
     x64_write_u32(writer, pointer_type);
+    types.unit_start = unit_start;
+
+    // A `Str` is the address of its bytes and their number, which gdb shows as the text up to a
+    // zero and the number.
+    types.str_type = (uint32_t)(writer->length - unit_start);
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_STRUCTURE_TYPE);
+    x64_write_string(writer, STR("Str"));
+    x64_write_unsigned_leb128(writer, 2 * X64_WORD_SIZE_BYTES);
+    x64_debug_member_write(writer, STR("data"), pointer_type, 0);
+    x64_debug_member_write(writer, STR("length"), types.int_type, X64_WORD_SIZE_BYTES);
+    x64_write_byte(writer, 0);                            // The end of the fields.
+
+    x64_debug_enums_write(builder, types);
+    x64_debug_structs_write(builder, types);
 
     // A constant that is a string is an array of its bytes and the zero after them, at its place
     // in `.rdata`.
@@ -6895,7 +6976,8 @@ static void x64_debug_info_write(X64_Builder *builder, size_t text_size_bytes) {
         cursor = x64_debug_cursor_move(debug->source, cursor,
                                        builder->nodes[definition].source_offset);
 
-        uint32_t return_reference = x64_debug_type_reference(types, return_type);
+        // The type of the result is an entry before the procedure, at the level of the unit.
+        uint32_t return_reference = x64_debug_type_write(builder, types, return_type);
         if (return_reference == 0) {
             x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_SUBPROGRAM_VOID);
         } else {
@@ -6917,12 +6999,10 @@ static void x64_debug_info_write(X64_Builder *builder, size_t text_size_bytes) {
         size_t parameter_count = x64_parameter_count(builder, procedure);
         Ast_Node_Index parameter = builder->nodes[procedure].first_child;
         for (size_t j = 0; j < parameter_count; j += 1) {
+            // The type is an entry of its own, before the parameter, when it is made of others.
             uint32_t parameter_reference =
-                x64_debug_type_reference(types, x64_parameter_type(builder, procedure, j));
-            if (parameter_reference == 0) {
-                parameter = builder->nodes[parameter].next_sibling;
-                continue;
-            }
+                x64_debug_type_write(builder, types, x64_parameter_type(builder, procedure, j));
+            assert(parameter_reference != 0);
             cursor = x64_debug_cursor_move(debug->source, cursor,
                                            builder->nodes[parameter].source_offset);
             x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_PARAMETER);
@@ -6947,16 +7027,15 @@ static void x64_debug_info_write(X64_Builder *builder, size_t text_size_bytes) {
             // The build checked the type of every variable, so it is one that the target has.
             X64_Type type = builder->layouts[node].type;
             assert(type.kind != X64_TYPE_KIND_NONE);
-            if (x64_debug_type_reference(types, type) == 0) {
-                continue;
-            }
+            uint32_t reference = x64_debug_type_write(builder, types, type);
+            assert(reference != 0);
             cursor = x64_debug_cursor_move(debug->source, cursor,
                                            builder->nodes[node].source_offset);
             x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_VARIABLE);
             x64_write_string(writer, builder->nodes[node].payload.variable_definition.name);
             x64_write_byte(writer, 1);
             x64_write_u32(writer, cursor.line);
-            x64_write_u32(writer, x64_debug_type_reference(types, type));
+            x64_write_u32(writer, reference);
             x64_debug_location_write(writer, -(int64_t)builder->layouts[node].frame_offset -
                                                  X64_DEBUG_CFA_FRAME_OFFSET_BYTES);
         }
@@ -7204,11 +7283,14 @@ static uint32_t x64_debug_address_rva(X64_Builder const *builder, size_t code_of
 }
 
 /**
- * Returns where the entry of `type` is in `.debug_info`, or 0, which no entry is at, for a type
- * that the debug information does not describe yet, whose parameters and variables it leaves out.
+ * Returns where the entry of the type of `kind` with `definition` is in `.debug_info`, for a type
+ * that has a name and an entry of its own: the primitive types, a struct and an enum, whose places
+ * the first writing of the unit found, see `x64_debug_info_write`. Returns 0, which no entry is
+ * at, for the other types, which are made of others, see `x64_debug_type_write`.
  */
-static uint32_t x64_debug_type_reference(X64_Debug_Types types, X64_Type type) {
-    switch (type.kind) {
+static uint32_t x64_debug_type_reference(X64_Builder const *builder, X64_Debug_Types types,
+                                         X64_Type_Kind kind, Ast_Node_Index definition) {
+    switch (kind) {
     case X64_TYPE_KIND_BOOL:
         return types.bool_type;
     case X64_TYPE_KIND_BYTE:
@@ -7216,20 +7298,220 @@ static uint32_t x64_debug_type_reference(X64_Debug_Types types, X64_Type type) {
     case X64_TYPE_KIND_C_STR:
         return types.c_str_type;
     case X64_TYPE_KIND_ENUM:
+    case X64_TYPE_KIND_STRUCT:
+        return builder->layouts[definition].frame_offset;
     case X64_TYPE_KIND_INT:
         return types.int_type;
+    case X64_TYPE_KIND_STR:
+        return types.str_type;
     case X64_TYPE_KIND_ARRAY:
+    case X64_TYPE_KIND_ENUM_LITERAL:
     case X64_TYPE_KIND_NIL:
     case X64_TYPE_KIND_NONE:
-    case X64_TYPE_KIND_ENUM_LITERAL:
     case X64_TYPE_KIND_POINTER:
     case X64_TYPE_KIND_PROCEDURE:
     case X64_TYPE_KIND_SLICE:
-    case X64_TYPE_KIND_STR:
-    case X64_TYPE_KIND_STRUCT:
         break;
     }
     return 0;
+}
+
+/**
+ * Writes the entry of `type` when it is made of other types, and returns where the entry of `type`
+ * is in `.debug_info`, or 0 for a type that has none, which is no type. An array is the address of
+ * its first element, so it is a pointer to an array of its length, which gdb shows whole with `*`,
+ * and an array slice is a struct without a name of a pointer to its first element and its length.
+ * The types of the elements and what a pointer points to are written by
+ * `x64_debug_scalar_type_write`, which writes no arrays.
+ */
+static uint32_t x64_debug_type_write(X64_Builder *builder, X64_Debug_Types types, X64_Type type) {
+    X64_Writer *writer = &builder->writer;
+    if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+        return x64_debug_scalar_type_write(builder, types, type);
+    }
+
+    uint32_t element = x64_debug_scalar_type_write(builder, types, x64_type_element(type));
+    if (type.kind == X64_TYPE_KIND_ARRAY) {
+        uint32_t array = (uint32_t)(writer->length - types.unit_start);
+        x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_ARRAY_TYPE);
+        x64_write_u32(writer, element);
+        // The range is the last index, which is -1 for an array of no elements.
+        x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_SUBRANGE_TYPE);
+        x64_write_u32(writer, (uint32_t)(type.length - 1));
+        x64_write_byte(writer, 0);                        // The end of the range.
+        return x64_debug_pointers_write(builder, types, array, 1);
+    }
+
+    uint32_t data = x64_debug_pointers_write(builder, types, element, 1);
+    uint32_t slice = (uint32_t)(writer->length - types.unit_start);
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_STRUCTURE_TYPE_ANONYMOUS);
+    x64_write_unsigned_leb128(writer, 2 * X64_WORD_SIZE_BYTES);
+    x64_debug_member_write(writer, STR("data"), data, 0);
+    x64_debug_member_write(writer, STR("length"), types.int_type, X64_WORD_SIZE_BYTES);
+    x64_write_byte(writer, 0);                            // The end of the fields.
+    return slice;
+}
+
+/**
+ * Writes the entry of `type` when it is a pointer, which is an entry for each caret, or a pointer
+ * to a procedure, which is a pointer to the type of the procedure, and returns where the entry of
+ * `type` is. Every other type that is no array has an entry of its own, see
+ * `x64_debug_type_reference`, or none.
+ */
+static uint32_t x64_debug_scalar_type_write(X64_Builder *builder, X64_Debug_Types types,
+                                            X64_Type type) {
+    if (type.kind == X64_TYPE_KIND_PROCEDURE) {
+        uint32_t procedure = x64_debug_subroutine_write(builder, types, type.definition);
+        return x64_debug_pointers_write(builder, types, procedure, 1);
+    }
+    if (type.kind != X64_TYPE_KIND_POINTER) {
+        return x64_debug_type_reference(builder, types, type.kind, type.definition);
+    }
+    // A pointer to a pointer to a procedure has one caret more than the pointer to the procedure.
+    if (type.pointee_kind == X64_TYPE_KIND_PROCEDURE) {
+        uint32_t procedure = x64_debug_subroutine_write(builder, types, type.definition);
+        return x64_debug_pointers_write(builder, types, procedure, type.depth + 1);
+    }
+    uint32_t pointee =
+        x64_debug_type_reference(builder, types, type.pointee_kind, type.definition);
+    return x64_debug_pointers_write(builder, types, pointee, type.depth);
+}
+
+/**
+ * Writes `depth` entries of pointers, the first to the entry at `target` and each other to the one
+ * before it, and returns where the last one is.
+ */
+static uint32_t x64_debug_pointers_write(X64_Builder *builder, X64_Debug_Types types,
+                                         uint32_t target, uint32_t depth) {
+    assert(depth >= 1);
+
+    X64_Writer *writer = &builder->writer;
+    uint32_t pointer = target;
+    for (uint32_t i = 0; i < depth; i += 1) {
+        uint32_t place = (uint32_t)(writer->length - types.unit_start);
+        x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_POINTER_TYPE);
+        x64_write_byte(writer, X64_DEBUG_ADDRESS_SIZE_BYTES);
+        x64_write_u32(writer, pointer);
+        pointer = place;
+    }
+    return pointer;
+}
+
+/**
+ * Writes the entry of the type of the procedures of `signature`, which is what a pointer to one of
+ * them points to, with the type of its result, and returns where it is. The result is a name with
+ * carets before it, so its type is a pointer at most, which is written before the entry.
+ */
+static uint32_t x64_debug_subroutine_write(X64_Builder *builder, X64_Debug_Types types,
+                                           Ast_Node_Index signature) {
+    X64_Writer *writer = &builder->writer;
+    X64_Type result = x64_return_type(builder, signature);
+    uint32_t result_reference = 0;
+    if (result.kind == X64_TYPE_KIND_POINTER) {
+        result_reference = x64_debug_pointers_write(
+            builder, types,
+            x64_debug_type_reference(builder, types, result.pointee_kind, result.definition),
+            result.depth);
+    } else if (result.kind != X64_TYPE_KIND_NONE) {
+        result_reference = x64_debug_type_reference(builder, types, result.kind,
+                                                    result.definition);
+    }
+    uint32_t place = (uint32_t)(writer->length - types.unit_start);
+    if (result_reference == 0) {
+        x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_SUBROUTINE_TYPE_VOID);
+    } else {
+        x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_SUBROUTINE_TYPE);
+        x64_write_u32(writer, result_reference);
+    }
+    return place;
+}
+
+/**
+ * Writes the entry of a field `name` of the type at `type`, at `offset` bytes from the start of its
+ * struct.
+ */
+static void x64_debug_member_write(X64_Writer *writer, Str name, uint32_t type, size_t offset) {
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_MEMBER);
+    x64_write_string(writer, name);
+    x64_write_u32(writer, type);
+    x64_write_unsigned_leb128(writer, offset);
+}
+
+/**
+ * Writes the entry of every enum of the module, with its members and their numbers, so that gdb
+ * shows a member by its name. `builder->layouts` keeps where each is at its definition.
+ */
+static void x64_debug_enums_write(X64_Builder *builder, X64_Debug_Types types) {
+    X64_Writer *writer = &builder->writer;
+    Ast_Node_Index definition = builder->nodes[builder->module].first_child;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node const *node = &builder->nodes[definition];
+        definition = node->next_sibling;
+        if (node->node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
+            builder->nodes[node->first_child].node_type != AST_NODE_TYPE_ENUM_TYPE) {
+            continue;
+        }
+        Ast_Node_Index enum_node = node->first_child;
+        builder->layouts[enum_node].frame_offset = (uint32_t)(writer->length - types.unit_start);
+        x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_ENUMERATION_TYPE);
+        x64_write_string(writer, node->payload.constant_definition.name);
+        x64_write_byte(writer, X64_WORD_SIZE_BYTES);
+        x64_write_u32(writer, types.int_type);
+        int64_t number = 0;
+        for (Ast_Node_Index member = builder->nodes[enum_node].first_child;
+             member != AST_NODE_INDEX_NONE; member = builder->nodes[member].next_sibling) {
+            x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_ENUMERATOR);
+            x64_write_string(writer, builder->nodes[member].payload.enum_member.name);
+            x64_write_signed_leb128(writer, number);
+            number += 1;
+        }
+        x64_write_byte(writer, 0);                        // The end of the members.
+    }
+}
+
+/**
+ * Writes the entry of every struct of the module, also of the structs of fields, which have no
+ * name, with its fields, each at 8 bytes for each word of the fields before it, see
+ * `x64_struct_word_count`. The type of a field that is made of others is an entry before its
+ * struct. `builder->layouts` keeps where each struct is at its node.
+ */
+static void x64_debug_structs_write(X64_Builder *builder, X64_Debug_Types types) {
+    X64_Writer *writer = &builder->writer;
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (builder->nodes[node].node_type != AST_NODE_TYPE_STRUCT_TYPE) {
+            continue;
+        }
+        // The types of the fields, whose places the layouts of the fields keep until the struct
+        // refers to them.
+        for (Ast_Node_Index field = builder->nodes[node].first_child; field != AST_NODE_INDEX_NONE;
+             field = builder->nodes[field].next_sibling) {
+            X64_Type type = x64_type_of_element_node(builder, builder->nodes[field].first_child);
+            builder->layouts[field].frame_offset = x64_debug_scalar_type_write(builder, types,
+                                                                               type);
+        }
+
+        builder->layouts[node].frame_offset = (uint32_t)(writer->length - types.unit_start);
+        Ast_Node_Index definition = x64_parent_find(builder, node);
+        size_t size_bytes = x64_struct_word_count(builder, node) * X64_WORD_SIZE_BYTES;
+        if (definition != AST_NODE_INDEX_NONE &&
+            builder->nodes[definition].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION) {
+            x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_STRUCTURE_TYPE);
+            x64_write_string(writer, builder->nodes[definition].payload.constant_definition.name);
+        } else {
+            x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_STRUCTURE_TYPE_ANONYMOUS);
+        }
+        x64_write_unsigned_leb128(writer, size_bytes);
+        size_t offset_bytes = 0;
+        for (Ast_Node_Index field = builder->nodes[node].first_child; field != AST_NODE_INDEX_NONE;
+             field = builder->nodes[field].next_sibling) {
+            X64_Type type = x64_type_of_element_node(builder, builder->nodes[field].first_child);
+            x64_debug_member_write(writer, builder->nodes[field].payload.field.name,
+                                   builder->layouts[field].frame_offset, offset_bytes);
+            offset_bytes += x64_type_word_count(builder, type) * X64_WORD_SIZE_BYTES;
+        }
+        x64_write_byte(writer, 0);                        // The end of the fields.
+    }
 }
 
 /**
