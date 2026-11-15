@@ -245,8 +245,8 @@ typedef struct {
  * `AST_NODE_TYPE_ARRAY_LITERAL`, and `frame_offset` is where the value of each of them is in the
  * frame of the procedure: at `rbp - frame_offset`, which for an array literal is its elements. For
  * an `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION` they are its type and its place in `.data`, and for
- * an `AST_NODE_TYPE_TYPE_INFO_OF` the place of the table of the members of its enum there. With debug
- * information, the `frame_offset` of an `AST_NODE_TYPE_STRUCT_TYPE` and of an
+ * an `AST_NODE_TYPE_TYPE_INFO_OF` the place of the table of the members of its enum there. With
+ * debug information, the `frame_offset` of an `AST_NODE_TYPE_STRUCT_TYPE` and of an
  * `AST_NODE_TYPE_ENUM_TYPE` is where its entry is in `.debug_info`, and that of an
  * `AST_NODE_TYPE_FIELD` where the entry of its type is. The entries of other nodes are not used.
  */
@@ -268,6 +268,10 @@ typedef struct {
 // What a row of the debug information says about a place in the code. Alphabetical, because nothing
 // depends on the order.
 typedef enum {
+    // A copy of a deferred statement ends at the place, which is a block of its own for a debugger.
+    X64_DEBUG_ROW_KIND_BLOCK_END,
+    // A copy of a deferred statement starts at the place.
+    X64_DEBUG_ROW_KIND_BLOCK_START,
     // The `leave` of a procedure is at the place, after which the frame is the one of its caller.
     X64_DEBUG_ROW_KIND_LEAVE,
     // A procedure or a statement starts at the place, which is where a debugger stops for its line.
@@ -286,10 +290,12 @@ typedef struct {
 } X64_Debug_Row;
 
 enum {
-    // The number of `X64_Debug_Row` elements that a build needs at most for every node of the
+    // The number of `X64_Debug_Row` elements that a build has room for for every node of the
     // syntax tree: a statement or a procedure has the row of its line, and a `return` or the end of
-    // a procedure has the row of its `leave`.
-    X64_DEBUG_ROWS_PER_NODE = 2,
+    // a procedure has the row of its `leave`, and a copy of a deferred statement has the rows of
+    // where it starts and ends. A deferred statement is written again at each place where its block
+    // is left, so the rows are bounded by the room, and the ones that do not fit are left out.
+    X64_DEBUG_ROWS_PER_NODE = 4,
 };
 
 /**

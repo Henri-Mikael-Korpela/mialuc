@@ -185,6 +185,8 @@ enum {
     X64_DWARF_ABBREVIATION_ENUMERATOR = 16,
     X64_DWARF_ABBREVIATION_SUBROUTINE_TYPE = 17,
     X64_DWARF_ABBREVIATION_SUBROUTINE_TYPE_VOID = 18,
+    X64_DWARF_ABBREVIATION_LEXICAL_BLOCK = 19,
+    X64_DWARF_ABBREVIATION_LABEL = 20,
     // The frame of a procedure, see `x64_procedure_write`: on entry the address to return to is at
     // `rsp`, so the frame of the caller, the CFA, starts 8 bytes above it. `push rbp` makes that
     // 16, and keeps `rbp` 16 bytes below the CFA, and from `mov rbp, rsp` on the CFA is `rbp + 16`.
@@ -524,6 +526,8 @@ static void         x64_copy_write               (X64_Builder *builder);
 static bool         x64_data_layout              (X64_Builder *builder);
 static void         x64_data_start_write         (X64_Builder *builder);
 static uint32_t     x64_debug_address_rva        (X64_Builder const *builder, size_t code_offset);
+static void         x64_debug_blocks_write       (X64_Builder *builder, size_t start,
+                                                  size_t end);
 static X64_Debug_Cursor x64_debug_cursor_move    (Str source, X64_Debug_Cursor cursor,
                                                   size_t offset);
 static void         x64_debug_entry_close        (X64_Builder *builder, size_t entry_start);
@@ -889,6 +893,13 @@ static byte const X64_DEBUG_ABBREVIATIONS[] = {
     // The same for a procedure that returns nothing.
     X64_DWARF_ABBREVIATION_SUBROUTINE_TYPE_VOID, 0x15, 0,
     0, 0,
+    // The code of a copy of a deferred statement, with a label as its child: low_pc, high_pc as a
+    // size.
+    X64_DWARF_ABBREVIATION_LEXICAL_BLOCK, 0x0B, 1,
+    0x11, 0x01, 0x12, 0x07, 0, 0,
+    // A place in the code with a name: name, low_pc.
+    X64_DWARF_ABBREVIATION_LABEL, 0x0A, 0,
+    0x03, 0x08, 0x11, 0x01, 0, 0,
     0,
 };
 
@@ -1919,6 +1930,9 @@ static bool x64_statements_write(X64_Builder *builder, Ast_Node_Index procedure)
                 if (frame_count > 0 && node_type == AST_NODE_TYPE_BLOCK) {
                     x64_block_end(builder, &frames[frame_count - 1], finished);
                 }
+                if (node_type == AST_NODE_TYPE_DEFER_STATEMENT) {
+                    x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_BLOCK_END, 0);
+                }
                 continue;
             }
         } else {
@@ -1975,6 +1989,10 @@ static bool x64_statements_write(X64_Builder *builder, Ast_Node_Index procedure)
             // list around it.
             pushed_frame->exit_level = (uint32_t)(frame_count - 2);
             pushed_frame->defer_bound = pushed;
+        } else if (pushed_type == AST_NODE_TYPE_DEFER_STATEMENT) {
+            // Each copy of a deferred statement is a block of its own for a debugger, so that a
+            // breakpoint on its line stops at every copy, see `x64_debug_blocks_write`.
+            x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_BLOCK_START, 0);
         }
     }
 
@@ -2022,6 +2040,11 @@ static bool x64_list_statement_write(X64_Builder *builder, Ast_Node_Index proced
                                      Ast_Node_Index statement, Ast_Node_Index *pushed) {
     assert(*pushed == AST_NODE_INDEX_NONE);
 
+    // A `defer` has no code where it is, so it has no line there: its line is at each place where
+    // its statement is written, which is where a debugger stops for it.
+    if (builder->nodes[statement].node_type == AST_NODE_TYPE_DEFER_STATEMENT) {
+        return true;
+    }
     x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LINE, builder->nodes[statement].source_offset);
     Ast_Node_Index current = statement;
     if (builder->nodes[current].node_type == AST_NODE_TYPE_LABELED_STATEMENT) {
@@ -2029,8 +2052,6 @@ static bool x64_list_statement_write(X64_Builder *builder, Ast_Node_Index proced
     }
 
     switch (builder->nodes[current].node_type) {
-    case AST_NODE_TYPE_DEFER_STATEMENT:
-        return true;
     case AST_NODE_TYPE_BREAK_STATEMENT:
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
     case AST_NODE_TYPE_IF_STATEMENT:
@@ -6676,14 +6697,16 @@ static void x64_headers_write(X64_Builder *builder, size_t text_size_bytes) {
 
 /**
  * Notes that the code that is written next is a place of `kind`, see `X64_Debug_Row`. It does
- * nothing for a file without debug information.
+ * nothing for a file without debug information. A deferred statement is written again at each
+ * place where its block is left, with its rows, so a program with many of them can need more rows
+ * than `X64_DEBUG_ROWS_PER_NODE` for each node, and then the rows after the last that fits are left
+ * out, which only makes the debug information less complete.
  */
 static void x64_debug_row_add(X64_Builder *builder, X64_Debug_Row_Kind kind,
                               uint32_t source_offset) {
-    if (builder->debug == NULL) {
+    if (builder->debug == NULL || builder->row_count == builder->row_capacity) {
         return;
     }
-    // There are at most `X64_DEBUG_ROWS_PER_NODE` rows for each node, see `X64_Debug_Row`.
     assert(builder->row_count < builder->row_capacity);
     assert(builder->writer.length >= builder->text_start);
 
@@ -6947,6 +6970,25 @@ static void x64_debug_unit_write(X64_Builder *builder, size_t text_size_bytes) {
                                   x64_string_offset(builder, literal));
     }
 
+    // A global variable is at its place in `.data`, see `x64_data_layout`.
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (builder->nodes[node].node_type != AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            continue;
+        }
+        uint32_t reference = x64_debug_type_write(builder, types, builder->layouts[node].type);
+        assert(reference != 0);
+        cursor = x64_debug_cursor_move(debug->source, cursor, builder->nodes[node].source_offset);
+        x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_VARIABLE);
+        x64_write_string(writer, builder->nodes[node].payload.global_variable_definition.name);
+        x64_write_byte(writer, 1);
+        x64_write_u32(writer, cursor.line);
+        x64_write_u32(writer, reference);
+        x64_write_unsigned_leb128(writer, 1 + X64_DEBUG_ADDRESS_SIZE_BYTES);
+        x64_write_byte(writer, X64_DWARF_OP_ADDR);
+        x64_write_u64(writer, X64_IMAGE_BASE + builder->data_rva +
+                                  builder->layouts[node].frame_offset);
+    }
+
     // The start of the program has a name, so that a debugger that shows the frames below `main`
     // can name its frame. It is the code before the first procedure.
     size_t first_procedure = text_size_bytes;
@@ -7040,11 +7082,70 @@ static void x64_debug_unit_write(X64_Builder *builder, size_t text_size_bytes) {
                                                  X64_DEBUG_CFA_FRAME_OFFSET_BYTES);
         }
 
+        // The iterator of a for statement is a variable at the start of the place of the
+        // statement, see `x64_procedure_layout`.
+        for (Ast_Node_Index node = procedure; node < procedure_end; node += 1) {
+            if (builder->nodes[node].node_type != AST_NODE_TYPE_FOR_STATEMENT) {
+                continue;
+            }
+            X64_Type type = builder->layouts[node].type;
+            uint32_t reference = x64_debug_type_write(builder, types, type);
+            assert(reference != 0);
+            cursor = x64_debug_cursor_move(debug->source, cursor,
+                                           builder->nodes[node].source_offset);
+            x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_VARIABLE);
+            x64_write_string(writer, builder->nodes[node].payload.for_statement.name);
+            x64_write_byte(writer, 1);
+            x64_write_u32(writer, cursor.line);
+            x64_write_u32(writer, reference);
+            x64_debug_location_write(writer, -(int64_t)builder->layouts[node].frame_offset -
+                                                 X64_DEBUG_CFA_FRAME_OFFSET_BYTES);
+        }
+        x64_debug_blocks_write(builder, start, end);
+
         x64_write_byte(writer, 0);                        // The end of the children.
     }
 
     x64_write_byte(writer, 0);                            // The end of the children of the unit.
     x64_patch_u32(writer, unit_start, (uint32_t)(writer->length - unit_start - 4));
+}
+
+/**
+ * Writes a lexical block for each copy of a deferred statement in the code of the procedure from
+ * `start` to `end`, which the rows of `X64_DEBUG_ROW_KIND_BLOCK_START` and
+ * `X64_DEBUG_ROW_KIND_BLOCK_END` mark. gdb sets a breakpoint on a line at the first place of the
+ * line in each block of a procedure, so a deferred statement, whose line has a place in each of
+ * the copies, needs a block for each, to stop at all of them. gdb leaves out a block that has
+ * nothing in it, so each has a label, `defer`, at its start, which is not a variable and is not
+ * shown among them.
+ */
+static void x64_debug_blocks_write(X64_Builder *builder, size_t start, size_t end) {
+    X64_Writer *writer = &builder->writer;
+    size_t block_start = 0;
+    bool is_open = false;
+    for (size_t i = 0; i < builder->row_count; i += 1) {
+        X64_Debug_Row row = builder->rows[i];
+        if (row.code_offset < start || row.code_offset >= end) {
+            continue;
+        }
+        if (row.kind == X64_DEBUG_ROW_KIND_BLOCK_START) {
+            block_start = row.code_offset;
+            is_open = true;
+        } else if (row.kind == X64_DEBUG_ROW_KIND_BLOCK_END && is_open) {
+            is_open = false;
+            if (row.code_offset == block_start) {
+                continue;
+            }
+            uint64_t address = X64_IMAGE_BASE + x64_debug_address_rva(builder, block_start);
+            x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_LEXICAL_BLOCK);
+            x64_write_u64(writer, address);
+            x64_write_u64(writer, row.code_offset - block_start);
+            x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_LABEL);
+            x64_write_string(writer, STR("defer"));
+            x64_write_u64(writer, address);
+            x64_write_byte(writer, 0);                    // The end of the children.
+        }
+    }
 }
 
 /**
