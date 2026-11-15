@@ -985,6 +985,11 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 "that can be compared with its operator.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
+    case X64_BUILD_STATUS_CONDITION_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the condition at '%.*s' is not a Bool, and an Int is not "
+                "converted to one.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED:
         fprintf(stderr, "%s:%zu:%zu: more than %d constants, procedures and strings.\n", path,
                 position.line, position.column, X64_CONSTANT_COUNT_MAX);
@@ -1008,6 +1013,35 @@ static void main_run_command_report_x64_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' must be 'main :: proc() Int ->', a procedure without "
                 "parameters that returns an Int, which is the exit code.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_MATCH_CASE_DUPLICATE:
+        fprintf(stderr, "%s:%zu:%zu: this case matches a value that a case above it matches "
+                "already, so it could never run for that value.\n", path, position.line,
+                position.column);
+        break;
+    case X64_BUILD_STATUS_MATCH_PARTIAL_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' only means something for a match of an enum that "
+                "has no default case, which is the only match that must have a case for every "
+                "value.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT:
+        fprintf(stderr, "%s:%zu:%zu: the pattern of the case is not known when the program is "
+                "compiled. It must be a literal or a constant.\n", path, position.line,
+                position.column);
+        break;
+    case X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the pattern of the case is not of the type of what is "
+                "matched.\n", path, position.line, position.column);
+        break;
+    case X64_BUILD_STATUS_MATCH_RANGE_EMPTY:
+        fprintf(stderr, "%s:%zu:%zu: the range of the case has no numbers in it, so it could "
+                "never match.\n", path, position.line, position.column);
+        break;
+    case X64_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be matched by the x64 target, which matches "
+                "an Int.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
         break;
     case X64_BUILD_STATUS_OK:
     case X64_BUILD_STATUS_OUTPUT_TOO_LARGE:

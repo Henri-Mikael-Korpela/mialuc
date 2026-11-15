@@ -25,6 +25,9 @@ typedef enum {
     // The operands of a comparison are not two `Int` values, or not two `Bool` values for `==` and
     // `not=`. The subject is the first name or string of the comparison.
     X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+    // The condition of an if statement is not a `Bool`. The subject is the first name or string of
+    // the condition, or the name of the definition that it is in.
+    X64_BUILD_STATUS_CONDITION_TYPE_INVALID,
     // More constants than the build has room to keep, see `X64_CONSTANT_COUNT_MAX`. The subject
     // is the name of the first one that does not fit.
     X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED,
@@ -41,6 +44,22 @@ typedef enum {
     // `main` in the source in the second case, and has `bytes` NULL in the first, which is about
     // no place in the source.
     X64_BUILD_STATUS_MAIN_INVALID,
+    // Two cases of a match statement match a value in common. The subject is the word `case` of
+    // the second.
+    X64_BUILD_STATUS_MATCH_CASE_DUPLICATE,
+    // The attribute `partial` of a match statement whose subject is not an enum. The subject is the
+    // attribute.
+    X64_BUILD_STATUS_MATCH_PARTIAL_INVALID,
+    // The pattern of a case is not known when the program is compiled. The subject is the word
+    // `case`.
+    X64_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT,
+    // The pattern of a case is not of the type of the subject. The subject is the word `case`.
+    X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH,
+    // A range of a case that has no number in it. The subject is the word `case`.
+    X64_BUILD_STATUS_MATCH_RANGE_EMPTY,
+    // The subject of a match statement is not of a type that can be matched. The subject is its
+    // first name or string.
+    X64_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID,
     X64_BUILD_STATUS_OK,
     X64_BUILD_STATUS_OUTPUT_TOO_LARGE,
     // A `return` in a procedure that returns nothing. The subject is the name of the procedure.

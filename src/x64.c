@@ -77,6 +77,8 @@ enum {
     // The numbers of the conditions of `set` and of the conditional jumps, which are added to their
     // opcodes. The signed ones are used for an `Int`, whose order is signed.
     X64_CONDITION_EQUAL = 0x4,
+    // Not a condition of the processor: the jump that is always taken, see `x64_jump_write`.
+    X64_CONDITION_ALWAYS = 0x10,
     X64_CONDITION_NOT_EQUAL = 0x5,
     X64_CONDITION_LESS = 0xC,
     X64_CONDITION_GREATER_EQUAL = 0xD,
@@ -191,7 +193,14 @@ enum {
     X64_FRAME_FIXED_SIZE_BYTES = 8,
     // The place of that slot, at `rbp - 8`.
     X64_FRAME_TEMPORARY_OFFSET_BYTES = 8,
+    // The most frames that the statements of a procedure need at once: the body, and for each of
+    // the blocks that the parser accepts inside each other the statement and the block, see
+    // `AST_BLOCK_DEPTH_MAX`, with room for more that later statements need.
+    X64_STATEMENT_DEPTH_MAX = 4 * AST_BLOCK_DEPTH_MAX + 4,
 };
+
+// The end of a chain of jumps, see `x64_jump_write`. No place in the code is this far.
+static uint32_t const X64_JUMP_NONE = UINT32_MAX;
 
 // What a constant of the module is, which decides what the build makes of it. Alphabetical, because
 // nothing depends on the order.
@@ -309,6 +318,31 @@ typedef struct {
 } X64_Expression_Frame;
 
 /**
+ * What the pattern of a case of a match statement matches, see `x64_match_pattern`: the numbers
+ * from `low` to `high`, both included. When `status` is not `X64_BUILD_STATUS_OK` the pattern is
+ * wrong, and the rest means nothing.
+ */
+typedef struct {
+    int64_t low;
+    int64_t high;
+    X64_Build_Status status;
+} X64_Match_Pattern;
+
+/**
+ * A list of statements that is being written, or a statement that has blocks, see
+ * `x64_statements_write`. `node` is the procedure for its body, a block, an if statement or a match
+ * statement, and `next` is its child that is written next. `end_jumps` are the jumps to the end of
+ * an if statement or a match statement, and `false_jumps` the jumps of the condition of its branch
+ * that is being written, which go to the next branch when the condition does not hold.
+ */
+typedef struct {
+    Ast_Node_Index node;
+    Ast_Node_Index next;
+    uint32_t end_jumps;
+    uint32_t false_jumps;
+} X64_Statement_Frame;
+
+/**
  * The state shared by the building functions. A building function returns false after it recorded
  * an error here, and its caller then returns false too without recording anything more. So only
  * the first error is kept. The code is written twice, see `x64_build`, so everything here that the
@@ -380,6 +414,9 @@ static size_t       x64_align_up                 (size_t value, size_t alignment
 static size_t       x64_argument_word_offset     (X64_Builder const *builder,
                                                   Ast_Node_Index procedure, size_t position);
 static bool         x64_assignment_write         (X64_Builder *builder, Ast_Node_Index statement);
+static void         x64_block_end                (X64_Builder *builder,
+                                                  X64_Statement_Frame *frame,
+                                                  Ast_Node_Index block);
 static bool         x64_c_str_write              (X64_Builder *builder, Ast_Node_Index literal,
                                                   byte register_number);
 static bool         x64_call_is_built_in         (X64_Builder const *builder,
@@ -398,6 +435,9 @@ static X64_Type     x64_child_wanted             (X64_Builder const *builder,
 static bool         x64_code_write               (X64_Builder *builder);
 static bool         x64_comparison_write         (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
+static bool         x64_condition_write          (X64_Builder *builder,
+                                                  Ast_Node_Index condition,
+                                                  uint32_t *false_jumps);
 static bool         x64_constant_write           (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static bool         x64_constants_collect        (X64_Builder *builder);
@@ -437,8 +477,17 @@ static void         x64_headers_write            (X64_Builder *builder, size_t t
 static void         x64_image_write              (X64_Builder *builder);
 static bool         x64_is_constant              (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
+static void         x64_jump_write               (X64_Builder *builder, byte condition,
+                                                  uint32_t *jumps);
+static void         x64_jumps_resolve            (X64_Builder *builder, uint32_t jumps);
 static X64_Layout   x64_layout_make              (X64_Builder const *builder);
 static bool         x64_main_check               (X64_Builder *builder);
+static Ast_Node_Index x64_match_case_write       (X64_Builder *builder,
+                                                  X64_Statement_Frame *frame,
+                                                  Ast_Node_Index first);
+static X64_Match_Pattern x64_match_pattern       (X64_Builder const *builder, X64_Type subject,
+                                                  Ast_Node_Index pattern);
+static bool         x64_match_start_write        (X64_Builder *builder, Ast_Node_Index match);
 static bool         x64_operation_write          (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static size_t       x64_parameter_count          (X64_Builder const *builder,
@@ -464,6 +513,7 @@ static void         x64_stack_pop                (X64_Builder *builder, size_t w
 static int32_t      x64_stack_push               (X64_Builder *builder, size_t word_count);
 static bool         x64_statement_write          (X64_Builder *builder, Ast_Node_Index procedure,
                                                   Ast_Node_Index statement);
+static bool         x64_statements_write         (X64_Builder *builder, Ast_Node_Index procedure);
 static void         x64_store_u16                (byte *destination, uint16_t number);
 static void         x64_store_u32                (byte *destination, uint32_t number);
 static void         x64_store_u64                (byte *destination, uint64_t number);
@@ -1076,8 +1126,8 @@ static bool x64_code_write(X64_Builder *builder) {
 /**
  * Works out the frame of `procedure` before its code is written: the type of each of its variables
  * and the place of its value, in the order of the source, which `builder->layouts` keeps at the
- * node of the definition. A variable takes the words of its type, see `x64_type_word_count`, and
- * has a place of its own also when it is in a block, so that no two variables share memory and a
+ * node of the definition. A match statement has a place too, for its subject. A variable takes the
+ * words of its type, see `x64_type_word_count`, and has a place of its own also when it is in a block, so that no two variables share memory and a
  * debugger finds each at one place. A variable without a type takes the type of its value, which
  * only uses variables above it, whose types are worked out already. The places start below the
  * fixed part of the frame, see `X64_FRAME_FIXED_SIZE_BYTES`, and their size is
@@ -1089,16 +1139,20 @@ static void x64_procedure_layout(X64_Builder *builder, Ast_Node_Index procedure)
     size_t size_bytes = X64_FRAME_FIXED_SIZE_BYTES;
     Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
     for (Ast_Node_Index node = procedure; node < end; node += 1) {
-        if (builder->nodes[node].node_type != AST_NODE_TYPE_VARIABLE_DEFINITION) {
-            continue;
-        }
-
-        Ast_Node_Index type_node = x64_variable_type_node(builder, node);
+        Ast_Node_Type node_type = builder->nodes[node].node_type;
         X64_Type type = x64_type_make(X64_TYPE_KIND_NONE);
-        if (type_node != AST_NODE_INDEX_NONE) {
-            type = x64_type_of_node(builder, type_node);
+        if (node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            Ast_Node_Index type_node = x64_variable_type_node(builder, node);
+            if (type_node != AST_NODE_INDEX_NONE) {
+                type = x64_type_of_node(builder, type_node);
+            } else {
+                type = x64_expression_type(builder, builder->nodes[node].first_child);
+            }
+        } else if (node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+            // The subject is worked out once, and kept for the cases to compare.
+            type = x64_expression_type(builder, ast_match_subject(builder->nodes, node));
         } else {
-            type = x64_expression_type(builder, builder->nodes[node].first_child);
+            continue;
         }
         // A variable of a type that the target does not have is an error that the code finds
         // where it is defined. It takes a word until then, so that the layout is complete.
@@ -1176,28 +1230,16 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
                          -(int32_t)X64_FRAME_TEMPORARY_OFFSET_BYTES);
     }
 
-    // The statements follow the parameters among the children of the procedure.
-    size_t parameter_count = x64_parameter_count(builder, procedure);
-    Ast_Node_Index statement = builder->nodes[procedure].first_child;
-    for (size_t i = 0; i < parameter_count; i += 1) {
-        statement = builder->nodes[statement].next_sibling;
-    }
-
-    bool has_result = x64_return_type(builder, procedure).kind != X64_TYPE_KIND_NONE;
-    bool is_last_return = false;
-    // Every statement is a distinct node, so there cannot be more than there are nodes.
-    for (size_t i = 0; i < builder->node_count && statement != AST_NODE_INDEX_NONE; i += 1) {
-        Ast_Node const *statement_node = &builder->nodes[statement];
-        is_last_return = statement_node->node_type == AST_NODE_TYPE_RETURN_STATEMENT;
-        if (x64_statement_write(builder, procedure, statement) == false) {
-            return false;
-        }
-        statement = statement_node->next_sibling;
+    if (x64_statements_write(builder, procedure) == false) {
+        return false;
     }
 
     // `leave` and `ret` give the stack back and return. Falling off the end of a procedure that
     // has a result is a mistake of the program, so it stops with a breakpoint instead of returning
     // whatever is in `rax`.
+    bool has_result = x64_return_type(builder, procedure).kind != X64_TYPE_KIND_NONE;
+    Ast_Node_Index last = builder->nodes[procedure].last_child;
+    bool is_last_return = builder->nodes[last].node_type == AST_NODE_TYPE_RETURN_STATEMENT;
     if (is_last_return == false) {
         if (has_result) {
             x64_write_byte(writer, 0xCC);
@@ -1222,7 +1264,392 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
 }
 
 /**
- * Writes the statement `statement` of `procedure`. Returns false after it recorded an error.
+ * Writes the statements of the body of `procedure`, without recursion: a frame is kept for each
+ * list of statements that is being written, which is the body or a block, and for each statement
+ * that has blocks, an if statement or a match statement. A statement that has no blocks is written
+ * at once. A frame is taken off when its list or its statement has nothing more to write, and then
+ * the statement that the block belongs to writes what comes between its blocks.
+ *
+ * A jump goes forward to a place that is not known when it is written, so its distance of 32 bits,
+ * which is as long whatever the distance is, is filled in when the place is reached. The jumps that
+ * go to one place are a chain, see `x64_jump_write`. Returns false after it recorded an error.
+ */
+static bool x64_statements_write(X64_Builder *builder, Ast_Node_Index procedure) {
+    assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+
+    // The statements follow the parameters among the children of the procedure.
+    size_t parameter_count = x64_parameter_count(builder, procedure);
+    Ast_Node_Index first = builder->nodes[procedure].first_child;
+    for (size_t i = 0; i < parameter_count; i += 1) {
+        first = builder->nodes[first].next_sibling;
+    }
+
+    X64_Statement_Frame frames[X64_STATEMENT_DEPTH_MAX];
+    size_t frame_count = 1;
+    frames[0] = (X64_Statement_Frame){
+        .node = procedure,
+        .next = first,
+        .end_jumps = X64_JUMP_NONE,
+        .false_jumps = X64_JUMP_NONE,
+    };
+
+    // Every node is entered once and left once, and a frame is made for a node at most once, so
+    // twice the number of nodes steps are enough.
+    for (size_t step = 0; step < builder->node_count * 2 + 2 && frame_count > 0; step += 1) {
+        X64_Statement_Frame *frame = &frames[frame_count - 1];
+        Ast_Node_Type node_type = builder->nodes[frame->node].node_type;
+
+        if (frame->next == AST_NODE_INDEX_NONE) {
+            // The list or the statement ends here, so the jumps to its end come here, and the
+            // statement that a block is of goes on after it.
+            x64_jumps_resolve(builder, frame->false_jumps);
+            x64_jumps_resolve(builder, frame->end_jumps);
+            Ast_Node_Index finished = frame->node;
+            frame_count -= 1;
+            if (frame_count > 0 && node_type == AST_NODE_TYPE_BLOCK) {
+                x64_block_end(builder, &frames[frame_count - 1], finished);
+            }
+            continue;
+        }
+
+        Ast_Node_Index child = frame->next;
+        Ast_Node_Index pushed = AST_NODE_INDEX_NONE;
+        bool is_ok = true;
+        if (node_type == AST_NODE_TYPE_IF_STATEMENT) {
+            frame->next = builder->nodes[child].next_sibling;
+            if (builder->nodes[child].node_type == AST_NODE_TYPE_BLOCK) {
+                pushed = child;
+            } else {
+                is_ok = x64_condition_write(builder, child, &frame->false_jumps);
+            }
+        } else if (node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+            pushed = x64_match_case_write(builder, frame, child);
+            is_ok = pushed != AST_NODE_INDEX_NONE;
+        } else {
+            // A list of statements: the body or a block.
+            frame->next = builder->nodes[child].next_sibling;
+            x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LINE,
+                              builder->nodes[child].source_offset);
+            Ast_Node_Type child_type = builder->nodes[child].node_type;
+            if (child_type == AST_NODE_TYPE_IF_STATEMENT) {
+                pushed = child;
+            } else if (child_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+                is_ok = x64_match_start_write(builder, child);
+                pushed = child;
+            } else {
+                is_ok = x64_statement_write(builder, procedure, child);
+            }
+        }
+        if (is_ok == false) {
+            return false;
+        }
+        if (pushed == AST_NODE_INDEX_NONE) {
+            continue;
+        }
+
+        if (frame_count == X64_STATEMENT_DEPTH_MAX) {
+            return x64_fail_unsupported(builder);
+        }
+        Ast_Node_Index pushed_first = builder->nodes[pushed].first_child;
+        if (builder->nodes[pushed].node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
+            // The cases follow the subject, which was written already.
+            pushed_first =
+                builder->nodes[ast_match_subject(builder->nodes, pushed)].next_sibling;
+        }
+        frames[frame_count] = (X64_Statement_Frame){
+            .node = pushed,
+            .next = pushed_first,
+            .end_jumps = X64_JUMP_NONE,
+            .false_jumps = X64_JUMP_NONE,
+        };
+        frame_count += 1;
+    }
+
+    assert(frame_count == 0);
+    return true;
+}
+
+/**
+ * Writes what comes after the block `block` of the if statement or the match statement of `frame`,
+ * when that has more branches: a jump to its end, over the other branches, and then the place
+ * that the jump of the condition of the branch goes to when it does not hold, which is the next
+ * branch. A block that ends with a `return` never gets to its end, so it needs no jump.
+ */
+static void x64_block_end(X64_Builder *builder, X64_Statement_Frame *frame,
+                          Ast_Node_Index block) {
+    assert(builder->nodes[block].node_type == AST_NODE_TYPE_BLOCK);
+
+    Ast_Node_Type node_type = builder->nodes[frame->node].node_type;
+    if (node_type != AST_NODE_TYPE_IF_STATEMENT && node_type != AST_NODE_TYPE_MATCH_STATEMENT) {
+        return;
+    }
+    if (frame->next != AST_NODE_INDEX_NONE) {
+        Ast_Node_Index last = builder->nodes[block].last_child;
+        if (builder->nodes[last].node_type != AST_NODE_TYPE_RETURN_STATEMENT) {
+            x64_jump_write(builder, X64_CONDITION_ALWAYS, &frame->end_jumps);
+        }
+    }
+    x64_jumps_resolve(builder, frame->false_jumps);
+    frame->false_jumps = X64_JUMP_NONE;
+}
+
+/**
+ * Writes the condition `condition` of an if statement, which must be a `Bool`, and a jump that is
+ * taken when it is `false`, `test rax, rax` and `je`, which joins the chain `false_jumps`. A
+ * condition that is not the first has a line of its own for a debugger, the line of its
+ * `else if`. Returns false after it recorded an error.
+ */
+static bool x64_condition_write(X64_Builder *builder, Ast_Node_Index condition,
+                                uint32_t *false_jumps) {
+    X64_Type bool_type = x64_type_make(X64_TYPE_KIND_BOOL);
+    if (x64_type_accepts(builder, bool_type, condition) == false) {
+        return x64_fail(builder, X64_BUILD_STATUS_CONDITION_TYPE_INVALID,
+                        x64_expression_subject(builder, condition));
+    }
+    x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LINE, builder->nodes[condition].source_offset);
+    if (x64_expression_write(builder, condition, bool_type, true) == false) {
+        return false;
+    }
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                     x64_stack_displacement(builder, builder->stack_words - 1, 1));
+    x64_stack_pop(builder, 1);
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_RAX, X64_REGISTER_RAX);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, false_jumps);
+    return true;
+}
+
+/**
+ * Checks the match statement `match` and writes its start: the subject, which is stored in the
+ * place of the statement in the frame, see `x64_procedure_layout`, so that it is worked out once
+ * and every case compares the same value. The subject is an `Int`, every pattern is a constant of
+ * that type or a range of them, which has a number in it, and no two patterns match a value in
+ * common, so the order of the cases does not change what the statement does. Returns false after
+ * it recorded an error.
+ */
+static bool x64_match_start_write(X64_Builder *builder, Ast_Node_Index match) {
+    assert(builder->nodes[match].node_type == AST_NODE_TYPE_MATCH_STATEMENT);
+
+    Ast_Node_Index subject = ast_match_subject(builder->nodes, match);
+    X64_Type subject_type = builder->layouts[match].type;
+    if (subject_type.kind != X64_TYPE_KIND_INT) {
+        if (subject_type.kind == X64_TYPE_KIND_NONE &&
+            builder->nodes[subject].node_type != AST_NODE_TYPE_CALL) {
+            return x64_fail_unsupported(builder);
+        }
+        return x64_fail(builder, X64_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID,
+                        x64_expression_subject(builder, subject));
+    }
+
+    // The analysis allows `partial` as the only attribute, once, so it is the first child if any,
+    // and it is only for a match of an enum.
+    Ast_Node_Index attribute = builder->nodes[match].first_child;
+    if (builder->nodes[attribute].node_type == AST_NODE_TYPE_ATTRIBUTE) {
+        return x64_fail(builder, X64_BUILD_STATUS_MATCH_PARTIAL_INVALID,
+                        builder->nodes[attribute].payload.attribute.name);
+    }
+
+    Ast_Node_Index first_case = builder->nodes[subject].next_sibling;
+    Ast_Node_Index match_case = first_case;
+    // Every case is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && match_case != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node_Index pattern = ast_match_case_pattern(builder->nodes, match_case);
+        Str keyword = builder->nodes[match_case].payload.match.keyword;
+        if (pattern == AST_NODE_INDEX_NONE) {
+            // The parser keeps the default case last.
+            break;
+        }
+        X64_Match_Pattern checked = x64_match_pattern(builder, subject_type, pattern);
+        if (checked.status != X64_BUILD_STATUS_OK) {
+            return x64_fail(builder, checked.status, keyword);
+        }
+        Ast_Node_Index earlier = first_case;
+        for (size_t j = 0; j < i; j += 1) {
+            X64_Match_Pattern other = x64_match_pattern(
+                builder, subject_type, ast_match_case_pattern(builder->nodes, earlier));
+            assert(other.status == X64_BUILD_STATUS_OK);
+            if (other.low <= checked.high && checked.low <= other.high) {
+                return x64_fail(builder, X64_BUILD_STATUS_MATCH_CASE_DUPLICATE, keyword);
+            }
+            earlier = builder->nodes[earlier].next_sibling;
+        }
+        match_case = builder->nodes[match_case].next_sibling;
+    }
+
+    if (x64_expression_write(builder, subject, subject_type, true) == false) {
+        return false;
+    }
+    return x64_value_store(builder, subject_type,
+                           -(int32_t)builder->layouts[match].frame_offset);
+}
+
+/**
+ * Returns what `pattern`, the pattern of a case of a match statement whose subject is of the type
+ * `subject`, matches: the numbers from `low` to `high`, both included, which are one number for a
+ * pattern that is not a range. A pattern is a constant of the type of the subject, or a range of
+ * them, which must have a number in it. The status says what is wrong otherwise.
+ */
+static X64_Match_Pattern x64_match_pattern(X64_Builder const *builder, X64_Type subject,
+                                           Ast_Node_Index pattern) {
+    assert(pattern < builder->node_count);
+    assert(subject.kind == X64_TYPE_KIND_INT);
+
+    X64_Match_Pattern result = {
+        .low = 0,
+        .high = 0,
+        .status = X64_BUILD_STATUS_OK,
+    };
+    Ast_Node const *node = &builder->nodes[pattern];
+    Ast_Node_Index ends[2] = {pattern, pattern};
+    if (node->node_type == AST_NODE_TYPE_RANGE) {
+        ends[0] = node->first_child;
+        ends[1] = node->last_child;
+    }
+    for (size_t i = 0; i < 2; i += 1) {
+        if (x64_is_constant(builder, ends[i]) == false) {
+            result.status = X64_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT;
+            return result;
+        }
+        if (x64_type_accepts(builder, subject, ends[i]) == false) {
+            result.status = X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
+            return result;
+        }
+    }
+    result.low = builder->constant_values[ends[0]].integer;
+    result.high = builder->constant_values[ends[1]].integer;
+    if (node->node_type != AST_NODE_TYPE_RANGE) {
+        return result;
+    }
+    // The end of an exclusive range is above its last number, so it is above the first one too,
+    // and one less than it does not overflow.
+    if (node->payload.range.is_inclusive) {
+        if (result.high < result.low) {
+            result.status = X64_BUILD_STATUS_MATCH_RANGE_EMPTY;
+        }
+    } else if (result.high <= result.low) {
+        result.status = X64_BUILD_STATUS_MATCH_RANGE_EMPTY;
+    } else {
+        result.high -= 1;
+    }
+    return result;
+}
+
+/**
+ * Writes the case `first` of the match statement of `frame`, and the cases after it that have no
+ * block of their own and share the block of the last of them: the subject is compared with the
+ * pattern of each, and a pattern that matches jumps to the block, which comes after the
+ * comparisons, and when none does the jump over the block goes to the next case. A range compares the subject
+ * with its two ends, with the signed order of an `Int`. The default case has no pattern, and its
+ * block always runs when it is reached. The next case of the frame is set to the one after the
+ * block. Returns the block, which the caller writes next.
+ */
+static Ast_Node_Index x64_match_case_write(X64_Builder *builder, X64_Statement_Frame *frame,
+                                           Ast_Node_Index first) {
+    assert(builder->nodes[first].node_type == AST_NODE_TYPE_MATCH_CASE);
+
+    Ast_Node_Index match = frame->node;
+    X64_Type subject_type = builder->layouts[match].type;
+    int32_t subject = -(int32_t)builder->layouts[match].frame_offset;
+    uint32_t block_jumps = X64_JUMP_NONE;
+    bool has_default = false;
+
+    Ast_Node_Index match_case = first;
+    Ast_Node_Index block = AST_NODE_INDEX_NONE;
+    // Every case is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < builder->node_count && match_case != AST_NODE_INDEX_NONE; i += 1) {
+        x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LINE,
+                          builder->nodes[match_case].source_offset);
+        Ast_Node_Index pattern = ast_match_case_pattern(builder->nodes, match_case);
+        if (pattern == AST_NODE_INDEX_NONE) {
+            has_default = true;
+        } else {
+            X64_Match_Pattern checked = x64_match_pattern(builder, subject_type, pattern);
+            assert(checked.status == X64_BUILD_STATUS_OK);
+            x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                             subject);
+            if (checked.low == checked.high) {
+                x64_write_load_integer(builder, X64_REGISTER_RCX, checked.low);
+                x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+                x64_jump_write(builder, X64_CONDITION_EQUAL, &block_jumps);
+            } else {
+                // Below the first number the next pattern is tried, and up to the last one the
+                // pattern matches.
+                uint32_t below_jumps = X64_JUMP_NONE;
+                x64_write_load_integer(builder, X64_REGISTER_RCX, checked.low);
+                x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+                x64_jump_write(builder, X64_CONDITION_LESS, &below_jumps);
+                x64_write_load_integer(builder, X64_REGISTER_RCX, checked.high);
+                x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+                x64_jump_write(builder, X64_CONDITION_LESS_EQUAL, &block_jumps);
+                x64_jumps_resolve(builder, below_jumps);
+            }
+        }
+        block = ast_match_case_block(builder->nodes, match_case);
+        if (block != AST_NODE_INDEX_NONE) {
+            break;
+        }
+        match_case = builder->nodes[match_case].next_sibling;
+    }
+    // The parser makes sure that the last case has a block.
+    assert(block != AST_NODE_INDEX_NONE);
+
+    if (has_default == false) {
+        x64_jump_write(builder, X64_CONDITION_ALWAYS, &frame->false_jumps);
+    }
+    x64_jumps_resolve(builder, block_jumps);
+    frame->next = builder->nodes[match_case].next_sibling;
+    return block;
+}
+
+/**
+ * Writes a jump that is taken when `condition` holds, or always for `X64_CONDITION_ALWAYS`, with a
+ * distance of 32 bits, to a place that is not known yet. The jump joins the chain `jumps`: the
+ * distance of each jump of a chain holds the place of the one before it until the place that they
+ * go to is known, and `jumps` is the place of the last one, or `X64_JUMP_NONE` for an empty chain.
+ * So the jumps to one place need no memory but the code, see `x64_jumps_resolve`.
+ */
+static void x64_jump_write(X64_Builder *builder, byte condition, uint32_t *jumps) {
+    assert(condition <= X64_CONDITION_ALWAYS);
+
+    if (condition == X64_CONDITION_ALWAYS) {
+        x64_write_byte(&builder->writer, 0xE9);
+    } else {
+        x64_write_byte(&builder->writer, X64_OPCODE_TWO_BYTE);
+        x64_write_byte(&builder->writer, (byte)(0x80 | condition));
+    }
+    size_t place = builder->writer.length - builder->text_start;
+    assert(place < X64_JUMP_NONE);
+    x64_write_u32(&builder->writer, *jumps);
+    *jumps = (uint32_t)place;
+}
+
+/**
+ * Makes every jump of the chain `jumps` go to the place in the code that is written next, see
+ * `x64_jump_write`. A writer that overflowed does not have the places, and its file is not handed
+ * out, so then the chain is not followed.
+ */
+static void x64_jumps_resolve(X64_Builder *builder, uint32_t jumps) {
+    X64_Writer *writer = &builder->writer;
+    size_t target = writer->length - builder->text_start;
+    uint32_t place = jumps;
+    // Each jump of the chain is in the code before the last one, so there are fewer jumps than
+    // bytes of the code.
+    for (size_t i = 0; i <= writer->length && place != X64_JUMP_NONE; i += 1) {
+        size_t offset = builder->text_start + place;
+        if (writer->is_overflowed || offset + 4 > writer->length) {
+            return;
+        }
+        byte const *distance = writer->bytes + offset;
+        uint32_t previous = (uint32_t)distance[0] | ((uint32_t)distance[1] << 8) |
+                            ((uint32_t)distance[2] << 16) | ((uint32_t)distance[3] << 24);
+        assert(previous == X64_JUMP_NONE || previous < place);
+        x64_patch_u32(writer, offset, (uint32_t)(target - (place + 4)));
+        place = previous;
+    }
+}
+
+/**
+ * Writes the statement `statement` of `procedure`, which has no blocks. Returns false after it
+ * recorded an error.
  */
 static bool x64_statement_write(X64_Builder *builder, Ast_Node_Index procedure,
                                 Ast_Node_Index statement) {
@@ -1230,7 +1657,6 @@ static bool x64_statement_write(X64_Builder *builder, Ast_Node_Index procedure,
     assert(builder->stack_words == 0);
 
     Ast_Node const *statement_node = &builder->nodes[statement];
-    x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LINE, statement_node->source_offset);
     switch (statement_node->node_type) {
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
     case AST_NODE_TYPE_ASSIGNMENT:
@@ -1706,9 +2132,9 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
 }
 
 /**
- * Writes the value of the constant of `frame`, which the analysis worked out, as a value of the type
- * that its place wants: a number or a truth value is one `mov` of its 64 bits, and a string is a
- * `C_Str`, a copy in the temporary storage, which is the only string that the target has. Returns
+ * Writes the value of the constant of `frame`, which the analysis worked out, as a value of the
+ * type that its place wants: a number or a truth value is one `mov` of its 64 bits, and a string is
+ * a `C_Str`, a copy in the temporary storage, which is the only string that the target has. Returns
  * false after it recorded an error.
  */
 static bool x64_constant_write(X64_Builder *builder, X64_Expression_Frame const *frame) {

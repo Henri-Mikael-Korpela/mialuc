@@ -62,6 +62,7 @@
     - [Values](#values)
     - [Procedures and calls](#procedures-and-calls)
     - [Operators](#operators-1)
+    - [Control flow](#control-flow)
     - [What is rejected](#what-is-rejected)
     - [Debugging and temporary storage](#debugging-and-temporary-storage)
 - [Possible future features](#possible-future-features)
@@ -2015,9 +2016,15 @@ A `C_Str` variable cannot be returned, because it may hold a copy that `str_to_c
 
 A comparison is `cmp` of the two operands and `set` of its condition, which makes the `Bool` in the lowest byte of `rax`, and `movzx`, which widens it to the word. The order of `Int` values is signed, so `<`, `<=`, `>` and `>=` are the signed conditions `l`, `le`, `g` and `ge`. `and`, `or` and `not` are `and`, `or` and `xor` with 1, which are right because a `Bool` is always 0 or 1, and both operands of `and` and `or` are always evaluated.
 
+#### Control flow
+
+An if statement is its conditions and blocks one after the other. A condition is worked out like any expression, and `test` and `je` jump over its block to the next branch when it is `false`. The last statement of a block that is not the last branch is a `jmp` to the end of the statement, over the other branches, unless it is a `return`, which never gets there. A jump goes forward to a place that is not known yet when it is written, so it has a distance of 32 bits, which is as long whatever the place is, and is filled in when the place is reached: the jumps to one place wait for it in a chain, in which the distance of each holds the place of the one before it, so they need no memory but the code. When the last statement of a procedure that returns a value is not a `return`, for example an if statement that returns in all of its branches, the procedure ends with a breakpoint, because the end cannot be reached in a program whose every branch returns, and a program that gets there anyway stops.
+
+A match statement works out its subject once and stores it in a place of its own in the frame, like a variable, and then each case compares that place with its pattern: a number is `cmp` with the number and `je` to the block of the case, and a range is two comparisons, `jl` past the range when the subject is below its first number and `jle` to the block when it is not above its last, which is the signed order of an `Int`. Cases that share a block jump to it from each of their comparisons, and when none of them matches, a `jmp` goes over the block to the next case. The default case compares nothing. So the cases are tried in order, and at most one block runs, after which a `jmp` goes to the end of the statement. The subject of a match is an `Int` for now, and the patterns are checked as the language says: a pattern is a constant of the type of the subject, a range has a number in it, and no two cases match a value in common.
+
 #### What is rejected
 
-The target builds procedures whose parameters, results and variables are of the types `Int`, `Bool` and `C_Str`, whose statements are calls, `return`, definitions of variables and assignments to them, and whose expressions are constants that are numbers, truth values and strings where a `C_Str` is wanted, parameters, variables, the arithmetic, comparison and logical operators, and calls of procedures and of `str_to_c_str`. The rest is rejected, and the target also rejects a program when:
+The target builds procedures whose parameters, results and variables are of the types `Int`, `Bool` and `C_Str`, whose statements are calls, `return`, definitions of variables and assignments to them, if statements and match statements of an `Int`, and whose expressions are constants that are numbers, truth values and strings where a `C_Str` is wanted, parameters, variables, the arithmetic, comparison and logical operators, and calls of procedures and of `str_to_c_str`. The rest is rejected, and the target also rejects a program when:
 
 - an operand of `+`, `-`, `*` or `/` is not an `Int`, or the variable or the value of `+=`, `-=`, `*=` or `/=` is not an `Int`,
 - the operands of a comparison are not both `Int`, or not both `Bool` for `==` and `not=`,
@@ -2025,6 +2032,8 @@ The target builds procedures whose parameters, results and variables are of the 
 - a call has a different number of arguments than the procedure has parameters, or an argument is not of the type of its parameter, or the call of a procedure without a return type is used as a value,
 - a procedure with no return type has a `return` statement, or the value that a procedure returns is not of its return type,
 - the value of a variable, or the value that is assigned to it, is not of the type of the variable,
+- the condition of an if statement is not a `Bool`,
+- the subject of a match statement is not an `Int`, a pattern is not a constant of its type, a range is empty, two cases match a value in common, or the match has the attribute `partial`, which is for an enum,
 - an expression is nested deeper than 1024 operators and operands.
 
 #### Debugging and temporary storage
