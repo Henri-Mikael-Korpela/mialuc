@@ -55,6 +55,12 @@ typedef enum {
     X64_BUILD_STATUS_EXPRESSION_TOO_DEEP,
     // A procedure declared in a `foreign js ->` block. A program for the processor has no
     // JavaScript to import from, only the C library. The subject is the name of the procedure.
+    // A field is accessed on a value that is not a struct or a pointer of one caret to one. The
+    // subject is the name of the field.
+    X64_BUILD_STATUS_FIELD_BASE_INVALID,
+    // A field is assigned through a parameter or an iterator, which cannot be assigned to. The
+    // subject is the first name of the place.
+    X64_BUILD_STATUS_FIELD_TARGET_READ_ONLY,
     X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED,
     // An index of a subscript or a bound of a slice is not an `Int`. The subject is its first name
     // or string.
@@ -100,6 +106,21 @@ typedef enum {
     // A returned value of another type than the procedure returns. The subject is the name of
     // the procedure.
     X64_BUILD_STATUS_RETURN_TYPE_MISMATCH,
+    // A struct literal whose name is not a struct, or one without a name where no struct is
+    // wanted. The subject is its name, or the name of the definition that it is in.
+    X64_BUILD_STATUS_STRUCT_EXPECTED,
+    // A field of a struct literal is given twice. The subject is the second one.
+    X64_BUILD_STATUS_STRUCT_FIELD_DUPLICATE,
+    // A struct literal gives some fields and not all of them. The subject is its name.
+    X64_BUILD_STATUS_STRUCT_FIELD_MISSING,
+    // A field is given or assigned a value of another type than it has. The subject is the name
+    // of the field.
+    X64_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
+    // A field that the struct does not have. The subject is its name.
+    X64_BUILD_STATUS_STRUCT_FIELD_UNKNOWN,
+    // A struct that contains itself, through its fields and the fields of its fields. The subject
+    // is its first field.
+    X64_BUILD_STATUS_STRUCT_RECURSIVE,
     // A type that the target does not have, of a parameter, a result or a variable. The subject is
     // the text of the type, or the name of the parameter or the variable if the type is not a
     // name.
@@ -138,6 +159,7 @@ typedef enum {
     X64_TYPE_KIND_NONE,
     X64_TYPE_KIND_POINTER,
     X64_TYPE_KIND_SLICE,
+    X64_TYPE_KIND_STRUCT,
 } X64_Type_Kind;
 
 /**
@@ -145,7 +167,8 @@ typedef enum {
  * which is part of its type, and is -1 for an array type whose length is the number of elements of
  * its literal, `[const]Int`, which is equal to any length. For an array and an array slice,
  * `element_kind` and `element_definition` say what their elements are. `definition` is the
- * definition of a type that has one, which none has yet, and is `AST_NODE_INDEX_NONE` otherwise.
+ * `AST_NODE_TYPE_STRUCT_TYPE` of a struct, which is what makes two structs the same type, and is
+ * `AST_NODE_INDEX_NONE` for a type that has no definition.
  *
  * A pointer type such as `^^Int` has `depth`, the number of carets, which is at least 1, and the
  * type at the end of them, which is never a pointer, an array or an array slice: `pointee_kind` is

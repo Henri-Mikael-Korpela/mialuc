@@ -1029,6 +1029,17 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 position.line, position.column, subject_length, result.subject.bytes,
                 X64_EXPRESSION_DEPTH_MAX);
         break;
+    case X64_BUILD_STATUS_FIELD_BASE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is accessed on something that is not a "
+                "struct, or a pointer to one, such as a variable, a parameter, an element or a "
+                "pointer.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_FIELD_TARGET_READ_ONLY:
+        fprintf(stderr, "%s:%zu:%zu: a field of '%.*s' cannot be assigned to, because it is a "
+                "parameter or an iterator, unless it is a pointer.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' is declared in a 'foreign js' "
                 "block, and the x64 target imports from 'foreign libc'.\n", path, position.line,
@@ -1106,6 +1117,33 @@ static void main_run_command_report_x64_error(char const *path, Str source,
     case X64_BUILD_STATUS_RETURN_TYPE_MISSING:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' has no return type, so it cannot return a value.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_STRUCT_EXPECTED:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a struct that is defined, or the literal "
+                "without a name is not where a struct is wanted.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_STRUCT_FIELD_DUPLICATE:
+        fprintf(stderr, "%s:%zu:%zu: the field '%.*s' is given twice.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_STRUCT_FIELD_MISSING:
+        fprintf(stderr, "%s:%zu:%zu: the literal of '%.*s' gives some fields and not all of them, "
+                "and it gives either every field or none.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the value of the field '%.*s' is not of its type.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_STRUCT_FIELD_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: the struct has no field '%.*s'.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_STRUCT_RECURSIVE:
+        fprintf(stderr, "%s:%zu:%zu: the struct of the field '%.*s' contains itself, which "
+                "would never end, so it has a pointer to itself instead.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_TYPE_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: type '%.*s' is not supported by the x64 target.\n", path,
