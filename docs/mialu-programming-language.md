@@ -31,7 +31,6 @@
   - [If statements](#if-statements)
   - [Match statements](#match-statements)
   - [For statements](#for-statements)
-  - [Infinite loops](#infinite-loops)
   - [Scopes](#scopes)
   - [Break and continue](#break-and-continue)
   - [Defer](#defer)
@@ -1029,8 +1028,6 @@ fill :: proc() Int ->
         a[i] = i * i
     return a[4]
 ```
-
-### Infinite loops
 
 A for statement with no iterator and no range is an infinite loop, like `for(;;)` and `while(true)` in C. It is written `for ->`, and the block, which is indented one level deeper, runs again and again until a `break` or a `return` leaves it. Example:
 
