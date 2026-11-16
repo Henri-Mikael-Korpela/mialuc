@@ -10,6 +10,7 @@
 - [Identifiers](#identifiers)
 - [Primitive data types](#primitive-data-types)
   - [Booleans](#booleans)
+  - [Characters](#characters)
   - [Integers](#integers)
   - [Bytes](#bytes)
   - [Floating-point numbers](#floating-point-numbers)
@@ -210,6 +211,7 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 |-------|--------------------------------------------------------------|
 | `Bool` | A boolean value, which is `true` or `false`. See [Booleans](#booleans). |
 | `Byte` | An unsigned 8-bit integer, from 0 to 255. It is the unit of memory and of binary data. See [Bytes](#bytes). |
+| `Rune` | A Unicode character, which is its 32-bit code point. Written between single quotes, such as `'A'`, `'芋'` or `'🚀'`. See [Characters](#characters). |
 | `Int` | A signed 64-bit integer. Written as a number, such as `42`, `0b101010` or `0x2A`. See [Integers](#integers). |
 | `F32` | A 32-bit floating point number. Written as a number with a fractional part, such as `1.42`. See [Floats](#floating-point-numbers). |
 | `F64` | A 64-bit floating point number. Written as a number with a fractional part, such as `1.42`, and the type of one where nothing says. See [Floats](#floating-point-numbers). |
@@ -220,7 +222,6 @@ The following primitive data types are reserved for possible future use:
 
 | Category | Types |
 | -------- | ----- |
-| Character | `Rune` |
 | Signed integer | `I8 I16 I32 I64` |
 | Unsigned integer | `U8 U16 U32 U64` |
 
@@ -237,6 +238,25 @@ Unlike C, integer types are not implicitly converted into boolean values. A `Boo
 > **Lessons learnt from C** In C, any integer or pointer can be used as a condition, and a comparison gives an `int`. So `if (n)`, `if (p)` and `if (x = 0)` all compile, and a value that was meant to be a flag can quietly be 2 or -1 and be unequal to `true`. In Mialu a condition must be a `Bool`, so what is meant has to be written out, such as `n not= 0`, and a mistake of this kind is an error at compile time.
 
 A comparison such as `x > 5` is an expression of type `Bool`, see [Comparison operators](#comparison-operators). The logical operators `and`, `or` and `not` combine `Bool` values, see [Logical operators](#logical-operators).
+
+### Characters
+
+A `Rune` is one Unicode character. Underneath it is a 32-bit number, the code point of the character, which goes from 0 to 0x10FFFF, so it holds a letter of any alphabet, a kanji, an emoji or a control character alike. A rune literal is a character between single quotes:
+
+```
+letter : Rune = 'A'
+kanji : Rune = '芋'
+emoji : Rune = '🚀'
+inferred := 'é'
+```
+
+The source of a program is UTF-8, and a character in it can take one to four bytes, which a rune does not care about: `'A'` takes one byte and is 65, `'é'` takes two and is 233, `'芋'` takes three and is 33419, and `'🚀'` takes four and is 128640. What a rune holds is the number of the character and not its bytes, so it is the same whatever the encoding of the text that the character is in. A rune is one character, which is one code point: a letter with an accent that is written as a letter and a combining mark is two code points, and so is two runes, and a literal of both is an error, while the one code point of the letter, `'é'`, is a rune. A character that is not valid UTF-8 is an error, and so is a number that is not a Unicode character, which no literal can write, because the source is UTF-8 and a surrogate, U+D800 to U+DFFF, is not valid in it.
+
+A rune literal has the type `Rune`, and it is not an untyped number: `'A'` is not an `Int` and not a `Byte`, `x : Int = 'A'` is an error and so is `x : Rune = 65`. A rune literal is one literal, so it is a constant, which can be a [constant](#constants) with or without its type, `FIRST :: 'A'` and `LAST : Rune : 'Z'`, and a global variable, a parameter, a field, an element of an array and what a pointer points to can be one. The default value of a `Rune` is the character with the code point 0.
+
+Runes have an order, the order of their code points, so all six [comparison operators](#comparison-operators) work on two runes, and `character >= 'A' and character <= 'Z'` is true for an upper case letter of the ASCII range. Which characters come where in the order is the order of Unicode and not of an alphabet, so it is not the order of a dictionary, and the characters of other alphabets and the emojis are above the letters of ASCII. A rune has no arithmetic, because a sum of two characters is not a character: `'a' + 1` is an error. A backslash in a rune literal is an error for now, because the escape sequences are kept for later, as they are for a string, so a character that needs one, such as a new line, cannot be written yet.
+
+> **Lessons learnt from C** In C, a character literal such as `'A'` is an `int`, and the type `char` is a byte that may or may not be signed, so text in UTF-8 is a sequence of numbers that are not characters, and a character that takes several bytes cannot be one literal. In Mialu a character is a `Rune`, which is as wide as the largest code point, and its literal is one character in any alphabet.
 
 ### Integers
 
@@ -398,7 +418,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
 | `=`      | Sets the initial value of a variable whose type is written. It also assigns a new value to a variable, an element or a field, and copies to a range of elements. | 0 | `x : Int = 5`, `x = 6`, `a[0] = 5`, `p.age = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, float literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` or `cast(Type)` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. A comparison takes two `Int` values, or two `Bool` values or two pointers of one type for `==` and `not=`, and its result is a `Bool`.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, float literals, rune literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` or `cast(Type)` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. A comparison takes two `Int` values, or two `Bool` values or two pointers of one type for `==` and `not=`, and its result is a `Bool`.
 
 > **Lessons learnt from C** In C, `a < b < c` is valid, and it does not mean what it means in mathematics: it compares the `0` or `1` of `a < b` with `c`. Mialu makes the comparison of a comparison an error, so the mistake is found at compile-time.
 
@@ -520,7 +540,7 @@ is_even :: proc(n: Int) Bool ->
     return n / 2 * 2 == n
 ```
 
-Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. Two [floats](#floating-point-numbers) of one type can be compared with all six operators too, and an untyped float is of that type there, so `x < 0.5` is allowed whether `x` is an `F32` or an `F64`. A comparison with not a number is false, except `not=`, which is true. `Int`, `Byte` and the floats are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an untyped integer from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Strings cannot be compared.
+Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. Two [`Rune`](#characters) values can be compared with all six operators too, and the comparison is of their code points. Two [floats](#floating-point-numbers) of one type can be compared with all six operators too, and an untyped float is of that type there, so `x < 0.5` is allowed whether `x` is an `F32` or an `F64`. A comparison with not a number is false, except `not=`, which is true. `Int`, `Byte`, `Rune` and the floats are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an untyped integer from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Strings cannot be compared.
 
 A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, see [Operators](#operators).
 

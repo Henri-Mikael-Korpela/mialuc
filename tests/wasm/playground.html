@@ -334,6 +334,7 @@
             arrays: "arrays",
             "boolean logic": "boolean-logic",
             bytes: "bytes",
+            characters: "characters",
             "C strings": "c-strings",
             comments: "comments",
             constants: "constants",
@@ -384,7 +385,7 @@
         const HIGHLIGHT_RULES = {
             mialu: [
                 ["comment", /\/\/.*/],
-                ["string", /"[^"\\\n]*"/],
+                ["string", /"[^"\\\n]*"|'(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|[^'\\\n])'/],
                 ["attribute", /#(?:[ \t]*\([ \t]*[A-Za-z_]\w*[ \t]*\))+/],
                 ["label", /@[A-Za-z_]\w*/],
                 ["keyword", /\b(?:proc|return|if|else|for|in|break|case|cast|const|continue|defer|enum|match|struct|type_info_of|union|foreign|import|and|or)\b|\bnot\b(?!=)/],

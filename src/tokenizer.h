@@ -98,6 +98,9 @@ typedef enum {
     // `..<` and `..<=`, which are the ends of an exclusive and of an inclusive range.
     TOKEN_KIND_RANGE_EXCLUSIVE,
     TOKEN_KIND_RANGE_INCLUSIVE,
+    // One character between single quotes, such as `'A'`, `'芋'` or `'🚀'`. See
+    // `AST_NODE_TYPE_RUNE_LITERAL`.
+    TOKEN_KIND_RUNE_LITERAL,
     TOKEN_KIND_SLASH_EQUALS,
     TOKEN_KIND_STRING_LITERAL,
 
@@ -137,6 +140,11 @@ typedef struct {
             // Literals that do not fit are rejected by the tokenizer.
             int64_t value;
         } integer_literal;
+        struct {
+            // The Unicode code point of the character between the quotes, which is at most
+            // U+10FFFF and not a surrogate, U+D800 to U+DFFF.
+            uint32_t value;
+        } rune_literal;
         struct {
             // The bytes between the quotes, as a view of the source text. They are valid UTF-8,
             // which the tokenizer checks. It is never NULL, also for the empty string, so that
@@ -195,6 +203,20 @@ typedef enum {
     TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID,
     // The string has no closing quote before the end of its line.
     TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED,
+    // A backslash in a rune literal. It is kept for escape sequences, which the language does not
+    // have yet. `error_offset` is where the backslash is.
+    TOKENIZE_STATUS_RUNE_LITERAL_BACKSLASH,
+    // `''`, a rune literal without a character. `error_offset` is where the literal starts.
+    TOKENIZE_STATUS_RUNE_LITERAL_EMPTY,
+    // The character of a rune literal is not valid UTF-8. `error_offset` is where the first bad
+    // byte is.
+    TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID,
+    // A rune literal that has more than one character, such as `'ab'`. `error_offset` is where the
+    // literal starts.
+    TOKENIZE_STATUS_RUNE_LITERAL_TOO_LONG,
+    // A rune literal that has no closing quote before the end of its line. `error_offset` is where
+    // the literal starts.
+    TOKENIZE_STATUS_RUNE_LITERAL_UNTERMINATED,
     TOKENIZE_STATUS_TOKEN_LIMIT,
     TOKENIZE_STATUS_UNEXPECTED_CHARACTER,
 } Tokenize_Status;

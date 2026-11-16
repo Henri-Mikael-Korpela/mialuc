@@ -41,12 +41,12 @@
        of the object of `js` is not checked, because it is not known until the program runs.
      - A literal is untyped: it becomes the type that its place wants, when its value fits in it,
        and else it has its default type. An integer literal is an `Int`, or a `Byte` where one is
-       wanted and its value is from 0 to 255. A float literal is an `F64`, or an `F32` where one is wanted. A string literal is a `Str`, or a `C_Str` where one is
+       wanted and its value is from 0 to 255. A rune literal is not untyped: it is a `Rune`. A float literal is an `F64`, or an `F32` where one is wanted. A string literal is a `Str`, or a `C_Str` where one is
        wanted, `true` and `false` are a `Bool`, and `nil` is a pointer of any type. A constant that
        is defined without a type, such as `LIMIT :: 200`, is untyped in the same way, and so is
        an operator of untyped constants, such as `LIMIT * 2`, which the compiler works out. A
        constant that is defined with a type, such as `LIMIT : Byte : 200`, has that type, which is
-       `Int`, `Byte`, `F32`, `F64`, `Bool` or `Str`, and its value must fit in it.
+       `Int`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`, and its value must fit in it.
      - The value of a constant that is not a procedure, a struct, an enum or the member of an enum
        must be known when the program is compiled: literals, other such constants, and the
        arithmetic, comparison and logical operators of them. A constant cannot be defined in terms
@@ -612,8 +612,8 @@ cast_prefix = "cast" , ws , "(" , ws , name , ws , ")" , ws ;
    struct literal by the brace. A name and the literals can have subscripts, fields and carets
    after them. *)
 operand_value =
-    float_literal | signed_float_literal | integer_literal | signed_integer_literal | string_literal |
-    bool_literal | nil_literal | enum_literal | call |
+    float_literal | signed_float_literal | integer_literal | signed_integer_literal | rune_literal |
+    string_literal | bool_literal | nil_literal | enum_literal | call |
     ( name | array_literal | struct_literal | type_info_of ) , { ws , postfix } ;
 
 (* The information about a type, which the compiler works out while it compiles the program:
@@ -683,6 +683,13 @@ nil_literal = "nil" ;
    backslash is not allowed, to keep it free for them. Any other character is, including a tab
    and characters that are not ASCII. The grammar works on characters, so it only sees text that
    is valid UTF-8; the compiler works on bytes and rejects a string that is not. *)
+(* A rune literal is one character between single quotes, which can be any character that is valid
+   UTF-8, such as `'A'`, `'芋'` and `'🚀'`. A backslash is not allowed yet, and the quote itself is not
+   a character of a literal, so there is no way to write a rune of a quote or of a new line yet. *)
+rune_literal = "'" , rune_character , "'" ;
+
+rune_character = any_character - ( "'" | "\\" | "\n" | "\r" ) ;
+
 string_literal = '"' , { string_character } , '"' ;
 
 string_character = any_character - ( '"' | "\\" | "\n" | "\r" ) ;

@@ -45,8 +45,8 @@ typedef enum {
     // The call of a variable, a parameter or a global variable that does not hold a pointer to a
     // procedure. The subject is its name.
     X64_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE,
-    // The operands of a comparison are not two `Int` values or two floats of one type, or not two
-    // `Bool` values for `==` and `not=`. The subject is the first name or string of the comparison.
+    // The operands of a comparison are not two `Int` values, two `Rune` values or two floats of one
+    // type, or not two `Bool` values for `==` and `not=`. The subject is the first name or string of the comparison.
     X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
     // The condition of an if statement is not a `Bool`. The subject is the first name or string of
     // the condition, or the name of the definition that it is in.
@@ -214,6 +214,7 @@ typedef enum {
     X64_TYPE_KIND_NONE,
     X64_TYPE_KIND_POINTER,
     X64_TYPE_KIND_PROCEDURE,
+    X64_TYPE_KIND_RUNE,
     X64_TYPE_KIND_SLICE,
     X64_TYPE_KIND_STR,
     X64_TYPE_KIND_STRUCT,
@@ -361,7 +362,8 @@ typedef struct {
  * code of the process.
  *
  * `Int` is a 64-bit integer, `Bool` is 0 or 1 in 64 bits, `C_Str` is the 64-bit address of
- * bytes that end with a zero, `F32` is a 32-bit float, which is kept in the low 32 bits of a
+ * bytes that end with a zero, `Rune` is the code point of a character in a word, and `F32` is a
+ * 32-bit float, which is kept in the low 32 bits of a
  * word, and `F64` is a 64-bit float, which is a word. A float is passed and returned as the calling
  * convention says: in `xmm0` to `xmm3` for the first four words of the arguments and in `xmm0` for
  * a result, also in the integer register of the word, so that a variadic procedure of the C library

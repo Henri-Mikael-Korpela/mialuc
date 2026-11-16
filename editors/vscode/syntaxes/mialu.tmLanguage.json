@@ -13,6 +13,9 @@
             "include": "#strings"
         },
         {
+            "include": "#runes"
+        },
+        {
             "include": "#attributes"
         },
         {
@@ -96,6 +99,11 @@
                     "match": "\\\\"
                 }
             ]
+        },
+        "runes": {
+            "name": "string.quoted.single.mialu",
+            "comment": "A rune literal is one character between single quotes, which can be any character, as in 'A', '芋' and '🚀'. A backslash is not allowed yet, so a literal that has one, or has more than one character, is not colored.",
+            "match": "'[^'\\\\\\n]'"
         },
         "attributes": {
             "name": "meta.attribute.mialu",

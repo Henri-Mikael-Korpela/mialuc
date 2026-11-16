@@ -62,6 +62,7 @@ typedef enum {
     AST_NODE_TYPE_PROCEDURE_TYPE,
     AST_NODE_TYPE_RANGE,
     AST_NODE_TYPE_RETURN_STATEMENT,
+    AST_NODE_TYPE_RUNE_LITERAL,
     AST_NODE_TYPE_SCOPE_STATEMENT,
     AST_NODE_TYPE_SLICE,
     AST_NODE_TYPE_STRING_LITERAL,
@@ -349,6 +350,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   source, each one an expression: one value, or as many as the procedure has return types,
  *   separated by commas in the source, as in `return a / b, a - b`. The word `return` is in the
  *   payload, like the word of a `break`.
+ * - `AST_NODE_TYPE_RUNE_LITERAL`: no children. One character between single quotes, such as `'A'`,
+ *   whose Unicode code point is in the payload. It is an expression, whose type is `Rune`.
  * - `AST_NODE_TYPE_SCOPE_STATEMENT`: an optional `AST_NODE_TYPE_LABEL`, and then the
  *   `AST_NODE_TYPE_BLOCK` that runs once, in a scope of its own. A `break` inside it leaves it.
  *   It is a statement of a procedure body.
@@ -547,6 +550,10 @@ typedef struct {
         struct {
             int64_t value;
         } integer_literal;
+        struct {
+            // The Unicode code point, from 0 to 0x10FFFF, which is never a surrogate.
+            uint32_t value;
+        } rune_literal;
         struct {
             // Views the source text, like the other names. Without the `@`.
             Str name;

@@ -113,6 +113,7 @@ static Ast_Node_Index parse_scope_statement     (Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_identifier          (Parser *parser);
 static Ast_Node_Index parse_integer_literal     (Parser *parser);
 static Ast_Node_Index parse_float_literal       (Parser *parser);
+static Ast_Node_Index parse_rune_literal        (Parser *parser);
 static Ast_Node_Index parse_negative_number_literal(Parser *parser);
 static bool           parse_line_end_expect     (Parser *parser);
 static bool           parse_match_case          (Parser *parser, Ast_Node_Index match);
@@ -2308,6 +2309,9 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
     if (next == TOKEN_KIND_FLOAT_LITERAL) {
         return parse_float_literal(parser);
     }
+    if (next == TOKEN_KIND_RUNE_LITERAL) {
+        return parse_rune_literal(parser);
+    }
     if (next == TOKEN_KIND_MINUS) {
         return parse_negative_number_literal(parser);
     }
@@ -2371,10 +2375,10 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
         return nil;
     }
 
-    return parse_fail(parser, STR("an integer literal, a float literal, a string literal, 'true', "
-                                  "'false', 'nil', a name, a call, an array literal, a struct "
-                                  "literal, 'cast', 'type_info_of' or a member of an enum such as "
-                                  "'.RED'"));
+    return parse_fail(parser, STR("an integer literal, a float literal, a rune literal, a string "
+                                  "literal, 'true', 'false', 'nil', a name, a call, an array "
+                                  "literal, a struct literal, 'cast', 'type_info_of' or a member "
+                                  "of an enum such as '.RED'"));
 }
 
 /**
@@ -3184,6 +3188,26 @@ static Ast_Node_Index parse_float_literal(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
     parser->nodes[node].payload.float_literal.value = literal->payload.float_literal.value;
+    parse_token_advance(parser);
+
+    assert(parser->nodes[node].first_child == AST_NODE_INDEX_NONE);
+    return node;
+}
+
+static Ast_Node_Index parse_rune_literal(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    Token const *literal = parse_token_current(parser);
+    if (literal->kind != TOKEN_KIND_RUNE_LITERAL) {
+        return parse_fail(parser, STR("a rune literal"));
+    }
+
+    Ast_Node_Index node = parse_node_make(parser, AST_NODE_TYPE_RUNE_LITERAL);
+    if (node == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[node].payload.rune_literal.value = literal->payload.rune_literal.value;
     parse_token_advance(parser);
 
     assert(parser->nodes[node].first_child == AST_NODE_INDEX_NONE);

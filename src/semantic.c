@@ -420,6 +420,7 @@ static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
                                     node_type == AST_NODE_TYPE_MULTIPLICATION ||
                                     node_type == AST_NODE_TYPE_NOT ||
                                     node_type == AST_NODE_TYPE_OR ||
+                                    node_type == AST_NODE_TYPE_RUNE_LITERAL ||
                                     node_type == AST_NODE_TYPE_STRING_LITERAL ||
                                     node_type == AST_NODE_TYPE_SUBTRACTION;
                 if (not is_candidate) {

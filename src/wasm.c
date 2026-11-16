@@ -88,7 +88,9 @@ typedef struct {
 // byte where one is wanted, see `wasm_value_is_accepted`. An `F32` is one 32-bit float, which takes
 // 8 bytes in memory like any other value, of which the first 4 are the float, and an `F64` is one
 // 64-bit float, which takes the 8 bytes. An untyped float is an `F32` or an `F64` where one is
-// wanted, and an `F64` where nothing says.
+// wanted, and an `F64` where nothing says. A `Rune` is one 32-bit value, the code point of a
+// character, from 0 to 0x10FFFF, which takes 8 bytes in memory like the others, of which the first
+// 4 are the rune.
 typedef enum {
     WASM_VALUE_TYPE_ARRAY,
     WASM_VALUE_TYPE_BOOL,
@@ -103,6 +105,7 @@ typedef enum {
     WASM_VALUE_TYPE_NONE,
     WASM_VALUE_TYPE_POINTER,
     WASM_VALUE_TYPE_PROCEDURE,
+    WASM_VALUE_TYPE_RUNE,
     WASM_VALUE_TYPE_SLICE,
     WASM_VALUE_TYPE_STR,
     WASM_VALUE_TYPE_STRUCT,
@@ -1523,10 +1526,11 @@ static void wasm_build_global_section(Wasm_Builder *builder) {
                     wasm_write_float_const(&builder->writer, value_type, constant.floating);
                     wasm_write_byte(&builder->writer, WASM_OPCODE_END);
                 } else {
-                    // A `Byte` and a `Bool` are 32-bit values, and the number is from 0 to 255 or
-                    // 0 or 1, which the check of the global made sure of.
+                    // A `Byte`, a `Bool` and a `Rune` are 32-bit values, and the number is from 0 to
+                    // 255, 0 or 1, or a code point, which the check of the global made sure of.
                     assert(value_type.kind == WASM_VALUE_TYPE_BYTE ||
-                           value_type.kind == WASM_VALUE_TYPE_BOOL);
+                           value_type.kind == WASM_VALUE_TYPE_BOOL ||
+                           value_type.kind == WASM_VALUE_TYPE_RUNE);
                     wasm_write_byte(&builder->writer, WASM_TYPE_I32);
                     wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
                     wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
@@ -4046,6 +4050,8 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
         return wasm_arithmetic_type(builder, expression);
     case AST_NODE_TYPE_FLOAT_LITERAL:
         return wasm_type_make(WASM_VALUE_TYPE_F64);
+    case AST_NODE_TYPE_RUNE_LITERAL:
+        return wasm_type_make(WASM_VALUE_TYPE_RUNE);
     case AST_NODE_TYPE_INTEGER_LITERAL:
         return wasm_type_make(WASM_VALUE_TYPE_INT);
     case AST_NODE_TYPE_IDENTIFIER:
@@ -4388,6 +4394,21 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
                              wasm_expression_subject(builder, definition, left));
         }
         if (not wasm_value_is_accepted(builder, float_type, right)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, right));
+        }
+        return true;
+    }
+
+    // Runes have an order too, the one of their code points. The other operand is a `Rune`, and
+    // there is no untyped number that is one.
+    if (left_type.kind == WASM_VALUE_TYPE_RUNE || right_type.kind == WASM_VALUE_TYPE_RUNE) {
+        Wasm_Type rune_type = wasm_type_make(WASM_VALUE_TYPE_RUNE);
+        if (not wasm_value_is_accepted(builder, rune_type, left)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, left));
+        }
+        if (not wasm_value_is_accepted(builder, rune_type, right)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                              wasm_expression_subject(builder, definition, right));
         }
@@ -4818,6 +4839,7 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
     case AST_NODE_TYPE_BOOL_LITERAL:
     case AST_NODE_TYPE_FLOAT_LITERAL:
     case AST_NODE_TYPE_INTEGER_LITERAL:
+    case AST_NODE_TYPE_RUNE_LITERAL:
     case AST_NODE_TYPE_STRING_LITERAL:
         // A literal is a constant, which is written by `wasm_constant_write`.
         assert(false);
@@ -4833,9 +4855,11 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
                                                            node->last_child)));
             break;
         }
-        // Bytes are compared as the unsigned 32-bit integers that they are.
+        // Bytes and runes are compared as the unsigned 32-bit integers that they are.
         if (wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_BYTE ||
-            wasm_expression_type(builder, node->last_child).kind == WASM_VALUE_TYPE_BYTE) {
+            wasm_expression_type(builder, node->last_child).kind == WASM_VALUE_TYPE_BYTE ||
+            wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_RUNE ||
+            wasm_expression_type(builder, node->last_child).kind == WASM_VALUE_TYPE_RUNE) {
             wasm_write_byte(&builder->writer,
                             wasm_comparison_opcode_byte(node->payload.comparison.operator));
             break;
@@ -6250,6 +6274,7 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
     case AST_NODE_TYPE_PROCEDURE_TYPE:
     case AST_NODE_TYPE_RANGE:
     case AST_NODE_TYPE_RETURN_STATEMENT:
+    case AST_NODE_TYPE_RUNE_LITERAL:
     case AST_NODE_TYPE_SCOPE_STATEMENT:
     case AST_NODE_TYPE_SLICE:
     case AST_NODE_TYPE_STRING_LITERAL:
@@ -6505,6 +6530,7 @@ static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
     case WASM_VALUE_TYPE_F64:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_PROCEDURE:
+    case WASM_VALUE_TYPE_RUNE:
     case WASM_VALUE_TYPE_STR:
     case WASM_VALUE_TYPE_STRUCT: {
         Wasm_Type pointer = wasm_type_make(WASM_VALUE_TYPE_POINTER);
@@ -6911,7 +6937,7 @@ static Wasm_Type wasm_type_of_name(Wasm_Builder const *builder, Str type_name) {
 
 /**
  * Returns the type that the name `type_name` stands for, which has no carets before it: `Bool`,
- * `Byte`, `C_Str`, `F32`, `F64`, `Int`, `Str` or the name of a struct, or a type of the kind
+ * `Byte`, `C_Str`, `F32`, `F64`, `Int`, `Rune`, `Str` or the name of a struct, or a type of the kind
  * `WASM_VALUE_TYPE_NONE` if the target does not have a type of that name.
  */
 static Wasm_Type wasm_type_of_plain_name(Wasm_Builder const *builder, Str type_name) {
@@ -6935,6 +6961,9 @@ static Wasm_Type wasm_type_of_plain_name(Wasm_Builder const *builder, Str type_n
     }
     if (str_equals(type_name, STR("Int"))) {
         return wasm_type_make(WASM_VALUE_TYPE_INT);
+    }
+    if (str_equals(type_name, STR("Rune"))) {
+        return wasm_type_make(WASM_VALUE_TYPE_RUNE);
     }
     if (str_equals(type_name, STR("Str"))) {
         return wasm_type_make(WASM_VALUE_TYPE_STR);
@@ -7121,7 +7150,8 @@ static size_t wasm_struct_slots(Wasm_Builder const *builder, Ast_Node_Index stru
                 // An enum is a number, which is an `Int`.
                 leaf = WASM_VALUE_TYPE_INT;
             } else if (not str_equals(name, STR("Bool")) &&
-                       not str_equals(name, STR("Byte"))) {
+                       not str_equals(name, STR("Byte")) &&
+                       not str_equals(name, STR("Rune"))) {
                 nested = wasm_struct_find(builder, name);
             }
         }
@@ -7182,6 +7212,7 @@ static size_t wasm_type_slot_count(Wasm_Builder const *builder, Wasm_Type type) 
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_POINTER:
     case WASM_VALUE_TYPE_PROCEDURE:
+    case WASM_VALUE_TYPE_RUNE:
         return 1;
     case WASM_VALUE_TYPE_SLICE:
     case WASM_VALUE_TYPE_STR:
@@ -7224,6 +7255,7 @@ static byte wasm_type_slot_kind(Wasm_Builder const *builder, Wasm_Type type, siz
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_POINTER:
     case WASM_VALUE_TYPE_PROCEDURE:
+    case WASM_VALUE_TYPE_RUNE:
     case WASM_VALUE_TYPE_SLICE:
     case WASM_VALUE_TYPE_STR:
         return WASM_TYPE_I32;
@@ -7355,6 +7387,7 @@ static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_NONE:
+    case WASM_VALUE_TYPE_RUNE:
     case WASM_VALUE_TYPE_STR:
         return true;
     }
@@ -7427,6 +7460,8 @@ static Wasm_Type wasm_constant_type(Constant_Type type) {
         return wasm_type_make(WASM_VALUE_TYPE_F64);
     case CONSTANT_TYPE_INT:
         return wasm_type_make(WASM_VALUE_TYPE_INT);
+    case CONSTANT_TYPE_RUNE:
+        return wasm_type_make(WASM_VALUE_TYPE_RUNE);
     case CONSTANT_TYPE_STR:
         return wasm_type_make(WASM_VALUE_TYPE_STR);
     case CONSTANT_TYPE_UNTYPED_BOOL:
@@ -7457,6 +7492,7 @@ static bool wasm_constant_is_accepted(Wasm_Type target, Constant_Value value) {
     case CONSTANT_TYPE_F32:
     case CONSTANT_TYPE_F64:
     case CONSTANT_TYPE_INT:
+    case CONSTANT_TYPE_RUNE:
     case CONSTANT_TYPE_STR:
         return wasm_type_equals(target, wasm_constant_type(value.type));
     case CONSTANT_TYPE_UNTYPED_BOOL:
@@ -7493,6 +7529,7 @@ static void wasm_constant_write(Wasm_Builder *builder, Constant_Value value, Was
     switch (type.kind) {
     case WASM_VALUE_TYPE_BOOL:
     case WASM_VALUE_TYPE_BYTE:
+    case WASM_VALUE_TYPE_RUNE:
         wasm_write_i32_const(&builder->writer, value.integer);
         break;
     case WASM_VALUE_TYPE_C_STR:

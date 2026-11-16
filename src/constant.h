@@ -32,6 +32,9 @@ typedef enum {
     // A constant that is defined with the type `F64`, or arithmetic of one with an untyped float.
     CONSTANT_TYPE_F64,
     CONSTANT_TYPE_INT,
+    // A rune literal, such as `'A'`, whose code point is in `integer`, and a constant that is
+    // defined with the type `Rune`. A rune has no arithmetic, and no untyped integer is one.
+    CONSTANT_TYPE_RUNE,
     CONSTANT_TYPE_STR,
     // `true`, `false`, a comparison of constants, and `and`, `or` and `not` of untyped truth
     // values.
@@ -71,8 +74,8 @@ typedef enum {
     // arithmetic does not wrap around as the arithmetic of a running program does, because the
     // number is wrong as soon as it would. `error` is the operator.
     CONSTANT_STATUS_OVERFLOW,
-    // A typed constant whose type is not `Int`, `Byte`, `F32`, `F64`, `Bool` or `Str`, which are
-    // the types that a constant can have. `error` is the definition.
+    // A typed constant whose type is not `Int`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`,
+    // which are the types that a constant can have. `error` is the definition.
     CONSTANT_STATUS_TYPE_INVALID,
     // A value that is not of the type that it is given, such as a string for a constant of type
     // `Int`, or a typed `Int` for one of type `Byte`. `error` is the definition.

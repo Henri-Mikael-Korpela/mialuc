@@ -197,6 +197,7 @@ Constant_Type constant_type_default(Constant_Type type) {
     case CONSTANT_TYPE_F32:
     case CONSTANT_TYPE_F64:
     case CONSTANT_TYPE_INT:
+    case CONSTANT_TYPE_RUNE:
     case CONSTANT_TYPE_STR:
         return type;
     case CONSTANT_TYPE_UNTYPED_FLOAT:
@@ -242,6 +243,9 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
     case AST_NODE_TYPE_INTEGER_LITERAL:
         return constant_step_done(constant_make(CONSTANT_TYPE_UNTYPED_INTEGER,
                                                 current->payload.integer_literal.value));
+    case AST_NODE_TYPE_RUNE_LITERAL:
+        return constant_step_done(constant_make(CONSTANT_TYPE_RUNE,
+                                                (int64_t)current->payload.rune_literal.value));
     case AST_NODE_TYPE_STRING_LITERAL: {
         Constant_Value string = constant_make(CONSTANT_TYPE_UNTYPED_STRING, 0);
         string.string = node;
@@ -424,6 +428,10 @@ static Constant_Value constant_convert(Ast_Node const *nodes, Ast_Node_Index def
     } else if (str_equals(name, STR("F64"))) {
         target = CONSTANT_TYPE_F64;
         untyped = CONSTANT_TYPE_UNTYPED_FLOAT;
+    } else if (str_equals(name, STR("Rune"))) {
+        // No untyped constant is a rune, so only a rune literal or a rune constant is.
+        target = CONSTANT_TYPE_RUNE;
+        untyped = CONSTANT_TYPE_RUNE;
     } else if (str_equals(name, STR("Bool"))) {
         target = CONSTANT_TYPE_BOOL;
         untyped = CONSTANT_TYPE_UNTYPED_BOOL;
@@ -730,6 +738,8 @@ static Constant_Value constant_comparison(Ast_Node const *nodes, Ast_Node_Index 
             integer = 1;
         }
         return constant_make(CONSTANT_TYPE_UNTYPED_BOOL, integer);
+    } else if (left.type == CONSTANT_TYPE_RUNE && right.type == CONSTANT_TYPE_RUNE) {
+        // Runes are compared by their code points, with every operator, like numbers.
     } else if (constant_type_is_bool(left.type) && constant_type_is_bool(right.type)) {
         if (not is_equality) {
             return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, comparison);

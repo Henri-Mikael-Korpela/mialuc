@@ -177,6 +177,7 @@ enum {
     X64_DWARF_REGISTER_RIP = 16,
     X64_DWARF_ENCODING_BOOLEAN = 0x02,
     X64_DWARF_ENCODING_FLOAT = 0x04,
+    X64_DWARF_ENCODING_UTF = 0x10,
     X64_DWARF_ENCODING_SIGNED = 0x05,
     X64_DWARF_ENCODING_UNSIGNED_CHAR = 0x08,
     X64_DWARF_OP_ADDR = 0x03,
@@ -375,6 +376,7 @@ typedef struct {
     uint32_t f32_type;
     uint32_t f64_type;
     uint32_t int_type;
+    uint32_t rune_type;
     uint32_t str_type;
     // The start of the unit in `.debug_info`, which the places of the entries are counted from.
     size_t unit_start;
@@ -1479,7 +1481,8 @@ static bool x64_data_layout(X64_Builder *builder) {
         // are the values that a constant expression or the information about a type has.
         bool is_valid = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_BYTE ||
                         type.kind == X64_TYPE_KIND_F32 || type.kind == X64_TYPE_KIND_F64 ||
-                        type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_STR ||
+                        type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_RUNE ||
+                        type.kind == X64_TYPE_KIND_STR ||
                         (type.kind == X64_TYPE_KIND_ARRAY && x64_type_info_access_is(builder,
                                                                                    value));
         if (not is_valid) {
@@ -4637,7 +4640,7 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     bool is_equality = operator == AST_COMPARISON_OPERATOR_EQUAL ||
                        operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
     bool is_ordered = type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_BYTE ||
-                      x64_type_is_float(type);
+                      type.kind == X64_TYPE_KIND_RUNE || x64_type_is_float(type);
     bool is_equatable = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_ENUM ||
                         type.kind == X64_TYPE_KIND_POINTER ||
                         type.kind == X64_TYPE_KIND_PROCEDURE;
@@ -5263,6 +5266,8 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
             return x64_type_make(X64_TYPE_KIND_F64);
         case CONSTANT_TYPE_INT:
             return x64_type_make(X64_TYPE_KIND_INT);
+        case CONSTANT_TYPE_RUNE:
+            return x64_type_make(X64_TYPE_KIND_RUNE);
         case CONSTANT_TYPE_STR:
             return x64_type_make(X64_TYPE_KIND_STR);
         case CONSTANT_TYPE_UNTYPED_BOOL:
@@ -6040,7 +6045,7 @@ static bool x64_structs_check(X64_Builder *builder) {
             bool is_valid = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_BYTE ||
                             type.kind == X64_TYPE_KIND_ENUM || type.kind == X64_TYPE_KIND_F32 ||
                             type.kind == X64_TYPE_KIND_F64 || type.kind == X64_TYPE_KIND_INT ||
-                            type.kind == X64_TYPE_KIND_POINTER ||
+                            type.kind == X64_TYPE_KIND_POINTER || type.kind == X64_TYPE_KIND_RUNE ||
                             type.kind == X64_TYPE_KIND_PROCEDURE ||
                             type.kind == X64_TYPE_KIND_STR || type.kind == X64_TYPE_KIND_STRUCT;
             if (not is_valid) {
@@ -6086,6 +6091,7 @@ static X64_Type x64_type_pointer_to(X64_Type target) {
     case X64_TYPE_KIND_F64:
     case X64_TYPE_KIND_INT:
     case X64_TYPE_KIND_PROCEDURE:
+    case X64_TYPE_KIND_RUNE:
     case X64_TYPE_KIND_STR:
     case X64_TYPE_KIND_STRUCT: {
         X64_Type pointer = x64_type_make(X64_TYPE_KIND_POINTER);
@@ -6154,6 +6160,7 @@ static X64_Type x64_type_sequence_of(X64_Type element, X64_Type_Kind kind, int64
     if (element.kind != X64_TYPE_KIND_BOOL && element.kind != X64_TYPE_KIND_BYTE &&
         element.kind != X64_TYPE_KIND_ENUM && element.kind != X64_TYPE_KIND_F32 &&
         element.kind != X64_TYPE_KIND_F64 && element.kind != X64_TYPE_KIND_INT &&
+        element.kind != X64_TYPE_KIND_RUNE &&
         element.kind != X64_TYPE_KIND_POINTER && element.kind != X64_TYPE_KIND_PROCEDURE &&
         element.kind != X64_TYPE_KIND_STR && element.kind != X64_TYPE_KIND_STRUCT) {
         return x64_type_make(X64_TYPE_KIND_NONE);
@@ -6218,6 +6225,7 @@ static size_t x64_type_word_count(X64_Builder const *builder, X64_Type type) {
     case X64_TYPE_KIND_NIL:
     case X64_TYPE_KIND_POINTER:
     case X64_TYPE_KIND_PROCEDURE:
+    case X64_TYPE_KIND_RUNE:
         return 1;
     case X64_TYPE_KIND_SLICE:
     case X64_TYPE_KIND_STR:
@@ -6292,6 +6300,8 @@ static X64_Type x64_type_of_name(X64_Builder const *builder, Str name) {
         base = x64_type_make(X64_TYPE_KIND_F64);
     } else if (str_equals(base_name, STR("Int"))) {
         base = x64_type_make(X64_TYPE_KIND_INT);
+    } else if (str_equals(base_name, STR("Rune"))) {
+        base = x64_type_make(X64_TYPE_KIND_RUNE);
     } else if (str_equals(base_name, STR("Str"))) {
         base = x64_type_make(X64_TYPE_KIND_STR);
     } else if (x64_enum_find(builder, base_name) != AST_NODE_INDEX_NONE) {
@@ -7591,6 +7601,11 @@ static void x64_debug_unit_write(X64_Builder *builder, size_t text_size_bytes) {
     x64_write_string(writer, STR("F64"));
     x64_write_byte(writer, X64_DWARF_ENCODING_FLOAT);
     x64_write_byte(writer, X64_WORD_SIZE_BYTES);
+    types.rune_type = (uint32_t)(writer->length - unit_start);
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_BASE_TYPE);
+    x64_write_string(writer, STR("Rune"));
+    x64_write_byte(writer, X64_DWARF_ENCODING_UTF);
+    x64_write_byte(writer, X64_WORD_SIZE_BYTES);
     uint32_t pointer_type = (uint32_t)(writer->length - unit_start);
     x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_POINTER_TYPE);
     x64_write_byte(writer, X64_DEBUG_ADDRESS_SIZE_BYTES);
@@ -8084,6 +8099,8 @@ static uint32_t x64_debug_type_reference(X64_Builder const *builder, X64_Debug_T
         return types.f64_type;
     case X64_TYPE_KIND_INT:
         return types.int_type;
+    case X64_TYPE_KIND_RUNE:
+        return types.rune_type;
     case X64_TYPE_KIND_STR:
         return types.str_type;
     case X64_TYPE_KIND_ARRAY:

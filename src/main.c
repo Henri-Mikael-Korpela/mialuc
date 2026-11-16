@@ -838,6 +838,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_KIND_SLASH_EQUALS:
             printf("SLASH_EQUALS\n");
             break;
+        case TOKEN_KIND_RUNE_LITERAL:
+            printf("RUNE_LITERAL U+%04" PRIX32 "\n", token.payload.rune_literal.value);
+            break;
         case TOKEN_KIND_STRING_LITERAL:
             printf("STRING_LITERAL \"%.*s\"\n", (int)token.payload.string_literal.text.length,
                    token.payload.string_literal.text.bytes);
@@ -916,6 +919,26 @@ static void main_run_command_report_tokenize_error(char const *path, Str source,
     case TOKENIZE_STATUS_LABEL_INVALID:
         fprintf(stderr, "%s:%zu:%zu: a label is '@' directly followed by a name that is not a "
                 "reserved word.\n", path, line, column);
+        break;
+    case TOKENIZE_STATUS_RUNE_LITERAL_BACKSLASH:
+        fprintf(stderr, "%s:%zu:%zu: a rune cannot contain a backslash, because escape sequences "
+                "are not supported.\n", path, line, column);
+        break;
+    case TOKENIZE_STATUS_RUNE_LITERAL_EMPTY:
+        fprintf(stderr, "%s:%zu:%zu: a rune literal has a character between its quotes, and "
+                "this has none.\n", path, line, column);
+        break;
+    case TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the character of a rune must be valid UTF-8.\n", path, line,
+                column);
+        break;
+    case TOKENIZE_STATUS_RUNE_LITERAL_TOO_LONG:
+        fprintf(stderr, "%s:%zu:%zu: a rune literal has one character between its quotes, and "
+                "this has more.\n", path, line, column);
+        break;
+    case TOKENIZE_STATUS_RUNE_LITERAL_UNTERMINATED:
+        fprintf(stderr, "%s:%zu:%zu: a rune literal has no closing quote on its line.\n", path,
+                line, column);
         break;
     case TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH:
         fprintf(stderr, "%s:%zu:%zu: a string cannot contain a backslash, because escape "
@@ -1635,8 +1658,8 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: an operator of the constant expression at '%.*s' is given "
                 "operands that it does not take: arithmetic takes integers that are untyped or "
                 "Int, or floats, but not both, 'and', 'or' and 'not' take truth values, a Byte is "
-                "compared with a Byte or a number from 0 to 255, and strings are not "
-                "compared.\n", path, position.line,
+                "compared with a Byte or a number from 0 to 255, a Rune with a Rune, and "
+                "strings are not compared.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_CONSTANT_OVERFLOW:

@@ -41,6 +41,18 @@ typedef struct {
     bool is_float;
 } Tokenize_Float_Literal;
 
+/**
+ * A rune literal that `tokenizer_rune_literal` read. On `TOKENIZE_STATUS_OK`, `value` is the code
+ * point and `end` is the offset right after the closing quote. Otherwise `error_offset` is where
+ * the mistake is.
+ */
+typedef struct {
+    uint32_t value;
+    size_t end;
+    size_t error_offset;
+    Tokenize_Status status;
+} Tokenize_Rune_Literal;
+
 enum {
     // Indentation must be a whole number of levels, and one level is always this many spaces.
     INDENTATION_SPACES_PER_LEVEL = 4,
@@ -59,6 +71,8 @@ static size_t utf8_sequence_size(Str text, size_t offset);
 static int    char_digit_value  (char character);
 static bool   tokenizer_comment_line_end(Str source, size_t offset, size_t *end);
 static Tokenize_Float_Literal tokenizer_float_literal(Str source, size_t offset);
+static Tokenize_Rune_Literal tokenizer_rune_literal(Str source, size_t offset);
+static uint32_t utf8_decode(Str text, size_t offset, size_t sequence_size);
 static Tokenize_Integer_Literal tokenizer_integer_literal(Str source, size_t offset);
 static Token_Kind tokenizer_keyword_type(Str text);
 static bool   tokenizer_operator_types(char character, Token_Kind *plain_type,
@@ -240,6 +254,88 @@ static bool tokenizer_operator_types(char character, Token_Kind *plain_type,
  * Returns the keyword token kind of `text`, or `TOKEN_KIND_IDENTIFIER` when it is not a reserved
  * word. `not` followed by `=` must be handled before, because that is the token `not=`.
  */
+/**
+ * Returns the code point of the UTF-8 character that starts at `offset` in `text` and takes
+ * `sequence_size` bytes, which `utf8_sequence_size` found to be valid.
+ */
+static uint32_t utf8_decode(Str text, size_t offset, size_t sequence_size) {
+    assert(sequence_size >= 1 && sequence_size <= 4);
+    assert(offset + sequence_size <= text.length);
+
+    byte lead = (byte)text.bytes[offset];
+    if (sequence_size == 1) {
+        return lead;
+    }
+    // The lead byte has the highest bits of the code point after its own marker of the length,
+    // and each continuation byte has 6 more, after its marker `10`.
+    uint32_t code_point = lead & (0x7Fu >> sequence_size);
+    for (size_t i = 1; i < sequence_size; i += 1) {
+        code_point = (code_point << 6) | ((byte)text.bytes[offset + i] & 0x3Fu);
+    }
+    return code_point;
+}
+
+/**
+ * Reads the rune literal that starts at `offset` in `source`, where there is a single quote: one
+ * character, which is valid UTF-8 and so can be any Unicode character, such as `'A'`, `'芋'` or
+ * `'🚀'`, and a closing single quote. It is on one line, and a backslash is an error for now,
+ * because the escape sequences are kept for later, like those of a string. A character is not
+ * several code points, so a letter with an accent that is a base letter and a combining mark is two
+ * characters and an error, and the one code point of the letter is a rune.
+ */
+static Tokenize_Rune_Literal tokenizer_rune_literal(Str source, size_t offset) {
+    assert(offset < source.length);
+    assert(source.bytes[offset] == '\'');
+
+    Tokenize_Rune_Literal literal = { .status = TOKENIZE_STATUS_OK };
+
+    size_t start = offset + 1;
+    bool is_line_end = start >= source.length || source.bytes[start] == '\n' ||
+                       source.bytes[start] == '\r';
+    if (is_line_end) {
+        literal.status = TOKENIZE_STATUS_RUNE_LITERAL_UNTERMINATED;
+        literal.error_offset = offset;
+        return literal;
+    }
+    if (source.bytes[start] == '\'') {
+        literal.status = TOKENIZE_STATUS_RUNE_LITERAL_EMPTY;
+        literal.error_offset = offset;
+        return literal;
+    }
+    if (source.bytes[start] == '\\') {
+        literal.status = TOKENIZE_STATUS_RUNE_LITERAL_BACKSLASH;
+        literal.error_offset = start;
+        return literal;
+    }
+
+    size_t sequence_size = utf8_sequence_size(source, start);
+    if (sequence_size == 0) {
+        literal.status = TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID;
+        literal.error_offset = start;
+        return literal;
+    }
+    literal.value = utf8_decode(source, start, sequence_size);
+
+    size_t end = start + sequence_size;
+    if (end < source.length && source.bytes[end] == '\'') {
+        literal.end = end + 1;
+        return literal;
+    }
+
+    // There is more after the character. A closing quote later on the line says that the literal has
+    // too many characters, and none that it is not closed.
+    literal.status = TOKENIZE_STATUS_RUNE_LITERAL_UNTERMINATED;
+    for (size_t i = end; i < source.length && source.bytes[i] != '\n' && source.bytes[i] != '\r';
+         i += 1) {
+        if (source.bytes[i] == '\'') {
+            literal.status = TOKENIZE_STATUS_RUNE_LITERAL_TOO_LONG;
+            break;
+        }
+    }
+    literal.error_offset = offset;
+    return literal;
+}
+
 /**
  * Reads the float literal that starts at `offset` in `source`, where there is a digit: decimal
  * digits, a dot and decimal digits, such as `3.14` or `0.5`. An underscore is a digit separator
@@ -793,6 +889,23 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             };
             result.tokens.length += 1;
             offset = end;
+        }
+        // A rune literal is one character between single quotes.
+        else if (character == '\'') {
+            Tokenize_Rune_Literal literal = tokenizer_rune_literal(source, offset);
+            if (literal.status != TOKENIZE_STATUS_OK) {
+                result.status = literal.status;
+                result.error_offset = literal.error_offset;
+                return result;
+            }
+
+            token_elements[result.tokens.length] = (Token){
+                .kind = TOKEN_KIND_RUNE_LITERAL,
+                .source_offset = (uint32_t)offset,
+                .payload.rune_literal.value = literal.value,
+            };
+            result.tokens.length += 1;
+            offset = literal.end;
         }
         // An operator that is a single character, or that character with an `=` directly after it,
         // which is one token: `=` and `==`, `<` and `<=`, `>` and `>=`, `*` and `*=`, `+` and `+=`,
