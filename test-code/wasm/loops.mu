@@ -76,7 +76,7 @@ count_single_number :: proc(n: Int) Int ->
 
 negative_range :: proc() Int ->
     total := 0
-    for i in 0 - 3..<=3 ->
+    for i in -3..<=3 ->
         total += i * i
     return total
 

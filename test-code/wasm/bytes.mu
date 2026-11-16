@@ -132,7 +132,7 @@ too_large :: proc() Int ->
     return cast(Int)int_to_byte(n)
 
 negative :: proc() Int ->
-    n := 0 - 1
+    n := -1
     return cast(Int)int_to_byte(n)
 
 /// `cast(Int)` also makes an Int of a Bool, which is 1 for true and 0 for false, and of an Int,

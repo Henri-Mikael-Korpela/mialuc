@@ -411,7 +411,7 @@ find_negative :: proc(values: []Int) ^Int ->
     return nil
 
 return_nil_or_pointer :: proc() Int ->
-    found := [const]Int { 3, 0 - 4, 5 }
+    found := [const]Int { 3, -4, 5 }
     missing := [const]Int { 3, 4, 5 }
     p := find_negative(found)
     q := find_negative(missing)

@@ -37,7 +37,7 @@ sign :: proc(n: Int) Int ->
     if n > 0 ->
         return 1
     else if n < 0 ->
-        return 0 - 1
+        return -1
     else ->
         return 0
 
@@ -48,7 +48,7 @@ compare_foo :: proc(a: Int, b: Int) Int ->
         if a >= b + 10 ->
             return 2
         else if a <= b - 10 ->
-            return 0 - 2
+            return -2
     return 1
 
 /// A variable defined in a branch exists only in that branch.

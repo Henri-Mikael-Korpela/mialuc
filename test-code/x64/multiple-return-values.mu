@@ -90,7 +90,7 @@ main :: proc() Int ->
     say(first)
     say(second)
 
-    is_positive, text, size := describe(0 - 5)
+    is_positive, text, size := describe(-5)
     say(text)
     if is_positive ->
         wrong += 1

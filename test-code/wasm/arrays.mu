@@ -149,7 +149,7 @@ sum_of_odd_elements :: proc(elements: []Int) Int ->
     return total
 
 breaks_and_continues :: proc() Int ->
-    a := [const]Int { 1, 0 - 1, 2, 3, 0 - 4, 5 }
+    a := [const]Int { 1, -1, 2, 3, -4, 5 }
     b := [const]Int { 10, 20 }
     total := 0
     @outer for x in a ->

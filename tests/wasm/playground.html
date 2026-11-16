@@ -394,8 +394,10 @@
                 ["function", /\b[A-Za-z_]\w*(?=\()/],
                 ["type", /\b[A-Z]\w*\b/],
                 // Decimal, binary after 0b or hexadecimal after 0x, with an underscore only
-                // between two digits, as the compiler takes them.
-                ["number", /\b(?:0b[01](?:_?[01])*|0x[\dA-Fa-f](?:_?[\dA-Fa-f])*|\d(?:_?\d)*)\b/],
+                // between two digits, as the compiler takes them. The minus sign of a signed literal such as
+                // `-5` is part of it where an operand is expected, which is not after a name (other
+                // than a keyword), a number, a closing bracket or a caret, so `a -5` has no literal.
+                ["number", /(?:(?<=\b(?:return|in|case|and|or|not) )|(?<![A-Za-z0-9_)\]^"'])(?<![A-Za-z0-9_)\]^"'] ))-(?=[0-9])|\b(?:0b[01](?:_?[01])*|0x[\dA-Fa-f](?:_?[\dA-Fa-f])*|\d(?:_?\d)*)\b/],
             ],
             javascript: [
                 ["comment", /\/\/.*|\/\*[\s\S]*?\*\//],

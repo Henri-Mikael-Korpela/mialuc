@@ -64,7 +64,7 @@ assignment_in_condition :: proc(n: Int) Int ->
     if n > 0 ->
         x = 1
     else ->
-        x = 0 - 1
+        x = -1
     return x
 
 assignment_in_loop :: proc() Int ->

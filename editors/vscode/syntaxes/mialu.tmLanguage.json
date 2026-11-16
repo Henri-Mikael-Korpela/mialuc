@@ -205,8 +205,20 @@
             ]
         },
         "numbers": {
-            "comment": "Integer literals: decimal, binary after 0b and hexadecimal after 0x, with an underscore as a digit separator between two digits, as in 1_000_000, 0b1111_0000 and 0xFF_FF. A literal that the compiler rejects, such as 1__0 or 0b102, is not colored as a number.",
+            "comment": "Integer literals: decimal, binary after 0b and hexadecimal after 0x, with an underscore as a digit separator between two digits, as in 1_000_000, 0b1111_0000 and 0xFF_FF. A minus sign directly before the digits, where an operand is expected (not after a name other than return, in, case, and, or and not, a number, a closing bracket or a caret, with at most one space between), is part of the literal, as in -5 and -0x10. A literal that the compiler rejects, such as 1__0 or 0b102, is not colored as a number.",
             "patterns": [
+                {
+                    "name": "constant.numeric.integer.binary.mialu",
+                    "match": "(?:(?<=\\b(?:return|in|case|and|or|not) )|(?<![A-Za-z0-9_)\\]^\"'])(?<![A-Za-z0-9_)\\]^\"'] ))-0b[01](?:_?[01])*\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.hexadecimal.mialu",
+                    "match": "(?:(?<=\\b(?:return|in|case|and|or|not) )|(?<![A-Za-z0-9_)\\]^\"'])(?<![A-Za-z0-9_)\\]^\"'] ))-0x[0-9A-Fa-f](?:_?[0-9A-Fa-f])*\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.decimal.mialu",
+                    "match": "(?:(?<=\\b(?:return|in|case|and|or|not) )|(?<![A-Za-z0-9_)\\]^\"'])(?<![A-Za-z0-9_)\\]^\"'] ))-[0-9](?:_?[0-9])*\\b"
+                },
                 {
                     "name": "constant.numeric.integer.binary.mialu",
                     "match": "\\b0b[01](?:_?[01])*\\b"

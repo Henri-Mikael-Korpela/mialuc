@@ -28,7 +28,8 @@
 
    What a grammar cannot say, and the compiler checks in addition:
      - An integer literal must fit in a signed 64-bit integer, in any base: `0x7FFF_FFFF_FFFF_FFFF`
-       is the largest.
+       is the largest. A signed integer literal is its negation, so `-9_223_372_036_854_775_807`
+       is the lowest one.
      - A name that is used must be a variable or a parameter of its procedure or a constant or a
        global variable of the module, a variable can only be used below its definition, and no name
        may be declared twice, for example a variable may not have the name of a parameter. This is
@@ -603,13 +604,13 @@ operand = [ cast_prefix ] , { "%" , ws } , operand_value ;
    one can be written, so a cast does not follow a cast. *)
 cast_prefix = "cast" , ws , "(" , ws , name , ws , ")" , ws ;
 
-(* An integer literal, a string literal, `true` or `false`, a call of a procedure, or the use of a
+(* An integer literal, a signed integer literal, a string literal, `true` or `false`, a call of a procedure, or the use of a
    name, such as a parameter or a constant, or an array literal or a struct literal. A call starts
    with a name too, and is told from the use of a name by the opening parenthesis after it, and a
    struct literal by the brace. A name and the literals can have subscripts, fields and carets
    after them. *)
 operand_value =
-    integer_literal | string_literal | bool_literal | nil_literal | enum_literal | call |
+    integer_literal | signed_integer_literal | string_literal | bool_literal | nil_literal | enum_literal | call |
     ( name | array_literal | struct_literal | type_info_of ) , { ws , postfix } ;
 
 (* The information about a type, which the compiler works out while it compiles the program:
@@ -709,6 +710,11 @@ identifier = ( letter | "_" ) , { letter | digit | "_" } ;
 integer_literal = binary_literal | hexadecimal_literal | decimal_literal ;
 
 decimal_literal = digit , { [ "_" ] , digit } ;
+
+(* A `-` directly before the digits of an integer literal, with no space between them, is part of
+   the literal, as in `-5` and `-0x10`. It is an operand, so it is written where an operand is
+   expected, and the `-` between two operands is the operator `-`, as in `a - 5` and `a -5`. *)
+signed_integer_literal = "-" , integer_literal ;
 
 binary_literal = "0b" , binary_digit , { [ "_" ] , binary_digit } ;
 

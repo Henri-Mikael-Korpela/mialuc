@@ -112,6 +112,7 @@ static bool           parse_line_has_range      (Parser const *parser);
 static Ast_Node_Index parse_scope_statement     (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_identifier          (Parser *parser);
 static Ast_Node_Index parse_integer_literal     (Parser *parser);
+static Ast_Node_Index parse_negative_integer_literal(Parser *parser);
 static bool           parse_line_end_expect     (Parser *parser);
 static bool           parse_match_case          (Parser *parser, Ast_Node_Index match);
 static Ast_Node_Index parse_match_statement     (Parser *parser, Ast_Node_Index parent);
@@ -2303,6 +2304,9 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
     if (next == TOKEN_KIND_INTEGER_LITERAL) {
         return parse_integer_literal(parser);
     }
+    if (next == TOKEN_KIND_MINUS) {
+        return parse_negative_integer_literal(parser);
+    }
     if (next == TOKEN_KIND_IDENTIFIER) {
         // The name is not the last token, because the last one is `END`.
         assert(parser->token_index + 1 < parser->token_count);
@@ -3155,6 +3159,41 @@ static Ast_Node_Index parse_integer_literal(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
     parser->nodes[node].payload.integer_literal.value = literal->payload.integer_literal.value;
+    parse_token_advance(parser);
+
+    assert(parser->nodes[node].first_child == AST_NODE_INDEX_NONE);
+    return node;
+}
+
+/**
+ * Parses a signed integer literal, such as `-5`: a `-` directly followed by the digits of an
+ * integer literal, with no space between them. It is a literal and not an operator, so its node is
+ * an `AST_NODE_TYPE_INTEGER_LITERAL` with a negative value, and a target needs nothing more to
+ * handle it. This is called where an operand is expected, so the `-` of `a - 5` and `a -5`, which
+ * is between two operands, is the operator that subtracts. `- 5` with a space is an error.
+ */
+static Ast_Node_Index parse_negative_integer_literal(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->kind == TOKEN_KIND_MINUS);
+    // The `-` is not the last token, because the last one is `END`.
+    assert(parser->token_index + 1 < parser->token_count);
+
+    Token const *minus = parse_token_current(parser);
+    Token const *literal = &parser->tokens[parser->token_index + 1];
+    if (literal->kind != TOKEN_KIND_INTEGER_LITERAL || literal->source_offset != minus->source_offset + 1) {
+        return parse_fail(parser, STR("an integer literal, a string literal, 'true', 'false', "
+                                      "'nil', a name, a call, an array literal, a struct literal, "
+                                      "'cast', 'type_info_of', a member of an enum such as '.RED' "
+                                      "or a signed integer literal such as '-5', which has no "
+                                      "space after the '-'"));
+    }
+
+    Ast_Node_Index node = parse_node_make(parser, AST_NODE_TYPE_INTEGER_LITERAL);
+    if (node == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[node].payload.integer_literal.value = -literal->payload.integer_literal.value;
+    parse_token_advance(parser);
     parse_token_advance(parser);
 
     assert(parser->nodes[node].first_child == AST_NODE_INDEX_NONE);

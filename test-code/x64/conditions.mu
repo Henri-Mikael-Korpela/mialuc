@@ -21,7 +21,7 @@ sign :: proc(n: Int) Int ->
     if n > 0 ->
         return 1
     else if n < 0 ->
-        return 0 - 1
+        return -1
     return 0
 
 /// Returns the larger of two numbers, which a variable is given in either branch.
@@ -80,7 +80,7 @@ classify :: proc(n: Int) Int ->
 main :: proc() Int ->
     failures := 0
     show("sign(42) is %lld", sign(42))
-    show("sign(-5) is %lld", sign(0 - 5))
+    show("sign(-5) is %lld", sign(-5))
     show("sign(0) is %lld", sign(0))
     show("max(3, 9) is %lld", max(3, 9))
     show("size_code(7) is %lld", size_code(7))
@@ -91,7 +91,7 @@ main :: proc() Int ->
     show("classify(5000000) is %lld", classify(5000000))
     show("classify(8) is %lld", classify(8))
 
-    if sign(0 - 5) not= 0 - 1 ->
+    if sign(-5) not= -1 ->
         failures += 1
     if max(3, 9) not= 9 or max(9, 3) not= 9 ->
         failures += 1

@@ -82,7 +82,7 @@ main :: proc() Int ->
     wrong := 0
     wrong += check("create_pointer_to_procedure() is %lld", create_pointer_to_procedure(), 20)
     difference := create_pointer_to_procedure2()
-    wrong += check("create_pointer_to_procedure2() is %lld", difference, 0 - 10)
+    wrong += check("create_pointer_to_procedure2() is %lld", difference, -10)
     wrong += check("apply_twice(double, 5) is %lld", apply_twice(double, 5), 20)
     wrong += check("operations_table() is %lld", operations_table(), 342)
     wrong += check("compare_pointers() is %lld", compare_pointers(), 0)

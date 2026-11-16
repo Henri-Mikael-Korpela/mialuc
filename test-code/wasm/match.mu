@@ -83,7 +83,7 @@ LIMIT :: 100
 SMALL : Int : 10
 
 /// A pattern is anything known when the program is compiled: a literal, a constant, or arithmetic
-/// of constants, such as `0 - 1`, which is how a negative number is written. A range is
+/// of constants, such as `0 - 1`, or a signed literal such as `-1`. A range is
 /// `first..<end` without its end, or `first..<=end` with it.
 classify :: proc(n: Int) Str ->
     match n ->

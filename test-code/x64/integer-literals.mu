@@ -27,5 +27,19 @@ main :: proc() Int ->
     largest := 0x7FFF_FFFF_FFFF_FFFF
     show(str_to_c_str("0x7FFF_FFFF_FFFF_FFFF is %lld"), largest)
 
+    // A signed integer literal has a minus sign directly before its digits, in any form.
+    show(str_to_c_str("-5 is %lld"), -5)
+    show(str_to_c_str("-112 is %lld"), -112)
+    show(str_to_c_str("-0x10 is %lld"), -0x10)
+    show(str_to_c_str("-0b101 is %lld"), -0b101)
+    show(str_to_c_str("-9_223_372_036_854_775_807 is %lld"), -9_223_372_036_854_775_807)
+
+    // Where an operand is expected a minus sign starts a literal, and between two operands it is
+    // the subtraction, whether or not there is a space after it.
+    base := 10
+    show(str_to_c_str("3 * -4 is %lld"), 3 * -4)
+    show(str_to_c_str("base - -2 is %lld"), base - -2)
+    show(str_to_c_str("base -5 + base-1 is %lld"), base -5 + base-1)
+
     exit_code : Int = 0x2A
     return exit_code

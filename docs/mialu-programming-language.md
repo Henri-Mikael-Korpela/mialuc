@@ -12,6 +12,7 @@
   - [Booleans](#booleans)
   - [Integers](#integers)
   - [Bytes](#bytes)
+  - [Signed integer literals](#signed-integer-literals)
   - [Strings](#strings)
 - [Operators](#operators)
   - [Arithmetic operators](#arithmetic-operators)
@@ -253,11 +254,11 @@ flags := 0b1111_0000
 mask := 0xFF_FF
 ```
 
-A literal is the same untyped integer whatever its base, which is an `Int` where nothing else is wanted, see [Untyped constants](#untyped-constants), so the bases can be mixed, and `0b1010 + 10 + 0xA` is 30. A literal that does not fit in an `Int` is an error in every base, so the largest hexadecimal literal is `0x7FFF_FFFF_FFFF_FFFF`, and `0xFFFF_FFFF_FFFF_FFFF` is an error and not -1. There is no negative literal, so a negative number is written as a subtraction, such as `0 - 4` or `0 - 0x10`. A literal must not be directly followed by a letter or an underscore, so `12a`, `0b102` and `0xFG` are errors that name the character that is not a digit of the literal.
+A literal is the same untyped integer whatever its base, which is an `Int` where nothing else is wanted, see [Untyped constants](#untyped-constants), so the bases can be mixed, and `0b1010 + 10 + 0xA` is 30. A literal that does not fit in an `Int` is an error in every base, so the largest hexadecimal literal is `0x7FFF_FFFF_FFFF_FFFF`, and `0xFFFF_FFFF_FFFF_FFFF` is an error and not -1. A literal is signed with a minus sign directly before its digits, with no space between them, so `-5`, `-112` and `-0x10` are negative literals, and the sign is part of the literal and not an operator. The lowest `Int`, -9223372036854775808, has no literal, because its digits alone do not fit, so the lowest literal is `-9_223_372_036_854_775_807`. See [Signed integer literals](#signed-integer-literals). A literal must not be directly followed by a letter or an underscore, so `12a`, `0b102` and `0xFG` are errors that name the character that is not a digit of the literal.
 
 > **Lessons learnt from C** In C, a literal that starts with `0`, such as `010`, is octal, so a number that is padded with a zero to line up with others quietly becomes another number. In Mialu a leading zero changes nothing, `010` is ten, and a base other than decimal is always spelled out with a letter, `0b` or `0x`.
 
-The arithmetic operators `+`, `-`, `*` and `/` take two `Int` values and give an `Int`, see [Operators](#operators), and so do the assignment operators `+=`, `-=`, `*=` and `/=`, see [Assignment](#assignment). Addition, subtraction and multiplication wrap around on overflow, so the largest `Int` plus 1 is the smallest. Division truncates toward zero, so `(0 - 7) / 2` is -3. Dividing by zero, or dividing the smallest `Int` by -1, whose result does not fit, is an error at run time, see [WebAssembly](#webassembly).
+The arithmetic operators `+`, `-`, `*` and `/` take two `Int` values and give an `Int`, see [Operators](#operators), and so do the assignment operators `+=`, `-=`, `*=` and `/=`, see [Assignment](#assignment). Addition, subtraction and multiplication wrap around on overflow, so the largest `Int` plus 1 is the smallest. Division truncates toward zero, so `-7 / 2` is -3. Dividing by zero, or dividing the smallest `Int` by -1, whose result does not fit, is an error at run time, see [WebAssembly](#webassembly).
 
 > **Lessons learnt from C** In C, the size of `int` and `long` depends on the platform, so the same code can overflow on one machine and not on another, and overflow of a signed integer is undefined behavior, which lets a compiler assume that it never happens and remove checks that a programmer wrote against it. Integer types of different sizes and signs are also converted into each other silently, so a comparison of a signed and an unsigned number can give a surprising answer. In Mialu there is one `Int` of 64 bits whose overflow wraps around in a defined way, nothing is converted implicitly, and the cases of division that have no result are traps and not undefined behavior.
 
@@ -272,6 +273,20 @@ A `Byte` is made an `Int` with a [cast](#casts), `cast(Int)b`, which never loses
 An untyped integer from 0 to 255, which is a literal, a constant without a type or a constant expression of them, is a `Byte` where a `Byte` is wanted, so `b : Byte = 200`, `b >= 65` and `[3]Byte { 1, 2, 3 }` need no conversion, and `b : Byte = 300` is an error, see [Untyped constants](#untyped-constants). An `Int` is never a `Byte`, whatever its value, because its value is known only when the program runs.
 
 A `Byte` has no arithmetic: `a + b` for two bytes is an error, and the arithmetic is done on `Int` values, as in `cast(Int)a + cast(Int)b`.
+
+### Signed integer literals
+
+A negative number is written as a signed integer literal: a `-` directly followed by the digits of an integer literal, in any base, with no space between them. `-5`, `-112`, `-0x10` and `-0b101` are signed literals, whose values are -5, -112, -16 and -5.
+
+```
+temperature := -5
+offset : Int = -112
+deltas := [const]Int { -1, 0, 1 }
+```
+
+A signed literal is one literal, not the operator `-` applied to a number, so it is an operand like any other and has the same type, an untyped integer that is an `Int` where nothing else is wanted, see [Untyped constants](#untyped-constants). It can be written wherever an operand can: as the value of a variable or a constant, an argument, a returned value, an element of an array, a bound of a range, the case of a match statement, and the operand of an operator, so `3 * -4` is -12 and `a - -2` is `a + 2`.
+
+Whether a `-` is part of a literal depends on where it is. A `-` where an operand is expected, which is at the start of an expression and after an operator, a comma, `(`, `[`, `{`, `in`, `case`, `return` or an assignment, starts a signed literal. A `-` between two operands is the subtraction, so `a - 5`, `a -5` and `a-5` all subtract 5 from `a`, and `a - -5` adds 5. A signed literal needs the digits directly after the `-`: `- 5` is an error, and so is `-x`, because there is no negation of a name, which is written `0 - x`. A literal that does not fit is an error also when it is signed, and a signed literal is not a `Byte`, so `b : Byte = -1` is an error.
 
 ### Strings
 
@@ -372,7 +387,7 @@ Addition, subtraction, multiplication and division are defined for [`Int`](#inte
 
 `+` and `-` have the same precedence, and so do `*` and `/`, and operators of the same precedence are left associative. So `a + b + c` means `(a + b) + c`, `a - b + c` means `(a - b) + c`, `5 - 1 + 2` is 6 and not 2, and `8 / 2 * 3` is 12 and not 1. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2. Parentheses are not part of the language, so the order is changed by naming a part of the expression in a variable.
 
-Division truncates toward zero, so `7 / 2` is 3 and `0 - 7 / 2` is -3. Dividing by zero is an error at run time, see [WebAssembly](#webassembly), and an error at compile-time when both operands are constants, see [Constants](#constants). Arithmetic that goes beyond the range of an `Int` wraps around when the program runs. The arithmetic can be combined with an assignment, see [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators).
+Division truncates toward zero, so `7 / 2` is 3 and `-7 / 2` is -3. Dividing by zero is an error at run time, see [WebAssembly](#webassembly), and an error at compile-time when both operands are constants, see [Constants](#constants). Arithmetic that goes beyond the range of an `Int` wraps around when the program runs. The arithmetic can be combined with an assignment, see [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators).
 
 ### Assignment and compound assignment operators
 
@@ -744,7 +759,7 @@ describe :: proc(x: Int) Str ->
 
 > **Lessons learnt from C** In C, the cases of a `switch` fall through into each other unless each ends with `break`, and a forgotten `break` is a well-known bug that compilers can only warn about. A Mialu case never falls through: its block is its own, like the branch of an `if`.
 
-The subject is an `Int`, a `Byte`, a `Str` or an enum. A pattern is known when the program is compiled: a literal, a [constant](#constants), or arithmetic of them such as `LIMIT + 1` or `0 - 1`, which is how a negative number is written. It must be of the type of the subject, and an untyped one becomes it when it fits, so a pattern of a `Byte` is a number from 0 to 255. A pattern that is a variable or a call is an error, because what it matches would not be known until the program runs. A string matches a pattern when it has the same bytes, so `"go"` does not match `"gone"` or `"Go"`, and `""` matches the empty string only:
+The subject is an `Int`, a `Byte`, a `Str` or an enum. A pattern is known when the program is compiled: a literal, a [constant](#constants), or arithmetic of them such as `LIMIT + 1` or `0 - 1`, or a signed literal such as `-1`. It must be of the type of the subject, and an untyped one becomes it when it fits, so a pattern of a `Byte` is a number from 0 to 255. A pattern that is a variable or a call is an error, because what it matches would not be known until the program runs. A string matches a pattern when it has the same bytes, so `"go"` does not match `"gone"` or `"Go"`, and `""` matches the empty string only:
 
 ```
 command_number :: proc(command: Str) Int ->

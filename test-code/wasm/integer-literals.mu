@@ -70,6 +70,36 @@ lowest_four_bits :: proc(n: Int) Int ->
     divisor := mask + 1
     return n - n / divisor * divisor
 
-/// A negative number is written as a subtraction, in any form.
+/// A signed integer literal has a minus sign directly before its digits, in any form.
 negative_hexadecimal :: proc() Int ->
-    return 0 - 0x10
+    return -0x10
+
+negative_decimal :: proc() Int ->
+    return -112
+
+negative_binary :: proc() Int ->
+    return -0b101
+
+/// The lowest Int that can be written as a literal, which is minus the largest Int.
+lowest_literal :: proc() Int ->
+    return -9_223_372_036_854_775_807
+
+/// A signed literal is an operand, so it can be the right side of an operator, after another
+/// operator, and in a variable, a comparison, an array and an argument.
+signed_in_expressions :: proc() Int ->
+    a := -5
+    b := 3 * -4
+    c := a - -2
+    numbers := [const]Int { -1, -2, -3 }
+    total := 0
+    for n in numbers ->
+        total += n
+    return a + b + c + total
+
+/// A minus sign between two operands is the subtraction, whether or not there is a space after it.
+subtraction_is_not_a_literal :: proc(n: Int) Int ->
+    return n -5 + n-1
+
+/// The order of signed numbers is the signed order.
+signed_comparison :: proc() Bool ->
+    return -5 < -2 and -112 < 0 and -1 == 0 - 1

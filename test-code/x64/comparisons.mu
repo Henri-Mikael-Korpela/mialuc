@@ -26,7 +26,7 @@ main :: proc() Int ->
     x := 4
     show("4 > 5 is %lld", x > 5)
     show("4 <= 4 is %lld", x <= 4)
-    show("0 - 1 < 1 is %lld, because the order is signed", 0 - 1 < 1)
+    show("-1 < 1 is %lld, because the order is signed", -1 < 1)
     show("is_even(10) is %lld", is_even(10))
     show("is_even(7) is %lld", is_even(7))
     show("in_range(4, 1, 10) is %lld", in_range(x, 1, 10))
