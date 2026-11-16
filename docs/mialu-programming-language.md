@@ -12,7 +12,6 @@
   - [Booleans](#booleans)
   - [Integers](#integers)
   - [Bytes](#bytes)
-  - [Signed integer literals](#signed-integer-literals)
   - [Floats](#floats)
   - [Float literals](#float-literals)
   - [Strings](#strings)
@@ -257,7 +256,19 @@ flags := 0b1111_0000
 mask := 0xFF_FF
 ```
 
-A literal is the same untyped integer whatever its base, which is an `Int` where nothing else is wanted, see [Untyped constants](#untyped-constants), so the bases can be mixed, and `0b1010 + 10 + 0xA` is 30. A literal that does not fit in an `Int` is an error in every base, so the largest hexadecimal literal is `0x7FFF_FFFF_FFFF_FFFF`, and `0xFFFF_FFFF_FFFF_FFFF` is an error and not -1. A literal is signed with a minus sign directly before its digits, with no space between them, so `-5`, `-112` and `-0x10` are negative literals, and the sign is part of the literal and not an operator. The lowest `Int`, -9223372036854775808, has no literal, because its digits alone do not fit, so the lowest literal is `-9_223_372_036_854_775_807`. See [Signed integer literals](#signed-integer-literals). A literal must not be directly followed by a letter or an underscore, so `12a`, `0b102` and `0xFG` are errors that name the character that is not a digit of the literal.
+A literal is the same untyped integer whatever its base, which is an `Int` where nothing else is wanted, see [Untyped constants](#untyped-constants), so the bases can be mixed, and `0b1010 + 10 + 0xA` is 30. A literal that does not fit in an `Int` is an error in every base, so the largest hexadecimal literal is `0x7FFF_FFFF_FFFF_FFFF`, and `0xFFFF_FFFF_FFFF_FFFF` is an error and not -1. A literal is signed with a minus sign directly before its digits, with no space between them, so `-5`, `-112` and `-0x10` are negative literals, and the sign is part of the literal and not an operator. The lowest `Int`, -9223372036854775808, has no literal, because its digits alone do not fit, so the lowest literal is `-9_223_372_036_854_775_807`. A literal must not be directly followed by a letter or an underscore, so `12a`, `0b102` and `0xFG` are errors that name the character that is not a digit of the literal.
+
+A negative number is written as a signed integer literal: a `-` directly followed by the digits of an integer literal, in any base, with no space between them. `-5`, `-112`, `-0x10` and `-0b101` are signed literals, whose values are -5, -112, -16 and -5.
+
+```
+temperature := -5
+offset : Int = -112
+deltas := [const]Int { -1, 0, 1 }
+```
+
+A signed literal is one literal, not the operator `-` applied to a number, so it is an operand like any other and has the same type, an untyped integer that is an `Int` where nothing else is wanted, see [Untyped constants](#untyped-constants). It can be written wherever an operand can: as the value of a variable or a constant, an argument, a returned value, an element of an array, a bound of a range, the case of a match statement, and the operand of an operator, so `3 * -4` is -12 and `a - -2` is `a + 2`.
+
+Whether a `-` is part of a literal depends on where it is. A `-` where an operand is expected, which is at the start of an expression and after an operator, a comma, `(`, `[`, `{`, `in`, `case`, `return` or an assignment, starts a signed literal. A `-` between two operands is the subtraction, so `a - 5`, `a -5` and `a-5` all subtract 5 from `a`, and `a - -5` adds 5. A signed literal needs the digits directly after the `-`: `- 5` is an error, and so is `-x`, because there is no negation of a name, which is written `0 - x`. A literal that does not fit is an error also when it is signed, and a signed literal is not a `Byte`, so `b : Byte = -1` is an error.
 
 > **Lessons learnt from C** In C, a literal that starts with `0`, such as `010`, is octal, so a number that is padded with a zero to line up with others quietly becomes another number. In Mialu a leading zero changes nothing, `010` is ten, and a base other than decimal is always spelled out with a letter, `0b` or `0x`.
 
@@ -276,20 +287,6 @@ A `Byte` is made an `Int` with a [cast](#casts), `cast(Int)b`, which never loses
 An untyped integer from 0 to 255, which is a literal, a constant without a type or a constant expression of them, is a `Byte` where a `Byte` is wanted, so `b : Byte = 200`, `b >= 65` and `[3]Byte { 1, 2, 3 }` need no conversion, and `b : Byte = 300` is an error, see [Untyped constants](#untyped-constants). An `Int` is never a `Byte`, whatever its value, because its value is known only when the program runs.
 
 A `Byte` has no arithmetic: `a + b` for two bytes is an error, and the arithmetic is done on `Int` values, as in `cast(Int)a + cast(Int)b`.
-
-### Signed integer literals
-
-A negative number is written as a signed integer literal: a `-` directly followed by the digits of an integer literal, in any base, with no space between them. `-5`, `-112`, `-0x10` and `-0b101` are signed literals, whose values are -5, -112, -16 and -5.
-
-```
-temperature := -5
-offset : Int = -112
-deltas := [const]Int { -1, 0, 1 }
-```
-
-A signed literal is one literal, not the operator `-` applied to a number, so it is an operand like any other and has the same type, an untyped integer that is an `Int` where nothing else is wanted, see [Untyped constants](#untyped-constants). It can be written wherever an operand can: as the value of a variable or a constant, an argument, a returned value, an element of an array, a bound of a range, the case of a match statement, and the operand of an operator, so `3 * -4` is -12 and `a - -2` is `a + 2`.
-
-Whether a `-` is part of a literal depends on where it is. A `-` where an operand is expected, which is at the start of an expression and after an operator, a comma, `(`, `[`, `{`, `in`, `case`, `return` or an assignment, starts a signed literal. A `-` between two operands is the subtraction, so `a - 5`, `a -5` and `a-5` all subtract 5 from `a`, and `a - -5` adds 5. A signed literal needs the digits directly after the `-`: `- 5` is an error, and so is `-x`, because there is no negation of a name, which is written `0 - x`. A literal that does not fit is an error also when it is signed, and a signed literal is not a `Byte`, so `b : Byte = -1` is an error.
 
 ### Floats
 
@@ -324,7 +321,7 @@ negative := -0.5
 
 There are digits on both sides of the dot, so `1.` and `.5` are not literals: write `1.0` and `0.5`. An underscore is a digit separator between two digits, on either side of the dot, as it is in an integer literal, so `1_000.000_1` is one number. A float literal has no exponent, no suffix and no other base, so `1e3`, `1.5f` and `0x1.8` are errors, and a literal that has a letter after its digits is an error that names the character, as for an integer. The dot of a range, as in `0..<5`, is not followed by a digit, so it is never part of a float literal.
 
-A float literal is not an integer: `1.0` and `1` are different literals, and an integer is not converted to a float or the other way round without `cast`. The value of a literal is the number that its digits are nearest to, as a 64-bit floating point number (a `double` in C), so `1.42` is stored as the nearest number to it that the type can hold, which is not exactly 1.42 for most numbers, as in every language that has floats. A literal that is larger than the largest 64-bit float, about 1.8e308, is an error. A `-` directly before the digits makes a signed float literal in the same places where it makes a signed integer literal, see [Signed integer literals](#signed-integer-literals), so `-0.5` is one literal and `a - 0.5` subtracts.
+A float literal is not an integer: `1.0` and `1` are different literals, and an integer is not converted to a float or the other way round without `cast`. The value of a literal is the number that its digits are nearest to, as a 64-bit floating point number (a `double` in C), so `1.42` is stored as the nearest number to it that the type can hold, which is not exactly 1.42 for most numbers, as in every language that has floats. A literal that is larger than the largest 64-bit float, about 1.8e308, is an error. A `-` directly before the digits makes a signed float literal in the same places where it makes a signed integer literal, see [Integers](#integers), so `-0.5` is one literal and `a - 0.5` subtracts.
 
 A float literal is untyped, like an integer literal, and it is an [`F32`](#floats) or an [`F64`](#floats) where one is wanted, and an `F64` where nothing says, as in `x := 1.42`, which is the default type of a float, see [Untyped constants](#untyped-constants). A literal that is too large for an `F32`, above about 3.4e38, is an error where an `F32` is wanted, and it is rounded to the nearest number of the type, so `0.1` is not exactly 0.1 in either. Arithmetic and comparisons of float literals are known when the program is compiled, as they are for integer literals, so `1.5 + 2.25` is the untyped float 3.75, and dividing by zero is an error there.
 
