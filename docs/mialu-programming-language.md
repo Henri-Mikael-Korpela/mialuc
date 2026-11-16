@@ -22,11 +22,8 @@
   - [Logical operators](#logical-operators)
   - [Address of and dereference operators](#address-of-and-dereference-operators)
   - [Casts](#casts)
-- [Constants and variables](#constants-and-variables)
-  - [Constants](#constants)
-  - [Untyped constants](#untyped-constants)
-  - [Variables](#variables)
-  - [Global variables](#global-variables)
+- [Constants](#constants)
+- [Variables](#variables)
 - [Control flow structures](#control-flow-structures)
   - [If statements](#if-statements)
   - [Match statements](#match-statements)
@@ -670,9 +667,7 @@ A cast binds like `%`: it is written before an operand, which can have subscript
 
 > **Lessons learnt from C** In C, a cast is written `(int)x` whatever it does, so one spelling converts a number, throws away the high bits of another, and reinterprets a pointer as an integer, and it is easy to confuse with a parenthesized expression. In Mialu a cast is a keyword that is found by searching for it, and it is allowed only where nothing is lost.
 
-## Constants and variables
-
-### Constants
+## Constants
 
 A constant is an immutable value with a name, and it is visible in the whole module, also above where it is defined. It is defined by placing two subsequent colons after an identifier:
 
@@ -698,8 +693,6 @@ DEBUG :: true
 The value of such a constant is a constant expression: a literal, the name of another constant, or the arithmetic, comparison and logical operators applied to them, such as `DOUBLE_LIMIT :: LIMIT * 2` or `VERBOSE :: DEBUG and LIMIT > 50`. The compiler works the value out, so a constant costs nothing when the program runs: a use of its name is its value, as if the literal were written there. A constant can be used above the line where it is defined, like any constant, and it can be defined in terms of constants below it, but not in terms of itself, so `A :: B` together with `B :: A + 1` is an error. A call, a variable, a parameter and a global variable have a value only when the program runs, so `START :: clock()` is an error.
 
 Arithmetic in a constant expression is exact. A step whose result does not fit in an `Int`, such as `0x7FFF_FFFF_FFFF_FFFF + 1`, is an error, and so is a division by zero, such as `1 / 0`, where the same operation on variables would wrap around or trap when the program runs. That goes for the parts of any expression that are constants, so `x + 1 / 0` is an error as well.
-
-### Untyped constants
 
 A literal has no type of its own. `200` is an untyped integer: a number without a size, which becomes the type that the place where it is used wants, when its value fits in that type. The same goes for every constant that is defined without a type, such as `LIMIT :: 200`, and for every constant expression of them, such as `LIMIT / 2`. So one constant can be given to an `Int` and to a `Byte`:
 
@@ -741,7 +734,7 @@ That is how a literal is written once and used with every type that can hold it:
 
 > **Lessons learnt from C** In C, every literal has a type, `int` by default, so `200` is an `int` that is converted to a `char` when it is given to one, whether it fits or not: `unsigned char b = 300;` compiles and gives 44. A `#define` has no type and no scope, and it is checked nowhere but where it is pasted in, while a `const int` is a variable, which cannot be used everywhere that C wants a constant. In Mialu a constant has a name with a scope and a value that the compiler works out exactly, and it has no type until it is used, where it becomes a value of the type that is wanted only when it fits, which is checked when the program is compiled.
 
-### Variables
+## Variables
 
 A variable is a name for a value that is local to a procedure. It is defined by a name followed by `:=` and its initial value, which is an expression:
 
@@ -773,8 +766,6 @@ A variable is defined once, with its initial value, and every variable has one. 
 The values of a call of a procedure that returns several values are defined together, with a name for each, as in `quotient, remainder := divide(31, 4)`, see [Multiple return values](#multiple-return-values).
 
 A variable that is defined outside of every procedure is a [global variable](#global-variables).
-
-### Global variables
 
 A global variable is a variable that is defined at file scope, outside of every procedure. It is written like a variable, with the attribute `static` before the `:`, and it starts in the first column like a constant:
 
