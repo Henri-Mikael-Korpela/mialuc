@@ -60,5 +60,3 @@ console.log("Pointer to an F64, 0.5 * 3, 1.5:", double_pointer());
 console.log("Global variable of an F64, 0.30000000000000004 then 0.5:", add_to_precise(), add_to_precise());
 console.log("Pointer to a procedure with F64, (12 + 1 - 0.5) / 2, 6.25:", double_pointer_to_procedure());
 console.log("Not a number of an F64, 2:", double_not_a_number());
-
-done

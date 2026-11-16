@@ -65,5 +65,3 @@ console.log("Length of the array, 4n:", encoded_array_length());
 console.log("Sum of the bytes of 🚀, 0xF0 + 0x9F + 0x9A + 0x80, 681n:", encoded_sum(128640));
 console.log("The first byte of A is A, and of 🚀 it is U+F0:", show(round_trip(65)), show(round_trip(128640)));
 console.log("Two arrays, (0xC3 * 256 + 0xA9) + 0x80, 50217n:", two_encodings());
-
-done
