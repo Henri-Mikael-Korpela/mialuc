@@ -12,8 +12,7 @@
   - [Booleans](#booleans)
   - [Integers](#integers)
   - [Bytes](#bytes)
-  - [Floats](#floats)
-  - [Float literals](#float-literals)
+  - [Floating-point numbers](#floating-point-numbers)
   - [Strings](#strings)
 - [Operators](#operators)
   - [Arithmetic operators](#arithmetic-operators)
@@ -212,8 +211,8 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 | `Bool` | A boolean value, which is `true` or `false`. See [Booleans](#booleans). |
 | `Byte` | An unsigned 8-bit integer, from 0 to 255. It is the unit of memory and of binary data. See [Bytes](#bytes). |
 | `Int` | A signed 64-bit integer. Written as a number, such as `42`, `0b101010` or `0x2A`. See [Integers](#integers). |
-| `F32` | A 32-bit floating point number. Written as a number with a fractional part, such as `1.42`. See [Floats](#floats). |
-| `F64` | A 64-bit floating point number. Written as a number with a fractional part, such as `1.42`, and the type of one where nothing says. See [Floats](#floats). |
+| `F32` | A 32-bit floating point number. Written as a number with a fractional part, such as `1.42`. See [Floats](#floating-point-numbers). |
+| `F64` | A 64-bit floating point number. Written as a number with a fractional part, such as `1.42`, and the type of one where nothing says. See [Floats](#floating-point-numbers). |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
 | `C_Str` | A null-terminated C string, the address of bytes that end with a zero. It is for passing text to and from code written in C, to a parameter of type `char *` or `char const *`. See [C strings](#c-strings). |
 
@@ -288,9 +287,23 @@ An untyped integer from 0 to 255, which is a literal, a constant without a type 
 
 A `Byte` has no arithmetic: `a + b` for two bytes is an error, and the arithmetic is done on `Int` values, as in `cast(Int)a + cast(Int)b`.
 
-### Floats
+### Floating-point numbers
 
-There are two floating point types: `F32` is a 32-bit floating point number, the IEEE 754 binary32 type that is a `float` in C, which holds numbers of about 7 decimal digits, from about 1.2e-38 to 3.4e38 in size, and `F64` is a 64-bit one, the binary64 type that is a `double` in C, which holds about 15 decimal digits, from about 2.2e-308 to 1.8e308 in size. Both also hold infinity, minus infinity and not a number. They are written as [float literals](#float-literals), and their default value is `0.0`. An `F64` is the type of a float literal where nothing says, as in `x := 1.42`, and an `F32` is written out: `x : F32 = 1.42`.
+There are two floating point types: `F32` is a 32-bit floating point number, the IEEE 754 binary32 type that is a `float` in C, which holds numbers of about 7 decimal digits, from about 1.2e-38 to 3.4e38 in size, and `F64` is a 64-bit one, the binary64 type that is a `double` in C, which holds about 15 decimal digits, from about 2.2e-308 to 1.8e308 in size. Both also hold infinity, minus infinity and not a number. They are written as float literals, see below, and their default value is `0.0`. An `F64` is the type of a float literal where nothing says, as in `x := 1.42`, and an `F32` is written out: `x : F32 = 1.42`.
+
+A number with a fractional part is a float literal: decimal digits, a dot and decimal digits, such as `1.42`, `42.4445` or `0.5`.
+
+```
+my_float := 1.42
+other_float := 42.4445
+negative := -0.5
+```
+
+There are digits on both sides of the dot, so `1.` and `.5` are not literals: write `1.0` and `0.5`. An underscore is a digit separator between two digits, on either side of the dot, as it is in an integer literal, so `1_000.000_1` is one number. A float literal has no exponent, no suffix and no other base, so `1e3`, `1.5f` and `0x1.8` are errors, and a literal that has a letter after its digits is an error that names the character, as for an integer. The dot of a range, as in `0..<5`, is not followed by a digit, so it is never part of a float literal.
+
+A float literal is not an integer: `1.0` and `1` are different literals, and an integer is not converted to a float or the other way round without `cast`. The value of a literal is the number that its digits are nearest to, as a 64-bit floating point number (a `double` in C), so `1.42` is stored as the nearest number to it that the type can hold, which is not exactly 1.42 for most numbers, as in every language that has floats. A literal that is larger than the largest 64-bit float, about 1.8e308, is an error. A `-` directly before the digits makes a signed float literal in the same places where it makes a signed integer literal, see [Integers](#integers), so `-0.5` is one literal and `a - 0.5` subtracts.
+
+A float literal is untyped, like an integer literal, and it is an `F32` or an `F64` where one is wanted, and an `F64` where nothing says, as in `x := 1.42`, which is the default type of a float, see [Untyped constants](#untyped-constants). A literal that is too large for an `F32`, above about 3.4e38, is an error where an `F32` is wanted, and it is rounded to the nearest number of the type, so `0.1` is not exactly 0.1 in either. Arithmetic and comparisons of float literals are known when the program is compiled, as they are for integer literals, so `1.5 + 2.25` is the untyped float 3.75, and dividing by zero is an error there.
 
 ```
 scale :: proc(x: F32, factor: F32) F32 ->
@@ -308,22 +321,6 @@ An operation of floats follows IEEE 754, so it never traps and never wraps aroun
 The result of an `F32` is the same on every target, because the operations are the ones of the standard and nothing in between is kept in more digits than the type has. A procedure of the C library that takes a `float` is declared with an `F32` and one that takes a `double` with an `F64`, see [Foreign procedures in the C library](#foreign-procedures-in-the-c-library).
 
 > **Lessons learnt from C** In C, an integer is converted to a float and a float to a double without being asked to, so `1 / 2 * x` is 0 and `1.0 / 2 * x` is not, and a `float` that is passed to a procedure that takes a variable number of arguments is converted to a `double`, which a format that expects a `float` reads wrongly. In Mialu a float is never converted to another type unless `cast` says so, so `1 / 2.0` is an error, and what a procedure receives is of the type that is written.
-
-### Float literals
-
-A number with a fractional part is a float literal: decimal digits, a dot and decimal digits, such as `1.42`, `42.4445` or `0.5`.
-
-```
-my_float := 1.42
-other_float := 42.4445
-negative := -0.5
-```
-
-There are digits on both sides of the dot, so `1.` and `.5` are not literals: write `1.0` and `0.5`. An underscore is a digit separator between two digits, on either side of the dot, as it is in an integer literal, so `1_000.000_1` is one number. A float literal has no exponent, no suffix and no other base, so `1e3`, `1.5f` and `0x1.8` are errors, and a literal that has a letter after its digits is an error that names the character, as for an integer. The dot of a range, as in `0..<5`, is not followed by a digit, so it is never part of a float literal.
-
-A float literal is not an integer: `1.0` and `1` are different literals, and an integer is not converted to a float or the other way round without `cast`. The value of a literal is the number that its digits are nearest to, as a 64-bit floating point number (a `double` in C), so `1.42` is stored as the nearest number to it that the type can hold, which is not exactly 1.42 for most numbers, as in every language that has floats. A literal that is larger than the largest 64-bit float, about 1.8e308, is an error. A `-` directly before the digits makes a signed float literal in the same places where it makes a signed integer literal, see [Integers](#integers), so `-0.5` is one literal and `a - 0.5` subtracts.
-
-A float literal is untyped, like an integer literal, and it is an [`F32`](#floats) or an [`F64`](#floats) where one is wanted, and an `F64` where nothing says, as in `x := 1.42`, which is the default type of a float, see [Untyped constants](#untyped-constants). A literal that is too large for an `F32`, above about 3.4e38, is an error where an `F32` is wanted, and it is rounded to the nearest number of the type, so `0.1` is not exactly 0.1 in either. Arithmetic and comparisons of float literals are known when the program is compiled, as they are for integer literals, so `1.5 + 2.25` is the untyped float 3.75, and dividing by zero is an error there.
 
 ### Strings
 
@@ -413,7 +410,7 @@ See [Variables](#variables) for variable definitions and [Constants](#constants)
 
 ### Arithmetic operators
 
-Addition, subtraction, multiplication and division are defined for [`Int`](#integers) and for the [float types](#floats), so both operands must be `Int` or both must be of one float type, and the result is of the same type, and `a + 1.5` is an error when `a` is an `Int`, and so is the sum of an `F32` and an `F64`. A [`Byte`](#bytes) has no arithmetic, and is converted with [`cast(Int)`](#casts) first.
+Addition, subtraction, multiplication and division are defined for [`Int`](#integers) and for the [float types](#floating-point-numbers), so both operands must be `Int` or both must be of one float type, and the result is of the same type, and `a + 1.5` is an error when `a` is an `Int`, and so is the sum of an `F32` and an `F64`. A [`Byte`](#bytes) has no arithmetic, and is converted with [`cast(Int)`](#casts) first.
 
 | Operator | Meaning | Precedence | Example |
 |----------|---------|------------|---------|
@@ -523,7 +520,7 @@ is_even :: proc(n: Int) Bool ->
     return n / 2 * 2 == n
 ```
 
-Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. Two [floats](#floats) of one type can be compared with all six operators too, and an untyped float is of that type there, so `x < 0.5` is allowed whether `x` is an `F32` or an `F64`. A comparison with not a number is false, except `not=`, which is true. `Int`, `Byte` and the floats are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an untyped integer from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Strings cannot be compared.
+Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. Two [floats](#floating-point-numbers) of one type can be compared with all six operators too, and an untyped float is of that type there, so `x < 0.5` is allowed whether `x` is an `F32` or an `F64`. A comparison with not a number is false, except `not=`, which is true. `Int`, `Byte` and the floats are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an untyped integer from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Strings cannot be compared.
 
 A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, see [Operators](#operators).
 
