@@ -1,7 +1,7 @@
 # Links the VS Code extensions of editors/ into the VS Code extensions folder of the current user,
-# so that VS Code loads them from this project: editors/vscode, the language support, and
-# editors/vscode-debug, the debugging. Links and not copies, so that changes to the extensions need
-# only a reload of VS Code.
+# so that VS Code loads them from this project: editors/vscode, the language support,
+# editors/vscode-debug, the debugging, and editors/vscode-lsp, the language server. Links and not
+# copies, so that changes to the extensions need only a reload of VS Code.
 #
 #   powershell -File scripts/install_vscode_extension.ps1              install
 #   powershell -File scripts/install_vscode_extension.ps1 -Uninstall   remove the links again
@@ -17,7 +17,7 @@ if (-not $Uninstall -and -not (Test-Path $extensionsFolder)) {
     throw "The VS Code extensions folder $extensionsFolder does not exist. Is VS Code installed?"
 }
 
-foreach ($name in @('vscode', 'vscode-debug')) {
+foreach ($name in @('vscode', 'vscode-debug', 'vscode-lsp')) {
     $source = (Resolve-Path (Join-Path $PSScriptRoot "..\editors\$name")).Path
     $package = Get-Content (Join-Path $source 'package.json') -Raw | ConvertFrom-Json
 

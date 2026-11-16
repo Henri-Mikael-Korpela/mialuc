@@ -984,6 +984,7 @@ static byte const X64_DEBUG_ABBREVIATIONS[] = {
 STATIC_ASSERT(X64_DWARF_CFA_NOP == 0, x64_dwarf_cfa_nop_is_zero);
 // The fixed part of a frame is whole words, so that the variables after it are aligned.
 STATIC_ASSERT(X64_FRAME_FIXED_SIZE_BYTES % X64_WORD_SIZE_BYTES == 0, x64_frame_fixed_is_words);
+STATIC_ASSERT((int)X64_STRUCT_ALIGNMENT_BYTES == (int)X64_WORD_SIZE_BYTES, x64_struct_alignment_is_word);
 static char const X64_EXIT_NAME[] = "exit";
 
 X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice constants,
@@ -5697,6 +5698,24 @@ static size_t x64_struct_word_count(X64_Builder const *builder, Ast_Node_Index s
         depth += 1;
     }
     return count;
+}
+
+size_t x64_struct_size_bytes(Array_Slice nodes, Ast_Node_Index root, Ast_Node_Index struct_node) {
+    assert(nodes.elements != NULL);
+    assert(root < nodes.length);
+    assert(struct_node < nodes.length);
+
+    // Only the tree is looked at to count the words, so the rest of the builder stays empty.
+    X64_Builder builder = {
+        .nodes = nodes.elements,
+        .node_count = nodes.length,
+        .module = root,
+    };
+    size_t word_count = x64_struct_word_count(&builder, struct_node);
+    if (word_count == X64_WORD_COUNT_INVALID) {
+        return SIZE_MAX;
+    }
+    return word_count * X64_WORD_SIZE_BYTES;
 }
 
 /**

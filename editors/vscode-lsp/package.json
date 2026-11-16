@@ -1,0 +1,37 @@
+{
+    "name": "mialu-lsp",
+    "displayName": "Mialu Language Server",
+    "description": "A language server for Mialu that shows the size of each struct above its definition.",
+    "version": "0.0.1",
+    "publisher": "mialu",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "extensionDependencies": [
+        "mialu.mialu"
+    ],
+    "main": "./extension.js",
+    "activationEvents": [
+        "onLanguage:mialu"
+    ],
+    "contributes": {
+        "configuration": {
+            "title": "Mialu Language Server",
+            "properties": {
+                "mialu.lsp.compilerPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "The path of mialuc, which works out the sizes. When it is empty, build/mialuc.exe in the folder of the workspace is used if it exists, and otherwise mialuc on the PATH."
+                },
+                "mialu.lsp.structSizes": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show the size and the alignment of a struct above its definition."
+                }
+            }
+        }
+    }
+}

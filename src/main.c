@@ -49,6 +49,7 @@ typedef enum {
     COMMAND_MODE_BUILD,
     COMMAND_MODE_DUMP_ASM,
     COMMAND_MODE_DUMP_AST,
+    COMMAND_MODE_DUMP_STRUCT_SIZES,
     COMMAND_MODE_INVALID,
     COMMAND_MODE_RUN,
 } Command_Mode;
@@ -114,6 +115,7 @@ static int32_t      main_run_command_build                 (Command command, Buf
 static int32_t      main_run_command_build_x64             (Command command, Buffers const *buffers,
                                                             Str source, Parse_Result parse_result,
                                                             Semantic_Result semantic_result);
+static void         main_run_command_print_struct_sizes    (Str source, Parse_Result parse_result);
 static void         main_run_command_print_tokens          (Array_Slice tokens);
 static Str          main_run_command_read_file             (char const *path, Array_Slice buffer);
 static void         main_run_command_report_parse_error    (char const *path, Str source,
@@ -156,11 +158,12 @@ int main(int argc, char *argv[]) {
                 "Usage: %s run <source file>\n"
                 "       %s dump-ast <source file>\n"
                 "       %s dump-asm --target x64-win32 <source file>\n"
+                "       %s dump-struct-sizes <source file>\n"
                 "       %s build --target wasm -o <output file> <source file>\n"
                 "       %s build --target wat -o <output file> <source file>\n"
                 "       %s build --target x64-win32 [--debug] -o <output file> <source file>\n"
                 "       %s --version\n",
-                argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0]);
+                argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0]);
         return 2;
     }
 
@@ -234,6 +237,7 @@ int main(int argc, char *argv[]) {
  *     mialuc run <source file>
  *     mialuc dump-ast <source file>
  *     mialuc dump-asm --target x64-win32 <source file>
+ *     mialuc dump-struct-sizes <source file>
  *     mialuc build --target wasm -o <output file> <source file>
  *     mialuc build --target wat -o <output file> <source file>
  *     mialuc build --target x64-win32 [--debug] -o <output file> <source file>
@@ -287,6 +291,19 @@ static Command main_command_parse(Array_Slice args) {
             .output_path = NULL,
             .mode = COMMAND_MODE_DUMP_ASM,
             .target = COMMAND_TARGET_X64_WIN32,
+            .is_debug = false,
+        };
+    }
+
+    if (strcmp(argv[1], "dump-struct-sizes") == 0) {
+        if (args.length != 3) {
+            return invalid;
+        }
+        return (Command){
+            .source_path = argv[2],
+            .output_path = NULL,
+            .mode = COMMAND_MODE_DUMP_STRUCT_SIZES,
+            .target = COMMAND_TARGET_NONE,
             .is_debug = false,
         };
     }
@@ -430,6 +447,9 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
                                           semantic_result);
     case COMMAND_MODE_DUMP_AST:
         return 0;
+    case COMMAND_MODE_DUMP_STRUCT_SIZES:
+        main_run_command_print_struct_sizes(source, parse_result);
+        return 0;
     case COMMAND_MODE_INVALID:
         assert(false);
         return 1;
@@ -439,6 +459,39 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
 
     assert(false);
     return 1;
+}
+
+/**
+ * Prints a line for each struct that is defined as a constant of the module, in the order of the
+ * source: the line of its definition, counted from 1, its name, its size in bytes and its
+ * alignment in bytes, separated by tabs. The sizes are those of the program for the processor, see
+ * `x64_struct_size_bytes`. This is what an editor shows above the definition of a struct. A struct
+ * that has no size, because it contains itself, is left out.
+ */
+static void main_run_command_print_struct_sizes(Str source, Parse_Result parse_result) {
+    assert(parse_result.status == PARSE_STATUS_OK);
+
+    Ast_Node const *nodes = parse_result.nodes.elements;
+    Ast_Node_Index definition = nodes[parse_result.root].first_child;
+    // Every definition is a distinct node, so there cannot be more than there are nodes.
+    for (size_t i = 0; i < parse_result.nodes.length && definition != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node const *node = &nodes[definition];
+        definition = node->next_sibling;
+        if (node->node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
+            nodes[node->first_child].node_type != AST_NODE_TYPE_STRUCT_TYPE) {
+            continue;
+        }
+
+        size_t size_bytes = x64_struct_size_bytes(parse_result.nodes, parse_result.root,
+                                                  node->first_child);
+        if (size_bytes == SIZE_MAX) {
+            continue;
+        }
+        Str name = node->payload.constant_definition.name;
+        Str_Position position = str_position_at(source, node->source_offset);
+        printf("%zu\t%.*s\t%zu\t%d\n", position.line, (int)name.length, name.bytes, size_bytes,
+               (int)X64_STRUCT_ALIGNMENT_BYTES);
+    }
 }
 
 /**

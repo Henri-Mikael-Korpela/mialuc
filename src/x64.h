@@ -398,4 +398,21 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
                            Array_Slice output_buffer, Array_Slice symbol_buffer,
                            X64_Debug const *debug);
 
+// The alignment of a struct in memory, which is the size of a word, since every field is made of
+// whole words and a struct has no padding.
+enum {
+    X64_STRUCT_ALIGNMENT_BYTES = 8,
+};
+
+/**
+ * Returns the size in bytes that a value of the struct `struct_node` takes in memory in a program
+ * of this target, so that a tool can show it without building the program. `struct_node` must be
+ * an `AST_NODE_TYPE_STRUCT_TYPE` of the tree below `root`, which must be the
+ * `AST_NODE_TYPE_MODULE` node of a successful `parse`, and `nodes` holds its `Ast_Node` elements.
+ * Every field is made of whole words of 8 bytes and there is no padding, see
+ * `X64_STRUCT_ALIGNMENT_BYTES`. Returns `SIZE_MAX` when the structs are inside each other too deep,
+ * which happens for a struct that contains itself.
+ */
+size_t x64_struct_size_bytes(Array_Slice nodes, Ast_Node_Index root, Ast_Node_Index struct_node);
+
 #endif

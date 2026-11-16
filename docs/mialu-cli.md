@@ -14,6 +14,8 @@ The commands are:
 build       compile a source file and write a program for a target
 dump-asm    compile a source file and print the assembly of the program
 dump-ast    print the tokens and the syntax tree of a source file
+dump-struct-sizes
+            print the size and the alignment of each struct of a source file
 run         compile a source file and run the program
 ```
 
@@ -86,6 +88,26 @@ Dump-ast reads the source file, and prints what the front end made of it to the 
 The tokens are printed before the source is parsed, and the tree before the names are resolved, so a program with a syntax error still shows its tokens, and a program with an unknown name still shows its tree.
 
 Dump-ast does not build the program, so it does not depend on a target, and it also shows programs that no target can build.
+
+## Print the sizes of the structs
+
+Usage:
+
+```
+mialuc dump-struct-sizes <source file>
+```
+
+Dump-struct-sizes reads the source file, checks it up to the names, as dump-ast does, and prints a line for each struct that is defined as a constant of the module, in the order of the source. A line has four fields separated by tabs: the line of the definition, counted from 1, the name of the struct, its size in bytes, and its alignment in bytes. For `test-code/x64/structs.mu`:
+
+```
+23	Person	24	8
+28	Point	16	8
+32	Line	32	8
+36	Info	24	8
+42	Node	16	8
+```
+
+The sizes are those of the `x64-win32` target, see [Structs](build-target-x64-win32.md#structs): every field is made of whole words of 8 bytes, a `Str` is two words, and a struct has no padding, so the alignment is always 8. A struct that is defined where a field is has no name, and is not printed, but it is part of the size of the struct that has it. The command does not build the program, so it also shows programs that the target cannot build. It is what the [language server](../editors/vscode-lsp/README.md) shows above the structs in an editor.
 
 ## Compile a program and run it
 

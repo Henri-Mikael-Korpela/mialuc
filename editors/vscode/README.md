@@ -10,7 +10,7 @@ nothing to build and nothing to install with a package manager.
 
 ## Install
 
-VS Code only loads extensions from its extensions folder, so link this folder into it, together with the [debug extension](../vscode-debug/README.md):
+VS Code only loads extensions from its extensions folder, so link this folder into it, together with the [debug extension](../vscode-debug/README.md) and the [language server](../vscode-lsp/README.md):
 
 ```
 powershell -File scripts/install_vscode_extension.ps1

@@ -69,7 +69,7 @@ build/mialuc.exe build --target wasm -o <output file> <source file>
 build/mialuc.exe build --target wat -o <output file> <source file>
 ```
 
-See [test-code/x64](../test-code/x64) and [test-code/wasm](../test-code/wasm) for programs of the targets, [build-wasm.ps1](../build-wasm.ps1) and [run.ps1](../run.ps1) for examples, and [Playground](playground.md) for trying the WebAssembly in the browser. All the commands, including `dump-ast` and `dump-asm`, which show what the compiler makes of a source file, are in [mialuc](mialu-cli.md).
+See [test-code/x64](../test-code/x64) and [test-code/wasm](../test-code/wasm) for programs of the targets, [build-wasm.ps1](../build-wasm.ps1) and [run.ps1](../run.ps1) for examples, and [Playground](playground.md) for trying the WebAssembly in the browser. All the commands, including `dump-ast`, `dump-asm` and `dump-struct-sizes`, which show what the compiler makes of a source file, are in [mialuc](mialu-cli.md).
 
 ## Linux and other operating systems
 
