@@ -303,6 +303,7 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
     case AST_NODE_TYPE_ADDRESS_OF:
     case AST_NODE_TYPE_ARRAY_LITERAL:
     case AST_NODE_TYPE_CALL:
+    case AST_NODE_TYPE_CAST:
     case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_ENUM_LITERAL:
     case AST_NODE_TYPE_FIELD_ACCESS:

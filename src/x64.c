@@ -639,6 +639,8 @@ static void         x64_memory_store             (X64_Builder *builder, X64_Type
 static bool         x64_node_enter               (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static bool         x64_node_type_is_jump        (Ast_Node_Type node_type);
+static bool         x64_cast_write               (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame);
 static bool         x64_operation_write          (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static size_t       x64_parameter_count          (X64_Builder const *builder,
@@ -3503,6 +3505,7 @@ static Ast_Node_Index x64_child_first(X64_Builder const *builder, Ast_Node_Index
     case AST_NODE_TYPE_ADDRESS_OF:
     case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_CALL:
+    case AST_NODE_TYPE_CAST:
     case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_DIVISION:
@@ -3587,9 +3590,6 @@ static X64_Type x64_child_wanted(X64_Builder const *builder, X64_Expression_Fram
             if (str_equals(node->payload.call.name, STR("int_to_byte"))) {
                 return x64_type_make(X64_TYPE_KIND_INT);
             }
-            if (str_equals(node->payload.call.name, STR("byte_to_int"))) {
-                return x64_type_make(X64_TYPE_KIND_BYTE);
-            }
             if (str_equals(node->payload.call.name, STR("str_to_c_str"))) {
                 return x64_type_make(X64_TYPE_KIND_STR);
             }
@@ -3664,6 +3664,8 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
             return x64_built_in_write(builder, frame);
         }
         return x64_call_write(builder, frame, is_result_used);
+    case AST_NODE_TYPE_CAST:
+        return x64_cast_write(builder, frame);
     case AST_NODE_TYPE_COMPARISON:
         return x64_comparison_write(builder, frame);
     case AST_NODE_TYPE_FIELD_INITIALIZER:
@@ -4097,10 +4099,27 @@ static void x64_sequence_length_load(X64_Builder *builder, X64_Type type, byte r
 }
 
 /**
- * Writes a call of the built-in procedure `length_of`, `byte_to_int` or `int_to_byte` of `frame`,
- * whose argument is on the stack of values. `length_of` is the length of an array, which is part
- * of its type, or the second word of an array slice. A `Byte` is a number from 0 to 255 in a word,
- * so `byte_to_int` changes nothing, and `int_to_byte` traps unless the number is at most 255, as an
+ * Writes the cast of `frame`, whose operand is on the stack of values: a `Byte`, a `Bool` or an
+ * `Int` is cast to an `Int`. A `Byte` and a `Bool` are numbers in a whole word, from 0 to 255 and
+ * from 0 to 1, which are the same numbers as `Int` values, so the value stays where it is and no
+ * instruction is needed. Returns false after it recorded an error.
+ */
+static bool x64_cast_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
+    Ast_Node const *cast = &builder->nodes[frame->node];
+    X64_Type target = x64_type_of_name(builder, cast->payload.cast.type_name);
+    X64_Type source = x64_expression_type(builder, cast->first_child);
+    bool is_source_valid = source.kind == X64_TYPE_KIND_BYTE || source.kind == X64_TYPE_KIND_BOOL ||
+                           source.kind == X64_TYPE_KIND_INT;
+    if (target.kind != X64_TYPE_KIND_INT || not is_source_valid) {
+        return x64_fail(builder, X64_BUILD_STATUS_CAST_INVALID, cast->payload.cast.type_name);
+    }
+    return true;
+}
+
+/**
+ * Writes a call of the built-in procedure `length_of` or `int_to_byte` of `frame`, whose argument
+ * is on the stack of values. `length_of` is the length of an array, which is part of its type, or
+ * the second word of an array slice. `int_to_byte` traps unless the number is at most 255, as an
  * unsigned number, which a negative one is not. Returns false after it recorded an error.
  */
 static bool x64_built_in_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
@@ -4120,11 +4139,6 @@ static bool x64_built_in_write(X64_Builder *builder, X64_Expression_Frame const 
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         }
         x64_sequence_length_load(builder, type, X64_REGISTER_RAX, place);
-    } else if (str_equals(name, STR("byte_to_int"))) {
-        if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_BYTE), argument)) {
-            return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
-        }
-        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
     } else if (str_equals(name, STR("int_to_byte"))) {
         if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_INT), argument)) {
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
@@ -4992,6 +5006,10 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
     case AST_NODE_TYPE_NOT:
     case AST_NODE_TYPE_OR:
         return x64_type_make(X64_TYPE_KIND_BOOL);
+    case AST_NODE_TYPE_CAST:
+        // The type that is cast to. A type that is not allowed is an error when the cast is
+        // written, see `x64_cast_write`.
+        return x64_type_of_name(builder, node->payload.cast.type_name);
     case AST_NODE_TYPE_ARRAY_LITERAL: {
         X64_Type type = x64_type_of_node(builder, node->first_child);
         if (type.kind != X64_TYPE_KIND_ARRAY) {

@@ -264,7 +264,7 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
 
 /**
  * Returns whether `name` is the name of a built-in procedure, which is called like any procedure
- * but is not defined in the program. Today those are `byte_to_int`, `int_to_byte`, `length_of` and
+ * but is not defined in the program. Today those are `int_to_byte`, `length_of` and
  * `str_to_c_str`. The analysis does not bind the call of a built-in procedure to a definition, so
  * its binding keeps the kind `SEMANTIC_BINDING_KIND_NONE`, and the target knows what the call means
  * from the name. A definition of the program with the same name is called instead, because a name

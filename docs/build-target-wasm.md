@@ -90,7 +90,7 @@ The target rejects a program that the parser accepts when:
 - the type written after `enum` is not `Int`,
 - `type_info_of` is asked about a type that is not an enum, or is not followed by `.name` or `.members` right away, or is the initial value of a global variable with anything more than one of them after it,
 - `length_of` has other than one argument, or an argument that is not an array or an array slice,
-- `byte_to_int` has other than one argument, or an argument that is not a `Byte`, and `int_to_byte` has other than one argument, or an argument that is not an `Int`,
+- `cast(Type)` casts to another type than `Int`, or a value that is not a `Byte`, a `Bool` or an `Int`, and `int_to_byte` has other than one argument, or an argument that is not an `Int`,
 - a type, also the one of a global variable, is not `Int`, `Bool`, `Byte`, `Str`, a struct or an enum that is defined, a pointer to one of them, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
 - a struct contains itself, or has a field that is an array or an array slice,
 - a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field, or the literal gives a value to some fields and not to all of them,

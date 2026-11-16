@@ -24,6 +24,8 @@ console.log("Pointer to a Byte, 99:", pointer_to_byte());
 console.log("Pointer to an element, 5 60 7 as 50000 + 6000 + 7:", pointer_to_element());
 console.log("Global Byte, 4 then 5:", raise_level(), raise_level());
 
+console.log("Cast of Bool and Int, 142:", cast_bool_and_int());
+
 function trapped(call) {
     try {
         return call();

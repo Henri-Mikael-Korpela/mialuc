@@ -2087,6 +2087,28 @@ static Ast_Node_Index parse_operand(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
 
+    // `cast(Type)` comes first, and has the whole operand after it, also the `%` of it. The type is
+    // kept until the operand is parsed, so that the node is made after the operand like the node
+    // of `not`, and a cast cannot follow a cast, so the parser does not call itself.
+    bool is_cast = parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_CAST;
+    Str cast_type_name = {0};
+    uint32_t cast_offset = parse_token_current(parser)->source_offset;
+    if (is_cast) {
+        parse_token_advance(parser);
+        if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('"))) {
+            return AST_NODE_INDEX_NONE;
+        }
+        Token const *type_name = parse_token_current(parser);
+        if (type_name->kind != TOKEN_KIND_IDENTIFIER) {
+            return parse_fail(parser, STR("the name of the type to cast to"));
+        }
+        cast_type_name = type_name->payload.identifier.text;
+        parse_token_advance(parser);
+        if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'"))) {
+            return AST_NODE_INDEX_NONE;
+        }
+    }
+
     size_t address_count = 0;
     // Every `%` consumes a token, so there are fewer of them than tokens, which bounds the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
@@ -2109,6 +2131,18 @@ static Ast_Node_Index parse_operand(Parser *parser) {
         }
         parse_node_append_child(parser, address, operand);
         operand = address;
+    }
+
+    if (is_cast) {
+        Ast_Node_Index cast = parse_node_make(parser, AST_NODE_TYPE_CAST);
+        if (cast == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        // An error about the cast points at its word, and not at what follows the operand.
+        parser->nodes[cast].source_offset = cast_offset;
+        parser->nodes[cast].payload.cast.type_name = cast_type_name;
+        parse_node_append_child(parser, cast, operand);
+        operand = cast;
     }
 
     return operand;
@@ -2189,7 +2223,7 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
 
     return parse_fail(parser, STR("an integer literal, a string literal, 'true', 'false', 'nil', "
                                   "a name, a call, an array literal, a struct literal, "
-                                  "'type_info_of' or a member of an enum such as '.RED'"));
+                                  "'cast', 'type_info_of' or a member of an enum such as '.RED'"));
 }
 
 /**

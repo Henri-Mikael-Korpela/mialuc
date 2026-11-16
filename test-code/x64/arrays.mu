@@ -77,7 +77,7 @@ sum_of_bytes :: proc(bytes: []Byte) Int ->
     total := 0
     for b in bytes ->
         if b >= 100 ->
-            total += byte_to_int(b)
+            total += cast(Int)b
     return total
 
 main :: proc() Int ->
@@ -95,8 +95,8 @@ main :: proc() Int ->
 
     bytes := [const]Byte { 10, 100, 200, 255 }
     wrong += check("sum_of_bytes is %lld", sum_of_bytes(bytes), 555)
-    bytes[0] = int_to_byte(byte_to_int(bytes[3]) - 5)
-    wrong += check("bytes[0] is %lld", byte_to_int(bytes[0]), 250)
+    bytes[0] = int_to_byte(cast(Int)bytes[3] - 5)
+    wrong += check("bytes[0] is %lld", cast(Int)bytes[0], 250)
 
     // An array of bytes is a buffer for the C library: `%bytes[0]` is the address of the first.
     buffer := [64]Byte {
@@ -106,6 +106,8 @@ main :: proc() Int ->
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     }
     sprintf(%buffer[0], "%lld", 2026)
-    wrong += check("the first is '2', which is %lld", byte_to_int(buffer[0]), 50)
-    wrong += check("the one after the last is %lld", byte_to_int(buffer[4]), 0)
+    wrong += check("the first is '2', which is %lld", cast(Int)buffer[0], 50)
+    wrong += check("the one after the last is %lld", cast(Int)buffer[4], 0)
+    yes := true
+    wrong += check("a true Bool cast to Int is %lld", cast(Int)yes, 1)
     return wrong

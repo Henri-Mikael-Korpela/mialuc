@@ -160,6 +160,9 @@ typedef enum {
     // A call of a variable, a parameter or a global variable that does not hold a pointer to a
     // procedure. The subject is the name.
     WASM_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE,
+    // `cast(Type)` of a value that is not converted to that type: the type must be `Int`, and the
+    // value a `Byte`, a `Bool` or an `Int`. The subject is the name of the type.
+    WASM_BUILD_STATUS_CAST_INVALID,
     WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
     WASM_BUILD_STATUS_CONDITION_TYPE_INVALID,
     WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED,

@@ -329,6 +329,7 @@ static bool            wasm_build_code_section_body_call_statement(Wasm_Builder 
 static bool            wasm_build_code_section_body_assignment(Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index assignment);
+static bool            wasm_cast_is_valid                     (Wasm_Type target, Wasm_Type source);
 static bool            wasm_build_code_section_body_operands  (Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index operation);
@@ -3045,7 +3046,7 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
 
     // A built-in procedure takes one argument, which was written already. `length_of` takes an
     // array or an array slice, and an array was made into a slice of all its elements, so the
-    // length is on the stack either way. `byte_to_int` takes a `Byte` and `int_to_byte` an `Int`.
+    // length is on the stack either way. `int_to_byte` takes an `Int`.
     if (wasm_call_is_built_in(builder, call)) {
         if (wasm_children_count(builder, call) != 1) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
@@ -3053,9 +3054,7 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
         Wasm_Type argument_type =
             wasm_expression_type(builder, builder->nodes[call].first_child);
         bool is_argument_valid = wasm_type_is_sequence(argument_type);
-        if (str_equals(name, STR("byte_to_int"))) {
-            is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_BYTE;
-        } else if (str_equals(name, STR("int_to_byte"))) {
+        if (str_equals(name, STR("int_to_byte"))) {
             is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_INT;
         } else if (str_equals(name, STR("str_to_c_str"))) {
             is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_STR;
@@ -3870,6 +3869,10 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
         return wasm_type_make(WASM_VALUE_TYPE_INT);
     case AST_NODE_TYPE_IDENTIFIER:
         return wasm_binding_value_type(builder, builder->bindings[expression]);
+    case AST_NODE_TYPE_CAST:
+        // The type that is cast to. A type that is not allowed is an error when the cast is
+        // written, see `wasm_cast_is_valid`.
+        return wasm_type_of_name(builder, node->payload.cast.type_name);
     case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_BOOL_LITERAL:
     case AST_NODE_TYPE_COMPARISON:
@@ -3877,8 +3880,8 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     case AST_NODE_TYPE_OR:
         return wasm_type_make(WASM_VALUE_TYPE_BOOL);
     case AST_NODE_TYPE_CALL: {
-        // A built-in procedure returns an `Int`, the length of an array or the number of a byte,
-        // except `int_to_byte`, which returns a `Byte`.
+        // A built-in procedure returns an `Int`, the length of an array, except `int_to_byte`,
+        // which returns a `Byte`, and `str_to_c_str`, which returns a `C_Str`.
         if (wasm_call_is_built_in(builder, expression)) {
             if (str_equals(builder->nodes[expression].payload.call.name, STR("int_to_byte"))) {
                 return wasm_type_make(WASM_VALUE_TYPE_BYTE);
@@ -4054,6 +4057,16 @@ static Str wasm_expression_subject(Wasm_Builder const *builder, Ast_Node_Index d
 }
 
 /**
+ * Returns whether a value of type `source` can be cast to `target`, which is done only where no
+ * information is lost: a `Byte`, a `Bool` or an `Int` is cast to an `Int`.
+ */
+static bool wasm_cast_is_valid(Wasm_Type target, Wasm_Type source) {
+    return target.kind == WASM_VALUE_TYPE_INT &&
+           (source.kind == WASM_VALUE_TYPE_BYTE || source.kind == WASM_VALUE_TYPE_BOOL ||
+            source.kind == WASM_VALUE_TYPE_INT);
+}
+
+/**
  * Checks the operands of the arithmetic operation, comparison or logical operation `operation`,
  * which were written already. `and`, `or` and `not` take `Bool` values only. Arithmetic is defined
  * for `Int` only. A comparison takes two `Int` values with any
@@ -4069,6 +4082,15 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     Ast_Node_Index right = node->last_child;
     assert(left != AST_NODE_INDEX_NONE);
 
+    if (node->node_type == AST_NODE_TYPE_CAST) {
+        assert(right == left);
+        if (not wasm_cast_is_valid(wasm_type_of_name(builder, node->payload.cast.type_name),
+                                   wasm_expression_type(builder, left))) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_CAST_INVALID,
+                             node->payload.cast.type_name);
+        }
+        return true;
+    }
     if (node->node_type == AST_NODE_TYPE_NOT) {
         assert(right == left);
         if (wasm_expression_type(builder, left).kind != WASM_VALUE_TYPE_BOOL) {
@@ -4329,6 +4351,7 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
     case AST_NODE_TYPE_SUBTRACTION:
     case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_AND:
+    case AST_NODE_TYPE_CAST:
     case AST_NODE_TYPE_NOT:
     case AST_NODE_TYPE_OR:
         if (not wasm_build_code_section_body_operands(builder, definition, current)) {
@@ -4356,6 +4379,13 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
         // one. There is no short circuit: both operands are always evaluated.
         wasm_write_byte(&builder->writer, WASM_OPCODE_I32_AND);
         break;
+    case AST_NODE_TYPE_CAST:
+        // A `Byte` and a `Bool` are 32-bit integers, from 0 to 255 and from 0 to 1, and an `Int` is
+        // a 64-bit one, so they are widened without a sign. An `Int` is the type already.
+        if (wasm_expression_type(builder, node->first_child).kind != WASM_VALUE_TYPE_INT) {
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_U);
+        }
+        break;
     case AST_NODE_TYPE_NOT:
         // 1 for a 0 and 0 for a 1.
         wasm_write_byte(&builder->writer, WASM_OPCODE_I32_EQZ);
@@ -4368,12 +4398,6 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
         if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
             str_equals(node->payload.call.name, STR("str_to_c_str"))) {
             // The address of the literal is on the stack already, see the string literal.
-            break;
-        }
-        if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
-            str_equals(node->payload.call.name, STR("byte_to_int"))) {
-            // A byte is a 32-bit integer from 0 to 255, and an `Int` is a 64-bit one.
-            wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_U);
             break;
         }
         if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
@@ -5733,6 +5757,7 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
     case AST_NODE_TYPE_ENUM_MEMBER:
     case AST_NODE_TYPE_ENUM_TYPE:
     case AST_NODE_TYPE_TYPE_INFO_OF:
+    case AST_NODE_TYPE_CAST:
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
     case AST_NODE_TYPE_ADDRESS_OF:

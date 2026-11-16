@@ -720,6 +720,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_KIND_KEYWORD_CASE:
             printf("KEYWORD_CASE\n");
             break;
+        case TOKEN_KIND_KEYWORD_CAST:
+            printf("KEYWORD_CAST\n");
+            break;
         case TOKEN_KIND_KEYWORD_CONST:
             printf("KEYWORD_CONST\n");
             break;
@@ -1068,6 +1071,11 @@ static void main_run_command_report_x64_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: the index at '%.*s' is not an Int.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
+    case X64_BUILD_STATUS_CAST_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool or an Int "
+                "can be cast to Int, and nothing else is converted.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: an operand of 'and', 'or' or 'not' at '%.*s' is not a "
                 "Bool.\n", path, position.line, position.column, subject_length,
@@ -1341,6 +1349,11 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' does not hold a pointer to a procedure, so it cannot "
                 "be called.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_CAST_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool or an Int "
+                "can be cast to Int, and nothing else is converted.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "

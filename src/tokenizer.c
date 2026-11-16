@@ -311,6 +311,8 @@ static Token_Kind tokenizer_keyword_type(Str text) {
         return TOKEN_KIND_KEYWORD_BREAK;
     } else if (str_equals(text, STR("case"))) {
         return TOKEN_KIND_KEYWORD_CASE;
+    } else if (str_equals(text, STR("cast"))) {
+        return TOKEN_KIND_KEYWORD_CAST;
     } else if (str_equals(text, STR("const"))) {
         return TOKEN_KIND_KEYWORD_CONST;
     } else if (str_equals(text, STR("continue"))) {

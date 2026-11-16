@@ -36,7 +36,7 @@ calls #(static) := LIMIT / 2
 limit_as_both :: proc() Int ->
     count : Int = LIMIT
     small : Byte = LIMIT
-    return count + byte_to_int(small)
+    return count + cast(Int)small
 
 /// Without a type, a variable has the default type of the constant, which is Int.
 default_type :: proc() Int ->
@@ -52,14 +52,14 @@ byte_argument :: proc() Int ->
     return take_byte(LIMIT / 4 + 5)
 
 take_byte :: proc(b: Byte) Int ->
-    return byte_to_int(b)
+    return cast(Int)b
 
 /// The elements of an array of Byte can be untyped constants, and typed Byte constants.
 sum_of_bytes :: proc() Int ->
     bytes := [const]Byte { LIMIT, MASK, 0b11 }
     total := 0
     for b in bytes ->
-        total += byte_to_int(b)
+        total += cast(Int)b
     return total
 
 /// A typed Int and an untyped integer give an Int.

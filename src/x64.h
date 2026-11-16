@@ -79,6 +79,9 @@ typedef enum {
     // An operand of `and`, `or` or `not` is not a `Bool`. The subject is the first name or string
     // of the operand, or the name of the definition that it is in.
     X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
+    // `cast(Type)` of a value that is not converted to that type: the type must be `Int`, and the
+    // value a `Byte`, a `Bool` or an `Int`. The subject is the name of the type.
+    X64_BUILD_STATUS_CAST_INVALID,
     // There is no procedure called `main`, or it is not `main :: proc() Int ->`. The subject is
     // `main` in the source in the second case, and has `bytes` NULL in the first, which is about
     // no place in the source.

@@ -51,7 +51,7 @@ same_number_in_every_form :: proc() Bool ->
 /// A literal from 0 to 255 is a Byte where a Byte is wanted, in any form.
 hexadecimal_byte :: proc() Int ->
     b : Byte = 0xFF
-    return byte_to_int(b)
+    return cast(Int)b
 
 /// The length of an array type is an integer literal, so it can be written in any form.
 array_with_hexadecimal_length :: proc() Int ->

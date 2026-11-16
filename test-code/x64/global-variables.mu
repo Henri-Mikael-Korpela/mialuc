@@ -52,7 +52,7 @@ main :: proc() Int ->
     wrong += check("ready is %lld", one_if(ready), 0)
     ready = true
     wrong += check("ready is %lld after it is set", one_if(ready), 1)
-    wrong += check("small is %lld", byte_to_int(small), 200)
+    wrong += check("small is %lld", cast(Int)small, 200)
     wrong += check("twice is %lld", twice, 200)
     puts(str_to_c_str(label))
 

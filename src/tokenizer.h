@@ -59,6 +59,8 @@ typedef enum {
     TOKEN_KIND_KEYWORD_BREAK,
     // Starts a case of a match statement, see `AST_NODE_TYPE_MATCH_CASE`, or of a union match.
     TOKEN_KIND_KEYWORD_CASE,
+    // Starts a cast, `cast(Int)x`, see `AST_NODE_TYPE_CAST`.
+    TOKEN_KIND_KEYWORD_CAST,
     TOKEN_KIND_KEYWORD_CONST,
     TOKEN_KIND_KEYWORD_CONTINUE,
     // Runs the statement after it when the block that it is in is left, see

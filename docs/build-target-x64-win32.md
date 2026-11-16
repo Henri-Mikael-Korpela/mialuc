@@ -118,7 +118,8 @@ The target builds procedures whose parameters, results and variables are of the 
 - a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field, or the literal gives a value to some fields and not to all of them,
 - a field is accessed on a value that is not a struct or a pointer of one caret to one, or does not exist, or is accessed through a value that is computed, such as a call,
 - a field is assigned through a parameter or an iterator that is not a pointer,
-- `length_of`, `byte_to_int`, `int_to_byte` or `str_to_c_str` has other than one argument, or an argument of another type than an array or an array slice, a `Byte`, an `Int` and a `Str`,
+- `cast(Type)` casts to another type than `Int`, or a value that is not a `Byte`, a `Bool` or an `Int`,
+- `length_of`, `int_to_byte` or `str_to_c_str` has other than one argument, or an argument of another type than an array or an array slice, an `Int` and a `Str`,
 - the subject of a match statement is not an `Int`, a `Byte`, a `Str` or an enum, a pattern is not a constant of its type, a range is empty or is the pattern of a `Str` or an enum, two cases match a value in common, a match of an enum without a default case and without `partial` has no case for a member, or a match with `partial` is not of an enum or has a default case,
 - an expression is nested deeper than 1024 operators and operands.
 

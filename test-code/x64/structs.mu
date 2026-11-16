@@ -127,7 +127,7 @@ defaults :: proc() Int ->
     nothing : Person
     if nothing.is_member ->
         return 1
-    return empty.x + empty.y + nothing.age + byte_to_int(nothing.initial)
+    return empty.x + empty.y + nothing.age + cast(Int)nothing.initial
 
 main :: proc() Int ->
     wrong := 0

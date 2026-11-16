@@ -33,6 +33,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_BREAK_STATEMENT:
     case AST_NODE_TYPE_CALL:
     case AST_NODE_TYPE_CALL_STATEMENT:
+    case AST_NODE_TYPE_CAST:
     case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
@@ -299,6 +300,10 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_CALL_STATEMENT:
             printf("CALL_STATEMENT\n");
+            break;
+        case AST_NODE_TYPE_CAST:
+            printf("CAST %.*s\n", (int)node.payload.cast.type_name.length,
+                   node.payload.cast.type_name.bytes);
             break;
         case AST_NODE_TYPE_COMPARISON:
             printf("COMPARISON %s\n",

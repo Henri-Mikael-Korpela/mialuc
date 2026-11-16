@@ -23,6 +23,7 @@ typedef enum {
     AST_NODE_TYPE_BREAK_STATEMENT,
     AST_NODE_TYPE_CALL,
     AST_NODE_TYPE_CALL_STATEMENT,
+    AST_NODE_TYPE_CAST,
     AST_NODE_TYPE_COMPARISON,
     AST_NODE_TYPE_CONSTANT_DEFINITION,
     AST_NODE_TYPE_CONTINUE_STATEMENT,
@@ -175,6 +176,10 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   depends on the procedure, which is for the target to tell.
  * - `AST_NODE_TYPE_CALL_STATEMENT`: one child, an `AST_NODE_TYPE_CALL` whose value, if it has
  *   one, is dropped. It is a statement of a procedure body.
+ * - `AST_NODE_TYPE_CAST`: one child, the operand, as `b` in `cast(Int)b`. The name of the type that
+ *   the value is converted to, `Int` there, is in the payload, and which types a value can be
+ *   converted between is for the target to tell. It is an expression. It binds like `%`, tighter
+ *   than every operator, so `cast(Int)a + b` is `(cast(Int)a) + b`.
  * - `AST_NODE_TYPE_COMPARISON`: two children, the left and the right operand, in that order. It is
  *   an expression of type `Bool` with the lowest precedence of the operators, so its operands are
  *   not comparisons. The operator is in the payload.
@@ -432,6 +437,10 @@ typedef struct {
             // Views the source text, like the other names.
             Str name;
         } call;
+        struct {
+            // The name of the type that the operand is converted to, as a view of the source text.
+            Str type_name;
+        } cast;
         struct {
             Ast_Comparison_Operator operator;
         } comparison;

@@ -17,6 +17,7 @@
   - [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators)
   - [Comparison operators](#comparison-operators)
   - [Logical operators](#logical-operators)
+  - [Casts](#casts)
 - [Constants and variables](#constants-and-variables)
   - [Constants](#constants)
   - [Untyped constants](#untyped-constants)
@@ -144,7 +145,7 @@ Reserved words are categorized into used and unused keywords and literal words. 
 ```
 and
 break
-case const continue
+case cast const continue
 defer
 else enum
 for foreign
@@ -263,11 +264,11 @@ An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an err
 
 A `Byte` is an unsigned 8-bit integer: it holds the numbers from 0 to 255. It can be used to represent individual bytes of memory. The default value for `Byte` is `0`.
 
-The built-in procedures `byte_to_int` and `int_to_byte` allow conversion between bytes and integers.
+A `Byte` is made an `Int` with a [cast](#casts), `cast(Int)b`, which never loses anything, and the built-in procedure `int_to_byte` makes a `Byte` of an `Int`, and stops the program when the number is not from 0 to 255.
 
 An untyped integer from 0 to 255, which is a literal, a constant without a type or a constant expression of them, is a `Byte` where a `Byte` is wanted, so `b : Byte = 200`, `b >= 65` and `[3]Byte { 1, 2, 3 }` need no conversion, and `b : Byte = 300` is an error, see [Untyped constants](#untyped-constants). An `Int` is never a `Byte`, whatever its value, because its value is known only when the program runs.
 
-A `Byte` has no arithmetic: `a + b` for two bytes is an error, and the arithmetic is done on `Int` values, as in `byte_to_int(a) + byte_to_int(b)`.
+A `Byte` has no arithmetic: `a + b` for two bytes is an error, and the arithmetic is done on `Int` values, as in `cast(Int)a + cast(Int)b`.
 
 ### Strings
 
@@ -331,6 +332,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `*`      | Multiplication. | 6 | `x := 2 + 3 * 4` makes `x` 14 |
 | `/`      | Division. The result is truncated toward zero. | 6 | `x := 20 - 12 / 4` makes `x` 17 |
 | `%`      | Address of. It is written before its operand, which must have an address, and gives a pointer to it. It binds looser than what follows a name, so `%p.x` is the address of `p.x`. See [Taking an address](#taking-an-address). | 7 | `%x` is a pointer to `x` |
+| `cast`   | Cast. `cast(Type)` is written before its operand, and converts its value to the type, where nothing is lost. It binds like `%`. See [Casts](#casts). | 7 | `cast(Int)b` is the `Int` of the `Byte` `b` |
 | `[ ]`    | Subscript. The index of an element between brackets. It is written after the name of an array or of an array slice, and binds tighter than every operator. See [Elements](#elements). | 8 | `a[2]` is the element at index 2 of `a` |
 | `.`      | Field access. The name of a field after a struct object, which is a name, an element of an array, what a pointer points to, or another field. See [Fields](#fields). | 8 | `p.age` is the field `age` of `p` |
 | `[ : ]`  | Slice. The two bounds of an array slice between brackets, separated by a colon. It includes the low bound and excludes the high bound. See [Array slices](#array-slices). | 8 | `a[1:4]` has the elements 1 through 3 |
@@ -344,7 +346,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
 | `=`      | Sets the initial value of a variable whose type is written. It also assigns a new value to a variable, an element or a field, and copies to a range of elements. | 0 | `x : Int = 5`, `x = 6`, `a[0] = 5`, `p.age = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values or two pointers of one type for `==` and `not=`, and its result is a `Bool`.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` or `cast(Type)` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values or two pointers of one type for `==` and `not=`, and its result is a `Bool`.
 
 > **Lessons learnt from C** In C, `a < b < c` is valid, and it does not mean what it means in mathematics: it compares the `0` or `1` of `a < b` with `c`. Mialu makes the comparison of a comparison an error, so the mistake is found at compile-time.
 
@@ -482,6 +484,28 @@ Both operands of `and` and `or` are always evaluated: there is no short circuit.
 
 A word must be separated from what is next to it by whitespace, unlike a symbol, so `a and b` cannot be written `aandb`. `not=` is one token for the inequality, and the keyword `not` is a `not` that is not directly followed by `=`.
 
+### Casts
+
+A cast converts a value to another type with `cast(Type)` before the value: `my_int := cast(Int)my_byte`. Nothing is converted implicitly in Mialu, so a cast is how a value of one type is used as a value of another, and it is written wherever the conversion happens, which makes it easy to find.
+
+A value is cast only to a type that can hold all of its values, so a cast never loses anything and never stops the program. Today these casts are allowed, and every other one is an error:
+
+| From | To | Result |
+|------|----|--------|
+| `Byte` | `Int` | The number of the byte, from 0 to 255. |
+| `Bool` | `Int` | 1 for `true` and 0 for `false`. |
+| `Int` | `Int` | The same number. |
+
+```
+count := cast(Int)small + cast(Int)flag
+```
+
+The other direction, to a type that holds fewer values, is not a cast, because a value may not fit: `int_to_byte` makes a `Byte` of an `Int` and stops the program when the number is not from 0 to 255, see [Bytes](#bytes). A `Bool` is never made out of an `Int`, which is written as a comparison, `n not= 0`, see [Booleans](#booleans).
+
+A cast binds like `%`: it is written before an operand, which can have subscripts, fields and carets after it, and it binds tighter than every operator, so `cast(Int)a + b` is `(cast(Int)a) + b` and `cast(Int)a[2]` is the cast of the element. A cast cannot follow a cast, which would do nothing, and a cast is not a constant, so `LIMIT :: cast(Int)SMALL` is an error. The type is a name, and the word `cast` is a [keyword](#reserved-words).
+
+> **Lessons learnt from C** In C, a cast is written `(int)x` whatever it does, so one spelling converts a number, throws away the high bits of another, and reinterprets a pointer as an integer, and it is easy to confuse with a parenthesized expression. In Mialu a cast is a keyword that is found by searching for it, and it is allowed only where nothing is lost.
+
 ## Constants and variables
 
 ### Constants
@@ -521,7 +545,7 @@ LIMIT :: 200
 both :: proc() Int ->
     count : Int = LIMIT
     small : Byte = LIMIT
-    return count + byte_to_int(small)
+    return count + cast(Int)small
 ```
 
 An untyped constant becomes a value of its type when the program is compiled, so nothing is converted while the program runs, and only where its value fits: `b : Byte = 300` and `b : Byte = LIMIT + 100` are errors, because 300 is not a `Byte`. There are three untyped kinds. Each has a default type, which is the type that an untyped constant has where its place does not say which type it wants, such as the value of a variable without a type, `x := LIMIT`:
@@ -548,7 +572,7 @@ NAME : Str : "Mialu"
 
 The type of a constant is `Int`, `Byte`, `Bool` or `Str`, and its value must be a constant expression that has that type, or that is untyped and fits in it, so `MASK : Byte : 256` and `COUNT : Int : "three"` are errors. A typed constant follows the rules of its type: `MASK + 1` is an error, because a `Byte` has no arithmetic, and so is `b : Byte = COUNT`, because an `Int` is not a `Byte`. A typed and an untyped operand give a value of the type, so `COUNT * 2` is the `Int` 6.
 
-That is how a literal is written once and used with every type that can hold it: no type is chosen for it until it is used, so it needs no conversion, which `byte_to_int` and `int_to_byte` are for values that are known only when the program runs.
+That is how a literal is written once and used with every type that can hold it: no type is chosen for it until it is used, so it needs no conversion, which a [cast](#casts) and `int_to_byte` are for values that are known only when the program runs.
 
 > **Lessons learnt from C** In C, every literal has a type, `int` by default, so `200` is an `int` that is converted to a `char` when it is given to one, whether it fits or not: `unsigned char b = 300;` compiles and gives 44. A `#define` has no type and no scope, and it is checked nowhere but where it is pasted in, while a `const int` is a variable, which cannot be used everywhere that C wants a constant. In Mialu a constant has a name with a scope and a value that the compiler works out exactly, and it has no type until it is used, where it becomes a value of the type that is wanted only when it fits, which is checked when the program is compiled.
 
