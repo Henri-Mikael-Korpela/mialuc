@@ -37,6 +37,7 @@ typedef enum {
     AST_NODE_TYPE_FIELD,
     AST_NODE_TYPE_FIELD_ACCESS,
     AST_NODE_TYPE_FIELD_INITIALIZER,
+    AST_NODE_TYPE_FLOAT_LITERAL,
     AST_NODE_TYPE_FOR_STATEMENT,
     AST_NODE_TYPE_FOREIGN_BODY,
     AST_NODE_TYPE_FOREIGN_IMPORT,
@@ -235,6 +236,10 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_FIELD_INITIALIZER`: one child, the value of the field, which is an expression
  *   or, for a field that is a struct, an `AST_NODE_TYPE_STRUCT_LITERAL` without a name. The name of
  *   the field is in the payload. It is a child of an `AST_NODE_TYPE_STRUCT_LITERAL`.
+ * - `AST_NODE_TYPE_FLOAT_LITERAL`: no children. A number with a fractional part, such as `3.14`,
+ *   whose value is in the payload as a `double`, and which is negative for a signed literal such as
+ *   `-0.5`, see `AST_NODE_TYPE_INTEGER_LITERAL`. Like an integer literal it is untyped, and
+ *   becomes the floating point type that the place it is given to wants. It is an expression.
  * - `AST_NODE_TYPE_FOR_STATEMENT`: two children, an `AST_NODE_TYPE_RANGE` and the
  *   `AST_NODE_TYPE_BLOCK` that runs once for each number of the range, in that order. Instead of
  *   the range the first child can be an expression, the array or array slice that the block runs
@@ -535,6 +540,10 @@ typedef struct {
             // Views the source text, like the other names.
             Str name;
         } identifier;
+        struct {
+            // The value that the digits are nearest to. It is never infinite.
+            double value;
+        } float_literal;
         struct {
             int64_t value;
         } integer_literal;

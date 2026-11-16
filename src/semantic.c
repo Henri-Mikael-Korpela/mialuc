@@ -414,6 +414,7 @@ static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
                                     node_type == AST_NODE_TYPE_BOOL_LITERAL ||
                                     node_type == AST_NODE_TYPE_COMPARISON ||
                                     node_type == AST_NODE_TYPE_DIVISION ||
+                                    node_type == AST_NODE_TYPE_FLOAT_LITERAL ||
                                     node_type == AST_NODE_TYPE_IDENTIFIER ||
                                     node_type == AST_NODE_TYPE_INTEGER_LITERAL ||
                                     node_type == AST_NODE_TYPE_MULTIPLICATION ||

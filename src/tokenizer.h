@@ -51,6 +51,8 @@ typedef enum {
     // elsewhere.
     TOKEN_KIND_ELLIPSIS,
     TOKEN_KIND_EQUALS_EQUALS,
+    // A decimal number with a fractional part, such as `1.5`. See `AST_NODE_TYPE_FLOAT_LITERAL`.
+    TOKEN_KIND_FLOAT_LITERAL,
     TOKEN_KIND_GREATER_EQUALS,
     TOKEN_KIND_IDENTIFIER,
     TOKEN_KIND_INDENTATION,
@@ -123,6 +125,11 @@ typedef struct {
             Str text;
         } comment;
         struct {
+            // The value that the digits are nearest to, as a `double`. A literal that is above the
+            // largest `double` is rejected by the tokenizer.
+            double value;
+        } float_literal;
+        struct {
             Str text;
         } identifier;
         struct {
@@ -152,6 +159,19 @@ typedef enum {
     // on lines of its own, and a note about the code on the same line is a `//` comment.
     // `error_offset` is where the `///` starts.
     TOKENIZE_STATUS_DOCUMENTATION_COMMENT_TRAILING,
+    // A character of a float literal after its dot that is not a digit, such as the `f` of `1.5f`
+    // or the `e` of `1.5e3`, which the language does not have. `error_offset` is where the
+    // character is.
+    TOKENIZE_STATUS_FLOAT_LITERAL_DIGIT_INVALID,
+    // A float literal that has more characters than `TOKENIZER_FLOAT_LITERAL_LENGTH_MAX`.
+    // `error_offset` is where the literal starts.
+    TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LONG,
+    // The value of a float literal is above the largest `double`, which is about 1.8e308.
+    // `error_offset` is where the literal starts.
+    TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LARGE,
+    // A digit separator `_` that is not between two digits in a float literal, such as `1.5_`.
+    // `error_offset` is where the separator is.
+    TOKENIZE_STATUS_FLOAT_LITERAL_SEPARATOR_INVALID,
     TOKENIZE_STATUS_INDENTATION_TAB,
     TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID,
     // A character of an integer literal that is not a digit of its base, such as the `2` of

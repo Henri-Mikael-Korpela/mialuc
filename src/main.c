@@ -697,6 +697,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_KIND_GREATER:
             printf("GREATER\n");
             break;
+        case TOKEN_KIND_FLOAT_LITERAL:
+            printf("FLOAT_LITERAL %.17g\n", token.payload.float_literal.value);
+            break;
         case TOKEN_KIND_GREATER_EQUALS:
             printf("GREATER_EQUALS\n");
             break;
@@ -874,6 +877,23 @@ static void main_run_command_report_tokenize_error(char const *path, Str source,
         break;
     case TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID:
         fprintf(stderr, "%s:%zu:%zu: indentation must be a multiple of 4 spaces.\n", path, line,
+                column);
+        break;
+    case TOKENIZE_STATUS_FLOAT_LITERAL_DIGIT_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: '%c' is not a digit of the float literal, which has the digits "
+                "0 to 9 and nothing else after the dot, since there is no exponent and no "
+                "suffix.\n", path, line, column, source.bytes[result.error_offset]);
+        break;
+    case TOKENIZE_STATUS_FLOAT_LITERAL_SEPARATOR_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: a digit separator '_' must be between two digits.\n", path,
+                line, column);
+        break;
+    case TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LARGE:
+        fprintf(stderr, "%s:%zu:%zu: float literal is larger than the largest F64, about "
+                "1.8e308.\n", path, line, column);
+        break;
+    case TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LONG:
+        fprintf(stderr, "%s:%zu:%zu: float literal has more than 128 characters.\n", path, line,
                 column);
         break;
     case TOKENIZE_STATUS_INTEGER_LITERAL_DIGIT_INVALID:
@@ -1611,13 +1631,15 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     case SEMANTIC_STATUS_CONSTANT_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: an operator of the constant expression at '%.*s' is given "
                 "operands that it does not take: arithmetic takes integers that are untyped or "
-                "Int, 'and', 'or' and 'not' take truth values, a Byte is compared with a Byte or a "
-                "number from 0 to 255, and strings are not compared.\n", path, position.line,
+                "Int, or floats, but not both, 'and', 'or' and 'not' take truth values, a Byte is "
+                "compared with a Byte or a number from 0 to 255, and strings are not "
+                "compared.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_CONSTANT_OVERFLOW:
         fprintf(stderr, "%s:%zu:%zu: the constant expression at '%.*s' has a value that does not "
-                "fit in an Int, which goes from -9223372036854775808 to 9223372036854775807.\n",
+                "fit in an Int, which goes from -9223372036854775808 to 9223372036854775807, or "
+                "in a float, which is finite.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_CONSTANT_TOO_DEEP:

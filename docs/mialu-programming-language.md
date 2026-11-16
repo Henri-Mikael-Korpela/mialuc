@@ -13,6 +13,7 @@
   - [Integers](#integers)
   - [Bytes](#bytes)
   - [Signed integer literals](#signed-integer-literals)
+  - [Float literals](#float-literals)
   - [Strings](#strings)
 - [Operators](#operators)
   - [Arithmetic operators](#arithmetic-operators)
@@ -288,6 +289,22 @@ A signed literal is one literal, not the operator `-` applied to a number, so it
 
 Whether a `-` is part of a literal depends on where it is. A `-` where an operand is expected, which is at the start of an expression and after an operator, a comma, `(`, `[`, `{`, `in`, `case`, `return` or an assignment, starts a signed literal. A `-` between two operands is the subtraction, so `a - 5`, `a -5` and `a-5` all subtract 5 from `a`, and `a - -5` adds 5. A signed literal needs the digits directly after the `-`: `- 5` is an error, and so is `-x`, because there is no negation of a name, which is written `0 - x`. A literal that does not fit is an error also when it is signed, and a signed literal is not a `Byte`, so `b : Byte = -1` is an error.
 
+### Float literals
+
+A number with a fractional part is a float literal: decimal digits, a dot and decimal digits, such as `1.42`, `42.4445` or `0.5`.
+
+```
+my_float := 1.42
+other_float := 42.4445
+negative := -0.5
+```
+
+There are digits on both sides of the dot, so `1.` and `.5` are not literals: write `1.0` and `0.5`. An underscore is a digit separator between two digits, on either side of the dot, as it is in an integer literal, so `1_000.000_1` is one number. A float literal has no exponent, no suffix and no other base, so `1e3`, `1.5f` and `0x1.8` are errors, and a literal that has a letter after its digits is an error that names the character, as for an integer. The dot of a range, as in `0..<5`, is not followed by a digit, so it is never part of a float literal.
+
+A float literal is not an integer: `1.0` and `1` are different literals, and an integer is not converted to a float or the other way round without `cast`. The value of a literal is the number that its digits are nearest to, as a 64-bit floating point number (a `double` in C), so `1.42` is stored as the nearest number to it that the type can hold, which is not exactly 1.42 for most numbers, as in every language that has floats. A literal that is larger than the largest 64-bit float, about 1.8e308, is an error. A `-` directly before the digits makes a signed float literal in the same places where it makes a signed integer literal, see [Signed integer literals](#signed-integer-literals), so `-0.5` is one literal and `a - 0.5` subtracts.
+
+A float literal is untyped, like an integer literal, and the type of floating point numbers that it becomes is described by the types `F32` and `F64`, which are [reserved](#primitive-data-types) for that. Arithmetic and comparisons of float literals are known when the program is compiled, as they are for integer literals, so `1.5 + 2.25` is the untyped float 3.75, and dividing by zero is an error there. **No target builds a float yet**, so a program that uses a float literal is parsed, and rejected by the targets as a type that they do not have.
+
 ### Strings
 
 A string literal is the text between a pair of double quotes, on one line:
@@ -364,7 +381,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
 | `=`      | Sets the initial value of a variable whose type is written. It also assigns a new value to a variable, an element or a field, and copies to a range of elements. | 0 | `x : Int = 5`, `x = 6`, `a[0] = 5`, `p.age = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` or `cast(Type)` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. A comparison takes two `Int` values, or two `Bool` values or two pointers of one type for `==` and `not=`, and its result is a `Bool`.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, float literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` or `cast(Type)` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. A comparison takes two `Int` values, or two `Bool` values or two pointers of one type for `==` and `not=`, and its result is a `Bool`.
 
 > **Lessons learnt from C** In C, `a < b < c` is valid, and it does not mean what it means in mathematics: it compares the `0` or `1` of `a < b` with `c`. Mialu makes the comparison of a comparison an error, so the mistake is found at compile-time.
 

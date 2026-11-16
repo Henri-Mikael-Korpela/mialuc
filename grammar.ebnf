@@ -604,13 +604,14 @@ operand = [ cast_prefix ] , { "%" , ws } , operand_value ;
    one can be written, so a cast does not follow a cast. *)
 cast_prefix = "cast" , ws , "(" , ws , name , ws , ")" , ws ;
 
-(* An integer literal, a signed integer literal, a string literal, `true` or `false`, a call of a procedure, or the use of a
+(* An integer literal, a signed integer literal, a float literal, a signed float literal, a string literal, `true` or `false`, a call of a procedure, or the use of a
    name, such as a parameter or a constant, or an array literal or a struct literal. A call starts
    with a name too, and is told from the use of a name by the opening parenthesis after it, and a
    struct literal by the brace. A name and the literals can have subscripts, fields and carets
    after them. *)
 operand_value =
-    integer_literal | signed_integer_literal | string_literal | bool_literal | nil_literal | enum_literal | call |
+    float_literal | signed_float_literal | integer_literal | signed_integer_literal | string_literal |
+    bool_literal | nil_literal | enum_literal | call |
     ( name | array_literal | struct_literal | type_info_of ) , { ws , postfix } ;
 
 (* The information about a type, which the compiler works out while it compiles the program:
@@ -715,6 +716,17 @@ decimal_literal = digit , { [ "_" ] , digit } ;
    the literal, as in `-5` and `-0x10`. It is an operand, so it is written where an operand is
    expected, and the `-` between two operands is the operator `-`, as in `a - 5` and `a -5`. *)
 signed_integer_literal = "-" , integer_literal ;
+
+(* A float literal is decimal digits, a dot and decimal digits, as in `3.14` and `0.5`: the digits on
+   both sides of the dot are required, so `1.` and `.5` are not literals. An underscore is a digit
+   separator between two digits, on either side of the dot, as in `1_000.000_1`. There is no
+   exponent, no suffix and no other base, so `1e3`, `1.5f` and `0x1.8` are not literals. The dot of a
+   range, as in `0..<5`, is not followed by a digit, so it is never part of one. *)
+float_literal = decimal_literal , "." , digit , { [ "_" ] , digit } ;
+
+(* A `-` directly before a float literal, with no space between them, is part of the literal, in
+   the same places as the `-` of a signed integer literal, as in `-0.5`. *)
+signed_float_literal = "-" , float_literal ;
 
 binary_literal = "0b" , binary_digit , { [ "_" ] , binary_digit } ;
 

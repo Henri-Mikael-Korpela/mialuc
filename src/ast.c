@@ -46,6 +46,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_FIELD:
     case AST_NODE_TYPE_FIELD_ACCESS:
     case AST_NODE_TYPE_FIELD_INITIALIZER:
+    case AST_NODE_TYPE_FLOAT_LITERAL:
     case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_FOREIGN_BODY:
     case AST_NODE_TYPE_FOREIGN_IMPORT:
@@ -428,6 +429,10 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_FIELD_INITIALIZER:
             printf("FIELD_INITIALIZER %.*s\n", (int)node.payload.field_initializer.name.length,
                    node.payload.field_initializer.name.bytes);
+            break;
+        case AST_NODE_TYPE_FLOAT_LITERAL:
+            // 17 significant digits tell every `double` apart from the others.
+            printf("FLOAT_LITERAL %.17g\n", node.payload.float_literal.value);
             break;
         case AST_NODE_TYPE_FOR_STATEMENT:
             printf("FOR_STATEMENT %.*s\n", (int)node.payload.for_statement.name.length,

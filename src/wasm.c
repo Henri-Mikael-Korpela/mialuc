@@ -4133,6 +4133,9 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
         // None of these is part of an expression.
         assert(false);
         break;
+    case AST_NODE_TYPE_FLOAT_LITERAL:
+        // The target has no type of floats yet, so a float literal has none.
+        break;
     case AST_NODE_TYPE_TYPE_INFO_OF:
         // The information is a struct object that only exists at compile time, so it has no type
         // that a variable can have. Its fields are the values, see `wasm_type_info_type`.
@@ -4583,6 +4586,7 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
         break;
     }
     case AST_NODE_TYPE_BOOL_LITERAL:
+    case AST_NODE_TYPE_FLOAT_LITERAL:
     case AST_NODE_TYPE_INTEGER_LITERAL:
     case AST_NODE_TYPE_STRING_LITERAL:
         // A literal is a constant, which is written by `wasm_constant_write`.
@@ -5915,6 +5919,7 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
     case AST_NODE_TYPE_FIELD:
     case AST_NODE_TYPE_FIELD_ACCESS:
     case AST_NODE_TYPE_FIELD_INITIALIZER:
+    case AST_NODE_TYPE_FLOAT_LITERAL:
     case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_FOREIGN_BODY:
     case AST_NODE_TYPE_FOREIGN_IMPORT:
@@ -7078,6 +7083,10 @@ static Wasm_Type wasm_constant_type(Constant_Type type) {
         // The default type is never untyped.
         assert(false);
         break;
+    case CONSTANT_TYPE_UNTYPED_FLOAT:
+        // The target has no type of floats yet, so a float has none, and is rejected where it is
+        // used for that.
+        break;
     }
     return wasm_type_make(WASM_VALUE_TYPE_NONE);
 }
@@ -7105,6 +7114,9 @@ static bool wasm_constant_is_accepted(Wasm_Type target, Constant_Value value) {
                (target.kind == WASM_VALUE_TYPE_BYTE && constant_is_byte(value));
     case CONSTANT_TYPE_UNTYPED_STRING:
         return target.kind == WASM_VALUE_TYPE_STR || target.kind == WASM_VALUE_TYPE_C_STR;
+    case CONSTANT_TYPE_UNTYPED_FLOAT:
+        // No type of the target holds a float yet.
+        return false;
     }
     return false;
 }

@@ -5104,6 +5104,9 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
         case CONSTANT_TYPE_UNTYPED_INTEGER:
         case CONSTANT_TYPE_UNTYPED_STRING:
             break;
+        case CONSTANT_TYPE_UNTYPED_FLOAT:
+            // The target has no type of floats yet, so a float has none.
+            break;
         }
         return x64_type_make(X64_TYPE_KIND_NONE);
     }

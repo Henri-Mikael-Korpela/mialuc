@@ -9,6 +9,7 @@
 #include <iso646.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include <mialu/common_types.h>
 #include <mialu/tokenizer.h>
@@ -25,9 +26,28 @@ typedef struct {
     Tokenize_Status status;
 } Tokenize_Integer_Literal;
 
+/**
+ * A float literal that `tokenizer_float_literal` read. `is_float` says whether the text is shaped
+ * like one, which is digits, a dot and a digit. When it is not, nothing else is set and the text is
+ * an integer literal or something else. When it is, then on `TOKENIZE_STATUS_OK` `value` is its
+ * value and `end` is the offset right after it, and otherwise `error_offset` is where the mistake
+ * is.
+ */
+typedef struct {
+    double value;
+    size_t end;
+    size_t error_offset;
+    Tokenize_Status status;
+    bool is_float;
+} Tokenize_Float_Literal;
+
 enum {
     // Indentation must be a whole number of levels, and one level is always this many spaces.
     INDENTATION_SPACES_PER_LEVEL = 4,
+    // The most characters that a float literal can have, digit separators included, which is far
+    // more than the 17 digits that tell two `double` values apart. The digits are copied to a
+    // buffer of this size, without the separators, for `strtod`.
+    TOKENIZER_FLOAT_LITERAL_LENGTH_MAX = 128,
 };
 
 static bool   char_is_digit     (char character);
@@ -38,6 +58,7 @@ static bool   char_is_whitespace(char character);
 static size_t utf8_sequence_size(Str text, size_t offset);
 static int    char_digit_value  (char character);
 static bool   tokenizer_comment_line_end(Str source, size_t offset, size_t *end);
+static Tokenize_Float_Literal tokenizer_float_literal(Str source, size_t offset);
 static Tokenize_Integer_Literal tokenizer_integer_literal(Str source, size_t offset);
 static Token_Kind tokenizer_keyword_type(Str text);
 static bool   tokenizer_operator_types(char character, Token_Kind *plain_type,
@@ -219,6 +240,97 @@ static bool tokenizer_operator_types(char character, Token_Kind *plain_type,
  * Returns the keyword token kind of `text`, or `TOKEN_KIND_IDENTIFIER` when it is not a reserved
  * word. `not` followed by `=` must be handled before, because that is the token `not=`.
  */
+/**
+ * Reads the float literal that starts at `offset` in `source`, where there is a digit: decimal
+ * digits, a dot and decimal digits, such as `3.14` or `0.5`. An underscore is a digit separator
+ * between two digits, as in an integer literal, so `1_000.000_1` is one number. There are digits on
+ * both sides of the dot, so `1.` and `.5` are not float literals, and the dot of `1..<5` is not one
+ * either: a dot that is not followed by a digit is the token of its own that it always was. There
+ * is no exponent and no suffix, so a letter after the digits is an error, like the letter of an
+ * integer literal. A literal with a prefix, `0b` or `0x`, is an integer. The value is what the
+ * digits are nearest to, as `strtod` finds it, which rounds correctly. The decimal point of
+ * `strtod` is the one of the "C" locale, which the compiler never changes.
+ */
+static Tokenize_Float_Literal tokenizer_float_literal(Str source, size_t offset) {
+    assert(offset < source.length);
+    assert(char_is_digit(source.bytes[offset]));
+
+    Tokenize_Float_Literal literal = { .status = TOKENIZE_STATUS_OK };
+
+    if (source.bytes[offset] == '0' && offset + 1 < source.length &&
+        (source.bytes[offset + 1] == 'b' || source.bytes[offset + 1] == 'x')) {
+        return literal;
+    }
+
+    // The whole part is digits and separators, up to a dot that has a digit after it.
+    size_t dot = offset;
+    while (dot < source.length && (char_is_digit(source.bytes[dot]) || source.bytes[dot] == '_')) {
+        dot += 1;
+    }
+    if (dot + 1 >= source.length || source.bytes[dot] != '.' ||
+        not char_is_digit(source.bytes[dot + 1])) {
+        return literal;
+    }
+    literal.is_float = true;
+
+    // The fraction goes on for as long as there are letters, digits and underscores, like an
+    // integer literal does, so that a wrong character is reported as part of the literal.
+    size_t end = dot + 1;
+    while (end < source.length && (char_is_letter(source.bytes[end]) ||
+                                   char_is_digit(source.bytes[end]) ||
+                                   source.bytes[end] == '_')) {
+        end += 1;
+    }
+    literal.end = end;
+
+    // One more for the zero that ends the text.
+    char text[TOKENIZER_FLOAT_LITERAL_LENGTH_MAX + 1] = {0};
+    size_t text_length = 0;
+    for (size_t i = offset; i < end; i += 1) {
+        char character = source.bytes[i];
+        if (i == dot) {
+            // The dot is followed by a digit, which was checked above.
+            assert(char_is_digit(source.bytes[i + 1]));
+        } else if (character == '_') {
+            // The first character is a digit, the dot has a digit after it, and a separator
+            // must have a digit on both sides.
+            bool is_after_digit = i > offset && char_is_digit(source.bytes[i - 1]);
+            bool is_before_digit = i + 1 < end && char_is_digit(source.bytes[i + 1]);
+            if (not is_after_digit || not is_before_digit) {
+                literal.status = TOKENIZE_STATUS_FLOAT_LITERAL_SEPARATOR_INVALID;
+                literal.error_offset = i;
+                return literal;
+            }
+            continue;
+        } else if (not char_is_digit(character)) {
+            literal.status = TOKENIZE_STATUS_FLOAT_LITERAL_DIGIT_INVALID;
+            literal.error_offset = i;
+            return literal;
+        }
+
+        if (text_length == TOKENIZER_FLOAT_LITERAL_LENGTH_MAX) {
+            literal.status = TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LONG;
+            literal.error_offset = offset;
+            return literal;
+        }
+        text[text_length] = character;
+        text_length += 1;
+    }
+
+    // `strtod` gives infinity for a number that is too large, and zero or a number that is not
+    // normal for one that is too small, which is a value that is nearest.
+    char *text_end = NULL;
+    double value = strtod(text, &text_end);
+    assert(text_end == text + text_length);
+    if (value > 1.7976931348623157e308) {
+        literal.status = TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LARGE;
+        literal.error_offset = offset;
+        return literal;
+    }
+    literal.value = value;
+    return literal;
+}
+
 /**
  * Reads the integer literal that starts at `offset` in `source`, where there is a digit. It is
  * decimal, or binary when it starts with `0b`, or hexadecimal when it starts with `0x`. An
@@ -567,8 +679,28 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset = end + 1;
         }
-        // An integer literal is decimal, or binary after `0b`, or hexadecimal after `0x`.
+        // A number is a float literal when it has a dot that is followed by a digit, and an
+        // integer literal otherwise. The integer literal is decimal, or binary after `0b`, or
+        // hexadecimal after `0x`.
         else if (char_is_digit(character)) {
+            Tokenize_Float_Literal float_literal = tokenizer_float_literal(source, offset);
+            if (float_literal.is_float) {
+                if (float_literal.status != TOKENIZE_STATUS_OK) {
+                    result.status = float_literal.status;
+                    result.error_offset = float_literal.error_offset;
+                    return result;
+                }
+
+                token_elements[result.tokens.length] = (Token){
+                    .kind = TOKEN_KIND_FLOAT_LITERAL,
+                    .source_offset = (uint32_t)offset,
+                    .payload.float_literal.value = float_literal.value,
+                };
+                result.tokens.length += 1;
+                offset = float_literal.end;
+                continue;
+            }
+
             Tokenize_Integer_Literal literal = tokenizer_integer_literal(source, offset);
             if (literal.status != TOKENIZE_STATUS_OK) {
                 result.status = literal.status;

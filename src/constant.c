@@ -1,10 +1,11 @@
 // This file works out the values that are known when a program is compiled: literals, the
 // constants that are defined with them, and the operators that combine them.
 //
-// A literal is untyped. It has a kind, which is an integer, a truth value or a string, but no
-// size, so the number 200 is neither an `Int` nor a `Byte` until it is used somewhere. The place
+// A literal is untyped. It has a kind, which is an integer, a float, a truth value or a string, but
+// no size, so the number 200 is neither an `Int` nor a `Byte` until it is used somewhere. The place
 // decides: where a `Byte` is wanted it becomes one, if it fits, and where nothing says, it becomes
-// its default type, `Int`. A constant that is defined without a type, such as `LIMIT :: 200`, is
+// its default type, `Int`. An integer is never a float: `1` and `1.0` are different kinds of
+// literal, and neither is converted to the other without `cast`. A constant that is defined without a type, such as `LIMIT :: 200`, is
 // untyped in the same way, so it can be used wherever its value fits, and arithmetic of untyped
 // values gives an untyped value. That is how a literal can be given to every type that can hold it
 // without the program converting anything when it runs, and without a literal having a type that
@@ -54,6 +55,9 @@ static Constant_Value constant_divide          (Constant_Value left, Constant_Va
 static Constant_Value constant_fail            (Constant_Status status, Ast_Node_Index node);
 static Constant_Value constant_logical         (Ast_Node const *nodes, Ast_Node_Index operation,
                                                 Constant_Value left, Constant_Value right);
+static Constant_Value constant_float_arithmetic(Ast_Node const *nodes, Ast_Node_Index operation,
+                                                Constant_Value left, Constant_Value right);
+static Constant_Value constant_float_make      (Constant_Type type, double floating);
 static Constant_Value constant_make            (Constant_Type type, int64_t integer);
 static Constant_Value constant_multiply        (Constant_Value left, Constant_Value right,
                                                 Ast_Node_Index operation);
@@ -65,6 +69,7 @@ static Constant_Step  constant_step_down       (Ast_Node_Index child);
 static Constant_Value constant_subtract        (Constant_Value left, Constant_Value right,
                                                 Ast_Node_Index operation);
 static bool           constant_type_is_bool    (Constant_Type type);
+static bool           constant_type_is_float   (Constant_Type type);
 static bool           constant_type_is_integer (Constant_Type type);
 static bool           constant_type_is_untyped (Constant_Type type);
 
@@ -183,6 +188,10 @@ Constant_Type constant_type_default(Constant_Type type) {
     case CONSTANT_TYPE_INT:
     case CONSTANT_TYPE_STR:
         return type;
+    case CONSTANT_TYPE_UNTYPED_FLOAT:
+        // There is no type of floats yet for a float to become, so it stays untyped, and a target
+        // does not build it.
+        return type;
     case CONSTANT_TYPE_UNTYPED_BOOL:
         return CONSTANT_TYPE_BOOL;
     case CONSTANT_TYPE_UNTYPED_INTEGER:
@@ -217,6 +226,9 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
         }
         return constant_step_done(constant_make(CONSTANT_TYPE_UNTYPED_BOOL, integer));
     }
+    case AST_NODE_TYPE_FLOAT_LITERAL:
+        return constant_step_done(constant_float_make(CONSTANT_TYPE_UNTYPED_FLOAT,
+                                                      current->payload.float_literal.value));
     case AST_NODE_TYPE_INTEGER_LITERAL:
         return constant_step_done(constant_make(CONSTANT_TYPE_UNTYPED_INTEGER,
                                                 current->payload.integer_literal.value));
@@ -429,6 +441,9 @@ static Constant_Value constant_arithmetic(Ast_Node const *nodes, Ast_Node_Index 
     assert(left.status == CONSTANT_STATUS_OK);
     assert(right.status == CONSTANT_STATUS_OK);
 
+    if (constant_type_is_float(left.type) && constant_type_is_float(right.type)) {
+        return constant_float_arithmetic(nodes, operation, left, right);
+    }
     if (not constant_type_is_integer(left.type) ||
         not constant_type_is_integer(right.type)) {
         return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, operation);
@@ -459,6 +474,40 @@ static Constant_Value constant_arithmetic(Ast_Node const *nodes, Ast_Node_Index 
         result.type = CONSTANT_TYPE_INT;
     }
     return result;
+}
+
+/**
+ * Returns the value of the arithmetic `operation` of two untyped floats, which is an untyped float.
+ * The result is worked out as a `double`. A division by zero is an error, and so is a result that
+ * is infinite, so that no constant is ever one.
+ */
+static Constant_Value constant_float_arithmetic(Ast_Node const *nodes, Ast_Node_Index operation,
+                                                Constant_Value left, Constant_Value right) {
+    assert(constant_type_is_float(left.type));
+    assert(constant_type_is_float(right.type));
+
+    double a = left.floating;
+    double b = right.floating;
+    double result = 0.0;
+    Ast_Node_Type operator = nodes[operation].node_type;
+    if (operator == AST_NODE_TYPE_ADDITION) {
+        result = a + b;
+    } else if (operator == AST_NODE_TYPE_SUBTRACTION) {
+        result = a - b;
+    } else if (operator == AST_NODE_TYPE_MULTIPLICATION) {
+        result = a * b;
+    } else {
+        assert(operator == AST_NODE_TYPE_DIVISION);
+        if (b == 0.0) {
+            return constant_fail(CONSTANT_STATUS_DIVISION_BY_ZERO, operation);
+        }
+        result = a / b;
+    }
+    // The operands are finite, so the result is a number or an infinity, and never not a number.
+    if (result > 1.7976931348623157e308 || result < -1.7976931348623157e308) {
+        return constant_fail(CONSTANT_STATUS_OVERFLOW, operation);
+    }
+    return constant_float_make(CONSTANT_TYPE_UNTYPED_FLOAT, result);
 }
 
 /**
@@ -565,6 +614,35 @@ static Constant_Value constant_comparison(Ast_Node const *nodes, Ast_Node_Index 
             not constant_is_byte(left)) {
             return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
         }
+    } else if (constant_type_is_float(left.type) && constant_type_is_float(right.type)) {
+        double a = left.floating;
+        double b = right.floating;
+        bool holds = false;
+        switch (operator) {
+        case AST_COMPARISON_OPERATOR_EQUAL:
+            holds = a == b;
+            break;
+        case AST_COMPARISON_OPERATOR_GREATER:
+            holds = a > b;
+            break;
+        case AST_COMPARISON_OPERATOR_GREATER_EQUAL:
+            holds = a >= b;
+            break;
+        case AST_COMPARISON_OPERATOR_LESS:
+            holds = a < b;
+            break;
+        case AST_COMPARISON_OPERATOR_LESS_EQUAL:
+            holds = a <= b;
+            break;
+        case AST_COMPARISON_OPERATOR_NOT_EQUAL:
+            holds = a != b;
+            break;
+        }
+        int64_t integer = 0;
+        if (holds) {
+            integer = 1;
+        }
+        return constant_make(CONSTANT_TYPE_UNTYPED_BOOL, integer);
     } else if (constant_type_is_bool(left.type) && constant_type_is_bool(right.type)) {
         if (not is_equality) {
             return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, comparison);
@@ -654,18 +732,34 @@ static bool constant_type_is_bool(Constant_Type type) {
     return type == CONSTANT_TYPE_BOOL || type == CONSTANT_TYPE_UNTYPED_BOOL;
 }
 
+static bool constant_type_is_float(Constant_Type type) {
+    return type == CONSTANT_TYPE_UNTYPED_FLOAT;
+}
+
 static bool constant_type_is_integer(Constant_Type type) {
     return type == CONSTANT_TYPE_INT || type == CONSTANT_TYPE_BYTE ||
            type == CONSTANT_TYPE_UNTYPED_INTEGER;
 }
 
 static bool constant_type_is_untyped(Constant_Type type) {
-    return type == CONSTANT_TYPE_UNTYPED_BOOL || type == CONSTANT_TYPE_UNTYPED_INTEGER ||
-           type == CONSTANT_TYPE_UNTYPED_STRING;
+    return type == CONSTANT_TYPE_UNTYPED_BOOL || type == CONSTANT_TYPE_UNTYPED_FLOAT ||
+           type == CONSTANT_TYPE_UNTYPED_INTEGER || type == CONSTANT_TYPE_UNTYPED_STRING;
+}
+
+static Constant_Value constant_float_make(Constant_Type type, double floating) {
+    return (Constant_Value){
+        .floating = floating,
+        .integer = 0,
+        .string = AST_NODE_INDEX_NONE,
+        .error = AST_NODE_INDEX_NONE,
+        .type = type,
+        .status = CONSTANT_STATUS_OK,
+    };
 }
 
 static Constant_Value constant_make(Constant_Type type, int64_t integer) {
     return (Constant_Value){
+        .floating = 0.0,
         .integer = integer,
         .string = AST_NODE_INDEX_NONE,
         .error = AST_NODE_INDEX_NONE,
@@ -678,6 +772,7 @@ static Constant_Value constant_fail(Constant_Status status, Ast_Node_Index node)
     assert(status != CONSTANT_STATUS_OK);
 
     return (Constant_Value){
+        .floating = 0.0,
         .integer = 0,
         .string = AST_NODE_INDEX_NONE,
         .error = node,
