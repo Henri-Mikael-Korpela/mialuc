@@ -14,6 +14,7 @@
   - [Bytes](#bytes)
   - [Strings](#strings)
 - [Operators](#operators)
+  - [Arithmetic operators](#arithmetic-operators)
   - [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators)
   - [Comparison operators](#comparison-operators)
   - [Logical operators](#logical-operators)
@@ -347,15 +348,30 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
 | `=`      | Sets the initial value of a variable whose type is written. It also assigns a new value to a variable, an element or a field, and copies to a range of elements. | 0 | `x : Int = 5`, `x = 6`, `a[0] = 5`, `p.age = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` or `cast(Type)` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. Addition, subtraction, multiplication and division are defined for `Int` only. A comparison takes two `Int` values, or two `Bool` values or two pointers of one type for `==` and `not=`, and its result is a `Bool`.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` or `cast(Type)` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. A comparison takes two `Int` values, or two `Bool` values or two pointers of one type for `==` and `not=`, and its result is a `Bool`.
 
 > **Lessons learnt from C** In C, `a < b < c` is valid, and it does not mean what it means in mathematics: it compares the `0` or `1` of `a < b` with `c`. Mialu makes the comparison of a comparison an error, so the mistake is found at compile-time.
 
-Operators of the same precedence are left associative, so `a + b + c` means `(a + b) + c`, and `a - b + c` means `(a - b) + c`. `+` and `-` have the same precedence, so `5 - 1 + 2` is 6 and not 2, and so do `*` and `/`, so `8 / 2 * 3` is 12 and not 1. A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, so `a + 1 > b * 2` means `(a + 1) > (b * 2)`. A comparison is an expression of type `Bool`, but its operands are not comparisons, so it cannot be an operand of another operator, and `a < b < c` and `a == b == c` are errors. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2.
+Operators of the same precedence are left associative, and an operator of a higher precedence binds tighter, see [Arithmetic operators](#arithmetic-operators). A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, so `a + 1 > b * 2` means `(a + 1) > (b * 2)`. A comparison is an expression of type `Bool`, but its operands are not comparisons, so it cannot be an operand of another operator, and `a < b < c` and `a == b == c` are errors.
 
 The operators of precedence 0 define names or assign to them, and are not part of an expression. Each one is written after the name that it defines or assigns to, which can be followed by subscripts, fields and carets, as in `a[0] = 1`, `p.age = 1` and `p^ = 1`, and takes everything up to the end of the line as its right-hand side, so `x := a + b` means `x := (a + b)`, and `x += a * b` means `x += (a * b)`. Spaces may be written between the characters of `::` and `:=`, because they are separate tokens. An assignment operator such as `+=`, `-=`, `*=` or `/=` is one token, so no space may be written between its characters.
 
 See [Variables](#variables) for variable definitions and [Constants](#constants) for constants.
+
+### Arithmetic operators
+
+Addition, subtraction, multiplication and division are defined for [`Int`](#integers) only, so both operands must be `Int` and the result is an `Int`. A [`Byte`](#bytes) has no arithmetic, and is converted with [`cast(Int)`](#casts) first.
+
+| Operator | Meaning | Precedence | Example |
+|----------|---------|------------|---------|
+| `a + b`  | Addition. | 5 | `x := 1 + 2` makes `x` 3 |
+| `a - b`  | Subtraction. | 5 | `x := 5 - 1` makes `x` 4 |
+| `a * b`  | Multiplication. | 6 | `x := 2 + 3 * 4` makes `x` 14 |
+| `a / b`  | Division. The result is truncated toward zero. | 6 | `x := 20 - 12 / 4` makes `x` 17 |
+
+`+` and `-` have the same precedence, and so do `*` and `/`, and operators of the same precedence are left associative. So `a + b + c` means `(a + b) + c`, `a - b + c` means `(a - b) + c`, `5 - 1 + 2` is 6 and not 2, and `8 / 2 * 3` is 12 and not 1. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2. Parentheses are not part of the language, so the order is changed by naming a part of the expression in a variable.
+
+Division truncates toward zero, so `7 / 2` is 3 and `0 - 7 / 2` is -3. Dividing by zero is an error at run time, see [WebAssembly](#webassembly), and an error at compile-time when both operands are constants, see [Constants](#constants). Arithmetic that goes beyond the range of an `Int` wraps around when the program runs. The arithmetic can be combined with an assignment, see [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators).
 
 ### Assignment and compound assignment operators
 
