@@ -827,6 +827,14 @@ static void         x64_write_rip_displacement   (X64_Builder *builder, uint64_t
 static void         x64_write_rip_memory         (X64_Builder *builder, byte opcode,
                                                   byte register_number, uint64_t target_rva);
 static uint32_t     x64_float_bits               (double number);
+static X64_Type     x64_cast_target              (X64_Builder const *builder,
+                                                  Ast_Node_Index cast);
+static bool         x64_cast_is_array            (X64_Builder const *builder, Ast_Node_Index node);
+static void         x64_cast_array_write         (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame,
+                                                  int32_t place);
+static void         x64_write_shift_right        (X64_Builder *builder, byte register_number,
+                                                  uint8_t count);
 static uint64_t     x64_double_bits              (double number);
 static bool         x64_type_is_float            (X64_Type type);
 static byte         x64_float_prefix             (X64_Type_Kind kind);
@@ -1815,8 +1823,9 @@ static void x64_procedure_layout(X64_Builder *builder, Ast_Node_Index procedure)
                 }
                 size_bytes += X64_WORD_SIZE_BYTES;
             }
-        } else if (node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
-            // The elements, after which a place is aligned again.
+        } else if (node_type == AST_NODE_TYPE_ARRAY_LITERAL || x64_cast_is_array(builder, node)) {
+            // The elements, after which a place is aligned again. The array that a cast makes of a
+            // rune has the 4 bytes of its encoding, and a place of its own like a literal has.
             type = x64_leaf_type(builder, node);
             if (type.kind != X64_TYPE_KIND_NONE) {
                 size_t elements_bytes =
@@ -3012,6 +3021,7 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
     if (type.kind == X64_TYPE_KIND_ARRAY &&
         (value == AST_NODE_INDEX_NONE ||
          (builder->nodes[value].node_type != AST_NODE_TYPE_ARRAY_LITERAL &&
+          not x64_cast_is_array(builder, value) &&
           not x64_type_info_access_is(builder, value)))) {
         return x64_fail(builder, X64_BUILD_STATUS_ARRAY_INITIALIZER_INVALID, name);
     }
@@ -4309,11 +4319,17 @@ static bool x64_cast_write(X64_Builder *builder, X64_Expression_Frame const *fra
     assert(builder->nodes[frame->node].node_type == AST_NODE_TYPE_CAST);
 
     Ast_Node const *cast = &builder->nodes[frame->node];
-    X64_Type target = x64_type_of_name(builder, cast->payload.cast.type_name);
+    X64_Type target = x64_cast_target(builder, frame->node);
     X64_Type source = x64_expression_type(builder, cast->first_child);
     bool is_integer_source = source.kind == X64_TYPE_KIND_BYTE || source.kind == X64_TYPE_KIND_BOOL ||
                              source.kind == X64_TYPE_KIND_INT;
-    bool is_valid = (target.kind == X64_TYPE_KIND_INT &&
+    // A `Rune` is cast to an `Int`, a `Byte` and a `Rune` to a `Rune`, and a `Rune` to the 4 bytes of
+    // its encoding, which are an array.
+    bool is_valid = (target.kind == X64_TYPE_KIND_INT && source.kind == X64_TYPE_KIND_RUNE) ||
+                    (target.kind == X64_TYPE_KIND_RUNE &&
+                     (source.kind == X64_TYPE_KIND_BYTE || source.kind == X64_TYPE_KIND_RUNE)) ||
+                    (target.kind == X64_TYPE_KIND_ARRAY && source.kind == X64_TYPE_KIND_RUNE) ||
+                    (target.kind == X64_TYPE_KIND_INT &&
                      (is_integer_source || x64_type_is_float(source))) ||
                     (x64_type_is_float(target) &&
                      ((is_integer_source && source.kind != X64_TYPE_KIND_BOOL) ||
@@ -4324,16 +4340,22 @@ static bool x64_cast_write(X64_Builder *builder, X64_Expression_Frame const *fra
 
     // The operand is a word on the stack of values, which the value of the cast replaces.
     int32_t place = x64_stack_displacement(builder, frame->stack_start, 1);
-    if (x64_type_is_float(target) && not x64_type_is_float(source)) {
+    if (target.kind == X64_TYPE_KIND_ARRAY) {
+        x64_cast_array_write(builder, frame, place);
+    } else if (target.kind == X64_TYPE_KIND_INT || target.kind == X64_TYPE_KIND_RUNE) {
+        // A `Rune`, a `Byte` and a `Bool` are numbers in a word, and so is the number that they are
+        // cast to, so the word is the value already.
+        if (x64_type_is_float(source)) {
+            x64_write_float_to_integer(builder, source.kind, place);
+            x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+        }
+    } else if (x64_type_is_float(target) && not x64_type_is_float(source)) {
         // `cvtsi2ss xmm0, rax` makes the float, and `movd eax, xmm0` moves it back to a word,
         // with the other 32 bits zero. `cvtsi2sd` and `movq` are the same for an `F64`.
         x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
         x64_write_sse(builder, x64_float_prefix(target.kind), true,
                       X64_OPCODE_SSE_CONVERT_FROM_INTEGER, X64_REGISTER_XMM0, X64_REGISTER_RAX);
         x64_write_float_move(builder, target.kind, false, X64_REGISTER_XMM0, X64_REGISTER_RAX);
-        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
-    } else if (target.kind == X64_TYPE_KIND_INT && x64_type_is_float(source)) {
-        x64_write_float_to_integer(builder, source.kind, place);
         x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
     } else if (x64_type_is_float(target) && target.kind != source.kind) {
         // `cvtss2sd` widens an `F32` to an `F64`, and `cvtsd2ss` rounds an `F64` to an `F32`.
@@ -5293,7 +5315,7 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
     case AST_NODE_TYPE_CAST:
         // The type that is cast to. A type that is not allowed is an error when the cast is
         // written, see `x64_cast_write`.
-        return x64_type_of_name(builder, node->payload.cast.type_name);
+        return x64_cast_target(builder, expression);
     case AST_NODE_TYPE_ARRAY_LITERAL: {
         X64_Type type = x64_type_of_node(builder, node->first_child);
         if (type.kind != X64_TYPE_KIND_ARRAY) {
@@ -6927,6 +6949,103 @@ static uint32_t x64_float_bits(double number) {
     uint32_t bits = 0;
     memcpy(&bits, &single, sizeof(bits));
     return bits;
+}
+
+/**
+ * Returns the type that the cast `cast` converts to: the type that the name says, or an array of 4
+ * bytes for `[4]Byte`, which has no name of a type.
+ */
+static X64_Type x64_cast_target(X64_Builder const *builder, Ast_Node_Index cast) {
+    assert(builder->nodes[cast].node_type == AST_NODE_TYPE_CAST);
+
+    Str type_name = builder->nodes[cast].payload.cast.type_name;
+    if (ast_cast_type_is_byte_array(type_name)) {
+        return x64_type_sequence_of(x64_type_make(X64_TYPE_KIND_BYTE), X64_TYPE_KIND_ARRAY, 4);
+    }
+    return x64_type_of_name(builder, type_name);
+}
+
+/**
+ * Returns whether `node` is a cast to an array of bytes, which makes the array in the frame of its
+ * procedure as an array literal does.
+ */
+static bool x64_cast_is_array(X64_Builder const *builder, Ast_Node_Index node) {
+    return builder->nodes[node].node_type == AST_NODE_TYPE_CAST &&
+           ast_cast_type_is_byte_array(builder->nodes[node].payload.cast.type_name);
+}
+
+/**
+ * Writes `shr register, count`, which moves the bits of the register down, with zeros coming in.
+ */
+static void x64_write_shift_right(X64_Builder *builder, byte register_number, uint8_t count) {
+    assert(register_number < 16);
+
+    x64_write_byte(&builder->writer, (byte)(X64_REX_WIDE | (register_number >> 3)));
+    x64_write_byte(&builder->writer, 0xC1);
+    // The middle bits are 5, which say that the instruction is `shr`.
+    x64_write_byte(&builder->writer, (byte)(0xC0 | (5 << 3) | (register_number & 7)));
+    x64_write_byte(&builder->writer, count);
+}
+
+/**
+ * Writes the cast of a `Rune` to `[4]Byte`, whose operand is the word at `place` from `rbp`: the
+ * UTF-8 encoding of the character, in one to four bytes, with zeros after them, in the 8 bytes of
+ * the frame that are the place of the array, and then the address of the array replaces the word. A
+ * rune below 0x80 is one byte, below 0x800 two, below 0x10000 three, and the others four. The first
+ * byte has the marker of the length and the highest bits, and each byte after it has `10` and 6
+ * more bits. Each length is a block that is skipped, with an unsigned comparison of `rax`, which
+ * has the rune, with the first rune that is too large for it.
+ */
+static void x64_cast_array_write(X64_Builder *builder, X64_Expression_Frame const *frame,
+                                 int32_t place) {
+    int32_t array = -(int32_t)builder->layouts[frame->node].frame_offset;
+
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+    // The bytes that the encoding does not take are zero.
+    x64_write_load_integer(builder, X64_REGISTER_RCX, 0);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RCX, X64_REGISTER_RBP, array);
+
+    static int64_t const LIMITS[3] = {0x80, 0x800, 0x10000};
+    static int64_t const MARKERS[4] = {0x00, 0xC0, 0xE0, 0xF0};
+    uint32_t end_jumps = X64_JUMP_NONE;
+    for (size_t length = 1; length <= 4; length += 1) {
+        uint32_t next_jumps = X64_JUMP_NONE;
+        if (length < 4) {
+            x64_write_load_integer(builder, X64_REGISTER_RCX, LIMITS[length - 1]);
+            x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+            x64_jump_write(builder, X64_CONDITION_ABOVE_EQUAL, &next_jumps);
+        }
+        for (size_t index = 0; index < length; index += 1) {
+            // `mov rcx, rax`, the bits of the byte, its marker, and the store of its lowest byte.
+            uint8_t shift = (uint8_t)(6 * (length - 1 - index));
+            x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RCX);
+            if (shift > 0) {
+                x64_write_shift_right(builder, X64_REGISTER_RCX, shift);
+            }
+            if (index > 0) {
+                x64_write_and_immediate(builder, X64_REGISTER_RCX, 0x3F);
+            }
+            int64_t marker = 0x80;
+            if (index == 0) {
+                marker = MARKERS[length - 1];
+            }
+            if (marker != 0) {
+                x64_write_load_integer(builder, X64_REGISTER_RDX, marker);
+                x64_write_registers(builder, X64_OPCODE_OR, X64_REGISTER_RDX, X64_REGISTER_RCX);
+            }
+            x64_write_memory(builder, X64_OPCODE_STORE_BYTE, X64_REGISTER_RCX, X64_REGISTER_RBP,
+                             array + (int32_t)index);
+        }
+        if (length < 4) {
+            x64_jump_write(builder, X64_CONDITION_ALWAYS, &end_jumps);
+        }
+        x64_jumps_resolve(builder, next_jumps);
+    }
+    x64_jumps_resolve(builder, end_jumps);
+
+    // The value is the address of the array, as the value of an array literal is.
+    x64_write_memory(builder, X64_OPCODE_LEA, X64_REGISTER_RAX, X64_REGISTER_RBP, array);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
 }
 
 /**

@@ -3,8 +3,9 @@
 // The source is UTF-8, so a character can be a letter of any alphabet, a kanji or an emoji, and it
 // is one rune, whatever number of bytes it takes. A character that cannot be written as itself, or
 // is hard to see, is an escape sequence: a backslash and what stands for the character, such as
-// `'\n'` for a new line and `'\u0123'` for U+0123. A rune has an order, the order of the code
-// points, but no arithmetic. The output is plain ASCII, so that any console shows it, and the exit code of
+// `'\n'` for a new line and `'\u0123'` for U+0123. A rune is cast to an Int, which is its code
+// point, and to 4 bytes, which are its UTF-8 encoding, and a Byte is cast to a rune. A rune has an
+// order, the order of the code points, but no arithmetic. The output is plain ASCII, so that any console shows it, and the exit code of
 // the program is the number of checks that failed, so 0 means that all of them passed.
 
 import foreign libc
@@ -42,6 +43,26 @@ next_global :: proc(character: Rune) Rune ->
     previous := current
     current = character
     return previous
+
+/// The 4 bytes of the encoding of a character as one Int, with the first byte highest.
+encoded :: proc(character: Rune) Int ->
+    bytes := cast([4]Byte)character
+    return cast(Int)bytes[0] * 16777216 + cast(Int)bytes[1] * 65536 + cast(Int)bytes[2] * 256 + cast(Int)bytes[3]
+
+/// The number of bytes of the encoding, which are the ones before the first zero.
+encoded_length :: proc(character: Rune) Int ->
+    bytes := cast([4]Byte)character
+    length := 0
+    for byte in bytes ->
+        if byte not= 0 ->
+            length += 1
+    return length
+
+sum_of_bytes :: proc(bytes: []Byte) Int ->
+    sum := 0
+    for byte in bytes ->
+        sum += cast(Int)byte
+    return sum
 
 main :: proc() Int ->
     failures := 0
@@ -99,4 +120,15 @@ main :: proc() Int ->
     failures += check(str_to_c_str("a unicode escape is a letter"), unicode_char == 'ģ')
     failures += check(str_to_c_str("an escaped emoji is the emoji"), '\U0001F680' == rocket)
     failures += check(str_to_c_str("digits of either case"), '\u00e9' == '\u00E9')
+
+    failures += check(str_to_c_str("code point of A"), cast(Int)'A' == 65)
+    failures += check(str_to_c_str("code point of a rocket"), cast(Int)rocket == 128640)
+    failures += check(str_to_c_str("a Byte is a Rune"), cast(Rune)int_to_byte(200) == '\u00C8')
+    failures += check(str_to_c_str("encoding of A"), encoded('A') == 0x41000000)
+    failures += check(str_to_c_str("encoding of e with an acute accent"), encoded('é') == 0xC3A90000)
+    failures += check(str_to_c_str("encoding of a kanji"), encoded(kanji) == 0xE88A8B00)
+    failures += check(str_to_c_str("encoding of a rocket"), encoded(rocket) == 0xF09F9A80)
+    failures += check(str_to_c_str("number of bytes of the encodings"), encoded_length('A') == 1 and encoded_length('é') == 2 and encoded_length(kanji) == 3 and encoded_length(rocket) == 4)
+    rocket_bytes := cast([4]Byte)rocket
+    failures += check(str_to_c_str("an array of bytes is an array"), length_of(rocket_bytes) == 4 and sum_of_bytes(rocket_bytes) == 681)
     return failures

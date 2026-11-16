@@ -1119,9 +1119,10 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_CAST_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool, an Int or "
-                "a float can be cast to Int, and a Byte, an Int or a float to a float.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes);
+        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool, an Int, a "
+                "Rune or a float can be cast to Int, a Byte, an Int or a float to a float, a Byte "
+                "or a Rune to Rune, and a Rune to [4]Byte.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: an operand of 'and', 'or' or 'not' at '%.*s' is not a "
@@ -1409,9 +1410,10 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_CAST_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool, an Int or "
-                "a float can be cast to Int, and a Byte, an Int or a float to a float.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes);
+        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool, an Int, a "
+                "Rune or a float can be cast to Int, a Byte, an Int or a float to a float, a Byte "
+                "or a Rune to Rune, and a Rune to [4]Byte.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "

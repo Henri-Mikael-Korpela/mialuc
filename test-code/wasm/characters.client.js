@@ -38,4 +38,32 @@ console.log("\\U0001F680, 🚀:", show(rocket_escaped()));
 console.log("Digits of either case, 1:", digits_of_either_case());
 console.log("The character with the code point 0, 1:", zero_characters());
 
+
+// A rune is cast to an Int, which is its code point, so JavaScript receives a BigInt.
+console.log("Code points of A, é, 芋 and 🚀, 65n 233n 33419n 128640n:",
+    code_point(65), code_point(233), code_point(33419), code_point(128640));
+console.log("Byte to rune, 200 is È (U+C8):", show(byte_to_rune(200n)));
+try {
+    byte_to_rune(300n);
+    console.log("A number that is not a Byte should have trapped");
+} catch (error) {
+    console.log("A number that is not a Byte traps, true:", error instanceof WebAssembly.RuntimeError);
+}
+
+// The four bytes of the UTF-8 encoding, the first one highest: A is 41 00 00 00.
+const hex = number => number.toString(16).toUpperCase().padStart(8, "0");
+const encoder = new TextEncoder();
+for (const character of ["A", "é", "芋", "🚀"]) {
+    const expected = [...encoder.encode(character), 0, 0, 0, 0].slice(0, 4)
+        .reduce((total, byte) => total * 256n + BigInt(byte), 0n);
+    console.log(`Encoding of ${character}, ${hex(expected)}:`, hex(encoded(character.codePointAt(0))),
+        encoded(character.codePointAt(0)) === expected);
+}
+console.log("Number of bytes of the encoding of A, é, 芋 and 🚀, 1n 2n 3n 4n:",
+    encoded_length(65), encoded_length(233), encoded_length(33419), encoded_length(128640));
+console.log("Length of the array, 4n:", encoded_array_length());
+console.log("Sum of the bytes of 🚀, 0xF0 + 0x9F + 0x9A + 0x80, 681n:", encoded_sum(128640));
+console.log("The first byte of A is A, and of 🚀 it is U+F0:", show(round_trip(65)), show(round_trip(128640)));
+console.log("Two arrays, (0xC3 * 256 + 0xA9) + 0x80, 50217n:", two_encodings());
+
 done

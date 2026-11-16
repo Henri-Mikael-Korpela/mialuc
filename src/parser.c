@@ -2244,10 +2244,32 @@ static Ast_Node_Index parse_operand(Parser *parser) {
             return AST_NODE_INDEX_NONE;
         }
         Token const *type_name = parse_token_current(parser);
+        Token const *array_start = NULL;
+        // The type of an array, as in `cast([4]Byte)r`: a length between brackets, which is part
+        // of the text of the type, and the name of the type of the elements.
+        if (type_name->kind == TOKEN_KIND_BRACKET_LEFT) {
+            array_start = type_name;
+            parse_token_advance(parser);
+            if (parse_token_current(parser)->kind != TOKEN_KIND_INTEGER_LITERAL) {
+                return parse_fail(parser, STR("the length of the array to cast to"));
+            }
+            parse_token_advance(parser);
+            if (not parse_token_expect(parser, TOKEN_KIND_BRACKET_RIGHT, STR("']'"))) {
+                return AST_NODE_INDEX_NONE;
+            }
+            type_name = parse_token_current(parser);
+        }
         if (type_name->kind != TOKEN_KIND_IDENTIFIER) {
             return parse_fail(parser, STR("the name of the type to cast to"));
         }
         cast_type_name = type_name->payload.identifier.text;
+        if (array_start != NULL) {
+            // The text is a view of the source from the bracket to the end of the name, which
+            // are in one place, so it is found from where the name is.
+            size_t distance = type_name->source_offset - array_start->source_offset;
+            cast_type_name = str_make(cast_type_name.bytes - distance,
+                                      distance + cast_type_name.length);
+        }
         parse_token_advance(parser);
         if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'"))) {
             return AST_NODE_INDEX_NONE;

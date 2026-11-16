@@ -76,8 +76,9 @@
      - `int_to_byte` is a built-in procedure like `length_of`. It takes an `Int` and gives a
        `Byte`.
      - `cast(Type)` converts between the types that have a conversion: the type is `Int` and the
-       value a `Byte`, a `Bool`, an `Int` or a float, or the type is a float and the value a
-       `Byte`, an `Int` or a float. The grammar takes any name as the type.
+       value a `Byte`, a `Bool`, an `Int`, a `Rune` or a float, or the type is a float and the value
+       a `Byte`, an `Int` or a float, or the type is `Rune` and the value a `Byte` or a `Rune`, or
+       the type is `[4]Byte` and the value a `Rune`. The grammar takes any name as the type.
        An untyped integer from 0 to 255 is a `Byte` where a `Byte` is wanted, and any other
        `Int` is not one, so `b : Byte = 256` is an error. A `Byte` has no arithmetic.
      - The name of a call must be a procedure, or a variable, a parameter or a global variable that
@@ -602,9 +603,13 @@ term = operand , { ws , ( "*" | "/" ) , ws , operand } ;
    the operand of `%` to have an address, which the grammar cannot tell. *)
 operand = [ cast_prefix ] , { "%" , ws } , operand_value ;
 
-(* `cast(Int)` before an operand, which converts its value to the type. It binds like `%`, and only
-   one can be written, so a cast does not follow a cast. *)
-cast_prefix = "cast" , ws , "(" , ws , name , ws , ")" , ws ;
+(* `cast(Int)` before an operand, which converts its value to the type, or `cast([4]Byte)`, whose
+   type is an array of a length and the name of the type of its elements. It binds like `%`, and
+   only one can be written, so a cast does not follow a cast. The compiler checks after parsing
+   which types a value can be cast to. *)
+cast_prefix = "cast" , ws , "(" , ws , ( name | cast_array_type ) , ws , ")" , ws ;
+
+cast_array_type = "[" , ws , decimal_literal , ws , "]" , ws , name ;
 
 (* An integer literal, a signed integer literal, a float literal, a signed float literal, a string literal, `true` or `false`, a call of a procedure, or the use of a
    name, such as a parameter or a constant, or an array literal or a struct literal. A call starts

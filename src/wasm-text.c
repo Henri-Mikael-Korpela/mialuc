@@ -994,6 +994,9 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
         case WASM_OPCODE_I32_SHL:
             wasm_text_write_instruction(&formatter->writer, STR("i32.shl"));
             break;
+        case WASM_OPCODE_I32_SHR_U:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.shr_u"));
+            break;
         case WASM_OPCODE_I32_SUB:
             wasm_text_write_instruction(&formatter->writer, STR("i32.sub"));
             break;

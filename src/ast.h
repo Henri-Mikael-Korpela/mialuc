@@ -179,7 +179,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_CALL_STATEMENT`: one child, an `AST_NODE_TYPE_CALL` whose value, if it has
  *   one, is dropped. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_CAST`: one child, the operand, as `b` in `cast(Int)b`. The name of the type that
- *   the value is converted to, `Int` there, is in the payload, and which types a value can be
+ *   the value is converted to, `Int` there, is in the payload, which can also be the type of an
+ *   array of bytes, as in `cast([4]Byte)r`, see `ast_cast_type_is_byte_array`, and which types a value can be
  *   converted between is for the target to tell. It is an expression. It binds like `%`, tighter
  *   than every operator, so `cast(Int)a + b` is `(cast(Int)a) + b`.
  * - `AST_NODE_TYPE_COMPARISON`: two children, the left and the right operand, in that order. It is
@@ -677,5 +678,12 @@ Ast_Node_Index ast_procedure_end(Ast_Node const *nodes, size_t node_count,
  * elements.
  */
 void ast_print(Array_Slice nodes, Ast_Node_Index root);
+
+/**
+ * Returns whether `type_name`, the text of the type of a cast, is the type of an array of 4 bytes,
+ * `[4]Byte`, which is what a `Rune` is cast to. Spaces and tabs between its parts are ignored, so
+ * `[ 4 ]Byte` is one too.
+ */
+bool ast_cast_type_is_byte_array(Str type_name);
 
 #endif

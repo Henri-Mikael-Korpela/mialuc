@@ -565,6 +565,13 @@ static void            wasm_cast_write                        (Wasm_Builder *bui
                                                                Ast_Node_Index cast);
 static Wasm_Type       wasm_arithmetic_type                   (Wasm_Builder const *builder,
                                                                Ast_Node_Index operation);
+static Wasm_Type       wasm_cast_target                       (Wasm_Builder const *builder,
+                                                               Ast_Node_Index cast);
+static bool            wasm_cast_is_array                     (Wasm_Builder const *builder,
+                                                               Ast_Node_Index node);
+static void            wasm_cast_array_write                  (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Ast_Node_Index cast);
 static byte            wasm_comparison_opcode_float           (Ast_Comparison_Operator operator,
                                                                Wasm_Type type);
 static void            wasm_write_f32_const                   (Wasm_Writer *writer,
@@ -997,7 +1004,10 @@ static bool wasm_data_measure(Wasm_Builder *builder) {
             size_bytes += wasm_string_size_bytes(&builder->nodes[i]);
         } else if (builder->nodes[i].node_type == AST_NODE_TYPE_ARRAY_TYPE) {
             has_array_type = true;
-        } else if (builder->nodes[i].node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
+        } else if (builder->nodes[i].node_type == AST_NODE_TYPE_ARRAY_LITERAL ||
+                   wasm_cast_is_array(builder, (Ast_Node_Index)i)) {
+            // The array that a cast to bytes makes is in the stack of the module like an array
+            // literal is.
             has_array_literal = true;
         } else if (builder->nodes[i].node_type == AST_NODE_TYPE_ADDRESS_OF) {
             has_address_of = true;
@@ -1036,8 +1046,8 @@ static bool wasm_data_measure(Wasm_Builder *builder) {
     // needs a memory, also when it has no array of its own. A pointer points into the memory, so a
     // module that has a pointer type or follows a pointer needs one as well, also when it takes no
     // address itself, because a caller from JavaScript can pass the address of something it wrote.
-    builder->has_memory = has_literal || has_array_type || has_address_of || has_pointer ||
-                          reflection_bytes > 0;
+    builder->has_memory = has_literal || has_array_type || has_array_literal || has_address_of ||
+                          has_pointer || reflection_bytes > 0;
     // A variable whose address is taken is on the stack, in the frame of its procedure, like the
     // elements of an array literal.
     builder->has_stack = has_array_literal || has_address_of;
@@ -3756,6 +3766,7 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
             if (wasm_variable_type(builder, statement).kind == WASM_VALUE_TYPE_ARRAY &&
                 (not has_value ||
                  (builder->nodes[value].node_type != AST_NODE_TYPE_ARRAY_LITERAL &&
+                  not wasm_cast_is_array(builder, value) &&
                   not wasm_type_info_access_is(builder, value)))) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_INITIALIZER_INVALID,
                                  statement_node->payload.variable_definition.name);
@@ -4059,7 +4070,7 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     case AST_NODE_TYPE_CAST:
         // The type that is cast to. A type that is not allowed is an error when the cast is
         // written, see `wasm_cast_is_valid`.
-        return wasm_type_of_name(builder, node->payload.cast.type_name);
+        return wasm_cast_target(builder, expression);
     case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_BOOL_LITERAL:
     case AST_NODE_TYPE_COMPARISON:
@@ -4303,15 +4314,25 @@ static Str wasm_expression_subject(Wasm_Builder const *builder, Ast_Node_Index d
 }
 
 /**
- * Returns whether a value of type `source` can be cast to `target`: a `Byte`, a `Bool` or an `Int`
- * is cast to an `Int`, and so is a float, which drops its fraction. A `Byte`, an `Int` or a float
+ * Returns whether a value of type `source` can be cast to `target`: a `Byte`, a `Bool`, an `Int`
+ * or a `Rune` is cast to an `Int`, and so is a float, which drops its fraction. A `Byte` is cast to
+ * a `Rune`, and a `Rune` to the array of 4 bytes of its UTF-8 encoding. A `Byte`, an `Int` or a float
  * is cast to a float, which rounds an `Int` that has more digits than the float has, and a number
  * of an `F64` that has more digits than an `F32` has.
  */
 static bool wasm_cast_is_valid(Wasm_Type target, Wasm_Type source) {
     if (target.kind == WASM_VALUE_TYPE_INT) {
         return source.kind == WASM_VALUE_TYPE_BYTE || source.kind == WASM_VALUE_TYPE_BOOL ||
-               source.kind == WASM_VALUE_TYPE_INT || wasm_type_is_float(source);
+               source.kind == WASM_VALUE_TYPE_INT || source.kind == WASM_VALUE_TYPE_RUNE ||
+               wasm_type_is_float(source);
+    }
+    // Every byte is a character of the first 256, which is a rune, and a rune is a rune.
+    if (target.kind == WASM_VALUE_TYPE_RUNE) {
+        return source.kind == WASM_VALUE_TYPE_BYTE || source.kind == WASM_VALUE_TYPE_RUNE;
+    }
+    // The 4 bytes of the UTF-8 encoding of a rune, which is as many as any rune takes.
+    if (target.kind == WASM_VALUE_TYPE_ARRAY) {
+        return source.kind == WASM_VALUE_TYPE_RUNE;
     }
     return wasm_type_is_float(target) &&
            (source.kind == WASM_VALUE_TYPE_BYTE || source.kind == WASM_VALUE_TYPE_INT ||
@@ -4336,7 +4357,7 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
 
     if (node->node_type == AST_NODE_TYPE_CAST) {
         assert(right == left);
-        if (not wasm_cast_is_valid(wasm_type_of_name(builder, node->payload.cast.type_name),
+        if (not wasm_cast_is_valid(wasm_cast_target(builder, operation),
                                    wasm_expression_type(builder, left))) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CAST_INVALID,
                              node->payload.cast.type_name);
@@ -4573,6 +4594,101 @@ static byte wasm_float_operation_opcode(Ast_Node_Type node_type, Wasm_Type type)
 }
 
 /**
+ * Returns the type that the cast `cast` converts to: the type that the name says, or an array of
+ * bytes for `[4]Byte`, which has no name of a type.
+ */
+static Wasm_Type wasm_cast_target(Wasm_Builder const *builder, Ast_Node_Index cast) {
+    assert(builder->nodes[cast].node_type == AST_NODE_TYPE_CAST);
+
+    Str type_name = builder->nodes[cast].payload.cast.type_name;
+    if (ast_cast_type_is_byte_array(type_name)) {
+        Wasm_Type array = wasm_type_make(WASM_VALUE_TYPE_ARRAY);
+        array.element_kind = WASM_VALUE_TYPE_BYTE;
+        return array;
+    }
+    return wasm_type_of_name(builder, type_name);
+}
+
+/**
+ * Returns whether `node` is a cast to an array of bytes, which makes the array in the frame of its
+ * procedure as an array literal does.
+ */
+static bool wasm_cast_is_array(Wasm_Builder const *builder, Ast_Node_Index node) {
+    return builder->nodes[node].node_type == AST_NODE_TYPE_CAST &&
+           ast_cast_type_is_byte_array(builder->nodes[node].payload.cast.type_name);
+}
+
+/**
+ * Writes the instructions of the cast `cast` of a `Rune` to `[4]Byte`, whose operand is on the
+ * stack: the UTF-8 encoding of the character, in one to four bytes, with zeros after them, in the
+ * 8 bytes of the frame that are the array of the cast, and then the address of the array. The rune
+ * is kept in a scratch local while the bytes are computed. A rune below 0x80 is one byte, below
+ * 0x800 two, below 0x10000 three, and the others four. The first byte has the marker of the length
+ * and the highest bits, and each byte after it has `10` and 6 more bits.
+ */
+static void wasm_cast_array_write(Wasm_Builder *builder, Ast_Node_Index procedure,
+                                  Ast_Node_Index cast) {
+    Wasm_Writer *writer = &builder->writer;
+    size_t frame = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FRAME);
+    size_t rune = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_TEMPORARY_32);
+    size_t offset_bytes = wasm_frame_literal_offset(builder, procedure, cast);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, rune);
+    // The bytes that the encoding does not take are zero.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+    wasm_write_i32_const(writer, 0);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_STORE, offset_bytes);
+
+    // The limits of the lengths, and the markers of the first byte of each length.
+    static int64_t const LIMITS[3] = {0x80, 0x800, 0x10000};
+    static int64_t const MARKERS[4] = {0x00, 0xC0, 0xE0, 0xF0};
+    for (size_t length = 1; length <= 4; length += 1) {
+        if (length < 4) {
+            wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, rune);
+            wasm_write_i32_const(writer, LIMITS[length - 1]);
+            wasm_write_byte(writer, WASM_OPCODE_I32_LT_U);
+            wasm_structured_begin(builder, WASM_OPCODE_IF);
+        }
+        for (size_t index = 0; index < length; index += 1) {
+            // The byte at `index` has the bits of the rune from `shift` up, the lowest 6 of them
+            // unless it is the first, which has all that are left and the marker.
+            size_t shift = 6 * (length - 1 - index);
+            wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+            wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, rune);
+            if (shift > 0) {
+                wasm_write_i32_const(writer, (int64_t)shift);
+                wasm_write_byte(writer, WASM_OPCODE_I32_SHR_U);
+            }
+            if (index > 0) {
+                wasm_write_i32_const(writer, 0x3F);
+                wasm_write_byte(writer, WASM_OPCODE_I32_AND);
+            }
+            int64_t marker = 0x80;
+            if (index == 0) {
+                marker = MARKERS[length - 1];
+            }
+            if (marker != 0) {
+                wasm_write_i32_const(writer, marker);
+                wasm_write_byte(writer, WASM_OPCODE_I32_OR);
+            }
+            wasm_write_memory_instruction(writer, WASM_OPCODE_I32_STORE8, offset_bytes + index);
+        }
+        if (length < 4) {
+            wasm_write_byte(writer, WASM_OPCODE_ELSE);
+        }
+    }
+    // The four `end`s of the three `if`s and... the three `if`s are closed here, innermost first.
+    for (size_t length = 1; length < 4; length += 1) {
+        wasm_write_byte(writer, WASM_OPCODE_END);
+    }
+
+    // The value of the cast is the address of the array, as the value of an array literal is.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+    wasm_write_i32_const(writer, (int64_t)offset_bytes);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+}
+
+/**
  * Writes the instruction that converts the operand of the cast `cast`, which is on the stack, to
  * the type that is cast to. A `Byte` and a `Bool` are 32-bit integers, from 0 to 255 and from 0 to
  * 1, and an `Int` is a 64-bit one, so they are widened without a sign to an `Int`. An `Int` is the
@@ -4584,14 +4700,22 @@ static byte wasm_float_operation_opcode(Ast_Node_Type node_type, Wasm_Type type)
 static void wasm_cast_write(Wasm_Builder *builder, Ast_Node_Index cast) {
     assert(builder->nodes[cast].node_type == AST_NODE_TYPE_CAST);
 
-    Wasm_Type target = wasm_type_of_name(builder, builder->nodes[cast].payload.cast.type_name);
+    Wasm_Type target = wasm_cast_target(builder, cast);
     Wasm_Type source = wasm_expression_type(builder, builder->nodes[cast].first_child);
+    if (target.kind == WASM_VALUE_TYPE_ARRAY) {
+        return;
+    }
+    if (target.kind == WASM_VALUE_TYPE_RUNE) {
+        // A `Byte` and a `Rune` are 32-bit integers, and a byte is a code point as it is.
+        return;
+    }
     if (target.kind == WASM_VALUE_TYPE_INT) {
         if (source.kind == WASM_VALUE_TYPE_F32) {
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_TRUNC_F32_S);
         } else if (source.kind == WASM_VALUE_TYPE_F64) {
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_TRUNC_F64_S);
         } else if (source.kind != WASM_VALUE_TYPE_INT) {
+            // A `Byte`, a `Bool` and a `Rune` are 32-bit integers that are not negative.
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_U);
         }
         return;
@@ -4773,7 +4897,11 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
         wasm_write_byte(&builder->writer, WASM_OPCODE_I32_AND);
         break;
     case AST_NODE_TYPE_CAST:
-        wasm_cast_write(builder, current);
+        if (wasm_cast_is_array(builder, current)) {
+            wasm_cast_array_write(builder, procedure, current);
+        } else {
+            wasm_cast_write(builder, current);
+        }
         break;
     case AST_NODE_TYPE_NOT:
         // 1 for a 0 and 0 for a 1.
@@ -5512,7 +5640,7 @@ static bool wasm_procedure_uses_arrays(Wasm_Builder const *builder, Ast_Node_Ind
         Ast_Node_Type node_type = builder->nodes[node].node_type;
         if (node_type == AST_NODE_TYPE_ARRAY_LITERAL || node_type == AST_NODE_TYPE_SLICE ||
             node_type == AST_NODE_TYPE_SUBSCRIPT || node_type == AST_NODE_TYPE_ADDRESS_OF ||
-            node_type == AST_NODE_TYPE_DEREFERENCE) {
+            node_type == AST_NODE_TYPE_DEREFERENCE || wasm_cast_is_array(builder, node)) {
             return true;
         }
         // `length_of` keeps the length of its argument in a scratch local.
@@ -5583,7 +5711,7 @@ static bool wasm_frame_is_needed(Wasm_Builder const *builder, Ast_Node_Index pro
     Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
     for (Ast_Node_Index node = procedure + 1; node < end; node += 1) {
         if (builder->nodes[node].node_type == AST_NODE_TYPE_ARRAY_LITERAL ||
-            wasm_variable_is_in_memory(builder, node)) {
+            wasm_cast_is_array(builder, node) || wasm_variable_is_in_memory(builder, node)) {
             return true;
         }
     }
@@ -5713,6 +5841,11 @@ static size_t wasm_frame_literal_offset(Wasm_Builder const *builder, Ast_Node_In
 
     size_t offset_bytes = 0;
     for (Ast_Node_Index node = procedure + 1; node < literal; node += 1) {
+        // The 4 bytes that a cast makes are rounded up like the elements of a literal.
+        if (wasm_cast_is_array(builder, node)) {
+            offset_bytes += wasm_frame_round_up(4);
+            continue;
+        }
         if (builder->nodes[node].node_type != AST_NODE_TYPE_ARRAY_LITERAL) {
             continue;
         }
@@ -5802,6 +5935,10 @@ static size_t wasm_array_length(Wasm_Builder const *builder, Ast_Node_Index expr
         if (builder->nodes[current].node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
             // The first child is the type, which is not an element.
             return wasm_children_count(builder, current) - 1;
+        }
+        // The array that a cast makes of a rune has the 4 bytes of the encoding.
+        if (wasm_cast_is_array(builder, current)) {
+            return 4;
         }
         // The members of an enum are as many as the enum has.
         if (wasm_type_info_access_is(builder, current)) {

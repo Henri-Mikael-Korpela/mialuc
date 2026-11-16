@@ -5,7 +5,9 @@
 // arithmetic. In WebAssembly it is a 32-bit integer, which JavaScript passes and receives as a
 // plain number, the code point, and `String.fromCodePoint` makes the character of it. A character
 // that cannot be written as itself, or is hard to see, is an escape sequence: a backslash and what
-// stands for the character, such as `'\n'` for a new line and `'\u0123'` for U+0123.
+// stands for the character, such as `'\n'` for a new line and `'\u0123'` for U+0123. A rune is cast
+// to an Int, which is its code point, and to 4 bytes, which are its UTF-8 encoding, and a Byte is
+// cast to a rune.
 
 /// A constant that is a rune, with or without its type.
 FIRST_LETTER :: 'A'
@@ -153,3 +155,53 @@ digits_of_either_case :: proc() Bool ->
 /// The character with the code point 0 is written with an octal or a hexadecimal number.
 zero_characters :: proc() Bool ->
     return '\000' == '\x00' and '\x00' == '\u0000'
+
+/// A rune is cast to an Int, which is its code point.
+code_point :: proc(character: Rune) Int ->
+    return cast(Int)character
+
+/// A Byte is cast to a Rune, which is the character of the first 256 with its number.
+byte_to_rune :: proc(number: Int) Rune ->
+    return cast(Rune)int_to_byte(number)
+
+/// A rune is cast to 4 bytes, the UTF-8 encoding of the character with zeros after it, which are
+/// returned as one Int, so that JavaScript sees all four: the first byte is the highest.
+encoded :: proc(character: Rune) Int ->
+    bytes := cast([4]Byte)character
+    return cast(Int)bytes[0] * 16777216 + cast(Int)bytes[1] * 65536 + cast(Int)bytes[2] * 256 + cast(Int)bytes[3]
+
+/// The number of bytes of the encoding of a character, which are the ones before the first zero.
+encoded_length :: proc(character: Rune) Int ->
+    bytes := cast([4]Byte)character
+    length := 0
+    for byte in bytes ->
+        if byte not= 0 ->
+            length += 1
+    return length
+
+/// The array has a length, and is passed as an array slice.
+encoded_array_length :: proc() Int ->
+    bytes := cast([4]Byte)'🚀'
+    return length_of(bytes)
+
+sum_of_bytes :: proc(bytes: []Byte) Int ->
+    sum := 0
+    for byte in bytes ->
+        sum += cast(Int)byte
+    return sum
+
+encoded_sum :: proc(character: Rune) Int ->
+    bytes := cast([4]Byte)character
+    return sum_of_bytes(bytes)
+
+/// A character is cast to bytes and the first one is cast back: the first byte of an ASCII
+/// character is the character itself.
+round_trip :: proc(character: Rune) Rune ->
+    bytes := cast([4]Byte)character
+    return cast(Rune)bytes[0]
+
+/// More than one array of bytes, each in a place of its own.
+two_encodings :: proc() Int ->
+    first := cast([4]Byte)'é'
+    second := cast([4]Byte)'🚀'
+    return cast(Int)first[0] * 256 + cast(Int)first[1] + cast(Int)second[3]

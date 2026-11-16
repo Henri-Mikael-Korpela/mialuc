@@ -616,3 +616,19 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         current = node_elements[current].next_sibling;
     }
 }
+
+bool ast_cast_type_is_byte_array(Str type_name) {
+    static char const EXPECTED[] = "[4]Byte";
+    size_t matched = 0;
+    for (size_t i = 0; i < type_name.length; i += 1) {
+        char character = type_name.bytes[i];
+        if (character == ' ' || character == '\t') {
+            continue;
+        }
+        if (matched == sizeof(EXPECTED) - 1 || character != EXPECTED[matched]) {
+            return false;
+        }
+        matched += 1;
+    }
+    return matched == sizeof(EXPECTED) - 1;
+}

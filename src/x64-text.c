@@ -569,6 +569,7 @@ static size_t x64_text_format_instruction(X64_Text_Formatter *formatter,
         case 0x89:
         case 0x8B:
         case 0x8D:
+        case 0xC1:
         case 0xF7:
         case 0xFF:
             is_known = x64_text_format_operands(formatter, cursor, opcode, rex);
@@ -855,6 +856,15 @@ static bool x64_text_format_operands(X64_Text_Formatter *formatter, X64_Text_Cur
         x64_text_write_register(writer, operand.register_number, is_wide);
         x64_text_write(writer, STR(", "));
         x64_text_write_operand(writer, operand, is_wide);
+    } else if (opcode == 0xC1) {
+        // `shr` of a register by a number of bits, which is a byte, and which the middle bits say.
+        if (operand.field != 5 || not operand.is_register || not is_wide) {
+            return false;
+        }
+        x64_text_write(writer, STR("shr "));
+        x64_text_write_operand(writer, operand, true);
+        x64_text_write(writer, STR(", "));
+        x64_text_write_immediate(writer, (int64_t)x64_text_read_byte(cursor));
     } else if (opcode == 0xF7) {
         // `neg` and `idiv`, which the middle bits tell apart.
         if (operand.field == 3) {

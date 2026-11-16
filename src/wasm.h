@@ -101,6 +101,7 @@ enum {
     WASM_OPCODE_I32_NE = 0x47,
     WASM_OPCODE_I32_OR = 0x72,
     WASM_OPCODE_I32_SHL = 0x74,
+    WASM_OPCODE_I32_SHR_U = 0x76,
     WASM_OPCODE_I32_STORE = 0x36,
     WASM_OPCODE_I32_STORE8 = 0x3A,
     WASM_OPCODE_I32_SUB = 0x6B,
@@ -198,8 +199,10 @@ typedef enum {
     // procedure. The subject is the name.
     WASM_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE,
     // `cast(Type)` of a value that is not converted to that type: the type must be `Int` and the
-    // value a `Byte`, a `Bool`, an `Int` or a float, or the type must be a float and the value a
-    // `Byte`, an `Int` or a float. The subject is the name of the type.
+    // value a `Byte`, a `Bool`, an `Int`, a `Rune` or a float, or the type must be a float and the
+    // value a `Byte`, an `Int` or a float, or the type must be `Rune` and the value a `Byte` or a
+    // `Rune`, or the type must be `[4]Byte` and the value a `Rune`. The subject is the name of the
+    // type.
     WASM_BUILD_STATUS_CAST_INVALID,
     WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
     WASM_BUILD_STATUS_CONDITION_TYPE_INVALID,

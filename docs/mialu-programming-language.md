@@ -261,7 +261,7 @@ rocket : Rune = '\U0001F680'
 
 The source of a program is UTF-8, and a character in it can take one to four bytes, which a rune does not care about: `'A'` takes one byte and is 65, `'é'` takes two and is 233, `'芋'` takes three and is 33419, and `'🚀'` takes four and is 128640. What a rune holds is the number of the character and not its bytes, so it is the same whatever the encoding of the text that the character is in. A rune is one character, which is one code point: a letter with an accent that is written as a letter and a combining mark is two code points, and so is two runes, and a literal of both is an error, while the one code point of the letter, `'é'`, is a rune. A character that is not valid UTF-8 is an error, and so is a number that is not a Unicode character: a surrogate, U+D800 to U+DFFF, and a number above 0x10FFFF.
 
-A rune literal has the type `Rune`, and it is not an untyped number: `'A'` is not an `Int` and not a `Byte`, `x : Int = 'A'` is an error and so is `x : Rune = 65`. A rune literal is one literal, so it is a constant, which can be a [constant](#constants) with or without its type, `FIRST :: 'A'` and `LAST : Rune : 'Z'`, and a global variable, a parameter, a field, an element of an array and what a pointer points to can be one. The default value of a `Rune` is the character with the code point 0.
+A rune literal has the type `Rune`, and it is not an untyped number: `'A'` is not an `Int` and not a `Byte`, `x : Int = 'A'` is an error and so is `x : Rune = 65`. A `Rune` is converted to an `Int`, to the 4 bytes of its UTF-8 encoding, and from a `Byte` with a [cast](#casts), as in `cast(Int)'A'`, which is 65. A rune literal is one literal, so it is a constant, which can be a [constant](#constants) with or without its type, `FIRST :: 'A'` and `LAST : Rune : 'Z'`, and a global variable, a parameter, a field, an element of an array and what a pointer points to can be one. The default value of a `Rune` is the character with the code point 0.
 
 Runes have an order, the order of their code points, so all six [comparison operators](#comparison-operators) work on two runes, and `character >= 'A' and character <= 'Z'` is true for an upper case letter of the ASCII range. Which characters come where in the order is the order of Unicode and not of an alphabet, so it is not the order of a dictionary, and the characters of other alphabets and the emojis are above the letters of ASCII. A rune has no arithmetic, because a sum of two characters is not a character: `'a' + 1` is an error.
 
@@ -627,13 +627,17 @@ increment :: proc() Int ->
 
 A cast converts a value to another type with `cast(Type)` before the value: `my_int := cast(Int)my_byte`. Nothing is converted implicitly in Mialu, so a cast is how a value of one type is used as a value of another, and it is written wherever the conversion happens, which makes it easy to find.
 
-A cast to `Int` of a `Byte` or a `Bool` never loses anything, and a cast of an `Int` to a float rounds to the nearest number of the type when the number has more digits than it holds, and a cast of a float to an `Int` drops the fraction, truncating toward zero, and stops the program for a number that is not in the range of an `Int` and for not a number, since there is no `Int` for it. A cast of an `F32` to an `F64` never loses anything, and a cast of an `F64` to an `F32` rounds, to infinity for a number that is too large. Today these casts are allowed, and every other one is an error:
+A cast to `Int` of a `Byte`, a `Bool` or a `Rune` never loses anything, a cast of a `Byte` to a `Rune` never does either, and a cast of a `Rune` to the 4 bytes of its UTF-8 encoding, `[4]Byte`, never does, because no character takes more than 4 bytes. A cast of an `Int` to a `Rune` is not allowed, since most numbers are not Unicode characters. and a cast of an `Int` to a float rounds to the nearest number of the type when the number has more digits than it holds, and a cast of a float to an `Int` drops the fraction, truncating toward zero, and stops the program for a number that is not in the range of an `Int` and for not a number, since there is no `Int` for it. A cast of an `F32` to an `F64` never loses anything, and a cast of an `F64` to an `F32` rounds, to infinity for a number that is too large. Today these casts are allowed, and every other one is an error:
 
 | From | To | Result |
 |------|----|--------|
 | `Byte` | `Int` | The number of the byte, from 0 to 255. |
 | `Bool` | `Int` | 1 for `true` and 0 for `false`. |
 | `Int` | `Int` | The same number. |
+| `Rune` | `Int` | The code point of the character, from 0 to 0x10FFFF. |
+| `Byte` | `Rune` | The character with that code point, one of the first 256, which are the ones of Latin-1: 65 is `'A'`, and 233 is `'é'`. |
+| `Rune` | `Rune` | The same character. |
+| `Rune` | `[4]Byte` | The UTF-8 encoding of the character, which is 1 to 4 bytes, followed by as many zero bytes as it takes to make 4, see below. |
 | `F32` or `F64` | `Int` | The number with its fraction dropped, truncated toward zero, so `-3.75` is -3. The program stops for a number that is not in the range of an `Int`, and for not a number. |
 | `Byte` | `F32` or `F64` | The number of the byte, exactly. |
 | `Int` | `F32` | The nearest `F32`, which is the number itself when it has at most 24 significant bits. |
@@ -646,6 +650,20 @@ A cast to `Int` of a `Byte` or a `Bool` never loses anything, and a cast of an `
 ```
 count := cast(Int)small + cast(Int)flag
 ```
+
+The cast of a rune to bytes makes an array of 4 bytes, which is used like the array that an array literal makes: it has a length, 4, it can be subscripted, gone through by a for statement and passed as an array slice, and it is in the frame of the procedure that makes it, so it does not outlive that. The bytes are those of the character in UTF-8, so `cast([4]Byte)'A'` is `[0x41, 0, 0, 0]`, `cast([4]Byte)'é'` is `[0xC3, 0xA9, 0, 0]`, `cast([4]Byte)'芋'` is `[0xE8, 0x8A, 0x8B, 0]` and `cast([4]Byte)'🚀'` is `[0xF0, 0x9F, 0x9A, 0x80]`. The bytes after the encoding are zero, so the array of an ASCII character is a C string of one character, and the number of bytes of the encoding is found by counting the bytes before the first zero, except for the character with the code point 0, which is one byte that is zero.
+
+```
+encode :: proc(character: Rune) Int ->
+    bytes := cast([4]Byte)character
+    length := 0
+    for byte in bytes ->
+        if byte not= 0 ->
+            length += 1
+    return length
+```
+
+`encode('🚀')` returns 4, `encode('é')` returns 2 and `encode('A')` returns 1. A rune is made of a `Byte` with `cast(Rune)`, and a `Rune` is made an `Int` with `cast(Int)`, which are the casts of a character to and from its number, and nothing makes a rune of an `Int` or of bytes, because those are not always characters.
 
 The other direction, to a type that holds fewer values, is not a cast, because a value may not fit: `int_to_byte` makes a `Byte` of an `Int` and stops the program when the number is not from 0 to 255, see [Bytes](#bytes). A `Bool` is never made out of an `Int`, which is written as a comparison, `n not= 0`, see [Booleans](#booleans).
 
