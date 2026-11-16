@@ -31,7 +31,7 @@
   - [If statements](#if-statements)
   - [Match statements](#match-statements)
   - [For statements](#for-statements)
-  - [Scopes](#scopes)
+  - [Labels and scopes](#labels-and-scopes)
   - [Break and continue](#break-and-continue)
   - [Defer](#defer)
 - [Arrays](#arrays)
@@ -1043,7 +1043,7 @@ count_up_to :: proc(limit: Int) Int ->
 
 `count_up_to(5)` returns 5. A loop without a way out is not an error, but it never ends, and neither does a program that runs it.
 
-### Scopes
+### Labels and scopes
 
 A scope statement is a block of statements that is not the branch of an `if` or the body of a loop. It is written `->` alone on a line, and the block, which is indented one level deeper, runs once, from the first statement to the last:
 
