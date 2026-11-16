@@ -18,6 +18,7 @@
   - [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators)
   - [Comparison operators](#comparison-operators)
   - [Logical operators](#logical-operators)
+  - [Address of and dereference operators](#address-of-and-dereference-operators)
   - [Casts](#casts)
 - [Constants and variables](#constants-and-variables)
   - [Constants](#constants)
@@ -333,12 +334,12 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `-`      | Subtraction. | 5 | `x := 5 - 1` makes `x` 4 |
 | `*`      | Multiplication. | 6 | `x := 2 + 3 * 4` makes `x` 14 |
 | `/`      | Division. The result is truncated toward zero. | 6 | `x := 20 - 12 / 4` makes `x` 17 |
-| `%`      | Address of. It is written before its operand, which must have an address, and gives a pointer to it. It binds looser than what follows a name, so `%p.x` is the address of `p.x`. See [Taking an address](#taking-an-address). | 7 | `%x` is a pointer to `x` |
+| `%`      | Address of. It is written before its operand. See [Address of and dereference operators](#address-of-and-dereference-operators). | 7 | `%x` is a pointer to `x` |
 | `cast`   | Cast. `cast(Type)` is written before its operand, and converts its value to the type, where nothing is lost. It binds like `%`. See [Casts](#casts). | 7 | `cast(Int)b` is the `Int` of the `Byte` `b` |
 | `[ ]`    | Subscript. The index of an element between brackets. It is written after the name of an array or of an array slice, and binds tighter than every operator. See [Elements](#elements). | 8 | `a[2]` is the element at index 2 of `a` |
 | `.`      | Field access. The name of a field after a struct object, which is a name, an element of an array, what a pointer points to, or another field. See [Fields](#fields). | 8 | `p.age` is the field `age` of `p` |
 | `[ : ]`  | Slice. The two bounds of an array slice between brackets, separated by a colon. It includes the low bound and excludes the high bound. See [Array slices](#array-slices). | 8 | `a[1:4]` has the elements 1 through 3 |
-| `^`      | Dereference. It is written after an expression whose value is a pointer, and gives what the pointer points to. It can be assigned to. See [Following a pointer](#following-a-pointer). | 8 | `p^` is the value that `p` points to |
+| `^`      | Dereference. It is written after its operand. See [Address of and dereference operators](#address-of-and-dereference-operators). | 8 | `p^` is the value that `p` points to |
 | `+=`     | Addition assignment. It adds the value to a variable that is defined already. | 0 | `x += 2` adds 2 to `x` |
 | `-=`     | Subtraction assignment. It subtracts the value from a variable. | 0 | `x -= 2` makes `x` 2 less |
 | `*=`     | Multiplication assignment. It multiplies a variable by the value. | 0 | `x *= 3` triples `x` |
@@ -500,6 +501,25 @@ A comparison binds tighter than all three, so `n >= low and n <= high` needs no 
 Both operands of `and` and `or` are always evaluated: there is no short circuit. That makes no difference for a value that is already computed, but in `d not= 0 and n / d > 1` the division still happens, and traps when `d` is zero.
 
 A word must be separated from what is next to it by whitespace, unlike a symbol, so `a and b` cannot be written `aandb`. `not=` is one token for the inequality, and the keyword `not` is a `not` that is not directly followed by `=`.
+
+### Address of and dereference operators
+
+| Operator | Result |
+|----------|--------|
+| `%a` | a pointer to `a`, of type `^T` when `a` is of type `T` |
+| `p^` | what the pointer `p` points to, which can be assigned to |
+
+`%` is the address of operator. It is written before its operand, which must have an address, such as a variable, a field, an element, or what a pointer points to, and gives a pointer to it. It binds looser than what follows a name, so `%p.x` is the address of `p.x` and `%a[1]` is the address of the element, and tighter than every operator. `^` is the dereference operator. It is written after an expression whose value is a pointer, and gives what the pointer points to, so a chain of pointers reads from left to right, as in `pp^^`. It binds like `.` and `[ ]`, and `p^` can be assigned to, with `=` and with the compound assignment operators.
+
+```
+increment :: proc() Int ->
+    x := 4
+    p := %x
+    p^ += 1
+    return x
+```
+
+`increment` returns 5. Which operands have an address, what a pointer to a field or an element is, and how the pointers behave with `nil` and with structs, is described in [Pointers](#pointers), see [Taking an address](#taking-an-address) and [Following a pointer](#following-a-pointer).
 
 ### Casts
 
