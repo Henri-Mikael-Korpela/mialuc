@@ -920,13 +920,16 @@ static void main_run_command_report_tokenize_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: a label is '@' directly followed by a name that is not a "
                 "reserved word.\n", path, line, column);
         break;
-    case TOKENIZE_STATUS_RUNE_LITERAL_BACKSLASH:
-        fprintf(stderr, "%s:%zu:%zu: a rune cannot contain a backslash, because escape sequences "
-                "are not supported.\n", path, line, column);
-        break;
     case TOKENIZE_STATUS_RUNE_LITERAL_EMPTY:
         fprintf(stderr, "%s:%zu:%zu: a rune literal has a character between its quotes, and "
                 "this has none.\n", path, line, column);
+        break;
+    case TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: this is not an escape sequence of a rune: a backslash and "
+                "one of a, b, e, f, n, r, t, v, \\, ' or \", three octal digits up to 377, x and "
+                "two hexadecimal digits, u and four, or U and eight, with a number that is a "
+                "Unicode character, which is at most 10FFFF and not D800 to DFFF.\n", path, line,
+                column);
         break;
     case TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID:
         fprintf(stderr, "%s:%zu:%zu: the character of a rune must be valid UTF-8.\n", path, line,

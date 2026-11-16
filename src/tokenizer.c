@@ -73,6 +73,7 @@ static bool   tokenizer_comment_line_end(Str source, size_t offset, size_t *end)
 static Tokenize_Float_Literal tokenizer_float_literal(Str source, size_t offset);
 static Tokenize_Rune_Literal tokenizer_rune_literal(Str source, size_t offset);
 static uint32_t utf8_decode(Str text, size_t offset, size_t sequence_size);
+static bool   tokenizer_escape_read(Str source, size_t offset, uint32_t *value, size_t *length);
 static Tokenize_Integer_Literal tokenizer_integer_literal(Str source, size_t offset);
 static Token_Kind tokenizer_keyword_type(Str text);
 static bool   tokenizer_operator_types(char character, Token_Kind *plain_type,
@@ -276,10 +277,94 @@ static uint32_t utf8_decode(Str text, size_t offset, size_t sequence_size) {
 }
 
 /**
+ * Reads the escape sequence that starts at `offset` in `source`, where there is a backslash, and
+ * sets `value` to the code point that it stands for and `length` to the number of bytes that it
+ * takes, the backslash included. The sequences are:
+ *
+ * - `\a`, `\b`, `\e`, `\f`, `\n`, `\r`, `\t` and `\v` are the control characters bell, backspace,
+ *   escape, form feed, line feed, carriage return, horizontal tab and vertical tab,
+ * - `\\`, `\'` and `\"` are the backslash and the two quotes,
+ * - a backslash and three octal digits, such as `\101`, is the code point of that number, which is
+ *   at most 255, `\x` and two hexadecimal digits, such as `\x41`, is the code point of that number,
+ *   `\u` and four, such as `\u0123`, and `\U` and eight, such as `\U0001F680`, are the code point
+ *   of that number, which has to be a Unicode character: at most 0x10FFFF and not a surrogate.
+ *
+ * The digits of a hexadecimal number are of either case. Returns false when the backslash does not
+ * start one of them.
+ */
+static bool tokenizer_escape_read(Str source, size_t offset, uint32_t *value, size_t *length) {
+    assert(offset < source.length);
+    assert(source.bytes[offset] == '\\');
+    assert(value != NULL);
+    assert(length != NULL);
+
+    if (offset + 1 >= source.length) {
+        return false;
+    }
+    char kind = source.bytes[offset + 1];
+
+    // The characters that are one letter after the backslash.
+    static struct {
+        char letter;
+        uint32_t code_point;
+    } const SIMPLE[] = {
+        {'a', 0x07}, {'b', 0x08}, {'e', 0x1B}, {'f', 0x0C}, {'n', 0x0A}, {'r', 0x0D},
+        {'t', 0x09}, {'v', 0x0B}, {'\\', '\\'}, {'\'', '\''}, {'"', '"'},
+    };
+    for (size_t i = 0; i < sizeof(SIMPLE) / sizeof(SIMPLE[0]); i += 1) {
+        if (SIMPLE[i].letter == kind) {
+            *value = SIMPLE[i].code_point;
+            *length = 2;
+            return true;
+        }
+    }
+
+    // A number, in digits of a base, which are all of the count that the kind says: three octal
+    // digits, or two, four or eight hexadecimal ones.
+    size_t digit_count = 0;
+    uint32_t base = 16;
+    size_t digits_start = offset + 2;
+    if (kind >= '0' && kind <= '7') {
+        digit_count = 3;
+        base = 8;
+        digits_start = offset + 1;
+    } else if (kind == 'x') {
+        digit_count = 2;
+    } else if (kind == 'u') {
+        digit_count = 4;
+    } else if (kind == 'U') {
+        digit_count = 8;
+    } else {
+        return false;
+    }
+    if (digits_start + digit_count > source.length) {
+        return false;
+    }
+
+    uint32_t number = 0;
+    for (size_t i = 0; i < digit_count; i += 1) {
+        int digit = char_digit_value(source.bytes[digits_start + i]);
+        if (digit < 0 || (uint32_t)digit >= base) {
+            return false;
+        }
+        number = number * base + (uint32_t)digit;
+    }
+
+    // An octal number is a byte, so it is at most 255, and the others are Unicode characters.
+    bool is_surrogate = number >= 0xD800 && number <= 0xDFFF;
+    if (number > 0x10FFFF || is_surrogate || (base == 8 && number > 255)) {
+        return false;
+    }
+    *value = number;
+    *length = (digits_start - offset) + digit_count;
+    return true;
+}
+
+/**
  * Reads the rune literal that starts at `offset` in `source`, where there is a single quote: one
  * character, which is valid UTF-8 and so can be any Unicode character, such as `'A'`, `'芋'` or
- * `'🚀'`, and a closing single quote. It is on one line, and a backslash is an error for now,
- * because the escape sequences are kept for later, like those of a string. A character is not
+ * `'🚀'`, or an escape sequence that stands for one, such as `'\n'` or `'\u0123'`, see
+ * `tokenizer_escape_read`, and a closing single quote. It is on one line. A character is not
  * several code points, so a letter with an accent that is a base letter and a combining mark is two
  * characters and an error, and the one code point of the letter is a rune.
  */
@@ -302,19 +387,23 @@ static Tokenize_Rune_Literal tokenizer_rune_literal(Str source, size_t offset) {
         literal.error_offset = offset;
         return literal;
     }
-    if (source.bytes[start] == '\\') {
-        literal.status = TOKENIZE_STATUS_RUNE_LITERAL_BACKSLASH;
-        literal.error_offset = start;
-        return literal;
-    }
 
-    size_t sequence_size = utf8_sequence_size(source, start);
-    if (sequence_size == 0) {
-        literal.status = TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID;
-        literal.error_offset = start;
-        return literal;
+    size_t sequence_size = 0;
+    if (source.bytes[start] == '\\') {
+        if (not tokenizer_escape_read(source, start, &literal.value, &sequence_size)) {
+            literal.status = TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID;
+            literal.error_offset = start;
+            return literal;
+        }
+    } else {
+        sequence_size = utf8_sequence_size(source, start);
+        if (sequence_size == 0) {
+            literal.status = TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID;
+            literal.error_offset = start;
+            return literal;
+        }
+        literal.value = utf8_decode(source, start, sequence_size);
     }
-    literal.value = utf8_decode(source, start, sequence_size);
 
     size_t end = start + sequence_size;
     if (end < source.length && source.bytes[end] == '\'') {

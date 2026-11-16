@@ -1,8 +1,10 @@
 // Characters: a `Rune` is a Unicode character, which is the code point of the character, a 32-bit
 // number from 0 to 0x10FFFF in a word, and a rune literal is one character between single quotes.
 // The source is UTF-8, so a character can be a letter of any alphabet, a kanji or an emoji, and it
-// is one rune, whatever number of bytes it takes. A rune has an order, the order of the code points,
-// but no arithmetic. The output is plain ASCII, so that any console shows it, and the exit code of
+// is one rune, whatever number of bytes it takes. A character that cannot be written as itself, or
+// is hard to see, is an escape sequence: a backslash and what stands for the character, such as
+// `'\n'` for a new line and `'\u0123'` for U+0123. A rune has an order, the order of the code
+// points, but no arithmetic. The output is plain ASCII, so that any console shows it, and the exit code of
 // the program is the number of checks that failed, so 0 means that all of them passed.
 
 import foreign libc
@@ -81,4 +83,20 @@ main :: proc() Int ->
 
     empty : Rune
     failures += check(str_to_c_str("default rune is zero"), empty < 'A')
+
+    newline : Rune = '\n'
+    unicode_char : Rune = '\u0123'
+    failures += check(str_to_c_str("a new line is below a space"), newline < ' ')
+    failures += check(str_to_c_str("a new line is the code point 10"), newline == '\x0A')
+    failures += check(str_to_c_str("a tab is the code point 9"), '\t' == '\011')
+    controls := '\a' < '\b' and '\b' < '\t' and '\e' > '\f'
+    failures += check(str_to_c_str("bell, backspace, escape and form feed"), controls)
+    failures += check(str_to_c_str("carriage return and vertical tab"), '\r' > '\v')
+    quotes := '\\' == '\x5C' and '\'' == '\x27' and '\"' == '"'
+    failures += check(str_to_c_str("backslash and quotes"), quotes)
+    every_way := '\101' == 'A' and '\x41' == 'A' and '\u0041' == 'A' and '\U00000041' == 'A'
+    failures += check(str_to_c_str("every way to write A"), every_way)
+    failures += check(str_to_c_str("a unicode escape is a letter"), unicode_char == 'ģ')
+    failures += check(str_to_c_str("an escaped emoji is the emoji"), '\U0001F680' == rocket)
+    failures += check(str_to_c_str("digits of either case"), '\u00e9' == '\u00E9')
     return failures

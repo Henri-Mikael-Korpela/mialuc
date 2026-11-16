@@ -250,11 +250,44 @@ emoji : Rune = '🚀'
 inferred := 'é'
 ```
 
-The source of a program is UTF-8, and a character in it can take one to four bytes, which a rune does not care about: `'A'` takes one byte and is 65, `'é'` takes two and is 233, `'芋'` takes three and is 33419, and `'🚀'` takes four and is 128640. What a rune holds is the number of the character and not its bytes, so it is the same whatever the encoding of the text that the character is in. A rune is one character, which is one code point: a letter with an accent that is written as a letter and a combining mark is two code points, and so is two runes, and a literal of both is an error, while the one code point of the letter, `'é'`, is a rune. A character that is not valid UTF-8 is an error, and so is a number that is not a Unicode character, which no literal can write, because the source is UTF-8 and a surrogate, U+D800 to U+DFFF, is not valid in it.
+A character that cannot be written as itself, or is hard to see, is written as an escape sequence: a backslash and what stands for the character, as in `'\n'` for a new line and `'\u0123'` for U+0123.
+
+```
+newline : Rune = '\n'
+quote : Rune = '\''
+unicode_char : Rune = '\u0123'
+rocket : Rune = '\U0001F680'
+```
+
+The source of a program is UTF-8, and a character in it can take one to four bytes, which a rune does not care about: `'A'` takes one byte and is 65, `'é'` takes two and is 233, `'芋'` takes three and is 33419, and `'🚀'` takes four and is 128640. What a rune holds is the number of the character and not its bytes, so it is the same whatever the encoding of the text that the character is in. A rune is one character, which is one code point: a letter with an accent that is written as a letter and a combining mark is two code points, and so is two runes, and a literal of both is an error, while the one code point of the letter, `'é'`, is a rune. A character that is not valid UTF-8 is an error, and so is a number that is not a Unicode character: a surrogate, U+D800 to U+DFFF, and a number above 0x10FFFF.
 
 A rune literal has the type `Rune`, and it is not an untyped number: `'A'` is not an `Int` and not a `Byte`, `x : Int = 'A'` is an error and so is `x : Rune = 65`. A rune literal is one literal, so it is a constant, which can be a [constant](#constants) with or without its type, `FIRST :: 'A'` and `LAST : Rune : 'Z'`, and a global variable, a parameter, a field, an element of an array and what a pointer points to can be one. The default value of a `Rune` is the character with the code point 0.
 
-Runes have an order, the order of their code points, so all six [comparison operators](#comparison-operators) work on two runes, and `character >= 'A' and character <= 'Z'` is true for an upper case letter of the ASCII range. Which characters come where in the order is the order of Unicode and not of an alphabet, so it is not the order of a dictionary, and the characters of other alphabets and the emojis are above the letters of ASCII. A rune has no arithmetic, because a sum of two characters is not a character: `'a' + 1` is an error. A backslash in a rune literal is an error for now, because the escape sequences are kept for later, as they are for a string, so a character that needs one, such as a new line, cannot be written yet.
+Runes have an order, the order of their code points, so all six [comparison operators](#comparison-operators) work on two runes, and `character >= 'A' and character <= 'Z'` is true for an upper case letter of the ASCII range. Which characters come where in the order is the order of Unicode and not of an alphabet, so it is not the order of a dictionary, and the characters of other alphabets and the emojis are above the letters of ASCII. A rune has no arithmetic, because a sum of two characters is not a character: `'a' + 1` is an error.
+
+The escape sequences are:
+
+| Escape sequence | Character | Code point |
+|-----------------|-----------|------------|
+| `\a` | bell | 7 |
+| `\b` | backspace | 8 |
+| `\e` | escape | 27 |
+| `\f` | form feed | 12 |
+| `\n` | new line, which is a line feed | 10 |
+| `\r` | carriage return | 13 |
+| `\t` | horizontal tab | 9 |
+| `\v` | vertical tab | 11 |
+| `\\` | backslash | 92 |
+| `\'` | single quote | 39 |
+| `\"` | double quote | 34 |
+| `\` and three octal digits, such as `\101` | the code point of the number, which is at most 255, `\377` | 0 to 255 |
+| `\x` and two hexadecimal digits, such as `\x41` | the code point of the number | 0 to 255 |
+| `\u` and four hexadecimal digits, such as `\u0123` | the code point of the number | 0 to 0xFFFF |
+| `\U` and eight hexadecimal digits, such as `\U0001F680` | the code point of the number | 0 to 0x10FFFF |
+
+The digits of a hexadecimal number are of either case, so `'\u00e9'` and `'\u00E9'` are the same rune. A number has all of its digits, so `'\x4'` is an error, and so is a number that is not a Unicode character: `'\ud800'` is a surrogate, and `'\U00110000'` is above the last code point. The octal form takes exactly three digits, so the character with the code point 0 is `'\000'` or `'\x00'`, and not `'\0'`. A backslash followed by anything else, such as `'\q'`, is an error. The single quote is written `'\''` in a rune literal, because a quote that is not escaped ends it, while the double quote, which is no problem there, can be written either way. A character that is a line break cannot be written as itself, because a literal is on one line, so a new line is `'\n'`.
+
+An escape sequence is a way to write one character, so a rune literal that has one is the same rune as the character: `'\u0041'`, `'\x41'`, `'\101'` and `'A'` are all 65. The escape sequences are only for rune literals now: a string has no escape sequences yet, and a backslash in one is an error.
 
 > **Lessons learnt from C** In C, a character literal such as `'A'` is an `int`, and the type `char` is a byte that may or may not be signed, so text in UTF-8 is a sequence of numbers that are not characters, and a character that takes several bytes cannot be one literal. In Mialu a character is a `Rune`, which is as wide as the largest code point, and its literal is one character in any alphabet.
 

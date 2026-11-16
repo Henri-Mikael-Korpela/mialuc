@@ -102,8 +102,8 @@
         },
         "runes": {
             "name": "string.quoted.single.mialu",
-            "comment": "A rune literal is one character between single quotes, which can be any character, as in 'A', '芋' and '🚀'. A backslash is not allowed yet, so a literal that has one, or has more than one character, is not colored.",
-            "match": "'[^'\\\\\\n]'"
+            "comment": "A rune literal is one character between single quotes, which can be any character, as in 'A', '芋' and '🚀', or an escape sequence: a backslash and one of a b e f n r t v \\ ' or \", three octal digits, x and two hexadecimal digits, u and four, or U and eight, as in '\\n' and '\\u0123'. A literal that has more than one character is not colored.",
+            "match": "'(?:[^'\\\\\\n]|\\\\(?:[abefnrtv\\\\'\\\"]|[0-7]{3}|x\\h{2}|u\\h{4}|U\\h{8}))'"
         },
         "attributes": {
             "name": "meta.attribute.mialu",

@@ -385,7 +385,7 @@
         const HIGHLIGHT_RULES = {
             mialu: [
                 ["comment", /\/\/.*/],
-                ["string", /"[^"\\\n]*"|'(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|[^'\\\n])'/],
+                ["string", /"[^"\\\n]*"|'(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|[^'\\\n]|\\(?:[abefnrtv\\'"]|[0-7]{3}|x[\dA-Fa-f]{2}|u[\dA-Fa-f]{4}|U[\dA-Fa-f]{8}))'/],
                 ["attribute", /#(?:[ \t]*\([ \t]*[A-Za-z_]\w*[ \t]*\))+/],
                 ["label", /@[A-Za-z_]\w*/],
                 ["keyword", /\b(?:proc|return|if|else|for|in|break|case|cast|const|continue|defer|enum|match|struct|type_info_of|union|foreign|import|and|or)\b|\bnot\b(?!=)/],

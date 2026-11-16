@@ -203,14 +203,16 @@ typedef enum {
     TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID,
     // The string has no closing quote before the end of its line.
     TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED,
-    // A backslash in a rune literal. It is kept for escape sequences, which the language does not
-    // have yet. `error_offset` is where the backslash is.
-    TOKENIZE_STATUS_RUNE_LITERAL_BACKSLASH,
     // `''`, a rune literal without a character. `error_offset` is where the literal starts.
     TOKENIZE_STATUS_RUNE_LITERAL_EMPTY,
     // The character of a rune literal is not valid UTF-8. `error_offset` is where the first bad
     // byte is.
     TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID,
+    // An escape sequence of a rune literal that is not one of the language: a backslash followed by
+    // a character that does not make one, such as `\q`, too few digits, as in `\x4`, or a number
+    // that is not a Unicode character, such as the surrogate of `\ud800`, a number above 0x10FFFF
+    // or an octal one above 255. `error_offset` is where the backslash is.
+    TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID,
     // A rune literal that has more than one character, such as `'ab'`. `error_offset` is where the
     // literal starts.
     TOKENIZE_STATUS_RUNE_LITERAL_TOO_LONG,
