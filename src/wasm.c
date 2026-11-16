@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <iso646.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -883,7 +884,7 @@ static bool wasm_check_foreign_targets(Wasm_Builder *builder) {
             str_equals(builder->nodes[i].payload.call.name, STR("str_to_c_str"))) {
             Ast_Node_Index argument = builder->nodes[i].first_child;
             if (argument == AST_NODE_INDEX_NONE ||
-                wasm_is_constant(builder, argument) == false ||
+                not wasm_is_constant(builder, argument) ||
                 builder->constants[argument].string == AST_NODE_INDEX_NONE) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_BUILT_IN_UNSUPPORTED,
                                  builder->nodes[i].payload.call.name);
@@ -917,7 +918,7 @@ static bool wasm_check_foreign_targets(Wasm_Builder *builder) {
  */
 static bool wasm_data_measure(Wasm_Builder *builder) {
     assert(builder->data_size_bytes == 0);
-    assert(builder->has_memory == false);
+    assert(not builder->has_memory);
 
     size_t size_bytes = 0;
     bool has_literal = false;
@@ -1014,7 +1015,7 @@ static bool wasm_check_signatures(Wasm_Builder *builder, Ast_Node_Index module,
     // The numbers of an enum are of the type that its definition writes, which is `Int`.
     for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
         if (builder->nodes[node].node_type == AST_NODE_TYPE_ENUM_TYPE &&
-            str_equals(builder->nodes[node].payload.enum_type.value_type, STR("Int")) == false) {
+            not str_equals(builder->nodes[node].payload.enum_type.value_type, STR("Int"))) {
             return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
                              builder->nodes[node].payload.enum_type.value_type);
         }
@@ -1056,7 +1057,7 @@ static bool wasm_check_signatures(Wasm_Builder *builder, Ast_Node_Index module,
                                      .payload.identifier.name);
             }
             size_t number = 0;
-            if (wasm_enum_member_find(builder, enum_node, member_name, &number) == false) {
+            if (not wasm_enum_member_find(builder, enum_node, member_name, &number)) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN, member_name);
             }
         }
@@ -1289,12 +1290,12 @@ static bool wasm_check_globals(Wasm_Builder *builder) {
                                  wasm_type_subject(builder, type_name));
             }
             if (wasm_type_info_access_is(builder, value)) {
-                if (wasm_type_info_check(builder, value) == false) {
+                if (not wasm_type_info_check(builder, value)) {
                     return false;
                 }
                 Ast_Node_Index declared = wasm_global_type_node(builder, global);
                 if (declared != AST_NODE_INDEX_NONE &&
-                    wasm_type_equals(wasm_type_info_type(builder, value), global_type) == false) {
+                    not wasm_type_equals(wasm_type_info_type(builder, value), global_type)) {
                     return wasm_fail(
                         builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
                         builder->nodes[global].payload.global_variable_definition.name);
@@ -1311,7 +1312,7 @@ static bool wasm_check_globals(Wasm_Builder *builder) {
                 global = builder->nodes[global].next_sibling;
                 continue;
             }
-            if (wasm_is_constant(builder, value) == false) {
+            if (not wasm_is_constant(builder, value)) {
                 // The analysis checked that anything else is a constant, so this follows
                 // `type_info_of(...)`, which only its field can.
                 return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_INFO_MISPLACED,
@@ -1340,7 +1341,7 @@ static bool wasm_check_globals(Wasm_Builder *builder) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
                                  wasm_type_subject(builder, type));
             }
-            if (wasm_value_is_accepted(builder, global_type, value) == false) {
+            if (not wasm_value_is_accepted(builder, global_type, value)) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
                                  builder->nodes[global].payload.global_variable_definition.name);
             }
@@ -1878,7 +1879,7 @@ static bool wasm_build_code_section(Wasm_Builder *builder, Ast_Node_Index module
     for (size_t i = 0; i < definition_count; i += 1) {
         assert(definition != AST_NODE_INDEX_NONE);
 
-        if (wasm_build_code_section_body(builder, definition) == false) {
+        if (not wasm_build_code_section_body(builder, definition)) {
             return false;
         }
         definition = wasm_function_find(builder, builder->nodes[definition].next_sibling, false);
@@ -1910,19 +1911,19 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
         wasm_write_unsigned(&builder->writer, 0);
         Ast_Node_Index enum_node = wasm_enum_of_access(builder, value);
         assert(enum_node != AST_NODE_INDEX_NONE);
-        if (wasm_enum_member_write(builder, enum_node,
-                                   builder->nodes[value].payload.field_access.name) == false) {
+        if (not wasm_enum_member_write(builder, enum_node,
+                                   builder->nodes[value].payload.field_access.name)) {
             return false;
         }
     } else {
         // The parameters are the first locals of the function already, and the variables come
         // after them.
-        if (wasm_variables_check(builder, definition, value) == false) {
+        if (not wasm_variables_check(builder, definition, value)) {
             return false;
         }
         wasm_variables_write_locals(builder, value);
         wasm_frame_enter(builder, value);
-        if (wasm_build_code_section_body_procedure(builder, definition) == false) {
+        if (not wasm_build_code_section_body_procedure(builder, definition)) {
             return false;
         }
     }
@@ -1967,7 +1968,7 @@ static void wasm_build_code_section_body_string(Wasm_Builder *builder, Ast_Node_
 
     // Both are below 2 GiB, because `wasm_data_measure` checked the total.
     wasm_write_i32_const(&builder->writer, (int64_t)address);
-    if (is_c_str == false) {
+    if (not is_c_str) {
         wasm_write_i32_const(&builder->writer, (int64_t)length_bytes);
     }
 }
@@ -2113,10 +2114,10 @@ static void wasm_build_code_section_body_exit(Wasm_Builder *builder, Ast_Node_In
 
     bool is_return = builder->nodes[jump].node_type == AST_NODE_TYPE_RETURN_STATEMENT;
     bool is_last_level = jump_frame->exit_level == 0;
-    if (is_return == false) {
+    if (not is_return) {
         is_last_level = level->statement == builder->bindings[jump].target;
     }
-    if (is_last_level == false) {
+    if (not is_last_level) {
         assert(jump_frame->exit_level > 0);
         jump_frame->exit_level -= 1;
         jump_frame->defer_bound = jump;
@@ -2204,7 +2205,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
         if (frame->next == AST_NODE_INDEX_NONE) {
             // The deferred statements of the list come before its end, the last one first, unless
             // the list ends with a jump, which wrote them before itself.
-            if (defer_count > 0 && wasm_list_ends_with_exit(builder, frame->node) == false) {
+            if (defer_count > 0 && not wasm_list_ends_with_exit(builder, frame->node)) {
                 Ast_Node_Index deferred =
                     wasm_defer_last_before(builder, frame->node, frame->defer_bound);
                 if (deferred != AST_NODE_INDEX_NONE) {
@@ -2247,11 +2248,11 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             if (child_node->node_type != AST_NODE_TYPE_BLOCK) {
                 // A condition after the first is an `else if`, which is inside the `else` of the
                 // branch before it.
-                if (is_first == false) {
+                if (not is_first) {
                     wasm_write_byte(&builder->writer, WASM_OPCODE_ELSE);
                 }
-                if (wasm_build_code_section_body_expression(builder, definition, child,
-                                                            false) == false) {
+                if (not wasm_build_code_section_body_expression(builder, definition, child,
+                                                            false)) {
                     return false;
                 }
                 // There is no conversion to a `Bool`, so an `Int` or a `Str` is not a condition.
@@ -2271,7 +2272,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             }
         } else if (child_node->node_type == AST_NODE_TYPE_RETURN_STATEMENT) {
             // The value is computed before the deferred statements run, so they cannot change it.
-            if (wasm_build_code_section_body_return(builder, definition, child) == false) {
+            if (not wasm_build_code_section_body_return(builder, definition, child)) {
                 return false;
             }
             if (defer_count > 0) {
@@ -2282,15 +2283,15 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
         } else if (child_node->node_type == AST_NODE_TYPE_DEFER_STATEMENT) {
             // Written where its block is left, see above.
         } else if (child_node->node_type == AST_NODE_TYPE_CALL_STATEMENT) {
-            if (wasm_build_code_section_body_call_statement(builder, definition, child) == false) {
+            if (not wasm_build_code_section_body_call_statement(builder, definition, child)) {
                 return false;
             }
         } else if (child_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
-            if (wasm_build_code_section_body_variable(builder, definition, child) == false) {
+            if (not wasm_build_code_section_body_variable(builder, definition, child)) {
                 return false;
             }
         } else if (ast_node_type_is_assignment(child_node->node_type)) {
-            if (wasm_build_code_section_body_assignment(builder, definition, child) == false) {
+            if (not wasm_build_code_section_body_assignment(builder, definition, child)) {
                 return false;
             }
         } else if (child_node->node_type == AST_NODE_TYPE_IF_STATEMENT) {
@@ -2305,7 +2306,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             wasm_frame_push(builder, frames, &frame_count, child, label_owner);
         } else if (child_node->node_type == AST_NODE_TYPE_MATCH_STATEMENT) {
             // The frame of the match goes through its cases, which come after the subject.
-            if (wasm_build_code_section_body_match(builder, definition, child) == false) {
+            if (not wasm_build_code_section_body_match(builder, definition, child)) {
                 return false;
             }
             wasm_frame_push(builder, frames, &frame_count, child, AST_NODE_INDEX_NONE);
@@ -2331,7 +2332,7 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             Ast_Node_Index block = child_node->last_child;
             wasm_frame_push(builder, frames, &frame_count, block, child);
         } else if (child_node->node_type == AST_NODE_TYPE_FOR_STATEMENT) {
-            if (wasm_build_code_section_body_for(builder, definition, child) == false) {
+            if (not wasm_build_code_section_body_for(builder, definition, child)) {
                 return false;
             }
             Ast_Node_Index block = child_node->last_child;
@@ -2376,7 +2377,7 @@ static bool wasm_build_code_section_body_for(Wasm_Builder *builder, Ast_Node_Ind
     // Both ends are `Int`, there is no conversion to one.
     Ast_Node_Index ends[2] = {first, end};
     for (size_t i = 0; i < 2; i += 1) {
-        if (wasm_build_code_section_body_expression(builder, definition, ends[i], false) == false) {
+        if (not wasm_build_code_section_body_expression(builder, definition, ends[i], false)) {
             return false;
         }
         if (wasm_expression_type(builder, ends[i]).kind != WASM_VALUE_TYPE_INT) {
@@ -2501,7 +2502,7 @@ static Wasm_Match_Pattern wasm_match_pattern(Wasm_Builder const *builder, Wasm_T
         size_t number = 0;
         if (member.bytes == NULL) {
             result.status = WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
-        } else if (wasm_enum_member_find(builder, subject.definition, member, &number) == false) {
+        } else if (not wasm_enum_member_find(builder, subject.definition, member, &number)) {
             result.status = WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN;
         }
         // An enum has fewer members than there are nodes, which is far below the largest `Int`.
@@ -2527,11 +2528,11 @@ static Wasm_Match_Pattern wasm_match_pattern(Wasm_Builder const *builder, Wasm_T
         }
         Ast_Node_Index ends[2] = {node->first_child, node->last_child};
         for (size_t i = 0; i < 2; i += 1) {
-            if (wasm_is_constant(builder, ends[i]) == false) {
+            if (not wasm_is_constant(builder, ends[i])) {
                 result.status = WASM_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT;
                 return result;
             }
-            if (wasm_constant_is_accepted(subject, builder->constants[ends[i]]) == false) {
+            if (not wasm_constant_is_accepted(subject, builder->constants[ends[i]])) {
                 result.status = WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
                 return result;
             }
@@ -2555,12 +2556,12 @@ static Wasm_Match_Pattern wasm_match_pattern(Wasm_Builder const *builder, Wasm_T
         return result;
     }
 
-    if (wasm_is_constant(builder, pattern) == false) {
+    if (not wasm_is_constant(builder, pattern)) {
         result.status = WASM_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT;
         return result;
     }
     Constant_Value constant = builder->constants[pattern];
-    if (wasm_constant_is_accepted(subject, constant) == false) {
+    if (not wasm_constant_is_accepted(subject, constant)) {
         result.status = WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
         return result;
     }
@@ -2692,13 +2693,13 @@ static bool wasm_match_check(Wasm_Builder *builder, Ast_Node_Index definition,
         Str name = builder->nodes[member].payload.enum_member.name;
         bool is_handled = false;
         match_case = first_case;
-        for (size_t j = 0; j < pattern_count && is_handled == false; j += 1) {
+        for (size_t j = 0; j < pattern_count && not is_handled; j += 1) {
             Ast_Node_Index pattern = ast_match_case_pattern(builder->nodes, match_case);
             is_handled = str_equals(
                 wasm_union_enum_member_name(builder, pattern, enum_node), name);
             match_case = builder->nodes[match_case].next_sibling;
         }
-        if (is_handled == false) {
+        if (not is_handled) {
             builder->detail = name;
             break;
         }
@@ -2720,7 +2721,7 @@ static bool wasm_build_code_section_body_match(Wasm_Builder *builder, Ast_Node_I
 
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
     Ast_Node_Index subject = ast_match_subject(builder->nodes, match);
-    if (wasm_build_code_section_body_expression(builder, definition, subject, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, subject, false)) {
         return false;
     }
     wasm_slots_set(builder, wasm_match_subject_type(builder, match), WASM_OPCODE_LOCAL_SET,
@@ -3016,7 +3017,7 @@ static bool wasm_build_code_section_body_call_statement(Wasm_Builder *builder,
     assert(builder->nodes[statement].node_type == AST_NODE_TYPE_CALL_STATEMENT);
 
     Ast_Node_Index call = builder->nodes[statement].first_child;
-    if (wasm_build_code_section_body_expression(builder, definition, call, true) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, call, true)) {
         return false;
     }
 
@@ -3059,7 +3060,7 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
         } else if (str_equals(name, STR("str_to_c_str"))) {
             is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_STR;
         }
-        if (is_argument_valid == false) {
+        if (not is_argument_valid) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         }
         return true;
@@ -3084,14 +3085,14 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
         Ast_Node_Index type = wasm_signature_parameter_type(builder, callee, i);
         Wasm_Type parameter_type = wasm_type_of_node(builder, type);
         // An array is passed as an array slice, see `wasm_array_decay`.
-        if (wasm_expression_is_accepted(builder, parameter_type, argument) == false) {
+        if (not wasm_expression_is_accepted(builder, parameter_type, argument)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         }
         argument = builder->nodes[argument].next_sibling;
     }
 
     bool has_result = ast_procedure_return_type(&builder->nodes[callee]).bytes != NULL;
-    if (has_result == false && is_result_unused == false) {
+    if (not has_result && not is_result_unused) {
         return wasm_fail(builder, WASM_BUILD_STATUS_CALL_RESULT_MISSING, name);
     }
     return true;
@@ -3114,7 +3115,7 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
     }
 
     Ast_Node_Index value = builder->nodes[statement].first_child;
-    if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
         return false;
     }
 
@@ -3122,7 +3123,7 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
     // written already, so every name in it is known.
     Str return_type_name = builder->nodes[procedure].payload.procedure.return_type;
     Wasm_Type return_type = wasm_type_of_name(builder, return_type_name);
-    if (wasm_value_is_accepted(builder, return_type, value) == false) {
+    if (not wasm_value_is_accepted(builder, return_type, value)) {
         Str name = builder->nodes[definition].payload.constant_definition.name;
         return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
     }
@@ -3200,7 +3201,7 @@ static bool wasm_build_code_section_body_variable_assignment(Wasm_Builder *build
 
     // A variable whose address is taken is in the frame. Its address is the frame plus its offset,
     // and from there it is a place in memory like an element is.
-    if (is_global == false && wasm_variable_is_in_memory(builder, binding.target)) {
+    if (not is_global && wasm_variable_is_in_memory(builder, binding.target)) {
         wasm_write_local_instruction(
             &builder->writer, WASM_OPCODE_LOCAL_GET,
             wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FRAME));
@@ -3224,10 +3225,10 @@ static bool wasm_build_code_section_body_variable_assignment(Wasm_Builder *build
         if (variable_type.kind == WASM_VALUE_TYPE_ARRAY) {
             return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, target_name);
         }
-        if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
+        if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
             return false;
         }
-        if (wasm_expression_is_accepted(builder, variable_type, value) == false) {
+        if (not wasm_expression_is_accepted(builder, variable_type, value)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, target_name);
         }
         if (variable_type.kind == WASM_VALUE_TYPE_SLICE) {
@@ -3253,7 +3254,7 @@ static bool wasm_build_code_section_body_variable_assignment(Wasm_Builder *build
     }
     wasm_write_unsigned(&builder->writer, storage_index);
 
-    if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
         return false;
     }
 
@@ -3303,7 +3304,7 @@ static bool wasm_build_code_section_body_field_assignment(Wasm_Builder *builder,
     // memory at the address that the pointer is, plus the offset of the field. The pointer is not
     // changed, so it can be a parameter.
     if (path.is_through_pointer) {
-        if (wasm_build_code_section_body_pointer(builder, definition, path.root, true) == false) {
+        if (not wasm_build_code_section_body_pointer(builder, definition, path.root, true)) {
             return false;
         }
         wasm_write_local_instruction(
@@ -3342,11 +3343,10 @@ static bool wasm_build_code_section_body_field_assignment(Wasm_Builder *builder,
                        path.slot_offset;
 
         if (is_plain) {
-            if (wasm_build_code_section_body_expression(builder, definition, value, false) ==
-                false) {
+            if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
                 return false;
             }
-            if (wasm_value_is_accepted(builder, path.type, value) == false) {
+            if (not wasm_value_is_accepted(builder, path.type, value)) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
                                  field_name);
             }
@@ -3359,7 +3359,7 @@ static bool wasm_build_code_section_body_field_assignment(Wasm_Builder *builder,
                              field_name);
         }
         wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, first);
-        if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
+        if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
             return false;
         }
         if (wasm_expression_type(builder, value).kind != WASM_VALUE_TYPE_INT) {
@@ -3376,17 +3376,17 @@ static bool wasm_build_code_section_body_field_assignment(Wasm_Builder *builder,
     assert(builder->nodes[path.root].node_type == AST_NODE_TYPE_SUBSCRIPT);
     Ast_Node_Index base = builder->nodes[path.root].first_child;
     Ast_Node_Index index = builder->nodes[path.root].last_child;
-    if (wasm_build_code_section_body_expression(builder, definition, base, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, base, false)) {
         return false;
     }
     Wasm_Type base_type = wasm_expression_type(builder, base);
-    if (wasm_type_is_sequence(base_type) == false) {
+    if (not wasm_type_is_sequence(base_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, base));
     }
     wasm_array_decay(builder, base);
 
-    if (wasm_build_code_section_body_expression(builder, definition, index, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, index, false)) {
         return false;
     }
     if (wasm_expression_type(builder, index).kind != WASM_VALUE_TYPE_INT) {
@@ -3424,10 +3424,10 @@ static bool wasm_build_code_section_body_place_store(Wasm_Builder *builder,
     size_t address = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_ADDRESS);
 
     if (is_plain) {
-        if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
+        if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
             return false;
         }
-        if (wasm_value_is_accepted(builder, type, value) == false) {
+        if (not wasm_value_is_accepted(builder, type, value)) {
             if (builder->nodes[target].node_type == AST_NODE_TYPE_FIELD_ACCESS) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
                                  builder->nodes[target].payload.field_access.name);
@@ -3455,7 +3455,7 @@ static bool wasm_build_code_section_body_place_store(Wasm_Builder *builder,
     wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, address);
     wasm_write_memory_instruction(&builder->writer, WASM_OPCODE_I64_LOAD, offset_bytes);
 
-    if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
         return false;
     }
     if (wasm_expression_type(builder, value).kind != WASM_VALUE_TYPE_INT) {
@@ -3489,14 +3489,14 @@ static bool wasm_build_code_section_body_variable(Wasm_Builder *builder,
         // The check of the variables rejected an array without a value.
         wasm_default_write(builder, variable_type);
     } else {
-        if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
+        if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
             return false;
         }
 
         // The value was written, so every name in it is known. It must be of the type of the
         // variable, which is the type that was written when the definition has one, and deduced
         // otherwise.
-        if (wasm_expression_is_accepted(builder, variable_type, value) == false) {
+        if (not wasm_expression_is_accepted(builder, variable_type, value)) {
             Str name = builder->nodes[variable].payload.variable_definition.name;
             return wasm_fail(builder, WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, name);
         }
@@ -3549,7 +3549,7 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
 
         // The subject of a match has locals like a variable, so its type has to be known too.
         if (statement_node->node_type == AST_NODE_TYPE_MATCH_STATEMENT &&
-            wasm_match_check(builder, definition, statement) == false) {
+            not wasm_match_check(builder, definition, statement)) {
             return false;
         }
 
@@ -3560,7 +3560,7 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
             if (sequence.kind == WASM_VALUE_TYPE_NONE) {
                 return wasm_expression_fail(builder, definition, elements);
             }
-            if (wasm_type_is_sequence(sequence) == false) {
+            if (not wasm_type_is_sequence(sequence)) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                                  wasm_expression_subject(builder, definition, elements));
             }
@@ -3571,7 +3571,7 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
             Ast_Node_Index value = statement_node->last_child;
             // A definition with a type can leave out the value, and then the type is the only
             // child.
-            bool has_value = wasm_node_is_type(builder, first) == false || first != value;
+            bool has_value = not wasm_node_is_type(builder, first) || first != value;
 
             if (wasm_node_is_type(builder, first)) {
                 if (wasm_type_of_node(builder, first).kind == WASM_VALUE_TYPE_NONE) {
@@ -3587,9 +3587,9 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
             // The exception is the members of an enum, which are in the data of the module and are
             // not copied: the variable holds the address of them.
             if (wasm_variable_type(builder, statement).kind == WASM_VALUE_TYPE_ARRAY &&
-                (has_value == false ||
+                (not has_value ||
                  (builder->nodes[value].node_type != AST_NODE_TYPE_ARRAY_LITERAL &&
-                  wasm_type_info_access_is(builder, value) == false))) {
+                  not wasm_type_info_access_is(builder, value)))) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_INITIALIZER_INVALID,
                                  statement_node->payload.variable_definition.name);
             }
@@ -3653,7 +3653,7 @@ static bool wasm_expression_fail(Wasm_Builder *builder, Ast_Node_Index definitio
     }
     if (wasm_type_info_access_is(builder, expression)) {
         // The type or the field is wrong, which this reports, or else the expression has a type.
-        if (wasm_type_info_check(builder, expression) == false) {
+        if (not wasm_type_info_check(builder, expression)) {
             return false;
         }
     }
@@ -3789,7 +3789,7 @@ static Wasm_Type wasm_variable_type(Wasm_Builder const *builder, Ast_Node_Index 
                 return wasm_type_make(WASM_VALUE_TYPE_INT);
             }
             Wasm_Type sequence = wasm_expression_type(builder, first);
-            if (wasm_type_is_sequence(sequence) == false) {
+            if (not wasm_type_is_sequence(sequence)) {
                 return wasm_type_make(WASM_VALUE_TYPE_NONE);
             }
             return wasm_type_element(sequence);
@@ -3837,7 +3837,7 @@ static size_t wasm_variable_local_index(Wasm_Builder const *builder, Ast_Node_In
 
     assert(wasm_node_has_locals(builder->nodes[variable].node_type));
     // A variable in the frame has no local.
-    assert(wasm_variable_is_in_memory(builder, variable) == false);
+    assert(not wasm_variable_is_in_memory(builder, variable));
     return local_index;
 }
 
@@ -3933,7 +3933,7 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
         return wasm_type_make(WASM_VALUE_TYPE_ENUM_LITERAL);
     case AST_NODE_TYPE_SLICE: {
         Wasm_Type slice = wasm_expression_type(builder, node->first_child);
-        if (wasm_type_is_sequence(slice) == false) {
+        if (not wasm_type_is_sequence(slice)) {
             return wasm_type_make(WASM_VALUE_TYPE_NONE);
         }
         slice.kind = WASM_VALUE_TYPE_SLICE;
@@ -3947,7 +3947,7 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     }
     case AST_NODE_TYPE_SUBSCRIPT: {
         Wasm_Type sequence = wasm_expression_type(builder, node->first_child);
-        if (wasm_type_is_sequence(sequence) == false) {
+        if (not wasm_type_is_sequence(sequence)) {
             return wasm_type_make(WASM_VALUE_TYPE_NONE);
         }
         return wasm_type_element(sequence);
@@ -4110,12 +4110,12 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     // from 0 to 255, which is a `Byte` there.
     if (left_type.kind == WASM_VALUE_TYPE_BYTE || right_type.kind == WASM_VALUE_TYPE_BYTE) {
         if (left_type.kind != WASM_VALUE_TYPE_BYTE &&
-            wasm_is_byte_literal(builder, left) == false) {
+            not wasm_is_byte_literal(builder, left)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                              wasm_expression_subject(builder, definition, left));
         }
         if (right_type.kind != WASM_VALUE_TYPE_BYTE &&
-            wasm_is_byte_literal(builder, right) == false) {
+            not wasm_is_byte_literal(builder, right)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                              wasm_expression_subject(builder, definition, right));
         }
@@ -4137,15 +4137,15 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     bool is_left_comparable = left_type.kind == WASM_VALUE_TYPE_INT ||
                               ((left_type.kind == WASM_VALUE_TYPE_BOOL || is_address) &&
                                is_equality);
-    if (is_left_comparable == false) {
+    if (not is_left_comparable) {
         return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                          wasm_expression_subject(builder, definition, left));
     }
-    if (is_address && wasm_type_equals(left_type, right_type) == false) {
+    if (is_address && not wasm_type_equals(left_type, right_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                          wasm_expression_subject(builder, definition, right));
     }
-    if (is_address == false && right_type.kind != left_type.kind) {
+    if (not is_address && right_type.kind != left_type.kind) {
         return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                          wasm_expression_subject(builder, definition, right));
     }
@@ -4245,7 +4245,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             }
 
             Ast_Node_Index first_child = AST_NODE_INDEX_NONE;
-            if (wasm_is_constant(builder, current) == false) {
+            if (not wasm_is_constant(builder, current)) {
                 first_child = wasm_expression_child_first(builder, current);
             }
             if (first_child != AST_NODE_INDEX_NONE) {
@@ -4271,16 +4271,16 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             }
             wasm_constant_write(builder, builder->constants[current],
                                 wasm_constant_target_type(builder, definition, current, parent));
-        } else if (wasm_build_code_section_body_node(
+        } else if (not wasm_build_code_section_body_node(
                        builder, definition, procedure, current,
-                       is_result_unused && current == expression) == false) {
+                       is_result_unused && current == expression)) {
             return false;
         }
 
         // What the parent needs of its children, which is not part of the child itself.
         if (path_count > 0 &&
-            wasm_build_code_section_body_child(builder, definition, path[path_count - 1],
-                                               current) == false) {
+            not wasm_build_code_section_body_child(builder, definition, path[path_count - 1],
+                                               current)) {
             return false;
         }
 
@@ -4316,7 +4316,7 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
                                               Ast_Node_Index procedure, Ast_Node_Index current,
                                               bool is_result_unused) {
     assert(current < builder->node_count);
-    assert(wasm_is_constant(builder, current) == false);
+    assert(not wasm_is_constant(builder, current));
 
     Ast_Node const *node = &builder->nodes[current];
 
@@ -4331,15 +4331,15 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
     case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_NOT:
     case AST_NODE_TYPE_OR:
-        if (wasm_build_code_section_body_operands(builder, definition, current) == false) {
+        if (not wasm_build_code_section_body_operands(builder, definition, current)) {
             return false;
         }
         break;
     case AST_NODE_TYPE_CALL:
         // The value of a call that is an operand is always needed. The call that is the whole
         // expression is the only one that can go without.
-        if (wasm_build_code_section_body_call(
-                builder, current, is_result_unused) == false) {
+        if (not wasm_build_code_section_body_call(
+                builder, current, is_result_unused)) {
             return false;
         }
         break;
@@ -4486,20 +4486,19 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
         break;
     case AST_NODE_TYPE_ENUM_LITERAL:
         // The number of the member depends on the enum, which the place of the literal says.
-        if (wasm_enum_member_write(
+        if (not wasm_enum_member_write(
                 builder, wasm_enum_literal_expected(builder, definition, current),
-                node->payload.enum_literal.name) == false) {
+                node->payload.enum_literal.name)) {
             return false;
         }
         break;
     case AST_NODE_TYPE_ARRAY_LITERAL:
-        if (wasm_build_code_section_body_array_literal(builder, definition, current) ==
-            false) {
+        if (not wasm_build_code_section_body_array_literal(builder, definition, current)) {
             return false;
         }
         break;
     case AST_NODE_TYPE_SLICE:
-        if (wasm_build_code_section_body_slice(builder, definition, current) == false) {
+        if (not wasm_build_code_section_body_slice(builder, definition, current)) {
             return false;
         }
         break;
@@ -4509,7 +4508,7 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
                          wasm_type_subject(builder, node->first_child));
     case AST_NODE_TYPE_FIELD_ACCESS: {
         if (wasm_type_info_access_is(builder, current)) {
-            if (wasm_type_info_check(builder, current) == false) {
+            if (not wasm_type_info_check(builder, current)) {
                 return false;
             }
             wasm_type_info_field_write(builder, current);
@@ -4517,36 +4516,35 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
         }
         Ast_Node_Index access_enum = wasm_enum_of_access(builder, current);
         if (access_enum != AST_NODE_INDEX_NONE) {
-            if (wasm_enum_member_write(builder, access_enum,
-                                       node->payload.field_access.name) == false) {
+            if (not wasm_enum_member_write(builder, access_enum,
+                                       node->payload.field_access.name)) {
                 return false;
             }
             break;
         }
-        if (wasm_build_code_section_body_field_access(builder, definition, current) ==
-            false) {
+        if (not wasm_build_code_section_body_field_access(builder, definition, current)) {
             return false;
         }
         break;
     }
     case AST_NODE_TYPE_STRUCT_LITERAL:
-        if (wasm_build_code_section_body_struct_literal(builder, definition, current,
-                                                        AST_NODE_INDEX_NONE) == false) {
+        if (not wasm_build_code_section_body_struct_literal(builder, definition, current,
+                                                        AST_NODE_INDEX_NONE)) {
             return false;
         }
         break;
     case AST_NODE_TYPE_SUBSCRIPT:
-        if (wasm_build_code_section_body_subscript(builder, definition, current) == false) {
+        if (not wasm_build_code_section_body_subscript(builder, definition, current)) {
             return false;
         }
         break;
     case AST_NODE_TYPE_ADDRESS_OF:
-        if (wasm_build_code_section_body_address_of(builder, definition, current) == false) {
+        if (not wasm_build_code_section_body_address_of(builder, definition, current)) {
             return false;
         }
         break;
     case AST_NODE_TYPE_DEREFERENCE:
-        if (wasm_build_code_section_body_dereference(builder, definition, current) == false) {
+        if (not wasm_build_code_section_body_dereference(builder, definition, current)) {
             return false;
         }
         break;
@@ -5029,7 +5027,7 @@ static bool wasm_procedure_uses_arrays(Wasm_Builder const *builder, Ast_Node_Ind
         }
         // A field of a pointer to a struct is in memory, though no `^` is written.
         if (node_type == AST_NODE_TYPE_FIELD_ACCESS &&
-            wasm_type_info_access_is(builder, node) == false &&
+            not wasm_type_info_access_is(builder, node) &&
             wasm_field_path(builder, node).is_through_pointer) {
             return true;
         }
@@ -5154,7 +5152,7 @@ static size_t wasm_variable_frame_offset(Wasm_Builder const *builder, Ast_Node_I
 
     size_t offset_bytes = wasm_frame_literal_offset(builder, procedure, end);
     for (Ast_Node_Index node = procedure + 1; node < variable; node += 1) {
-        if (wasm_variable_is_in_memory(builder, node) == false) {
+        if (not wasm_variable_is_in_memory(builder, node)) {
             continue;
         }
         // A type that the target does not have takes none, since it is rejected when it is written.
@@ -5251,7 +5249,7 @@ static size_t wasm_frame_literal_offset(Wasm_Builder const *builder, Ast_Node_In
 static void wasm_frame_enter(Wasm_Builder *builder, Ast_Node_Index procedure) {
     assert(procedure < builder->node_count);
 
-    if (wasm_frame_is_needed(builder, procedure) == false) {
+    if (not wasm_frame_is_needed(builder, procedure)) {
         return;
     }
     assert(builder->has_stack);
@@ -5281,7 +5279,7 @@ static void wasm_frame_enter(Wasm_Builder *builder, Ast_Node_Index procedure) {
 static void wasm_frame_leave(Wasm_Builder *builder, Ast_Node_Index procedure) {
     assert(procedure < builder->node_count);
 
-    if (wasm_frame_is_needed(builder, procedure) == false) {
+    if (not wasm_frame_is_needed(builder, procedure)) {
         return;
     }
     assert(builder->has_stack);
@@ -5471,7 +5469,7 @@ static bool wasm_build_code_section_body_child(Wasm_Builder *builder, Ast_Node_I
                              wasm_type_subject(builder, type));
         }
         Wasm_Type element = wasm_type_element(array_type);
-        if (wasm_value_is_accepted(builder, element, child) == false) {
+        if (not wasm_value_is_accepted(builder, element, child)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
                              wasm_expression_subject(builder, definition, child));
         }
@@ -5522,7 +5520,7 @@ static bool wasm_build_code_section_body_subscript(Wasm_Builder *builder,
     Ast_Node_Index index = builder->nodes[subscript].last_child;
 
     Wasm_Type base_type = wasm_expression_type(builder, base);
-    if (wasm_type_is_sequence(base_type) == false) {
+    if (not wasm_type_is_sequence(base_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, base));
     }
@@ -5553,17 +5551,17 @@ static bool wasm_build_code_section_body_element_address(Wasm_Builder *builder,
     Ast_Node_Index base = builder->nodes[subscript].first_child;
     Ast_Node_Index index = builder->nodes[subscript].last_child;
 
-    if (wasm_build_code_section_body_expression(builder, definition, base, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, base, false)) {
         return false;
     }
     Wasm_Type base_type = wasm_expression_type(builder, base);
-    if (wasm_type_is_sequence(base_type) == false) {
+    if (not wasm_type_is_sequence(base_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, base));
     }
     wasm_array_decay(builder, base);
 
-    if (wasm_build_code_section_body_expression(builder, definition, index, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, index, false)) {
         return false;
     }
     if (wasm_expression_type(builder, index).kind != WASM_VALUE_TYPE_INT) {
@@ -5585,7 +5583,7 @@ static bool wasm_build_code_section_body_pointer(Wasm_Builder *builder, Ast_Node
                                                  Ast_Node_Index pointer, bool is_checked) {
     assert(pointer < builder->node_count);
 
-    if (wasm_build_code_section_body_expression(builder, definition, pointer, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, pointer, false)) {
         return false;
     }
     if (wasm_expression_type(builder, pointer).kind != WASM_VALUE_TYPE_POINTER) {
@@ -5639,7 +5637,7 @@ static bool wasm_build_code_section_body_dereference_assignment(Wasm_Builder *bu
     assert(builder->nodes[target].node_type == AST_NODE_TYPE_DEREFERENCE);
     Ast_Node_Index pointer = builder->nodes[target].first_child;
 
-    if (wasm_build_code_section_body_pointer(builder, definition, pointer, true) == false) {
+    if (not wasm_build_code_section_body_pointer(builder, definition, pointer, true)) {
         return false;
     }
     wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET,
@@ -5702,7 +5700,7 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
         // The address of a field of what a pointer points to follows the pointer, so it is a null
         // pointer that is reported and not a small address.
         if (path.is_through_pointer) {
-            if (wasm_build_code_section_body_pointer(builder, definition, root, true) == false) {
+            if (not wasm_build_code_section_body_pointer(builder, definition, root, true)) {
                 return false;
             }
             if (offset_bytes > 0) {
@@ -5726,7 +5724,7 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
         return true;
     }
     case AST_NODE_TYPE_SUBSCRIPT:
-        if (wasm_build_code_section_body_element_address(builder, definition, root) == false) {
+        if (not wasm_build_code_section_body_element_address(builder, definition, root)) {
             return false;
         }
         break;
@@ -5821,7 +5819,7 @@ static bool wasm_build_code_section_body_slice(Wasm_Builder *builder, Ast_Node_I
     assert(first != end);
 
     Wasm_Type base_type = wasm_expression_type(builder, base);
-    if (wasm_type_is_sequence(base_type) == false) {
+    if (not wasm_type_is_sequence(base_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, base));
     }
@@ -5860,25 +5858,24 @@ static bool wasm_build_code_section_body_element_assignment(Wasm_Builder *builde
 
     if (builder->nodes[target].node_type == AST_NODE_TYPE_SLICE) {
         // Only the plain assignment copies. An operator such as `+=` is for one `Int`.
-        if (is_plain == false) {
+        if (not is_plain) {
             return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
                              wasm_expression_subject(builder, definition, target));
         }
 
-        if (wasm_build_code_section_body_expression(builder, definition, target, false) == false) {
+        if (not wasm_build_code_section_body_expression(builder, definition, target, false)) {
             return false;
         }
-        if (wasm_build_code_section_body_expression(builder, definition, value, false) == false) {
+        if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
             return false;
         }
         Wasm_Type target_type = wasm_expression_type(builder, target);
         Wasm_Type value_type = wasm_expression_type(builder, value);
-        if (wasm_type_is_sequence(value_type) == false) {
+        if (not wasm_type_is_sequence(value_type)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                              wasm_expression_subject(builder, definition, value));
         }
-        if (wasm_type_equals(wasm_type_element(target_type), wasm_type_element(value_type)) ==
-            false) {
+        if (not wasm_type_equals(wasm_type_element(target_type), wasm_type_element(value_type))) {
             return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
                              wasm_expression_subject(builder, definition, value));
         }
@@ -5909,17 +5906,17 @@ static bool wasm_build_code_section_body_element_assignment(Wasm_Builder *builde
     Ast_Node_Index base = builder->nodes[target].first_child;
     Ast_Node_Index index = builder->nodes[target].last_child;
 
-    if (wasm_build_code_section_body_expression(builder, definition, base, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, base, false)) {
         return false;
     }
     Wasm_Type base_type = wasm_expression_type(builder, base);
-    if (wasm_type_is_sequence(base_type) == false) {
+    if (not wasm_type_is_sequence(base_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, base));
     }
     wasm_array_decay(builder, base);
 
-    if (wasm_build_code_section_body_expression(builder, definition, index, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, index, false)) {
         return false;
     }
     if (wasm_expression_type(builder, index).kind != WASM_VALUE_TYPE_INT) {
@@ -5959,10 +5956,10 @@ static bool wasm_build_code_section_body_for_each(Wasm_Builder *builder, Ast_Nod
     size_t cursor = iterator + wasm_type_slot_count(builder, element);
     size_t end = cursor + 1;
 
-    if (wasm_build_code_section_body_expression(builder, definition, elements, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, elements, false)) {
         return false;
     }
-    if (wasm_type_is_sequence(wasm_expression_type(builder, elements)) == false) {
+    if (not wasm_type_is_sequence(wasm_expression_type(builder, elements))) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, elements));
     }
@@ -6223,8 +6220,7 @@ static Wasm_Type wasm_struct_literal_type(Wasm_Builder const *builder, Ast_Node_
     for (size_t i = name_count; i > 0; i -= 1) {
         size_t slot_offset = 0;
         if (type.kind != WASM_VALUE_TYPE_STRUCT ||
-            wasm_struct_field_find(builder, type.definition, names[i - 1], &slot_offset, &type) ==
-                false) {
+            not wasm_struct_field_find(builder, type.definition, names[i - 1], &slot_offset, &type)) {
             return wasm_type_make(WASM_VALUE_TYPE_NONE);
         }
     }
@@ -6366,7 +6362,7 @@ static bool wasm_enum_member_write(Wasm_Builder *builder, Ast_Node_Index enum_no
     }
 
     size_t number = 0;
-    if (wasm_enum_member_find(builder, enum_node, member_name, &number) == false) {
+    if (not wasm_enum_member_find(builder, enum_node, member_name, &number)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN, member_name);
     }
     wasm_write_byte(&builder->writer, WASM_OPCODE_I64_CONST);
@@ -6620,8 +6616,8 @@ static size_t wasm_struct_slots(Wasm_Builder const *builder, Ast_Node_Index stru
             } else if (wasm_enum_find(builder, name) != AST_NODE_INDEX_NONE) {
                 // An enum is a number, which is an `Int`.
                 leaf = WASM_VALUE_TYPE_INT;
-            } else if (str_equals(name, STR("Bool")) == false &&
-                       str_equals(name, STR("Byte")) == false) {
+            } else if (not str_equals(name, STR("Bool")) &&
+                       not str_equals(name, STR("Byte"))) {
                 nested = wasm_struct_find(builder, name);
             }
         }
@@ -6962,7 +6958,7 @@ static void wasm_constant_write(Wasm_Builder *builder, Constant_Value value, Was
     assert(value.status == CONSTANT_STATUS_OK);
 
     Wasm_Type type = target;
-    if (wasm_constant_is_accepted(target, value) == false) {
+    if (not wasm_constant_is_accepted(target, value)) {
         type = wasm_constant_type(value.type);
     }
 
@@ -7079,8 +7075,8 @@ static bool wasm_signature_equals(Wasm_Builder const *builder, Ast_Node_Index fi
             wasm_type_node_has_procedure(builder, second_type)) {
             return false;
         }
-        if (wasm_type_equals(wasm_type_of_node(builder, first_type),
-                             wasm_type_of_node(builder, second_type)) == false) {
+        if (not wasm_type_equals(wasm_type_of_node(builder, first_type),
+                             wasm_type_of_node(builder, second_type))) {
             return false;
         }
     }
@@ -7336,7 +7332,7 @@ static bool wasm_check_unions(Wasm_Builder *builder) {
 
         Str member = builder->nodes[builder->nodes[match].first_child].payload.union_case.member;
         size_t number = 0;
-        if (wasm_enum_member_find(builder, enum_node, member, &number) == false) {
+        if (not wasm_enum_member_find(builder, enum_node, member, &number)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_UNION_CASE_UNKNOWN, member);
         }
     }
@@ -7391,8 +7387,8 @@ static bool wasm_path_equals(Wasm_Builder const *builder, Ast_Node_Index first,
                    binding_a.position == binding_b.position;
         }
         if (node_a->node_type == AST_NODE_TYPE_FIELD_ACCESS) {
-            if (str_equals(node_a->payload.field_access.name,
-                           node_b->payload.field_access.name) == false) {
+            if (not str_equals(node_a->payload.field_access.name,
+                           node_b->payload.field_access.name)) {
                 return false;
             }
         } else if (node_a->node_type != AST_NODE_TYPE_DEREFERENCE) {
@@ -7421,7 +7417,7 @@ static bool wasm_union_block_changes(Wasm_Builder const *builder, Ast_Node_Index
     for (Ast_Node_Index node = block + 1; node < builder->nodes[block].payload.block.end;
          node += 1) {
         Ast_Node_Type node_type = builder->nodes[node].node_type;
-        if (ast_node_type_is_assignment(node_type) == false &&
+        if (not ast_node_type_is_assignment(node_type) &&
             node_type != AST_NODE_TYPE_ADDRESS_OF) {
             continue;
         }
@@ -7497,8 +7493,8 @@ static bool wasm_union_condition_matches(Wasm_Builder const *builder, Ast_Node_I
         for (size_t side = 0; side < 2; side += 1) {
             Ast_Node const *matched = &builder->nodes[sides[side]];
             if (matched->node_type != AST_NODE_TYPE_FIELD_ACCESS ||
-                str_equals(matched->payload.field_access.name, discriminant) == false ||
-                wasm_path_equals(builder, matched->first_child, container) == false) {
+                not str_equals(matched->payload.field_access.name, discriminant) ||
+                not wasm_path_equals(builder, matched->first_child, container)) {
                 continue;
             }
 
@@ -7567,7 +7563,7 @@ static bool wasm_union_is_matched(Wasm_Builder const *builder, Ast_Node_Index ac
                 builder->nodes[previous].node_type != AST_NODE_TYPE_BLOCK &&
                 wasm_union_condition_matches(builder, previous, container, union_match,
                                              enum_node) &&
-                wasm_union_block_changes(builder, parent, container, discriminant) == false) {
+                not wasm_union_block_changes(builder, parent, container, discriminant)) {
                 return true;
             }
         }
@@ -7774,7 +7770,7 @@ static bool wasm_type_info_check(Wasm_Builder *builder, Ast_Node_Index access) {
     }
 
     Str field = builder->nodes[access].payload.field_access.name;
-    if (str_equals(field, STR("members")) == false && str_equals(field, STR("name")) == false) {
+    if (not str_equals(field, STR("members")) && not str_equals(field, STR("name"))) {
         return wasm_fail(builder, WASM_BUILD_STATUS_STRUCT_FIELD_UNKNOWN, field);
     }
     return true;
@@ -8079,8 +8075,7 @@ static Wasm_Field_Path wasm_field_path(Wasm_Builder const *builder, Ast_Node_Ind
 
         size_t slot_offset = 0;
         Ast_Node_Index struct_node = current_type.definition;
-        if (wasm_struct_field_find(builder, struct_node, name, &slot_offset, &current_type) ==
-            false) {
+        if (not wasm_struct_field_find(builder, struct_node, name, &slot_offset, &current_type)) {
             path.status = WASM_BUILD_STATUS_STRUCT_FIELD_UNKNOWN;
             path.subject = name;
             return path;
@@ -8091,7 +8086,7 @@ static Wasm_Field_Path wasm_field_path(Wasm_Builder const *builder, Ast_Node_Ind
         Ast_Node_Index union_match = wasm_field_union_match(
             builder, wasm_struct_field_node_find(builder, struct_node, name));
         if (union_match != AST_NODE_INDEX_NONE &&
-            wasm_union_is_matched(builder, chain[i - 1], struct_node, union_match) == false) {
+            not wasm_union_is_matched(builder, chain[i - 1], struct_node, union_match)) {
             path.status = WASM_BUILD_STATUS_UNION_FIELD_UNMATCHED;
             path.subject = name;
             path.type = wasm_type_make(WASM_VALUE_TYPE_NONE);
@@ -8129,7 +8124,7 @@ static bool wasm_build_code_section_body_field_access(Wasm_Builder *builder,
     // The field is of what a pointer points to, as in `p.age` and `p^.age`, which is in memory at
     // the address that the pointer is, plus the offset of the field.
     if (path.is_through_pointer) {
-        if (wasm_build_code_section_body_pointer(builder, definition, path.root, true) == false) {
+        if (not wasm_build_code_section_body_pointer(builder, definition, path.root, true)) {
             return false;
         }
         wasm_slots_load_from_stack(builder, procedure, path.type,
@@ -8168,17 +8163,17 @@ static bool wasm_build_code_section_body_field_access(Wasm_Builder *builder,
     assert(builder->nodes[path.root].node_type == AST_NODE_TYPE_SUBSCRIPT);
     Ast_Node_Index base = builder->nodes[path.root].first_child;
     Ast_Node_Index index = builder->nodes[path.root].last_child;
-    if (wasm_build_code_section_body_expression(builder, definition, base, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, base, false)) {
         return false;
     }
     Wasm_Type base_type = wasm_expression_type(builder, base);
-    if (wasm_type_is_sequence(base_type) == false) {
+    if (not wasm_type_is_sequence(base_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, base));
     }
     wasm_array_decay(builder, base);
 
-    if (wasm_build_code_section_body_expression(builder, definition, index, false) == false) {
+    if (not wasm_build_code_section_body_expression(builder, definition, index, false)) {
         return false;
     }
     if (wasm_expression_type(builder, index).kind != WASM_VALUE_TYPE_INT) {
@@ -8252,8 +8247,7 @@ static bool wasm_build_code_section_body_struct_literal(Wasm_Builder *builder,
         Str name = builder->nodes[initializer].payload.field_initializer.name;
         size_t slot_offset = 0;
         Wasm_Type field_type = wasm_type_make(WASM_VALUE_TYPE_NONE);
-        if (wasm_struct_field_find(builder, struct_node, name, &slot_offset, &field_type) ==
-            false) {
+        if (not wasm_struct_field_find(builder, struct_node, name, &slot_offset, &field_type)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_STRUCT_FIELD_UNKNOWN, name);
         }
 
@@ -8287,7 +8281,7 @@ static bool wasm_build_code_section_body_struct_literal(Wasm_Builder *builder,
             }
             Str case_member =
                 builder->nodes[builder->nodes[union_match].first_child].payload.union_case.member;
-            if (str_equals(given_member, case_member) == false) {
+            if (not str_equals(given_member, case_member)) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH, name);
             }
         }
@@ -8336,8 +8330,8 @@ static bool wasm_build_code_section_body_struct_literal(Wasm_Builder *builder,
             if (builder->nodes[value].node_type == AST_NODE_TYPE_STRUCT_LITERAL &&
                 builder->nodes[value].payload.struct_literal.name.bytes == NULL) {
                 if (field_type.kind != WASM_VALUE_TYPE_STRUCT ||
-                    wasm_build_code_section_body_struct_literal(builder, definition, value,
-                                                                field_type.definition) == false) {
+                    not wasm_build_code_section_body_struct_literal(builder, definition, value,
+                                                                field_type.definition)) {
                     if (builder->status == WASM_BUILD_STATUS_OK) {
                         return wasm_fail(builder, WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
                                          given_name);
@@ -8345,11 +8339,10 @@ static bool wasm_build_code_section_body_struct_literal(Wasm_Builder *builder,
                     return false;
                 }
             } else {
-                if (wasm_build_code_section_body_expression(builder, definition, value, false) ==
-                    false) {
+                if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
                     return false;
                 }
-                if (wasm_value_is_accepted(builder, field_type, value) == false) {
+                if (not wasm_value_is_accepted(builder, field_type, value)) {
                     return wasm_fail(builder, WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
                                      given_name);
                 }
@@ -8444,7 +8437,7 @@ static size_t wasm_block_begin(Wasm_Writer *writer) {
     assert(writer->length <= writer->capacity);
 
     size_t block_start = writer->length;
-    if (writer->is_overflowed == false) {
+    if (not writer->is_overflowed) {
         if (writer->capacity - writer->length < WASM_LEB128_32_BYTES_MAX) {
             writer->is_overflowed = true;
         } else {
@@ -8530,7 +8523,7 @@ static size_t wasm_leb128_signed_encode(int64_t number, byte *encoded) {
 
     size_t size_bytes = 0;
     bool is_done = false;
-    for (size_t i = 0; i < WASM_LEB128_64_BYTES_MAX && is_done == false; i += 1) {
+    for (size_t i = 0; i < WASM_LEB128_64_BYTES_MAX && not is_done; i += 1) {
         byte group = (byte)(rest & 0x7F);
         rest >>= 7;
         if (is_negative) {
@@ -8538,9 +8531,9 @@ static size_t wasm_leb128_signed_encode(int64_t number, byte *encoded) {
         }
 
         bool is_sign_bit_set = (group & 0x40) != 0;
-        is_done = (rest == 0 && is_sign_bit_set == false) ||
+        is_done = (rest == 0 && not is_sign_bit_set) ||
                   (rest == UINT64_MAX && is_sign_bit_set);
-        if (is_done == false) {
+        if (not is_done) {
             group = (byte)(group | 0x80);
         }
         encoded[size_bytes] = group;

@@ -96,6 +96,10 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 - Use `bool` for booleans, never `int`.
 - Define and use a custom type `byte` using `typedef` to represent bytes instead of `char`, `unsigned char` or `uint8_t`.
 
+## Operators
+
+- Use `not` instead of !. Do not use comparison to `false` like `is_ok == false`.
+
 ## Control flow
 
 - If statements must have their bodies in curly brackets. No single line if statement body without curly brackets.

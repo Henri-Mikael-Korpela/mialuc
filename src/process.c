@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <iso646.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -54,7 +55,7 @@ static bool process_file_write(char const *path, Array_Slice program) {
     }
     size_t written = fwrite(program.elements, sizeof(byte), program.length, file);
     bool is_close_error = fclose(file) != 0;
-    return written == program.length && is_close_error == false;
+    return written == program.length && not is_close_error;
 }
 
 Process_Result process_run_executable(Array_Slice program) {
@@ -64,7 +65,7 @@ Process_Result process_run_executable(Array_Slice program) {
     Process_Result result = {.exit_code = 0, .status = PROCESS_STATUS_FILE_FAILED};
     char path[PROCESS_PATH_SIZE_BYTES] = {0};
     char placeholder[PROCESS_PATH_SIZE_BYTES] = {0};
-    if (process_temporary_path_make(path, placeholder) == false) {
+    if (not process_temporary_path_make(path, placeholder)) {
         return result;
     }
 

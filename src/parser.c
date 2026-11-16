@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <iso646.h>
 #include <stdbool.h>
 
 #include <mialu/parser.h>
@@ -202,7 +203,7 @@ static Ast_Node_Index parse_module(Parser *parser) {
         if (parse_token_current(parser)->kind == TOKEN_KIND_INDENTATION &&
             parser->token_index + 1 < parser->token_count &&
             parser->tokens[parser->token_index + 1].kind == TOKEN_KIND_KEYWORD_FOREIGN) {
-            if (parse_foreign_block(parser, module) == false) {
+            if (not parse_foreign_block(parser, module)) {
                 return AST_NODE_INDEX_NONE;
             }
             continue;
@@ -216,7 +217,7 @@ static Ast_Node_Index parse_module(Parser *parser) {
     }
 
     assert(parse_token_current(parser)->kind == TOKEN_KIND_END);
-    if (parser->has_type_info && parse_reflection_types_append(parser, module) == false) {
+    if (parser->has_type_info && not parse_reflection_types_append(parser, module)) {
         return AST_NODE_INDEX_NONE;
     }
     return module;
@@ -341,7 +342,7 @@ static Ast_Node_Index parse_definition(Parser *parser) {
                        parser->tokens[parser->token_index + 2].kind ==
                            TOKEN_KIND_TYPE_SEPARATOR;
     bool is_typed_constant = parse_typed_constant_is_next(parser);
-    if (is_constant == false && is_typed_constant == false) {
+    if (not is_constant && not is_typed_constant) {
         return parse_global_variable_definition(parser);
     }
 
@@ -355,7 +356,7 @@ static Ast_Node_Index parse_definition(Parser *parser) {
     // `::` is two separator tokens, one after the other, and a typed constant has its type between
     // them. The type is kept aside until the value is appended, because the value is the first
     // child of every constant.
-    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'"))) {
         return AST_NODE_INDEX_NONE;
     }
     Ast_Node_Index type = AST_NODE_INDEX_NONE;
@@ -365,7 +366,7 @@ static Ast_Node_Index parse_definition(Parser *parser) {
             return AST_NODE_INDEX_NONE;
         }
     }
-    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -374,19 +375,19 @@ static Ast_Node_Index parse_definition(Parser *parser) {
     // compiled. Only an expression can have a type.
     Token_Kind next = parse_token_current(parser)->kind;
     Ast_Node_Index value = AST_NODE_INDEX_NONE;
-    if (is_typed_constant == false && next == TOKEN_KIND_KEYWORD_STRUCT) {
+    if (not is_typed_constant && next == TOKEN_KIND_KEYWORD_STRUCT) {
         // Like a procedure, a struct ends with its body.
         value = parse_struct_type(parser, INDENTATION_LEVEL_TOP);
-    } else if (is_typed_constant == false && next == TOKEN_KIND_KEYWORD_ENUM) {
+    } else if (not is_typed_constant && next == TOKEN_KIND_KEYWORD_ENUM) {
         // An enum ends with its members.
         value = parse_enum_type(parser, INDENTATION_LEVEL_TOP);
-    } else if (is_typed_constant == false && next == TOKEN_KIND_KEYWORD_PROC) {
+    } else if (not is_typed_constant && next == TOKEN_KIND_KEYWORD_PROC) {
         value = parse_procedure(parser, INDENTATION_LEVEL_TOP, false, AST_FOREIGN_TARGET_JS);
     } else {
         value = parse_expression(parser);
         // A procedure ends with its body, but an expression is one line, so its end is checked
         // here.
-        if (value != AST_NODE_INDEX_NONE && parse_line_end_expect(parser) == false) {
+        if (value != AST_NODE_INDEX_NONE && not parse_line_end_expect(parser)) {
             return AST_NODE_INDEX_NONE;
         }
     }
@@ -425,8 +426,8 @@ static Ast_Node_Index parse_enum_type(Parser *parser, uint32_t indentation_level
     }
     parser->nodes[root].payload.enum_type.value_type = value_type->payload.identifier.text;
     parse_token_advance(parser);
-    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false ||
-        parse_line_end_expect(parser) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) ||
+        not parse_line_end_expect(parser)) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -454,7 +455,7 @@ static Ast_Node_Index parse_enum_type(Parser *parser, uint32_t indentation_level
         parser->nodes[member].payload.enum_member.name = member_name->payload.identifier.text;
         parse_token_advance(parser);
         parse_node_append_child(parser, root, member);
-        if (parse_line_end_expect(parser) == false) {
+        if (not parse_line_end_expect(parser)) {
             return AST_NODE_INDEX_NONE;
         }
     }
@@ -480,7 +481,7 @@ static Ast_Node_Index parse_foreign_import(Parser *parser) {
     }
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_FOREIGN, STR("'foreign'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_KEYWORD_FOREIGN, STR("'foreign'"))) {
         return AST_NODE_INDEX_NONE;
     }
     Token const *target_token = parse_token_current(parser);
@@ -513,7 +514,7 @@ static Ast_Node_Index parse_foreign_import(Parser *parser) {
     }
     }
 
-    if (parse_line_end_expect(parser) == false) {
+    if (not parse_line_end_expect(parser)) {
         return AST_NODE_INDEX_NONE;
     }
     return import;
@@ -573,10 +574,10 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
     if (parser->status != PARSE_STATUS_OK) {
         return false;
     }
-    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'"))) {
         return false;
     }
-    if (parse_line_end_expect(parser) == false) {
+    if (not parse_line_end_expect(parser)) {
         return false;
     }
 
@@ -612,10 +613,10 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
         parse_token_advance(parser);
 
         // `::` is two separator tokens, one after the other.
-        if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'")) == false) {
+        if (not parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'"))) {
             return false;
         }
-        if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'")) == false) {
+        if (not parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("'::'"))) {
             return false;
         }
 
@@ -657,12 +658,12 @@ static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
     parse_token_advance(parser);
 
     if (parse_token_current(parser)->kind == TOKEN_KIND_HASH) {
-        if (parse_attributes(parser, definition) == false) {
+        if (not parse_attributes(parser, definition)) {
             return AST_NODE_INDEX_NONE;
         }
     }
 
-    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':' or '#'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':' or '#'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -674,7 +675,7 @@ static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
         }
         parse_node_append_child(parser, definition, type);
     }
-    if (parse_token_expect(parser, TOKEN_KIND_EQUALS, STR("'='")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_EQUALS, STR("'='"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -687,7 +688,7 @@ static Ast_Node_Index parse_global_variable_definition(Parser *parser) {
     }
     parse_node_append_child(parser, definition, value);
 
-    if (parse_line_end_expect(parser) == false) {
+    if (not parse_line_end_expect(parser)) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -709,8 +710,8 @@ static bool parse_attributes(Parser *parser, Ast_Node_Index definition) {
     // Every attribute consumes three tokens, so there are fewer attributes than tokens, which
     // bounds the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT,
-                               STR("'(' after '#'")) == false) {
+        if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT,
+                               STR("'(' after '#'"))) {
             return false;
         }
 
@@ -728,7 +729,7 @@ static bool parse_attributes(Parser *parser, Ast_Node_Index definition) {
         parse_token_advance(parser);
         parse_node_append_child(parser, definition, attribute);
 
-        if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'")) == false) {
+        if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'"))) {
             return false;
         }
         if (parse_token_current(parser)->kind != TOKEN_KIND_PARENTHESIS_LEFT) {
@@ -750,7 +751,7 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
     assert(indentation_level < UINT32_MAX);
     assert(parser->status == PARSE_STATUS_OK);
 
-    if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_PROC, STR("'proc'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_KEYWORD_PROC, STR("'proc'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -759,21 +760,21 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
         return AST_NODE_INDEX_NONE;
     }
 
-    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('"))) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_procedure_parameters(parser, procedure) == false) {
+    if (not parse_procedure_parameters(parser, procedure)) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'")) == false) {
-        return AST_NODE_INDEX_NONE;
-    }
-
-    if (parse_procedure_return_type(parser, procedure) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
-    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false) {
+    if (not parse_procedure_return_type(parser, procedure)) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    if (not parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'"))) {
         return AST_NODE_INDEX_NONE;
     }
     if (is_foreign) {
@@ -781,17 +782,17 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
         if (body == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
         }
-        if (parse_token_expect(parser, TOKEN_KIND_ELLIPSIS, STR("'...'")) == false) {
+        if (not parse_token_expect(parser, TOKEN_KIND_ELLIPSIS, STR("'...'"))) {
             return AST_NODE_INDEX_NONE;
         }
         parser->nodes[body].payload.foreign_body.target = target;
         parse_node_append_child(parser, procedure, body);
-        if (parse_line_end_expect(parser) == false) {
+        if (not parse_line_end_expect(parser)) {
             return AST_NODE_INDEX_NONE;
         }
         return procedure;
     }
-    if (parse_procedure_body(parser, procedure, indentation_level) == false) {
+    if (not parse_procedure_body(parser, procedure, indentation_level)) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -921,7 +922,7 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
         } else {
             // A line that is indented less than the block that is open ends it.
             while (level < blocks[block_count - 1].level && block_count > 1) {
-                if (parse_block_close(parser, blocks[block_count - 1].node) == false) {
+                if (not parse_block_close(parser, blocks[block_count - 1].node)) {
                     return false;
                 }
                 block_count -= 1;
@@ -962,7 +963,7 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
             return false;
         }
         if (is_in_match) {
-            if (parse_match_case(parser, parent) == false) {
+            if (not parse_match_case(parser, parent)) {
                 return false;
             }
             if (block_count == AST_BLOCK_DEPTH_MAX + 1) {
@@ -1039,7 +1040,7 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
 
     // The body ends the blocks that are still open, innermost first.
     for (size_t open = block_count; open > 1; open -= 1) {
-        if (parse_block_close(parser, blocks[open - 1].node) == false) {
+        if (not parse_block_close(parser, blocks[open - 1].node)) {
             return false;
         }
     }
@@ -1087,10 +1088,10 @@ static Ast_Node_Index parse_block_open(Parser *parser, Ast_Node_Index statement)
     assert(parser->status == PARSE_STATUS_OK);
     assert(statement < parser->node_count);
 
-    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'"))) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_line_end_expect(parser) == false) {
+    if (not parse_line_end_expect(parser)) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1161,7 +1162,7 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
     parse_node_append_child(parser, parent, statement);
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_IN, STR("'in'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_KEYWORD_IN, STR("'in'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1272,7 +1273,7 @@ static Ast_Node_Index parse_match_statement(Parser *parser, Ast_Node_Index paren
     parse_token_advance(parser);
 
     if (parse_token_current(parser)->kind == TOKEN_KIND_HASH &&
-        parse_attributes(parser, statement) == false) {
+        not parse_attributes(parser, statement)) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1282,10 +1283,10 @@ static Ast_Node_Index parse_match_statement(Parser *parser, Ast_Node_Index paren
     }
     parse_node_append_child(parser, statement, subject);
 
-    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'"))) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_line_end_expect(parser) == false) {
+    if (not parse_line_end_expect(parser)) {
         return AST_NODE_INDEX_NONE;
     }
     return statement;
@@ -1328,7 +1329,7 @@ static bool parse_match_case(Parser *parser, Ast_Node_Index match) {
         parse_node_append_child(parser, match_case, pattern);
     }
 
-    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'"))) {
         return false;
     }
     return parse_line_end_expect(parser);
@@ -1342,7 +1343,7 @@ static bool parse_match_case(Parser *parser, Ast_Node_Index match) {
 static Ast_Node_Index parse_range_or_expression(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
 
-    if (parse_line_has_range(parser) == false) {
+    if (not parse_line_has_range(parser)) {
         return parse_expression(parser);
     }
 
@@ -1442,7 +1443,7 @@ static Ast_Node_Index parse_jump_statement(Parser *parser) {
         return parse_fail(parser, STR("the name of a label without '@'"));
     }
 
-    if (parse_line_end_expect(parser) == false) {
+    if (not parse_line_end_expect(parser)) {
         return AST_NODE_INDEX_NONE;
     }
     return jump;
@@ -1471,8 +1472,8 @@ static Ast_Node_Index parse_else_branch(Parser *parser, Ast_Node_Index parent) {
     }
     bool is_open = statement != AST_NODE_INDEX_NONE &&
                    parser->nodes[statement].node_type == AST_NODE_TYPE_IF_STATEMENT &&
-                   parser->nodes[statement].payload.if_statement.has_else == false;
-    if (is_open == false) {
+                   not parser->nodes[statement].payload.if_statement.has_else;
+    if (not is_open) {
         return parse_fail(parser, STR("an 'if' or 'else if' before 'else'"));
     }
     parse_token_advance(parser);
@@ -1695,7 +1696,7 @@ static Ast_Node_Index parse_parameter(Parser *parser) {
     parser->nodes[parameter].payload.parameter.name = name->payload.identifier.text;
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1793,7 +1794,7 @@ static Ast_Node_Index parse_assignment(Parser *parser) {
     }
     parse_node_append_child(parser, assignment, value);
 
-    if (parse_line_end_expect(parser) == false) {
+    if (not parse_line_end_expect(parser)) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1822,7 +1823,7 @@ static Ast_Node_Index parse_variable_definition(Parser *parser) {
     parser->nodes[definition].payload.variable_definition.name = name->payload.identifier.text;
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1847,7 +1848,7 @@ static Ast_Node_Index parse_variable_definition(Parser *parser) {
     if (has_type) {
         expected = STR("'=' or the end of the line");
     }
-    if (parse_token_expect(parser, TOKEN_KIND_EQUALS, expected) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_EQUALS, expected)) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1857,7 +1858,7 @@ static Ast_Node_Index parse_variable_definition(Parser *parser) {
     }
     parse_node_append_child(parser, definition, value);
 
-    if (parse_line_end_expect(parser) == false) {
+    if (not parse_line_end_expect(parser)) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1878,7 +1879,7 @@ static Ast_Node_Index parse_return_statement(Parser *parser) {
     parser->nodes[statement].payload.jump.keyword =
         parse_token_current(parser)->payload.identifier.text;
 
-    if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_RETURN, STR("'return'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_KEYWORD_RETURN, STR("'return'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1888,7 +1889,7 @@ static Ast_Node_Index parse_return_statement(Parser *parser) {
     }
     parse_node_append_child(parser, statement, value);
 
-    if (parse_line_end_expect(parser) == false) {
+    if (not parse_line_end_expect(parser)) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -1906,7 +1907,7 @@ static bool parse_line_end_expect(Parser *parser) {
 
     Token_Kind next = parse_token_current(parser)->kind;
     bool is_line_end = next == TOKEN_KIND_INDENTATION || next == TOKEN_KIND_END;
-    if (is_line_end == false) {
+    if (not is_line_end) {
         // The false return value reports the failure, so the node index is not needed.
         (void)parse_fail(parser, STR("the end of the line"));
         return false;
@@ -2025,7 +2026,7 @@ static Ast_Node_Index parse_call(Parser *parser) {
     parser->nodes[call].payload.call.name = name->payload.identifier.text;
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2046,7 +2047,7 @@ static Ast_Node_Index parse_call(Parser *parser) {
         }
     }
 
-    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("',' or ')'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("',' or ')'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2207,7 +2208,7 @@ static Ast_Node_Index parse_type_info_of(Parser *parser) {
     parse_token_advance(parser);
     parser->has_type_info = true;
 
-    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('"))) {
         return AST_NODE_INDEX_NONE;
     }
     Ast_Node_Index type = parse_type_name(parser, STR("the name of a type"), false);
@@ -2215,7 +2216,7 @@ static Ast_Node_Index parse_type_info_of(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
     parse_node_append_child(parser, info, type);
-    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2284,11 +2285,10 @@ static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
             if (end == AST_NODE_INDEX_NONE) {
                 return AST_NODE_INDEX_NONE;
             }
-            if (parse_token_expect(parser, TOKEN_KIND_BRACKET_RIGHT, STR("']'")) == false) {
+            if (not parse_token_expect(parser, TOKEN_KIND_BRACKET_RIGHT, STR("']'"))) {
                 return AST_NODE_INDEX_NONE;
             }
-        } else if (parse_token_expect(parser, TOKEN_KIND_BRACKET_RIGHT, STR("':' or ']'")) ==
-                   false) {
+        } else if (not parse_token_expect(parser, TOKEN_KIND_BRACKET_RIGHT, STR("':' or ']'"))) {
             return AST_NODE_INDEX_NONE;
         }
 
@@ -2343,7 +2343,7 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
     }
     parse_node_append_child(parser, literal, type);
 
-    if (parse_token_expect(parser, TOKEN_KIND_BRACE_LEFT, STR("'{'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_BRACE_LEFT, STR("'{'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2371,7 +2371,7 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
     parser->literal_depth -= 1;
 
     parse_skip_indentation(parser);
-    if (parse_token_expect(parser, TOKEN_KIND_BRACE_RIGHT, STR("',' or '}'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_BRACE_RIGHT, STR("',' or '}'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2421,7 +2421,7 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
         parse_token_advance(parser);
     }
 
-    if (parse_token_expect(parser, TOKEN_KIND_BRACE_LEFT, STR("'{'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_BRACE_LEFT, STR("'{'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2446,7 +2446,7 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
         parse_token_advance(parser);
         parse_node_append_child(parser, literal, initializer);
 
-        if (parse_token_expect(parser, TOKEN_KIND_EQUALS, STR("'='")) == false) {
+        if (not parse_token_expect(parser, TOKEN_KIND_EQUALS, STR("'='"))) {
             return AST_NODE_INDEX_NONE;
         }
         Ast_Node_Index value = AST_NODE_INDEX_NONE;
@@ -2469,7 +2469,7 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
     parser->literal_depth -= 1;
 
     parse_skip_indentation(parser);
-    if (parse_token_expect(parser, TOKEN_KIND_BRACE_RIGHT, STR("',' or '}'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_BRACE_RIGHT, STR("',' or '}'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2499,8 +2499,8 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
     if (root == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false ||
-        parse_line_end_expect(parser) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) ||
+        not parse_line_end_expect(parser)) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2572,7 +2572,7 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
         parse_token_advance(parser);
         parse_node_append_child(parser, frame->node, field);
 
-        if (parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'")) == false) {
+        if (not parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'"))) {
             return AST_NODE_INDEX_NONE;
         }
 
@@ -2586,11 +2586,11 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
                 return AST_NODE_INDEX_NONE;
             }
             parse_node_append_child(parser, field, nested);
-            if (parse_struct_type_union_tag(parser, field, frame) == false) {
+            if (not parse_struct_type_union_tag(parser, field, frame)) {
                 return AST_NODE_INDEX_NONE;
             }
-            if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false ||
-                parse_line_end_expect(parser) == false) {
+            if (not parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) ||
+                not parse_line_end_expect(parser)) {
                 return AST_NODE_INDEX_NONE;
             }
             frames[frame_count] = (Parse_Struct_Frame){
@@ -2608,10 +2608,10 @@ static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_lev
                 return AST_NODE_INDEX_NONE;
             }
             parse_node_append_child(parser, field, type);
-            if (parse_struct_type_union_tag(parser, field, frame) == false) {
+            if (not parse_struct_type_union_tag(parser, field, frame)) {
                 return AST_NODE_INDEX_NONE;
             }
-            if (parse_line_end_expect(parser) == false) {
+            if (not parse_line_end_expect(parser)) {
                 return AST_NODE_INDEX_NONE;
             }
         }
@@ -2677,7 +2677,7 @@ static Parse_Struct_Frame parse_struct_type_union_line(Parser *parser,
     if (parent->kind == PARSE_STRUCT_FRAME_KIND_STRUCT) {
         assert(parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_UNION);
         parse_token_advance(parser);
-        if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_MATCH, STR("'match'")) == false) {
+        if (not parse_token_expect(parser, TOKEN_KIND_KEYWORD_MATCH, STR("'match'"))) {
             return failed;
         }
         Token const *discriminant = parse_token_current(parser);
@@ -2688,9 +2688,8 @@ static Parse_Struct_Frame parse_struct_type_union_line(Parser *parser,
         opened.discriminant = discriminant->payload.identifier.text;
         parse_token_advance(parser);
     } else {
-        if (parse_token_expect(parser, TOKEN_KIND_KEYWORD_CASE, STR("'case'")) == false ||
-            parse_token_expect(parser, TOKEN_KIND_DOT, STR("'.' and the member of the enum")) ==
-                false) {
+        if (not parse_token_expect(parser, TOKEN_KIND_KEYWORD_CASE, STR("'case'")) ||
+            not parse_token_expect(parser, TOKEN_KIND_DOT, STR("'.' and the member of the enum"))) {
             return failed;
         }
         Token const *member = parse_token_current(parser);
@@ -2703,8 +2702,8 @@ static Parse_Struct_Frame parse_struct_type_union_line(Parser *parser,
         parse_token_advance(parser);
     }
 
-    if (parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) == false ||
-        parse_line_end_expect(parser) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'")) ||
+        not parse_line_end_expect(parser)) {
         return failed;
     }
     return opened;
@@ -2783,7 +2782,7 @@ static Ast_Node_Index parse_type(Parser *parser, Str expected) {
     parser->nodes[array_type].payload.array_type.length = length_value;
     parser->nodes[array_type].payload.array_type.length_kind = length_kind;
 
-    if (parse_token_expect(parser, TOKEN_KIND_BRACKET_RIGHT, STR("']'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_BRACKET_RIGHT, STR("']'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -2892,7 +2891,7 @@ static Ast_Node_Index parse_procedure_type(Parser *parser) {
     Str keyword = parse_token_current(parser)->payload.identifier.text;
     parse_token_advance(parser);
 
-    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('"))) {
         return AST_NODE_INDEX_NONE;
     }
     if (parse_token_current(parser)->kind != TOKEN_KIND_PARENTHESIS_RIGHT) {
@@ -2912,11 +2911,11 @@ static Ast_Node_Index parse_procedure_type(Parser *parser) {
             parse_token_advance(parser);
         }
     }
-    if (parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("',' or ')'")) == false) {
+    if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("',' or ')'"))) {
         return AST_NODE_INDEX_NONE;
     }
 
-    if (parse_procedure_return_type(parser, procedure_type) == false) {
+    if (not parse_procedure_return_type(parser, procedure_type)) {
         return AST_NODE_INDEX_NONE;
     }
     // See `AST_NODE_TYPE_PROCEDURE_TYPE`: the keyword is what an error about the type points at.

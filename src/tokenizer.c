@@ -6,6 +6,7 @@
 // using `<ctype.h>`, whose results // depend on the locale, so that behavior does not change
 // between machines.
 #include <assert.h>
+#include <iso646.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -394,7 +395,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             while (end < source.length && (source.bytes[end] == ' ' || source.bytes[end] == '\t')) {
                 if (source.bytes[end] == ' ') {
                     space_count += 1;
-                } else if (has_tab == false) {
+                } else if (not has_tab) {
                     has_tab = true;
                     tab_offset = end;
                 }
@@ -465,7 +466,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         else if (character == '/' && offset + 1 < source.length &&
                  source.bytes[offset + 1] == '/') {
             bool is_documentation = offset + 2 < source.length && source.bytes[offset + 2] == '/';
-            if (is_documentation && is_comment_line == false) {
+            if (is_documentation && not is_comment_line) {
                 result.status = TOKENIZE_STATUS_DOCUMENTATION_COMMENT_TRAILING;
                 result.error_offset = offset;
                 return result;
@@ -473,7 +474,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             is_comment_line = false;
 
             size_t end = 0;
-            if (tokenizer_comment_line_end(source, offset, &end) == false) {
+            if (not tokenizer_comment_line_end(source, offset, &end)) {
                 result.status = TOKENIZE_STATUS_COMMENT_ENCODING_INVALID;
                 result.error_offset = end;
                 return result;
@@ -498,10 +499,10 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                                              source.bytes[next] == '/' &&
                                              source.bytes[next + 1] == '/' &&
                                              source.bytes[next + 2] == '/';
-                if (is_next_documentation == false) {
+                if (not is_next_documentation) {
                     break;
                 }
-                if (tokenizer_comment_line_end(source, next, &end) == false) {
+                if (not tokenizer_comment_line_end(source, next, &end)) {
                     result.status = TOKENIZE_STATUS_COMMENT_ENCODING_INVALID;
                     result.error_offset = end;
                     return result;
@@ -543,7 +544,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             // The end of the source, and the end of the line, both mean that no quote came.
             bool is_terminated = end < source.length && source.bytes[end] != '\n' &&
                                  source.bytes[end] != '\r';
-            if (is_terminated == false) {
+            if (not is_terminated) {
                 result.status = TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED;
                 result.error_offset = offset;
                 return result;
@@ -633,7 +634,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             size_t end = offset + 1;
             bool is_name_start = end < source.length &&
                                  (char_is_letter(source.bytes[end]) || source.bytes[end] == '_');
-            if (is_name_start == false) {
+            if (not is_name_start) {
                 result.status = TOKENIZE_STATUS_LABEL_INVALID;
                 result.error_offset = offset;
                 return result;
@@ -769,7 +770,7 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             bool is_range = offset + 2 < source.length && source.bytes[offset + 1] == '.' &&
                             source.bytes[offset + 2] == '<';
-            if (is_range == false) {
+            if (not is_range) {
                 token_elements[result.tokens.length] = (Token){
                     .kind = TOKEN_KIND_DOT,
                     .source_offset = (uint32_t)offset,

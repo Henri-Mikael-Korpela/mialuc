@@ -13,6 +13,7 @@
 // The values of all the nodes are kept in a table that the caller owns, one entry per node, so
 // that a constant that is used many times is worked out once.
 #include <assert.h>
+#include <iso646.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -229,7 +230,7 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
         // parameter or a global variable has a value only when the program runs.
         Semantic_Binding binding = evaluation->bindings[node];
         if (binding.kind != SEMANTIC_BINDING_KIND_CONSTANT ||
-            constant_definition_is_value(nodes, binding.target) == false) {
+            not constant_definition_is_value(nodes, binding.target)) {
             return constant_step_done(constant_fail(CONSTANT_STATUS_NOT_CONSTANT,
                                                     AST_NODE_INDEX_NONE));
         }
@@ -258,7 +259,7 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
         if (value.status != CONSTANT_STATUS_OK) {
             return constant_step_done(constant_operand_failure(value));
         }
-        if (constant_type_is_bool(value.type) == false) {
+        if (not constant_type_is_bool(value.type)) {
             return constant_step_done(constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, node));
         }
         // The result has the type of the operand, so `not` of an untyped value is untyped.
@@ -410,7 +411,7 @@ static Constant_Value constant_convert(Ast_Node const *nodes, Ast_Node_Index def
     if (value.type != untyped) {
         return constant_fail(CONSTANT_STATUS_TYPE_MISMATCH, definition);
     }
-    if (target == CONSTANT_TYPE_BYTE && constant_is_byte(value) == false) {
+    if (target == CONSTANT_TYPE_BYTE && not constant_is_byte(value)) {
         return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, definition);
     }
     value.type = target;
@@ -427,8 +428,8 @@ static Constant_Value constant_arithmetic(Ast_Node const *nodes, Ast_Node_Index 
     assert(left.status == CONSTANT_STATUS_OK);
     assert(right.status == CONSTANT_STATUS_OK);
 
-    if (constant_type_is_integer(left.type) == false ||
-        constant_type_is_integer(right.type) == false) {
+    if (not constant_type_is_integer(left.type) ||
+        not constant_type_is_integer(right.type)) {
         return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, operation);
     }
     if (left.type == CONSTANT_TYPE_BYTE || right.type == CONSTANT_TYPE_BYTE) {
@@ -552,19 +553,19 @@ static Constant_Value constant_comparison(Ast_Node const *nodes, Ast_Node_Index 
     if (constant_type_is_integer(left.type) && constant_type_is_integer(right.type)) {
         bool is_left_untyped = constant_type_is_untyped(left.type);
         bool is_right_untyped = constant_type_is_untyped(right.type);
-        if (is_left_untyped == false && is_right_untyped == false && left.type != right.type) {
+        if (not is_left_untyped && not is_right_untyped && left.type != right.type) {
             return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, comparison);
         }
         if (left.type == CONSTANT_TYPE_BYTE && is_right_untyped &&
-            constant_is_byte(right) == false) {
+            not constant_is_byte(right)) {
             return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
         }
         if (right.type == CONSTANT_TYPE_BYTE && is_left_untyped &&
-            constant_is_byte(left) == false) {
+            not constant_is_byte(left)) {
             return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
         }
     } else if (constant_type_is_bool(left.type) && constant_type_is_bool(right.type)) {
-        if (is_equality == false) {
+        if (not is_equality) {
             return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, comparison);
         }
     } else {
@@ -611,7 +612,7 @@ static Constant_Value constant_logical(Ast_Node const *nodes, Ast_Node_Index ope
     assert(left.status == CONSTANT_STATUS_OK);
     assert(right.status == CONSTANT_STATUS_OK);
 
-    if (constant_type_is_bool(left.type) == false || constant_type_is_bool(right.type) == false) {
+    if (not constant_type_is_bool(left.type) || not constant_type_is_bool(right.type)) {
         return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, operation);
     }
 

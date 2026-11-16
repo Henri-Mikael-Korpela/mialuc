@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <inttypes.h>
+#include <iso646.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -486,7 +487,7 @@ static int32_t main_run_command_build(Command command, Buffers const *buffers, S
     }
     }
 
-    if (main_run_command_write_file(command.output_path, output) == false) {
+    if (not main_run_command_write_file(command.output_path, output)) {
         fprintf(stderr, "%s: cannot write file.\n", command.output_path);
         return 1;
     }
@@ -553,7 +554,7 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
     }
 
     if (command.mode == COMMAND_MODE_BUILD) {
-        if (main_run_command_write_file(command.output_path, build_result.bytes) == false) {
+        if (not main_run_command_write_file(command.output_path, build_result.bytes)) {
             fprintf(stderr, "%s: cannot write file.\n", command.output_path);
             return 1;
         }
@@ -603,7 +604,7 @@ static Str main_run_command_read_file(char const *path, Array_Slice buffer) {
     bool is_at_end = fgetc(file) == EOF;
     bool is_close_error = fclose(file) != 0;
 
-    if (is_read_error || is_close_error || is_at_end == false) {
+    if (is_read_error || is_close_error || not is_at_end) {
         return STR_EMPTY;
     }
 
@@ -628,7 +629,7 @@ static bool main_run_command_write_file(char const *path, Array_Slice bytes) {
     size_t written = fwrite(bytes.elements, sizeof(byte), bytes.length, file);
     bool is_close_error = fclose(file) != 0;
 
-    return written == bytes.length && is_close_error == false;
+    return written == bytes.length && not is_close_error;
 }
 
 /**

@@ -1,0 +1,173 @@
+# Build target: x64-win32
+
+The `x64-win32` target of `mialuc build` writes an executable file for Windows on x64 (a PE32+ file for the console), which needs nothing but Windows to run. This document describes what it builds and how. See [mialuc](mialu-cli.md) for the commands, [Getting Started](getting-started.md) for building the compiler, and the [language specification](mialu-programming-language.md) for the language itself.
+
+The programs in [test-code/x64](../test-code/x64) are for this target.
+
+## Foreign procedures
+
+A foreign procedure is declared in a `foreign libc` block, see [Foreign procedures](mialu-programming-language.md#foreign-procedures).
+
+A foreign procedure of `libc` is a function of the C library of the platform, which the program links to and calls by the name of the procedure, as C code does. The types of the parameters and the result are the ones that the function has in C: a `C_Str` for a `char *` or a `char const *`, and an `Int` for an integer of 64 bits. The compiler trusts the declaration. A C function that returns an `int` has 32 bits, and the other 32 bits of an `Int` that is declared as its result are not defined, so such a function is declared without a result, or its result is not used.
+
+```
+import foreign libc
+
+foreign libc ->
+    printf :: proc(content: C_Str) -> ...
+
+main :: proc() Int ->
+    printf("Hello, world!")
+    return 0
+```
+
+## Program
+
+The program starts at a few instructions of the compiler that call `main`, which has to be `main :: proc() Int ->`, and pass its result to the function `exit` of the C library, so that the output of the program is written out before it ends and its result is the exit code of the process. A foreign procedure of a `foreign libc` block is imported by name from `msvcrt.dll`, which is part of every installation of Windows, and a procedure of a `foreign js` block is an error.
+
+## Values
+
+Every value is made of words of 8 bytes. `Int` is a 64-bit integer, a `Bool` is one word that is 0 for `false` and 1 for `true`, a `Byte` is one word that is a number from 0 to 255, and a `C_Str` and a pointer are the 64-bit address of what they point to. A `Str` is two words, the address of its bytes and their number. An enum is one word, the number of its member, counted from 0 in the order of the definition. An array is the address of its first element, because its length is part of its type, and an array slice is two words, the address of its first element and its number of elements. A struct is the words of its fields, see [Structs](#structs). A pointer to a procedure is the address of the code of the procedure.
+
+A constant that is a number or a truth value, which is a literal of any base, a constant or a constant expression such as `KILO * KILO`, is loaded into a register with one `mov` of its whole 64-bit value, which the compiler worked out, so a number that does not fit in 32 bits, such as `0x7FFF_FFFF_FFFF_FFFF`, needs nothing more. An untyped integer from 0 to 255 is a `Byte` where one is wanted, which is the same word as the number. The bytes of every string literal, and of every constant that is a string, are in the read-only data of the program, with a zero after them, and a string is a `Str` of them, `lea` of the address and `mov` of the length, so a `Str` that a procedure returns stays good, because the bytes are part of the program. An untyped string where a `C_Str` is wanted is a copy that ends with a zero in the temporary storage, which is what `str_to_c_str` of it makes too, see below. A constant that is a number, a truth value or a string has no code: a use of it is its value, and a constant that is the member of an enum, such as `DEFAULT :: Color.RED`, is its number.
+
+## Procedures and calls
+
+A call of a procedure follows the calling convention of Windows on x64, so that the C library can be called: the words of the arguments are passed in the order of the parameters, the first four in `rcx`, `rdx`, `r8` and `r9` and the others on the stack, above the 32 bytes of space that the caller makes for the callee to keep the four in, the result is in `rax`, and the stack is a multiple of 16 bytes at the call. So a procedure can have any number of parameters. A procedure keeps `rbp` and sets it to the stack pointer, and copies the four registers to the space that its caller made, so that every word of its arguments is in memory, one after the other, from `rbp + 16` on. The arguments are evaluated from left to right, and an argument can be any expression, also another call. The code uses only the registers that a procedure may change without keeping them for its caller: `rax`, `rcx`, `rdx` and `r8` to `r11`.
+
+Each variable has a place of 8 bytes for each of its words in the frame of its procedure, below `rbp`, in the order of the source, and the first 8 bytes below `rbp` keep how much of the temporary storage was in use, when the procedure makes temporary strings. A variable has a place of its own also when it is in a block, so that two variables never share memory and a debugger finds each at one place. The definition and an assignment store the value in the place, and a use loads it from there, so a variable always has its value in memory, where a debugger finds it too. A variable without a value is 0, which is `false` for a `Bool` and the address 0, the null pointer of C, for a `C_Str`.
+
+While an expression is worked out, its values are kept on a stack of values in the frame, below the places of the variables: an operator loads its operands from there to registers, and stores its result in the place of its first operand. How deep the stack is at each instruction follows from the expression, so the compiler knows the place of every value, and the stack pointer does not move between the start and the end of a procedure. The frame has the places of the variables, the stack of values, and at its bottom the space for the arguments of the calls that the procedure makes, and the procedure makes it with one `sub rsp`, rounded up to 16 bytes, so that every call is made with the stack as the calling convention wants it. A frame is at most 512 KiB. The stack of the program is 1 MiB, and all of it is there from the start, so a frame of any size is used at once.
+
+A `C_Str` variable cannot be returned, because it may hold a copy that `str_to_c_str` made, which is given back when the procedure returns, and neither can a string where a `C_Str` is returned, for the same reason.
+
+A global variable is in the data of the program, `.data`, after the temporary storage, and takes the words of its type, in the order of the source. The program gives every global variable its initial value before it calls `main`, with a store of the constant, or of the address and the length of a string, so a global variable has its value before any procedure runs, and keeps what the procedures assign to it. A use loads it from its place, relative to the instruction pointer, and an assignment stores it there. A global variable is an `Int`, a `Bool`, a `Byte`, a `Str`, or the members of an enum, which are the values that its initial value can have, and it has no address, because it is not in the frame where the other places that `%` points to are.
+
+## Operators
+
+`+`, `-` and `*` are the instructions `add`, `sub` and `imul` of two 64-bit registers, which wrap around on overflow, as the language says, because the low 64 bits of a sum or a product are the same for signed and unsigned numbers. `/` is `cqo`, which widens the dividend with its sign, and `idiv`, which truncates toward zero. `idiv` traps when the divisor is zero or when the smallest `Int` is divided by -1, which stops the program with an exception of Windows. The assignments `+=`, `-=`, `*=` and `/=` load the variable, work out the operator with the value and store the result.
+
+A comparison is `cmp` of the two operands and `set` of its condition, which makes the `Bool` in the lowest byte of `rax`, and `movzx`, which widens it to the word. The order of `Int` values is signed, so `<`, `<=`, `>` and `>=` are the signed conditions `l`, `le`, `g` and `ge`. `and`, `or` and `not` are `and`, `or` and `xor` with 1, which are right because a `Bool` is always 0 or 1, and both operands of `and` and `or` are always evaluated.
+
+## Control flow
+
+An if statement is its conditions and blocks one after the other. A condition is worked out like any expression, and `test` and `je` jump over its block to the next branch when it is `false`. The last statement of a block that is not the last branch is a `jmp` to the end of the statement, over the other branches, unless it is a `return`, which never gets there. A jump goes forward to a place that is not known yet when it is written, so it has a distance of 32 bits, which is as long whatever the place is, and is filled in when the place is reached: the jumps to one place wait for it in a chain, in which the distance of each holds the place of the one before it, so they need no memory but the code. When the last statement of a procedure that returns a value is not a `return`, for example an if statement that returns in all of its branches, the procedure ends with a breakpoint, because the end cannot be reached in a program whose every branch returns, and a program that gets there anyway stops.
+
+A match statement works out its subject once and stores it in a place of its own in the frame, like a variable, and then each case compares that place with its pattern: a number is `cmp` with the number and `je` to the block of the case, and a range is two comparisons, `jl` past the range when the subject is below its first number and `jle` to the block when it is not above its last, which is the signed order of an `Int`. Cases that share a block jump to it from each of their comparisons, and when none of them matches, a `jmp` goes over the block to the next case. The default case compares nothing. So the cases are tried in order, and at most one block runs, after which a `jmp` goes to the end of the statement. The subject of a match is an `Int` for now, and the patterns are checked as the language says: a pattern is a constant of the type of the subject, a range has a number in it, and no two cases match a value in common.
+
+## Arrays and pointers
+
+An array lives in the frame of the procedure that has its array literal: each literal has a place of its own there, after the places of the variables before it, where the literal stores its elements one after the other, and its value is the address of the first, `lea` of the place. So a variable of an array type is one word that holds that address, and is defined with an array literal, which is not copied. An element takes 8 bytes for each of its words, except a `Byte`, which takes one byte, so that an array of bytes is as small as its bytes, and is a buffer that the C library can write to through the address of its first element, `%buffer[0]`, which is a `^Byte`. Each literal is rounded up to 8 bytes, so that what comes after it is aligned. An array is made into a slice where one is wanted by putting its length after its address.
+
+A subscript loads the index to `rax` and the length to `rcx`, which for an array is part of its type and for a slice its second word, and traps unless the index is below the length with `cmp` and `jb` over a breakpoint, which is unsigned, so that a negative index traps too. The address of the element is the address of the first one plus the index times the size of an element, and the element is loaded from there with `mov`, or `movzx` for a `Byte`, or stored there with `mov`, of one byte for a `Byte`. A slice `a[low:high]` traps unless `low` is not above `high` and `high` is not above the length, and is the address of the element at `low` and `high - low`. `length_of` is the length of an array, which is a number in the instruction, or the second word of a slice. The assignment to a range of elements traps unless the two lengths are equal, and copies the bytes one at a time, from the last one down when the target is above the source, so that the copy is right when the ranges overlap, like `memmove` of C. A for statement over the elements of an array or a slice keeps the address of the next element and the address after the last one after its iterator, and each pass copies the element there to the iterator and moves the address to the next element.
+
+A pointer is the address of its place: `%x` is `lea` of the place of the variable in the frame, so that the variable and the pointer are the same memory, and `%a[1]` is the address that a subscript works out. `p^` loads the pointer, traps when it is `nil`, the address 0, with `test` and `jne` over a breakpoint, and loads what it points to from there, which takes 8 bytes for each of its words, or one byte for a `Byte`. An assignment works out the address of its place first, then the value, and stores the value there, and the operators such as `p^ += 1` load from the address, work out the operator and store the result. A `Byte` variable takes a word in the frame, whose lowest byte is what a `^Byte` to it points to, and the other bytes of the word are always zero. Pointers are compared with `cmp`, as two `Int` values, and with `nil`, which is 0. A procedure gets a pointer as a word like any other, so a pointer to a variable of its caller points to the frame of the caller, which is good until the caller returns. A trap is a breakpoint, `int3`, which stops a program that is not debugged with an exception of Windows, and stops a debugger there.
+
+## Structs
+
+A struct is the words of its fields one after the other, in the order of its definition, where a field that is a struct takes the words of its own fields in its place, and nothing else: it has no header and no padding, because every word is 8 bytes and so every field is aligned. A field of a type of one word takes a word, a `Byte` too, so a `Point` of two `Int` fields is 16 bytes, and a field that is a pointer is one word, also when it points to a struct of its own kind. So a struct is in memory as it is in C when its fields are words, and an array of structs has 8 bytes for each word of each element.
+
+A struct literal makes the place of its value on the stack of values before its fields are written, with every word zero, which is the value of a literal with empty braces, and the value of each field is stored in its words of that place as soon as it is worked out, in the order of the source. A variable, a parameter and a result of a struct type have as many words as the struct. A field is read at the address of its struct plus 8 bytes for each word of the fields before it: the struct of a variable, a parameter or the iterator of a for statement is at its place in the frame, the struct of an element is at the address that the subscript works out, and a pointer to a struct is followed, after a test that traps when it is `nil`, so `p.age` reads the field of what `p` points to, and `first.next.value` follows `first.next`. A field is assigned at that address the same way, which a field of a parameter or of an iterator cannot be, unless it is reached through a pointer. A definition, an assignment, an argument and `copy := p^` copy the words of a struct, so a copy does not change with the struct that it was copied from.
+
+A procedure whose result is more than a word, such as a struct, gets the address of a place for its result from its caller, as the first word of its arguments, before the others, which is what the calling convention of Windows on x64 does with a struct: the caller makes the place on its stack of values before it works out the arguments, the procedure writes the result there when it returns, and returns the address in `rax`. A foreign procedure takes and returns values of one word only, which are what a function of C takes and returns in registers.
+
+## Enums and pointers to procedures
+
+A member of an enum is its number, `mov` of it, whether it is written as `Color.RED`, as `.RED` where an enum is wanted, which is the enum of the place, or as a constant that is the member. Members are compared with `cmp`, like `Int` values, and the default value of an enum is 0, its first member. A match of an enum compares the number of the subject with the number of the member of each case, and a match without a default case and without `partial` has a case for every member, which the compiler checks.
+
+`type_info_of(Color).members` is a table in `.data`, one for each `type_info_of`, which has an `Enum_Member_Type_Info` for each member: the `Str` of its name, whose bytes are in the read-only data after the string literals, and its number, three words. The program fills the table before it calls `main`, and the value of the expression is the address of the table, which is an array, so a variable or a global variable that is given it holds the address, and its elements are indexed and gone through like those of any array. `type_info_of(Color).name` is the `Str` of the name of the enum.
+
+The name of a procedure that is not called is a pointer to it: `lea` of the address of its code, relative to the instruction pointer, or for a foreign procedure the address that the loader wrote to its place in the table of imports, so a pointer to a function of the C library calls it as well. A call of a variable, a parameter or a global variable loads the pointer that it holds to `r11` after the arguments, traps when it is `nil` with `test` and `jne` over a breakpoint, and is `call r11`. Every procedure with the same types of parameters and the same return type is of one type, whatever its name and the names of its parameters are. Pointers to procedures are compared with `cmp`, as addresses.
+
+## Strings and unions
+
+`str_to_c_str` of a string that is known when the program is compiled copies its bytes with stores of 8 bytes, see below. Of any other `Str`, it works out the size of the copy, which is the length and the zero rounded up to 8, checks that it fits in what is left of the temporary storage, writes the zero after the copy, and copies the bytes one at a time with the loop of the assignment to a range of elements. A match of a `Str` compares the length of the subject first, and when it is equal each byte with the byte of the pattern, which is a number in the instruction, because the pattern is known when the program is compiled, so the empty string is compared by its length only.
+
+The fields of the cases of a union match are fields of their struct like the others, one after the other, so a struct with a union is as large as all of its cases. A field of a case is read and assigned only where the compiler can tell that the object is in that case: in the block of an if statement whose condition compares the field that is matched with the member of the case, as long as the block does not assign to that field or to the object, or after such a comparison in an `and`. A struct literal gives a field of a case only with the member of that case for the field that is matched. These are the checks of the language, and there is nothing of them in the code.
+
+## Loops and jumps
+
+A for statement over a range stores the first number in its iterator and the end in the word after it, both in a place of the statement in the frame, so the end is read once, and the iterator is a variable that a debugger finds there. Then comes the start of the loop: a test that leaves it with `jge` when the iterator is not below the end, or with `jg` above it for an inclusive range, the statements of the block, and the step: `add` of 1 to the iterator and a `jmp` back to the test. For an inclusive range the loop leaves with `je` before the step when the iterator is the end, so a range that ends at the largest `Int` ends instead of wrapping around. An infinite loop is its block and a `jmp` back to its start, and a scope is its block. A `break` is a `jmp` to the end of the statement that it leaves, a loop, a scope or a labeled if statement, and a `continue` is a `jmp` to the step of its loop, so the step is not skipped. A label gives a statement a name for the jumps only, and has no code.
+
+A `defer` has no code where it is. The code of its deferred statement is written again at each place where its block is left: before the end of the block, and before each `break`, `continue` and `return` below the `defer` that leaves the block. A jump writes the deferred statements of each block that it leaves, the innermost block first, and in each block the last `defer` first, and then itself. A `return` works out its value first and keeps it on the stack of values while the deferred statements run, which leave the stack as deep as they found it, and then loads it to `rax` and returns. A block whose last statement is a jump writes no deferred statements at its end, which is never reached. The deferred statement has a line of its own for a debugger at each place, the line of the statement after `defer`.
+
+## What is rejected
+
+The target builds procedures whose parameters, results and variables are of the types `Int`, `Bool`, `Byte`, `Str`, `C_Str`, enums, structs, pointers to them, pointers to procedures and arrays and array slices of them, where a parameter is not an array and a result is not an array or an array slice, whose statements are calls, `return`, definitions of variables and assignments to them, if statements, match statements of an `Int`, a `Byte`, a `Str` and an enum, for statements over a range or over the elements of an array or an array slice, infinite loops, scopes, labels, `break`, `continue` and `defer`, and whose expressions are constants that are numbers, truth values and strings where a `C_Str` is wanted, parameters, variables, global variables, `nil`, members of enums, array literals, struct literals, fields, subscripts, slices, `%`, `^`, `type_info_of`, pointers to procedures, the arithmetic, comparison and logical operators, and calls of procedures, of pointers to procedures and of the built-in procedures `str_to_c_str`, `length_of`, `byte_to_int` and `int_to_byte`. A parameter and the result of a foreign procedure are one word, which is what a function of the C library takes and returns in registers, and the target rejects the rest, which is little. The target also rejects a program when: 
+- an operand of `+`, `-`, `*` or `/` is not an `Int`, or the variable or the value of `+=`, `-=`, `*=` or `/=` is not an `Int`,
+- the operands of a comparison are not both `Int` or both `Byte`, or not both `Bool`, members of one enum, pointers of one type, pointers to procedures of one type, or a pointer and `nil`, for `==` and `not=`,
+- an operand of `and`, `or` or `not` is not a `Bool`,
+- a call has a different number of arguments than the procedure has parameters, or an argument is not of the type of its parameter, or the call of a procedure without a return type is used as a value,
+- a procedure with no return type has a `return` statement, or the value that a procedure returns is not of its return type,
+- the value of a variable, or the value that is assigned to it, is not of the type of the variable,
+- the condition of an if statement is not a `Bool`,
+- the first number or the end of the range of a for statement is not an `Int`,
+- what is subscripted, sliced, gone through by a for statement or copied to a range of elements is not an array or an array slice, or an index or a bound is not an `Int`,
+- an array literal has another number of elements than the length of its type, an element of it or the value that is assigned to an element is not of the type of the elements, or a variable of an array type is not given an array literal or is assigned to as a whole,
+- the type of a parameter is an array,
+- `^` follows a value that is not a pointer, or the value that is assigned through a pointer is not of the type that it points to,
+- the operand of `%` has no address: it is a parameter, the iterator of a for statement, a value that is computed, or a variable of an array or array slice type,
+- the value of a variable that is defined without a type is `nil` or a member such as `.RED` that is written without its enum, which do not say the type of the variable,
+- a member such as `.RED` is where no enum is wanted, or the enum has no such member, or the type written after `enum` is not `Int`,
+- a name in an expression is a struct or an enum, which is a type and not a value,
+- a call is of a variable, a parameter or a global variable that does not hold a pointer to a procedure,
+- the type of a global variable is not an `Int`, a `Bool`, a `Byte`, a `Str` or the members of an enum, or its initial value is not of that type,
+- `type_info_of` is asked about a type that is not an enum, or is not followed by `.name` or `.members` right away,
+- a union is matched against a field that is not of an enum type, or a case is not a member of that enum, or a field of a case is read or assigned where the compiler cannot tell that the object is in that case, or a struct literal gives a field of a case without the member of that case,
+- a struct contains itself, or has a field of another type than `Int`, `Bool`, `Byte`, `Str`, an enum, a struct, a pointer or a pointer to a procedure, or the name of a struct literal is not one that is defined,
+- a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field, or the literal gives a value to some fields and not to all of them,
+- a field is accessed on a value that is not a struct or a pointer of one caret to one, or does not exist, or is accessed through a value that is computed, such as a call,
+- a field is assigned through a parameter or an iterator that is not a pointer,
+- `length_of`, `byte_to_int`, `int_to_byte` or `str_to_c_str` has other than one argument, or an argument of another type than an array or an array slice, a `Byte`, an `Int` and a `Str`,
+- the subject of a match statement is not an `Int`, a `Byte`, a `Str` or an enum, a pattern is not a constant of its type, a range is empty or is the pattern of a `Str` or an enum, two cases match a value in common, a match of an enum without a default case and without `partial` has no case for a member, or a match with `partial` is not of an enum or has a default case,
+- an expression is nested deeper than 1024 operators and operands.
+
+## Debugging and temporary storage
+
+A program that is built with `--debug` has debug information that gdb reads: DWARF of version 4 with the lines of the statements, the procedures and their parameters, variables and iterators, where each is kept, and their types, which are described as the C of gdb has them, a `Str` and an array slice as a struct of an address and a length and an array as a pointer to an array of its length, the global variables and the constants that are strings, each copy of a deferred statement as a lexical block of its own, so that a breakpoint on it stops at every copy, and the table of unwinding that Windows has for x64. The code is the same as without it. See [mialuc](mialu-cli.md#debugging).
+
+`str_to_c_str`, and an untyped string that is a `C_Str`, copies the string and the zero after it to temporary storage, which is a section of 64 KiB of the program that is zeroed when it is loaded and not in the file. The first 8 bytes of it say how much of the rest is in use. A copy is made at the end of what is in use and takes its size, rounded up to 8 bytes, and a procedure that makes copies saves how much was in use when it started and sets it back when it returns, so its copies are given back. A copy that does not fit stops the program with a breakpoint. A `str_to_c_str` that is returned is rejected, because the copy is gone when the procedure returns.
+
+## Debugging
+
+A program that is built with `--debug` has the same code as one built without it, and runs the same, but it also has sections that a debugger reads:
+
+- The DWARF debug information, version 4, which gdb reads from a file of this format: `.debug_info` has the procedures, their parameters, variables and the iterators of their for statements, where each is kept in the frame, their types, the global variables and the constants that are strings, `.debug_line` has the line and the column of every procedure, statement, condition of an `else if` and case of a match, and `.debug_frame` tells how to find the frame of the caller, so that the debugger can show the procedures that were called and step over a call. The language of the information is C, because gdb has no Mialu, and its C shows every type of the language: an `Int` and a `Byte` as a number, a `Bool` as `true` or `false`, a `C_Str` as its text, a `Str` as a struct of its address, which is shown as the text up to a zero, and its length, an enum as the name of its member, a struct with its fields, an array slice as a struct of the address of its first element and its length, a pointer as an address, and a pointer to a procedure as an address and the name of the procedure. An array is the address of its first elements, which is a pointer to an array of its length, so `print *a` shows the elements of an array `a`, and `print *s.data@s.length` the elements of a slice `s`. The statement of a `defer` has its code at each place where its block is left, and each of those copies is a lexical block of its own, so a breakpoint on the line of a `defer` stops at every one of them, each time the deferred statement runs, and the `defer` itself, which has no code where it is, has no line there.
+- `.pdata`, the table that Windows has for unwinding the stack of a program for x64, which gdb uses to find where the first statement of a procedure is, so that a breakpoint on a procedure stops there.
+
+The source file is named by its absolute path, so a debugger finds it whatever directory it runs in. gdb from [MinGW-w64](https://github.com/niXman/mingw-builds-binaries/releases) can debug such a program:
+
+```
+mialuc build --target x64-win32 --debug -o variables.exe test-code/x64/variables.mu
+gdb variables.exe
+(gdb) break variables.mu:22
+(gdb) run
+(gdb) info locals
+```
+
+The VS Code extension in [editors/vscode-debug](../editors/vscode-debug/README.md) builds a program with `--debug` and debugs it with gdb, with breakpoints in the editor.
+
+## Assembly
+
+The assembly is made from the executable file that `mialuc build --target x64-win32` would write, and not from the syntax tree, so it shows exactly what runs. It has a label for the start of the program, `.start`, and one for each procedure, `.name`, and a comment names what an instruction that is relative to the instruction pointer refers to, such as the imports of the C library:
+
+```
+.start:
+    sub %rsp, 40
+    call .main
+    mov %ecx, %eax
+    call [%rip - 73681]:u64  // msvcrt.dll: exit
+    int3
+```
+
+The format is:
+
+- One instruction is on each line, with the operand that is written to first: `mov %rbp, %rsp` copies `rsp` to `rbp`.
+- A register is written with a `%` in front of it, as in `%rax` and `%r10`.
+- A number is written as an integer. A large number, such as the bytes of a string, is written in hexadecimal.
+- A memory operand is `[base + displacement]` or `[base - displacement]`, and the displacement is left out when it is zero.
+- A label is written `.name:` where it is, and `.name` where it is used. A place inside a procedure that a jump goes to has a label that is `.L` and a number, which is where it is in the code, such as `.L94`.
+- A memory operand that is read or written as a byte, which `movzx`, `set` and the store of a byte have, has `:u8` after it, which is the size of the access.
+- A comment starts with `//`.
+
+A memory operand that is relative to the instruction pointer is written `[%rip + displacement]`, and the call of an import has the size of an address after it, `[%rip + displacement]:u64`, like any sized memory operand, `[base]:T`.

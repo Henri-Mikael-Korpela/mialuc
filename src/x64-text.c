@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <iso646.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -355,8 +356,8 @@ static bool x64_text_headers_read(X64_Text_Formatter *formatter) {
             formatter->data = found;
         }
     }
-    if (formatter->text.is_present == false || formatter->rdata.is_present == false ||
-        formatter->data.is_present == false) {
+    if (not formatter->text.is_present || not formatter->rdata.is_present ||
+        not formatter->data.is_present) {
         return x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_MALFORMED, sections);
     }
     if (formatter->text.file_offset > length ||
@@ -470,7 +471,7 @@ static bool x64_text_format_code(X64_Text_Formatter *formatter) {
                 symbol_index += 1;
                 is_symbol = true;
             }
-            if (is_symbol == false && offset != 0 && formatter->labels[offset] != 0) {
+            if (not is_symbol && offset != 0 && formatter->labels[offset] != 0) {
                 x64_text_write_label_target(formatter, (int64_t)offset);
                 x64_text_write(writer, STR(":\n"));
             }
@@ -584,7 +585,7 @@ static size_t x64_text_format_instruction(X64_Text_Formatter *formatter,
         x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_MALFORMED, error_offset);
         return 0;
     }
-    if (is_known == false) {
+    if (not is_known) {
         x64_text_fail(formatter, X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED, error_offset);
         return 0;
     }
@@ -611,7 +612,7 @@ static bool x64_text_format_two_byte(X64_Text_Formatter *formatter, X64_Text_Cur
     }
 
     X64_Text_Operand operand = x64_text_operand_read(cursor, rex);
-    if (operand.is_supported == false) {
+    if (not operand.is_supported) {
         return false;
     }
     if (opcode >= 0x90 && opcode <= 0x9F) {
@@ -650,7 +651,7 @@ static bool x64_text_format_operands(X64_Text_Formatter *formatter, X64_Text_Cur
 
     if (opcode == 0x3D) {
         // A comparison of `rax` with a number of 32 bits, which the processor widens.
-        if (is_wide == false) {
+        if (not is_wide) {
             return false;
         }
         x64_text_write(writer, STR("cmp %rax, "));
@@ -659,7 +660,7 @@ static bool x64_text_format_operands(X64_Text_Formatter *formatter, X64_Text_Cur
     }
 
     X64_Text_Operand operand = x64_text_operand_read(cursor, rex);
-    if (operand.is_supported == false) {
+    if (not operand.is_supported) {
         return false;
     }
 
@@ -715,12 +716,12 @@ static bool x64_text_format_operands(X64_Text_Formatter *formatter, X64_Text_Cur
         } else {
             number = (int8_t)x64_text_read_byte(cursor);
         }
-        if (GROUP[operand.field].bytes == NULL || is_wide == false) {
+        if (GROUP[operand.field].bytes == NULL || not is_wide) {
             return false;
         }
         x64_text_write(writer, GROUP[operand.field]);
         x64_text_write_operand(writer, operand, true);
-        if (operand.is_register == false) {
+        if (not operand.is_register) {
             x64_text_write(writer, STR(":u64"));
         }
         x64_text_write(writer, STR(", "));
@@ -766,7 +767,7 @@ static bool x64_text_format_operands(X64_Text_Formatter *formatter, X64_Text_Cur
         }
         x64_text_write(writer, STR("call "));
         x64_text_write_operand(writer, operand, true);
-        if (operand.is_register == false) {
+        if (not operand.is_register) {
             x64_text_write(writer, STR(":u64"));
         }
     } else {
@@ -955,7 +956,7 @@ static void x64_text_write_operand(X64_Text_Writer *writer, X64_Text_Operand ope
  * is subtracted. The base is a 64-bit register, because an address is.
  */
 static void x64_text_write_memory(X64_Text_Writer *writer, X64_Text_Operand operand) {
-    assert(operand.is_register == false);
+    assert(not operand.is_register);
 
     x64_text_write(writer, STR("["));
     if (operand.is_rip) {

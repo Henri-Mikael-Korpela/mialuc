@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <iso646.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -1143,8 +1144,7 @@ static bool x64_constants_collect(X64_Builder *builder) {
             // them among the constants that a binding is the position of. The numbers of the
             // members of an enum are an `Int`, which is the only type of them.
             if (value_type == AST_NODE_TYPE_ENUM_TYPE &&
-                str_equals(builder->nodes[procedure].payload.enum_type.value_type, STR("Int")) ==
-                    false) {
+                not str_equals(builder->nodes[procedure].payload.enum_type.value_type, STR("Int"))) {
                 return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
                                 builder->nodes[procedure].payload.enum_type.value_type);
             }
@@ -1156,9 +1156,9 @@ static bool x64_constants_collect(X64_Builder *builder) {
             Ast_Node_Index enum_node = x64_enum_of_access(builder, procedure);
             int64_t number = 0;
             if (enum_node == AST_NODE_INDEX_NONE ||
-                x64_enum_member_find(builder, enum_node,
+                not x64_enum_member_find(builder, enum_node,
                                      builder->nodes[procedure].payload.field_access.name,
-                                     &number) == false) {
+                                     &number)) {
                 return x64_fail(builder, X64_BUILD_STATUS_ENUM_MEMBER_UNKNOWN,
                                 builder->nodes[procedure].payload.field_access.name);
             }
@@ -1192,7 +1192,7 @@ static bool x64_constants_collect(X64_Builder *builder) {
                                 builder->nodes[parameter].payload.parameter.name);
             }
             if (parameter_type.kind == X64_TYPE_KIND_NONE ||
-                (is_foreign && x64_type_is_scalar(builder, parameter_type) == false)) {
+                (is_foreign && not x64_type_is_scalar(builder, parameter_type))) {
                 Str subject = builder->nodes[parameter].payload.parameter.name;
                 if (builder->nodes[type].node_type == AST_NODE_TYPE_TYPE_NAME) {
                     subject = builder->nodes[type].payload.type_name.name;
@@ -1207,7 +1207,7 @@ static bool x64_constants_collect(X64_Builder *builder) {
         if (return_type.bytes != NULL) {
             X64_Type type = x64_type_of_name(builder, return_type);
             if (type.kind == X64_TYPE_KIND_NONE ||
-                (is_foreign && x64_type_is_scalar(builder, type) == false)) {
+                (is_foreign && not x64_type_is_scalar(builder, type))) {
                 return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED, return_type);
             }
         }
@@ -1239,7 +1239,7 @@ static bool x64_main_check(X64_Builder *builder) {
     for (size_t i = 0; i < builder->constant_count; i += 1) {
         Ast_Node_Index definition = builder->constants[i].definition;
         Str name = builder->nodes[definition].payload.constant_definition.name;
-        if (str_equals(name, STR("main")) == false) {
+        if (not str_equals(name, STR("main"))) {
             continue;
         }
 
@@ -1394,7 +1394,7 @@ static bool x64_data_layout(X64_Builder *builder) {
         }
         if (type_node != AST_NODE_INDEX_NONE) {
             X64_Type written = x64_type_of_node(builder, type_node);
-            if (x64_type_accepts(builder, written, value) == false) {
+            if (not x64_type_accepts(builder, written, value)) {
                 if (written.kind == X64_TYPE_KIND_NONE) {
                     return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
                                     x64_type_subject(builder, type_node));
@@ -1409,7 +1409,7 @@ static bool x64_data_layout(X64_Builder *builder) {
                         type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_STR ||
                         (type.kind == X64_TYPE_KIND_ARRAY && x64_type_info_access_is(builder,
                                                                                    value));
-        if (is_valid == false) {
+        if (not is_valid) {
             return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED, name);
         }
         builder->layouts[definition] = (X64_Node_Layout){
@@ -1675,7 +1675,7 @@ static bool x64_code_write(X64_Builder *builder) {
             continue;
         }
         builder->constants[i].offset = writer->length - builder->text_start;
-        if (x64_procedure_write(builder, i) == false) {
+        if (not x64_procedure_write(builder, i)) {
             return false;
         }
     }
@@ -1825,7 +1825,7 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
                          -(int32_t)X64_FRAME_TEMPORARY_OFFSET_BYTES);
     }
 
-    if (x64_statements_write(builder, procedure) == false) {
+    if (not x64_statements_write(builder, procedure)) {
         return false;
     }
 
@@ -1835,7 +1835,7 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
     bool has_result = x64_return_type(builder, procedure).kind != X64_TYPE_KIND_NONE;
     Ast_Node_Index last = builder->nodes[procedure].last_child;
     bool is_last_return = builder->nodes[last].node_type == AST_NODE_TYPE_RETURN_STATEMENT;
-    if (is_last_return == false) {
+    if (not is_last_return) {
         if (has_result) {
             x64_write_byte(writer, 0xCC);
         } else {
@@ -1916,7 +1916,7 @@ static bool x64_statements_write(X64_Builder *builder, Ast_Node_Index procedure)
             if (is_list) {
                 Ast_Node_Index last = builder->nodes[frame->node].last_child;
                 if (last != AST_NODE_INDEX_NONE &&
-                    x64_node_type_is_jump(builder->nodes[last].node_type) == false) {
+                    not x64_node_type_is_jump(builder->nodes[last].node_type)) {
                     pushed = x64_defer_next(builder, frames, frame);
                 }
             }
@@ -1958,7 +1958,7 @@ static bool x64_statements_write(X64_Builder *builder, Ast_Node_Index procedure)
                 pushed = builder->nodes[frame->node].last_child;
                 assert(builder->nodes[pushed].node_type == AST_NODE_TYPE_BLOCK);
             }
-            if (is_ok == false) {
+            if (not is_ok) {
                 return false;
             }
         }
@@ -2101,11 +2101,11 @@ static bool x64_for_start_write(X64_Builder *builder, Ast_Node_Index statement) 
     };
     int32_t places[2] = {iterator, end};
     for (size_t i = 0; i < 2; i += 1) {
-        if (x64_type_accepts(builder, int_type, bounds[i]) == false) {
+        if (not x64_type_accepts(builder, int_type, bounds[i])) {
             return x64_fail(builder, X64_BUILD_STATUS_RANGE_TYPE_INVALID,
                             x64_expression_subject(builder, bounds[i]));
         }
-        if (x64_expression_write(builder, bounds[i], int_type, X64_MODE_VALUE, true) == false) {
+        if (not x64_expression_write(builder, bounds[i], int_type, X64_MODE_VALUE, true)) {
             return false;
         }
         x64_value_store(builder, int_type, places[i]);
@@ -2147,7 +2147,7 @@ static bool x64_for_each_start_write(X64_Builder *builder, Ast_Node_Index statem
         iterator + (int32_t)(x64_type_word_count(builder, element) * X64_WORD_SIZE_BYTES);
     int32_t end = next + X64_WORD_SIZE_BYTES;
 
-    if (x64_expression_write(builder, sequence, type, X64_MODE_VALUE, true) == false) {
+    if (not x64_expression_write(builder, sequence, type, X64_MODE_VALUE, true)) {
         return false;
     }
     size_t sequence_words = x64_type_word_count(builder, type);
@@ -2194,7 +2194,7 @@ static Ast_Node_Index x64_defer_next(X64_Builder *builder, X64_Statement_Frame c
     Ast_Node_Type node_type = builder->nodes[frame->node].node_type;
     bool is_jump = x64_node_type_is_jump(node_type);
 
-    if (is_jump == false) {
+    if (not is_jump) {
         Ast_Node_Index defer = x64_defer_last_before(builder, frame->node, frame->defer_bound);
         if (defer != AST_NODE_INDEX_NONE) {
             frame->defer_bound = defer;
@@ -2351,7 +2351,7 @@ static void x64_block_end(X64_Builder *builder, X64_Statement_Frame *frame,
     }
     if (frame->next != AST_NODE_INDEX_NONE) {
         Ast_Node_Index last = builder->nodes[block].last_child;
-        if (x64_node_type_is_jump(builder->nodes[last].node_type) == false) {
+        if (not x64_node_type_is_jump(builder->nodes[last].node_type)) {
             x64_jump_write(builder, X64_CONDITION_ALWAYS, &frame->end_jumps);
         }
     }
@@ -2379,12 +2379,12 @@ static void x64_jump_back_write(X64_Builder *builder, uint32_t target) {
 static bool x64_condition_write(X64_Builder *builder, Ast_Node_Index condition,
                                 uint32_t *false_jumps) {
     X64_Type bool_type = x64_type_make(X64_TYPE_KIND_BOOL);
-    if (x64_type_accepts(builder, bool_type, condition) == false) {
+    if (not x64_type_accepts(builder, bool_type, condition)) {
         return x64_fail(builder, X64_BUILD_STATUS_CONDITION_TYPE_INVALID,
                         x64_expression_subject(builder, condition));
     }
     x64_debug_row_add(builder, X64_DEBUG_ROW_KIND_LINE, builder->nodes[condition].source_offset);
-    if (x64_expression_write(builder, condition, bool_type, X64_MODE_VALUE, true) == false) {
+    if (not x64_expression_write(builder, condition, bool_type, X64_MODE_VALUE, true)) {
         return false;
     }
     x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
@@ -2417,7 +2417,7 @@ static bool x64_match_start_write(X64_Builder *builder, Ast_Node_Index match) {
                     subject_type.kind == X64_TYPE_KIND_ENUM ||
                     subject_type.kind == X64_TYPE_KIND_INT ||
                     subject_type.kind == X64_TYPE_KIND_STR;
-    if (is_valid == false) {
+    if (not is_valid) {
         if (subject_type.kind == X64_TYPE_KIND_NONE &&
             builder->nodes[subject].node_type != AST_NODE_TYPE_CALL) {
             return x64_fail_unsupported(builder);
@@ -2472,7 +2472,7 @@ static bool x64_match_start_write(X64_Builder *builder, Ast_Node_Index match) {
 
     // Every pattern is a different member, so the match has a case for each one when it has as
     // many patterns as the enum has members.
-    if (subject_type.kind == X64_TYPE_KIND_ENUM && has_default == false && is_partial == false) {
+    if (subject_type.kind == X64_TYPE_KIND_ENUM && not has_default && not is_partial) {
         size_t member_count = 0;
         for (Ast_Node_Index member = builder->nodes[subject_type.definition].first_child;
              member != AST_NODE_INDEX_NONE; member = builder->nodes[member].next_sibling) {
@@ -2484,7 +2484,7 @@ static bool x64_match_start_write(X64_Builder *builder, Ast_Node_Index match) {
         }
     }
 
-    if (x64_expression_write(builder, subject, subject_type, X64_MODE_VALUE, true) == false) {
+    if (not x64_expression_write(builder, subject, subject_type, X64_MODE_VALUE, true)) {
         return false;
     }
     return x64_value_store(builder, subject_type,
@@ -2513,8 +2513,7 @@ static X64_Match_Pattern x64_match_pattern(X64_Builder const *builder, X64_Type 
         Str member = x64_enum_member_name_of(builder, pattern, subject.definition);
         if (member.bytes == NULL) {
             result.status = X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
-        } else if (x64_enum_member_find(builder, subject.definition, member, &result.low) ==
-                   false) {
+        } else if (not x64_enum_member_find(builder, subject.definition, member, &result.low)) {
             result.status = X64_BUILD_STATUS_ENUM_MEMBER_UNKNOWN;
         }
         result.high = result.low;
@@ -2538,11 +2537,11 @@ static X64_Match_Pattern x64_match_pattern(X64_Builder const *builder, X64_Type 
         ends[1] = node->last_child;
     }
     for (size_t i = 0; i < 2; i += 1) {
-        if (x64_is_constant(builder, ends[i]) == false) {
+        if (not x64_is_constant(builder, ends[i])) {
             result.status = X64_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT;
             return result;
         }
-        if (x64_type_accepts(builder, subject, ends[i]) == false) {
+        if (not x64_type_accepts(builder, subject, ends[i])) {
             result.status = X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
             return result;
         }
@@ -2649,7 +2648,7 @@ static Ast_Node_Index x64_match_case_write(X64_Builder *builder, X64_Statement_F
     // The parser makes sure that the last case has a block.
     assert(block != AST_NODE_INDEX_NONE);
 
-    if (has_default == false) {
+    if (not has_default) {
         x64_jump_write(builder, X64_CONDITION_ALWAYS, &frame->false_jumps);
     }
     x64_jumps_resolve(builder, block_jumps);
@@ -2823,7 +2822,7 @@ static bool x64_return_value_write(X64_Builder *builder, Ast_Node_Index procedur
         // An expression that the target does not build has no type.
         return x64_fail_unsupported(builder);
     }
-    if (x64_type_accepts(builder, return_type, value) == false) {
+    if (not x64_type_accepts(builder, return_type, value)) {
         // The call of a procedure that returns nothing is in here too.
         return x64_fail(builder, X64_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
     }
@@ -2869,7 +2868,7 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
     if (type.kind == X64_TYPE_KIND_ARRAY &&
         (value == AST_NODE_INDEX_NONE ||
          (builder->nodes[value].node_type != AST_NODE_TYPE_ARRAY_LITERAL &&
-          x64_type_info_access_is(builder, value) == false))) {
+          not x64_type_info_access_is(builder, value)))) {
         return x64_fail(builder, X64_BUILD_STATUS_ARRAY_INITIALIZER_INVALID, name);
     }
 
@@ -2904,10 +2903,10 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
         }
         return x64_expression_write(builder, value, type, X64_MODE_VALUE, true);
     }
-    if (type_node != AST_NODE_INDEX_NONE && x64_type_accepts(builder, type, value) == false) {
+    if (type_node != AST_NODE_INDEX_NONE && not x64_type_accepts(builder, type, value)) {
         return x64_fail(builder, X64_BUILD_STATUS_VARIABLE_TYPE_MISMATCH, name);
     }
-    if (x64_expression_write(builder, value, type, X64_MODE_VALUE, true) == false) {
+    if (not x64_expression_write(builder, value, type, X64_MODE_VALUE, true)) {
         return false;
     }
     return x64_value_store(builder, type, displacement);
@@ -2964,7 +2963,7 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
     }
 
     // The address of the place, which the checks of the place report about, comes first.
-    if (x64_expression_write(builder, target, type, X64_MODE_TARGET, true) == false) {
+    if (not x64_expression_write(builder, target, type, X64_MODE_TARGET, true)) {
         return false;
     }
     X64_Type value_type = type;
@@ -2977,7 +2976,7 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
         mismatch = X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID;
         subject = x64_expression_subject(builder, value);
     }
-    if (x64_type_accepts(builder, value_type, value) == false) {
+    if (not x64_type_accepts(builder, value_type, value)) {
         // An expression that the target does not build has no type.
         if (x64_expression_type_for(builder, value, value_type).kind == X64_TYPE_KIND_NONE &&
             builder->nodes[value].node_type != AST_NODE_TYPE_CALL) {
@@ -2988,7 +2987,7 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
         }
         return x64_fail(builder, mismatch, subject);
     }
-    if (x64_expression_write(builder, value, value_type, X64_MODE_VALUE, true) == false) {
+    if (not x64_expression_write(builder, value, value_type, X64_MODE_VALUE, true)) {
         return false;
     }
 
@@ -3067,14 +3066,14 @@ static bool x64_range_assignment_write(X64_Builder *builder, Ast_Node_Index stat
         return x64_fail(builder, X64_BUILD_STATUS_ARRAY_EXPECTED,
                         x64_expression_subject(builder, target));
     }
-    if (x64_type_accepts(builder, type, value) == false) {
+    if (not x64_type_accepts(builder, type, value)) {
         return x64_fail(builder, X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
                         x64_expression_subject(builder, value));
     }
-    if (x64_expression_write(builder, target, type, X64_MODE_VALUE, true) == false) {
+    if (not x64_expression_write(builder, target, type, X64_MODE_VALUE, true)) {
         return false;
     }
-    if (x64_expression_write(builder, value, type, X64_MODE_VALUE, true) == false) {
+    if (not x64_expression_write(builder, value, type, X64_MODE_VALUE, true)) {
         return false;
     }
 
@@ -3194,7 +3193,7 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
         X64_Expression_Frame *frame = &frames[frame_count - 1];
 
         if (is_descending) {
-            if (x64_node_enter(builder, frame) == false) {
+            if (not x64_node_enter(builder, frame)) {
                 return false;
             }
             Ast_Node_Index first_child = x64_child_first(builder, frame->node);
@@ -3218,8 +3217,7 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
         // The children of the node are on the stack, so the node itself is written now. The value
         // of the root is dropped when it is not used, which only a call does without one.
         bool is_root = frame_count == 1;
-        if (x64_expression_node_write(builder, frame, is_root == false || is_result_used) ==
-            false) {
+        if (not x64_expression_node_write(builder, frame, not is_root || is_result_used)) {
             return false;
         }
         x64_conversion_write(builder, frame);
@@ -3230,7 +3228,7 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
         // What the parent does with the value of each child, and then the next sibling, or the
         // parent itself when there is none.
         X64_Expression_Frame const *parent = &frames[frame_count - 2];
-        if (x64_child_done(builder, parent, frame) == false) {
+        if (not x64_child_done(builder, parent, frame)) {
             return false;
         }
         Ast_Node_Index next = builder->nodes[frame->node].next_sibling;
@@ -3291,7 +3289,7 @@ static bool x64_node_enter(X64_Builder *builder, X64_Expression_Frame const *fra
     Ast_Node_Index node = frame->node;
     Ast_Node_Type node_type = builder->nodes[node].node_type;
 
-    if (node_type == AST_NODE_TYPE_CALL && x64_call_is_built_in(builder, node) == false) {
+    if (node_type == AST_NODE_TYPE_CALL && not x64_call_is_built_in(builder, node)) {
         Ast_Node_Index procedure = x64_call_procedure(builder, node);
         if (procedure != AST_NODE_INDEX_NONE && x64_result_is_hidden(builder, procedure)) {
             x64_stack_push(builder,
@@ -3318,8 +3316,7 @@ static bool x64_node_enter(X64_Builder *builder, X64_Expression_Frame const *fra
         Str name = builder->nodes[given].payload.field_initializer.name;
         size_t offset = 0;
         X64_Type field_type = x64_type_make(X64_TYPE_KIND_NONE);
-        if (x64_struct_field_find(builder, type.definition, name, &offset, &field_type) ==
-            false) {
+        if (not x64_struct_field_find(builder, type.definition, name, &offset, &field_type)) {
             return x64_fail(builder, X64_BUILD_STATUS_STRUCT_FIELD_UNKNOWN, name);
         }
         for (Ast_Node_Index earlier = builder->nodes[node].first_child; earlier != given;
@@ -3350,7 +3347,7 @@ static bool x64_node_enter(X64_Builder *builder, X64_Expression_Frame const *fra
         }
         Str case_member =
             builder->nodes[builder->nodes[union_match].first_child].payload.union_case.member;
-        if (str_equals(given_member, case_member) == false) {
+        if (not str_equals(given_member, case_member)) {
             return x64_fail(builder, X64_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH, name);
         }
     }
@@ -3360,7 +3357,7 @@ static bool x64_node_enter(X64_Builder *builder, X64_Expression_Frame const *fra
         Str field_name = builder->nodes[field].payload.field.name;
         bool is_given = false;
         for (Ast_Node_Index given = builder->nodes[node].first_child;
-             given != AST_NODE_INDEX_NONE && is_given == false;
+             given != AST_NODE_INDEX_NONE && not is_given;
              given = builder->nodes[given].next_sibling) {
             is_given = str_equals(builder->nodes[given].payload.field_initializer.name,
                                   field_name);
@@ -3374,7 +3371,7 @@ static bool x64_node_enter(X64_Builder *builder, X64_Expression_Frame const *fra
                 builder->nodes[builder->nodes[union_match].first_child].payload.union_case.member;
             is_required = given_member.bytes != NULL && str_equals(given_member, case_member);
         }
-        if (is_given == false && is_required) {
+        if (not is_given && is_required) {
             return x64_fail(builder, X64_BUILD_STATUS_STRUCT_FIELD_MISSING, field_name);
         }
     }
@@ -3402,7 +3399,7 @@ static bool x64_child_done(X64_Builder *builder, X64_Expression_Frame const *par
     Ast_Node_Type node_type = builder->nodes[parent->node].node_type;
     if (node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
         X64_Type element = x64_type_element(builder->layouts[parent->node].type);
-        if (x64_type_accepts(builder, element, child->node) == false) {
+        if (not x64_type_accepts(builder, element, child->node)) {
             return x64_fail(builder, X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
                             x64_expression_subject(builder, child->node));
         }
@@ -3426,7 +3423,7 @@ static bool x64_child_done(X64_Builder *builder, X64_Expression_Frame const *par
     assert(is_found);
     bool is_nested_literal = builder->nodes[value].node_type == AST_NODE_TYPE_STRUCT_LITERAL &&
                              builder->nodes[value].payload.struct_literal.name.bytes == NULL;
-    if (is_nested_literal == false && x64_type_accepts(builder, field_type, value) == false) {
+    if (not is_nested_literal && not x64_type_accepts(builder, field_type, value)) {
         return x64_fail(builder, X64_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH, name);
     }
 
@@ -3694,7 +3691,7 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
             return x64_type_info_write(builder, node);
         }
         // A field of a struct.
-        if (x64_address_write(builder, frame) == false) {
+        if (not x64_address_write(builder, frame)) {
             return false;
         }
         {
@@ -3709,7 +3706,7 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
     case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_SUBSCRIPT: {
         // The address of the place, and then what is there.
-        if (x64_address_write(builder, frame) == false) {
+        if (not x64_address_write(builder, frame)) {
             return false;
         }
         X64_Type type = x64_expression_type(builder, node);
@@ -3740,7 +3737,7 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
         }
         X64_Type type = x64_expression_type(builder, node);
         if (type.kind == X64_TYPE_KIND_NONE ||
-            x64_identifier_address_load(builder, node, X64_REGISTER_R11) == false) {
+            not x64_identifier_address_load(builder, node, X64_REGISTER_R11)) {
             return x64_fail_unsupported(builder);
         }
         x64_memory_load_words(builder, type, X64_REGISTER_R11);
@@ -3801,7 +3798,7 @@ static bool x64_identifier_address_load(X64_Builder *builder, Ast_Node_Index ide
         return true;
     }
     int32_t place = 0;
-    if (x64_identifier_place(builder, identifier, &place) == false) {
+    if (not x64_identifier_place(builder, identifier, &place)) {
         return false;
     }
     x64_write_memory(builder, X64_OPCODE_LEA, register_number, X64_REGISTER_RBP, place);
@@ -3839,7 +3836,7 @@ static bool x64_procedure_address_write(X64_Builder *builder, size_t position) {
  */
 static bool x64_member_write(X64_Builder *builder, Ast_Node_Index enum_node, Str member) {
     int64_t number = 0;
-    if (x64_enum_member_find(builder, enum_node, member, &number) == false) {
+    if (not x64_enum_member_find(builder, enum_node, member, &number)) {
         return x64_fail(builder, X64_BUILD_STATUS_ENUM_MEMBER_UNKNOWN, member);
     }
     x64_write_load_integer(builder, X64_REGISTER_RAX, number);
@@ -3917,7 +3914,7 @@ static bool x64_address_write(X64_Builder *builder, X64_Expression_Frame const *
                        binding.kind == SEMANTIC_BINDING_KIND_PARAMETER;
         }
         bool is_sequence = type.kind == X64_TYPE_KIND_ARRAY || type.kind == X64_TYPE_KIND_SLICE;
-        if (is_valid == false || (is_sequence && frame->mode == X64_MODE_ADDRESS)) {
+        if (not is_valid || (is_sequence && frame->mode == X64_MODE_ADDRESS)) {
             return x64_fail(builder, X64_BUILD_STATUS_ADDRESS_INVALID, subject);
         }
         int32_t target = x64_stack_push(builder, 1);
@@ -3951,7 +3948,7 @@ static bool x64_address_write(X64_Builder *builder, X64_Expression_Frame const *
         if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
             return x64_fail(builder, X64_BUILD_STATUS_ARRAY_EXPECTED, subject);
         }
-        if (x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_INT), index) == false) {
+        if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_INT), index)) {
             return x64_fail(builder, X64_BUILD_STATUS_INDEX_TYPE_INVALID,
                             x64_expression_subject(builder, index));
         }
@@ -3997,18 +3994,18 @@ static bool x64_field_address_write(X64_Builder *builder, X64_Expression_Frame c
     X64_Type type = x64_expression_type(builder, base);
     bool is_pointer = type.kind == X64_TYPE_KIND_POINTER && type.depth == 1 &&
                       type.pointee_kind == X64_TYPE_KIND_STRUCT;
-    if (type.kind != X64_TYPE_KIND_STRUCT && is_pointer == false) {
+    if (type.kind != X64_TYPE_KIND_STRUCT && not is_pointer) {
         return x64_fail(builder, X64_BUILD_STATUS_FIELD_BASE_INVALID, name);
     }
     size_t offset = 0;
     X64_Type field_type = x64_type_make(X64_TYPE_KIND_NONE);
-    if (x64_struct_field_find(builder, type.definition, name, &offset, &field_type) == false) {
+    if (not x64_struct_field_find(builder, type.definition, name, &offset, &field_type)) {
         return x64_fail(builder, X64_BUILD_STATUS_STRUCT_FIELD_UNKNOWN, name);
     }
     Ast_Node_Index union_match = x64_field_union_match(
         builder, x64_struct_field_node_find(builder, type.definition, name));
     if (union_match != AST_NODE_INDEX_NONE &&
-        x64_union_is_matched(builder, node, type.definition, union_match) == false) {
+        not x64_union_is_matched(builder, node, type.definition, union_match)) {
         return x64_fail(builder, X64_BUILD_STATUS_UNION_FIELD_UNMATCHED, name);
     }
 
@@ -4045,7 +4042,7 @@ static bool x64_slice_write(X64_Builder *builder, X64_Expression_Frame const *fr
     X64_Type int_type = x64_type_make(X64_TYPE_KIND_INT);
     for (Ast_Node_Index bound = builder->nodes[sequence].next_sibling;
          bound != AST_NODE_INDEX_NONE; bound = builder->nodes[bound].next_sibling) {
-        if (x64_type_accepts(builder, int_type, bound) == false) {
+        if (not x64_type_accepts(builder, int_type, bound)) {
             return x64_fail(builder, X64_BUILD_STATUS_INDEX_TYPE_INVALID,
                             x64_expression_subject(builder, bound));
         }
@@ -4124,12 +4121,12 @@ static bool x64_built_in_write(X64_Builder *builder, X64_Expression_Frame const 
         }
         x64_sequence_length_load(builder, type, X64_REGISTER_RAX, place);
     } else if (str_equals(name, STR("byte_to_int"))) {
-        if (x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_BYTE), argument) == false) {
+        if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_BYTE), argument)) {
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         }
         x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
     } else if (str_equals(name, STR("int_to_byte"))) {
-        if (x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_INT), argument) == false) {
+        if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_INT), argument)) {
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         }
         x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
@@ -4245,7 +4242,7 @@ static bool x64_constant_write(X64_Builder *builder, X64_Expression_Frame const 
     if (constant.string != AST_NODE_INDEX_NONE) {
         if (frame->wanted.kind == X64_TYPE_KIND_C_STR &&
             constant.type == CONSTANT_TYPE_UNTYPED_STRING) {
-            if (x64_c_str_write(builder, constant.string, X64_REGISTER_RAX) == false) {
+            if (not x64_c_str_write(builder, constant.string, X64_REGISTER_RAX)) {
                 return false;
             }
             int32_t target = x64_stack_push(builder, 1);
@@ -4299,10 +4296,10 @@ static bool x64_operation_write(X64_Builder *builder, X64_Expression_Frame const
     }
     Ast_Node_Index left = builder->nodes[node].first_child;
     Ast_Node_Index right = builder->nodes[left].next_sibling;
-    if (x64_type_accepts(builder, operand_type, left) == false) {
+    if (not x64_type_accepts(builder, operand_type, left)) {
         return x64_fail(builder, status, x64_expression_subject(builder, left));
     }
-    if (right != AST_NODE_INDEX_NONE && x64_type_accepts(builder, operand_type, right) == false) {
+    if (right != AST_NODE_INDEX_NONE && not x64_type_accepts(builder, operand_type, right)) {
         return x64_fail(builder, status, x64_expression_subject(builder, right));
     }
 
@@ -4370,7 +4367,7 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     X64_Type type = x64_expression_type(builder, left);
     bool is_left_untyped = x64_is_constant(builder, left) || type.kind == X64_TYPE_KIND_NIL ||
                            type.kind == X64_TYPE_KIND_ENUM_LITERAL;
-    if (is_left_untyped && x64_is_constant(builder, right) == false) {
+    if (is_left_untyped && not x64_is_constant(builder, right)) {
         type = x64_expression_type(builder, right);
     }
     bool is_equality = operator == AST_COMPARISON_OPERATOR_EQUAL ||
@@ -4380,8 +4377,8 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
                         type.kind == X64_TYPE_KIND_POINTER ||
                         type.kind == X64_TYPE_KIND_PROCEDURE;
     bool is_valid = is_ordered || (is_equatable && is_equality);
-    if (is_valid == false || x64_type_accepts(builder, type, left) == false ||
-        x64_type_accepts(builder, type, right) == false) {
+    if (not is_valid || not x64_type_accepts(builder, type, left) ||
+        not x64_type_accepts(builder, type, right)) {
         return x64_fail(builder, X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                         x64_expression_subject(builder, node));
     }
@@ -4465,7 +4462,7 @@ static bool x64_call_write(X64_Builder *builder, X64_Expression_Frame const *fra
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
         }
         X64_Type parameter_type = x64_parameter_type(builder, procedure, i);
-        if (x64_type_accepts(builder, parameter_type, argument) == false) {
+        if (not x64_type_accepts(builder, parameter_type, argument)) {
             // An expression that the target does not build has no type.
             if (x64_expression_type_for(builder, argument, parameter_type).kind ==
                     X64_TYPE_KIND_NONE &&
@@ -4566,7 +4563,7 @@ static bool x64_call_write(X64_Builder *builder, X64_Expression_Frame const *fra
     x64_stack_pop(builder, builder->stack_words - arguments_start);
     if (is_hidden) {
         // The result is in its place already, which is a value that is not used for a statement.
-        if (is_result_used == false) {
+        if (not is_result_used) {
             x64_stack_pop(builder, result_words);
         }
     } else if (is_result_used) {
@@ -4595,14 +4592,14 @@ static bool x64_str_to_c_str_write(X64_Builder *builder, Ast_Node_Index call) {
     }
     Ast_Node_Index literal = x64_string_literal_of(builder, argument);
     if (literal != AST_NODE_INDEX_NONE) {
-        if (x64_c_str_write(builder, literal, X64_REGISTER_RAX) == false) {
+        if (not x64_c_str_write(builder, literal, X64_REGISTER_RAX)) {
             return false;
         }
         int32_t target = x64_stack_push(builder, 1);
         x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
         return true;
     }
-    if (x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_STR), argument) == false) {
+    if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_STR), argument)) {
         return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
     }
 
@@ -4889,7 +4886,7 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
     Ast_Node_Index path[X64_EXPRESSION_DEPTH_MAX];
     size_t path_count = 0;
     Ast_Node_Index current = expression;
-    while (path_count < X64_EXPRESSION_DEPTH_MAX && x64_is_constant(builder, current) == false) {
+    while (path_count < X64_EXPRESSION_DEPTH_MAX && not x64_is_constant(builder, current)) {
         Ast_Node_Type node_type = builder->nodes[current].node_type;
         if (node_type != AST_NODE_TYPE_ADDRESS_OF && node_type != AST_NODE_TYPE_DEREFERENCE &&
             node_type != AST_NODE_TYPE_FIELD_ACCESS && node_type != AST_NODE_TYPE_SUBSCRIPT &&
@@ -4925,10 +4922,10 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
                               type.pointee_kind == X64_TYPE_KIND_STRUCT);
             size_t offset = 0;
             X64_Type field_type = x64_type_make(X64_TYPE_KIND_NONE);
-            if (is_struct == false ||
-                x64_struct_field_find(builder, type.definition,
+            if (not is_struct ||
+                not x64_struct_field_find(builder, type.definition,
                                       builder->nodes[path[i - 1]].payload.field_access.name,
-                                      &offset, &field_type) == false) {
+                                      &offset, &field_type)) {
                 return x64_type_make(X64_TYPE_KIND_NONE);
             }
             type = field_type;
@@ -5224,7 +5221,7 @@ static X64_Type x64_type_info_type(X64_Builder const *builder, Ast_Node_Index ac
         return x64_type_make(X64_TYPE_KIND_STR);
     }
     Ast_Node_Index member_struct = x64_struct_find(builder, STR("Enum_Member_Type_Info"));
-    if (str_equals(field, STR("members")) == false || member_struct == AST_NODE_INDEX_NONE) {
+    if (not str_equals(field, STR("members")) || member_struct == AST_NODE_INDEX_NONE) {
         return x64_type_make(X64_TYPE_KIND_NONE);
     }
     X64_Type element = x64_type_make(X64_TYPE_KIND_STRUCT);
@@ -5432,7 +5429,7 @@ static bool x64_unions_check(X64_Builder *builder) {
         }
         Str member = builder->nodes[builder->nodes[match].first_child].payload.union_case.member;
         int64_t number = 0;
-        if (x64_enum_member_find(builder, enum_node, member, &number) == false) {
+        if (not x64_enum_member_find(builder, enum_node, member, &number)) {
             return x64_fail(builder, X64_BUILD_STATUS_UNION_CASE_UNKNOWN, member);
         }
     }
@@ -5463,8 +5460,8 @@ static bool x64_path_equals(X64_Builder const *builder, Ast_Node_Index first,
                    binding_a.position == binding_b.position;
         }
         if (node_a->node_type == AST_NODE_TYPE_FIELD_ACCESS) {
-            if (str_equals(node_a->payload.field_access.name,
-                           node_b->payload.field_access.name) == false) {
+            if (not str_equals(node_a->payload.field_access.name,
+                           node_b->payload.field_access.name)) {
                 return false;
             }
         } else if (node_a->node_type != AST_NODE_TYPE_DEREFERENCE) {
@@ -5490,7 +5487,7 @@ static bool x64_union_block_changes(X64_Builder const *builder, Ast_Node_Index b
     for (Ast_Node_Index node = block + 1; node < builder->nodes[block].payload.block.end;
          node += 1) {
         Ast_Node_Type node_type = builder->nodes[node].node_type;
-        if (ast_node_type_is_assignment(node_type) == false &&
+        if (not ast_node_type_is_assignment(node_type) &&
             node_type != AST_NODE_TYPE_ADDRESS_OF) {
             continue;
         }
@@ -5559,8 +5556,8 @@ static bool x64_union_condition_matches(X64_Builder const *builder, Ast_Node_Ind
         for (size_t side = 0; side < 2; side += 1) {
             Ast_Node const *matched = &builder->nodes[sides[side]];
             if (matched->node_type != AST_NODE_TYPE_FIELD_ACCESS ||
-                str_equals(matched->payload.field_access.name, discriminant) == false ||
-                x64_path_equals(builder, matched->first_child, container) == false) {
+                not str_equals(matched->payload.field_access.name, discriminant) ||
+                not x64_path_equals(builder, matched->first_child, container)) {
                 continue;
             }
             Str other_member = x64_enum_member_name_of(builder, sides[1 - side], enum_node);
@@ -5625,7 +5622,7 @@ static bool x64_union_is_matched(X64_Builder const *builder, Ast_Node_Index acce
                 builder->nodes[previous].node_type != AST_NODE_TYPE_BLOCK &&
                 x64_union_condition_matches(builder, previous, container, union_match,
                                             enum_node) &&
-                x64_union_block_changes(builder, parent, container, discriminant) == false) {
+                not x64_union_block_changes(builder, parent, container, discriminant)) {
                 return true;
             }
         }
@@ -5681,7 +5678,7 @@ static bool x64_structs_check(X64_Builder *builder) {
                             type.kind == X64_TYPE_KIND_POINTER ||
                             type.kind == X64_TYPE_KIND_PROCEDURE ||
                             type.kind == X64_TYPE_KIND_STR || type.kind == X64_TYPE_KIND_STRUCT;
-            if (is_valid == false) {
+            if (not is_valid) {
                 return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
                                 x64_type_subject(builder, type_node));
             }
@@ -6120,7 +6117,7 @@ static Ast_Node_Index x64_signature_canonical(X64_Builder const *builder,
         Ast_Node_Type node_type = builder->nodes[node].node_type;
         if ((node_type != AST_NODE_TYPE_PROCEDURE && node_type != AST_NODE_TYPE_PROCEDURE_TYPE) ||
             x64_parameter_count(builder, node) != parameter_count ||
-            x64_type_equals(x64_return_type(builder, node), return_type) == false) {
+            not x64_type_equals(x64_return_type(builder, node), return_type)) {
             continue;
         }
         bool is_equal = true;
@@ -6202,7 +6199,7 @@ static size_t x64_argument_word_offset(X64_Builder const *builder, Ast_Node_Inde
  */
 static bool x64_result_is_hidden(X64_Builder const *builder, Ast_Node_Index procedure) {
     X64_Type type = x64_return_type(builder, procedure);
-    return type.kind != X64_TYPE_KIND_NONE && x64_type_is_scalar(builder, type) == false;
+    return type.kind != X64_TYPE_KIND_NONE && not x64_type_is_scalar(builder, type);
 }
 
 /**

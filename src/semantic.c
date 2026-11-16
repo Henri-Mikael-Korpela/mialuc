@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <iso646.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -222,7 +223,7 @@ static bool semantic_definitions_check(Semantic_Analyzer *analyzer) {
             Ast_Node_Index value = analyzer->nodes[definition].first_child;
             if (analyzer->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE &&
                 ast_procedure_is_foreign(analyzer->nodes, value) &&
-                has_foreign_import[ast_procedure_foreign_target(analyzer->nodes, value)] == false) {
+                not has_foreign_import[ast_procedure_foreign_target(analyzer->nodes, value)]) {
                 return semantic_fail(analyzer, SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING, name);
             }
         }
@@ -240,11 +241,11 @@ static bool semantic_definitions_check(Semantic_Analyzer *analyzer) {
         // are supported.
         if (analyzer->nodes[definition].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
             bool is_static = false;
-            if (semantic_attributes_check(analyzer, definition, STR("static"),
-                                          SEMANTIC_STATUS_ATTRIBUTE_UNKNOWN, &is_static) == false) {
+            if (not semantic_attributes_check(analyzer, definition, STR("static"),
+                                          SEMANTIC_STATUS_ATTRIBUTE_UNKNOWN, &is_static)) {
                 return false;
             }
-            if (is_static == false) {
+            if (not is_static) {
                 return semantic_fail(analyzer, SEMANTIC_STATUS_GLOBAL_NOT_STATIC, name);
             }
         }
@@ -391,7 +392,7 @@ static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
                 nodes[value_node].node_type == AST_NODE_TYPE_TYPE_INFO_OF ||
                 (nodes[value_node].node_type == AST_NODE_TYPE_FIELD_ACCESS &&
                  nodes[nodes[value_node].first_child].node_type == AST_NODE_TYPE_TYPE_INFO_OF);
-            if (is_type_info == false) {
+            if (not is_type_info) {
                 Constant_Value value = constant_evaluate(nodes, analyzer->node_count,
                                                          analyzer->bindings, analyzer->constants,
                                                          value_node);
@@ -420,7 +421,7 @@ static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
                                     node_type == AST_NODE_TYPE_OR ||
                                     node_type == AST_NODE_TYPE_STRING_LITERAL ||
                                     node_type == AST_NODE_TYPE_SUBTRACTION;
-                if (is_candidate == false) {
+                if (not is_candidate) {
                     continue;
                 }
                 // A node that an operator above it evaluated already is not worked out again.
@@ -536,7 +537,7 @@ static bool semantic_attributes_check(Semantic_Analyzer *analyzer, Ast_Node_Inde
         }
 
         Str name = attribute_node->payload.attribute.name;
-        if (str_equals(name, known) == false) {
+        if (not str_equals(name, known)) {
             return semantic_fail(analyzer, unknown_status, name);
         }
         if (*has_known) {
@@ -589,7 +590,7 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
                 return semantic_fail(analyzer, SEMANTIC_STATUS_DEFER_NESTED,
                                      analyzer->nodes[current].payload.jump.keyword);
             }
-            if (semantic_defer_check(analyzer, current) == false) {
+            if (not semantic_defer_check(analyzer, current)) {
                 return false;
             }
             defer = current;
@@ -600,13 +601,13 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
                                  analyzer->nodes[current].payload.jump.keyword);
         }
         if (semantic_jump_target_is_statement(analyzer, procedure, current)) {
-            if (semantic_jump_target_push(analyzer, targets, &target_count, current) == false) {
+            if (not semantic_jump_target_push(analyzer, targets, &target_count, current)) {
                 return false;
             }
         }
         if (node_type == AST_NODE_TYPE_BREAK_STATEMENT ||
             node_type == AST_NODE_TYPE_CONTINUE_STATEMENT) {
-            if (semantic_jump_resolve(analyzer, targets, target_count, current) == false) {
+            if (not semantic_jump_resolve(analyzer, targets, target_count, current)) {
                 return false;
             }
             // The statements are in the order of the source and the target is around the jump, so
@@ -620,23 +621,23 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
         if (node_type == AST_NODE_TYPE_PARAMETER) {
             // The parameters come first, so by the time that a statement is reached all of them
             // are known.
-            if (semantic_parameter_check(analyzer, procedure, current) == false) {
+            if (not semantic_parameter_check(analyzer, procedure, current)) {
                 return false;
             }
         } else if (node_type == AST_NODE_TYPE_VARIABLE_DEFINITION ||
                    node_type == AST_NODE_TYPE_FOR_STATEMENT) {
             statement = current;
-            if (semantic_variable_check(analyzer, procedure, current) == false) {
+            if (not semantic_variable_check(analyzer, procedure, current)) {
                 return false;
             }
         } else if (node_type == AST_NODE_TYPE_IDENTIFIER) {
             // The nodes of an expression come after the node of their statement, and the other
             // kinds of node that are met in between are not statements.
-            if (semantic_identifier_resolve(analyzer, procedure, statement, current) == false) {
+            if (not semantic_identifier_resolve(analyzer, procedure, statement, current)) {
                 return false;
             }
         } else if (node_type == AST_NODE_TYPE_CALL) {
-            if (semantic_call_resolve(analyzer, procedure, statement, current) == false) {
+            if (not semantic_call_resolve(analyzer, procedure, statement, current)) {
                 return false;
             }
         } else if (node_type == AST_NODE_TYPE_ADDRESS_OF) {
@@ -646,9 +647,9 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
             // Whether the match is partial is for the target, which knows the type of the subject.
             statement = current;
             bool is_partial = false;
-            if (semantic_attributes_check(analyzer, current, STR("partial"),
+            if (not semantic_attributes_check(analyzer, current, STR("partial"),
                                           SEMANTIC_STATUS_MATCH_ATTRIBUTE_UNKNOWN,
-                                          &is_partial) == false) {
+                                          &is_partial)) {
                 return false;
             }
         } else if (node_type == AST_NODE_TYPE_RETURN_STATEMENT ||
@@ -845,14 +846,14 @@ static bool semantic_jump_resolve(Semantic_Analyzer *analyzer, Semantic_Jump_Tar
             return semantic_fail(analyzer, SEMANTIC_STATUS_LABEL_UNKNOWN, label);
         }
         // A `continue` goes on with a loop, so a scope or an if statement is no use to it.
-        if (is_break == false && analyzer->nodes[found].node_type != AST_NODE_TYPE_FOR_STATEMENT &&
+        if (not is_break && analyzer->nodes[found].node_type != AST_NODE_TYPE_FOR_STATEMENT &&
             analyzer->nodes[found].node_type != AST_NODE_TYPE_LOOP_STATEMENT) {
             return semantic_fail(analyzer, SEMANTIC_STATUS_LABEL_NOT_LOOP, label);
         }
     } else {
         for (size_t i = target_count; i > 0 && found == AST_NODE_INDEX_NONE; i -= 1) {
             Semantic_Jump_Target const *target = &targets[i - 1];
-            if (target->is_if == false && (is_break || target->is_loop)) {
+            if (not target->is_if && (is_break || target->is_loop)) {
                 found = target->node;
             }
         }

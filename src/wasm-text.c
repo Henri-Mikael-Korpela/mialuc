@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <iso646.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -576,7 +577,7 @@ static bool wasm_text_format_functions(Wasm_Text_Formatter *formatter, Wasm_Text
     // Both sections must end right after their last entry.
     formatter->offset = function_cursor;
     formatter->limit = function.end;
-    if (wasm_text_section_end(formatter) == false) {
+    if (not wasm_text_section_end(formatter)) {
         return false;
     }
     formatter->offset = code_cursor;
@@ -644,7 +645,7 @@ static bool wasm_text_format_functions_body_locals(Wasm_Text_Formatter *formatte
         wasm_text_write(&formatter->writer, STR(" (local"));
         // Two bytes can declare billions of locals, so the loop also stops when the output is
         // full, which is reported afterwards.
-        for (uint32_t j = 0; j < local_count && formatter->writer.is_overflowed == false; j += 1) {
+        for (uint32_t j = 0; j < local_count && not formatter->writer.is_overflowed; j += 1) {
             wasm_text_write(&formatter->writer, STR(" "));
             wasm_text_write(&formatter->writer, name);
         }
@@ -664,7 +665,7 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
     bool is_ended = false;
     // Every instruction is at least one byte, so a body has no more instructions than bytes.
     size_t instruction_count_max = formatter->limit - formatter->offset;
-    for (size_t i = 0; i < instruction_count_max && is_ended == false &&
+    for (size_t i = 0; i < instruction_count_max && not is_ended &&
                        formatter->status == WASM_TEXT_STATUS_OK;
          i += 1) {
         size_t opcode_offset = formatter->offset;
@@ -974,7 +975,7 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
     if (formatter->status != WASM_TEXT_STATUS_OK) {
         return false;
     }
-    if (is_ended == false) {
+    if (not is_ended) {
         return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_MALFORMED, formatter->offset);
     }
     return true;
@@ -1303,7 +1304,7 @@ static uint32_t wasm_text_section_count_read(Wasm_Text_Formatter *formatter,
 
     formatter->offset = section.start;
     formatter->limit = section.end;
-    if (section.is_present == false) {
+    if (not section.is_present) {
         return 0;
     }
     return wasm_text_read_unsigned_32(formatter);
