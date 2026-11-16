@@ -41,12 +41,12 @@
        of the object of `js` is not checked, because it is not known until the program runs.
      - A literal is untyped: it becomes the type that its place wants, when its value fits in it,
        and else it has its default type. An integer literal is an `Int`, or a `Byte` where one is
-       wanted and its value is from 0 to 255. A string literal is a `Str`, or a `C_Str` where one is
+       wanted and its value is from 0 to 255. A float literal is an `F32`. A string literal is a `Str`, or a `C_Str` where one is
        wanted, `true` and `false` are a `Bool`, and `nil` is a pointer of any type. A constant that
        is defined without a type, such as `LIMIT :: 200`, is untyped in the same way, and so is
        an operator of untyped constants, such as `LIMIT * 2`, which the compiler works out. A
        constant that is defined with a type, such as `LIMIT : Byte : 200`, has that type, which is
-       `Int`, `Byte`, `Bool` or `Str`, and its value must fit in it.
+       `Int`, `Byte`, `F32`, `Bool` or `Str`, and its value must fit in it.
      - The value of a constant that is not a procedure, a struct, an enum or the member of an enum
        must be known when the program is compiled: literals, other such constants, and the
        arithmetic, comparison and logical operators of them. A constant cannot be defined in terms
@@ -75,8 +75,9 @@
        defines. It takes one array or array slice.
      - `int_to_byte` is a built-in procedure like `length_of`. It takes an `Int` and gives a
        `Byte`.
-     - `cast(Type)` converts a value only where nothing is lost: the type must be `Int`, and the
-       value a `Byte`, a `Bool` or an `Int`. The grammar takes any name as the type.
+     - `cast(Type)` converts between the types that have a conversion: the type is `Int` and the
+       value a `Byte`, a `Bool`, an `Int` or an `F32`, or the type is `F32` and the value a `Byte`,
+       an `Int` or an `F32`. The grammar takes any name as the type.
        An untyped integer from 0 to 255 is a `Byte` where a `Byte` is wanted, and any other
        `Int` is not one, so `b : Byte = 256` is an error. A `Byte` has no arithmetic.
      - The name of a call must be a procedure, or a variable, a parameter or a global variable that
@@ -104,8 +105,9 @@
        `break` or a `continue` in it must not leave it, because it runs while its block is being
        left. The names in a deferred statement are looked up where the `defer` is.
      - The condition of an if statement must be a `Bool`, so a number or a string is not one, and
-       the operands of a comparison must both be `Int`, or both `Byte` (or an untyped integer
-       from 0 to 255, which is a `Byte` there), or both `Bool` for `==` and `not=`. A
+       the operands of a comparison must both be `Int`, or both `F32` (or an untyped float, which is
+       one there), or both `Byte` (or an untyped integer from 0 to 255, which is a `Byte` there),
+       or both `Bool` for `==` and `not=`. A
        variable defined in a block can only be used in that block. All are checked after parsing.
      - The elements of an array and of an array slice must be `Int`, `Bool`, `Byte`, `Str` or a struct, an
        array literal must have as many elements as the length of its type when that is a number,

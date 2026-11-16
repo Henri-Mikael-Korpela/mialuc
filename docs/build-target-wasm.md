@@ -30,6 +30,8 @@ The `wasm` target writes a WebAssembly binary module. It imports its foreign pro
 
 `Int` is a 64-bit integer (`i64`), so JavaScript passes and receives it as a `BigInt`. An untyped integer is `i64.const` of its value where an `Int` is wanted, whatever its base, since the compiler has worked out the number, so the `wat` target shows `0xFF` and `0b1111_1111` as `i64.const 255`. The arithmetic is the one of [Integers](mialu-programming-language.md#integers), with the signed `i64` instructions. Division traps, which makes the call from JavaScript throw a `WebAssembly.RuntimeError`, when the divisor is zero, or when the smallest `Int` is divided by -1, because the result does not fit.
 
+`F32` is a 32-bit float (`f32`), so JavaScript passes and receives it as a plain number, and a float that is not exact in 32 bits is rounded to the nearest one when it is passed in. A float literal, or a constant expression of floats, is `f32.const` of its value rounded to an `F32`, where an untyped float is wanted as one, so `x := 1.42` is `f32.const 1.42`, where the `wat` target writes the number with the fewest digits that read back as the same `F32`, although the number that is stored is the nearest `F32`, 1.41999995708465576171875. The arithmetic is `f32.add`, `f32.sub`, `f32.mul` and `f32.div`, which never trap, and the comparisons are `f32.eq`, `f32.ne`, `f32.lt`, `f32.le`, `f32.gt` and `f32.ge`, which are false for not a number except `f32.ne`. A cast of an `Int` to an `F32` is `f32.convert_i64_s`, of a `Byte` `f32.convert_i32_u`, and a cast of an `F32` to an `Int` is `i64.trunc_f32_s`, which traps, and makes the call from JavaScript throw a `WebAssembly.RuntimeError`, for not a number and for a number that is not in the range of an `Int`. The default value is `f32.const 0`. A value of an `F32` is one slot of a struct, an array or what a pointer points to like any other, which is 8 bytes of memory of which the first 4 are the float, read with `f32.load` and written with `f32.store`. The module has a scratch local of the type `f32` after the others when a procedure uses arrays.
+
 `Bool` is a 32-bit integer (`i32`), which is 0 for `false` and 1 for `true`, as a comparison in WebAssembly leaves it. So JavaScript passes a `Bool` as `true`, `false`, 0 or 1, and receives it as the number 0 or 1, which `Boolean(...)` turns into a boolean. Comparisons of `Int` values are signed `i64` instructions, and comparisons of `Bool` values with `==` and `not=` are `i32.eq` and `i32.ne`. `and`, `or` and `not` are `i32.and`, `i32.or` and `i32.eqz`, which are correct because a `Bool` is always 0 or 1.
 
 `Str` is two 32-bit integers (`i32`): the address of its first byte in memory, and its length in bytes. The bytes are UTF-8, so a caller decodes them as that, as `TextDecoder` does by default. So a parameter of type `Str` is two WebAssembly parameters, one after the other, and a result of type `Str` is two WebAssembly results, which JavaScript receives as an array `[address, length]`. The bytes of all the string literals of the program are copied to the start of the memory of the module when it is instantiated, and the module exports the memory as `memory`, so that a caller can read a string:
@@ -93,8 +95,8 @@ The target rejects a program that the parser accepts when:
 - `type_info_of` is asked about a type that is not an enum, or is not followed by `.name` or `.members` right away, or is the initial value of a global variable with anything more than one of them after it,
 - a `return` gives another number of values than the procedure has return types, or a call that returns several values is used where one value is wanted, such as an argument or the value of a variable with one name, or the definition of several names is not of a call, or the call returns another number of values than there are names, or a return type is a type that the target does not have,
 - `length_of` has other than one argument, or an argument that is not an array or an array slice,
-- `cast(Type)` casts to another type than `Int`, or a value that is not a `Byte`, a `Bool` or an `Int`, and `int_to_byte` has other than one argument, or an argument that is not an `Int`,
-- a type, also the one of a global variable, is not `Int`, `Bool`, `Byte`, `Str`, a struct or an enum that is defined, a pointer to one of them, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
+- `cast(Type)` casts to another type than `Int` or `F32`, or a value that is not a `Byte`, a `Bool`, an `Int` or an `F32` to `Int`, or not a `Byte`, an `Int` or an `F32` to `F32`, and `int_to_byte` has other than one argument, or an argument that is not an `Int`,
+- a type, also the one of a global variable, is not `Int`, `F32`, `Bool`, `Byte`, `Str`, a struct or an enum that is defined, a pointer to one of them, or an array or an array slice of one of them, or a struct has a field of such a type, or the name of the struct in a struct literal is not one that is defined,
 - a struct contains itself, or has a field that is an array or an array slice,
 - a field of a struct literal is not a field of the struct, or is given twice, or its value is not of the type of the field, or the literal gives a value to some fields and not to all of them,
 - a field is accessed on a value that is not a struct or a pointer to one, or does not exist, or is accessed through something that is not a variable, a parameter, an element of an array or a pointer,
@@ -118,8 +120,8 @@ The target rejects a program that the parser accepts when:
 - the initial value of a variable is not of the type that is written for the variable,
 - a call has a different number of arguments than the procedure has parameters, or an argument is not of the type of its parameter,
 - the call of a procedure without a return type is used as a value, and not as a statement,
-- an operand of an arithmetic operator is not an `Int`,
-- the operands of a comparison are not both `Int`, or not both `Bool` or both pointers or both members of one enum (or `nil`) for `==` and `not=`,
+- an operand of an arithmetic operator is not an `Int` or not an `F32`, or the operands are of different types,
+- the operands of a comparison are not both `Int` or both `F32`, or not both `Bool` or both pointers or both members of one enum (or `nil`) for `==` and `not=`,
 - the value of a variable that is defined without a type is `nil` or a member such as `.RED` that is written without its enum, which does not say the type of the variable,
 - a member such as `.RED` is where no enum is known, or the enum has no such member, or it is the member of a name that is not an enum,
 - the operands of a comparison are members of two enums, or members of an enum are compared with `<`, `<=`, `>` or `>=`,
@@ -127,7 +129,7 @@ The target rejects a program that the parser accepts when:
 - the condition of an if statement is not a `Bool`,
 - the subject of a match statement is not an `Int`, a `Byte`, a `Str` or an enum, a pattern is not a constant or not of the type of the subject, a range is empty or is the pattern of a `Str` or an enum, two cases match a value in common, a match of an enum without a default case and without `partial` has no case for a member, or a match with `partial` is not of an enum or has a default case,
 - the first number or the end of a range is not an `Int`,
-- the variable or the value of an assignment such as `x += 2`, `x -= 2`, `x *= 2` or `x /= 2` is not an `Int`.
+- the variable or the value of an assignment such as `x += 2`, `x -= 2`, `x *= 2` or `x /= 2` is not an `Int`, or not an `F32`, or they are of different types.
 
 The target is built from the result of scope resolution, so it also rejects every program that scope resolution rejects.
 

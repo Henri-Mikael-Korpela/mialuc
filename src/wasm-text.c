@@ -2,6 +2,8 @@
 #include <iso646.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <mialu/common_types.h>
@@ -15,6 +17,10 @@
 enum {
     // The longest decimal number that is written: `UINT64_MAX` has 20 digits.
     WASM_TEXT_DECIMAL_DIGITS_MAX = 20,
+    // The most digits that tell two `float` values apart, and two `double` values, which is how many
+    // `wasm_text_write_float` needs to write a number so that it reads back the same.
+    WASM_TEXT_DIGITS_F32 = 9,
+    WASM_TEXT_DIGITS_F64 = 17,
     // The natural alignment of a 64-bit load or store, as a power of two: 8 bytes.
     WASM_TEXT_ALIGNMENT_I64 = 3,
     // The same for a 32-bit load or store: 4 bytes.
@@ -131,6 +137,9 @@ static void               wasm_text_write                             (Wasm_Text
                                                                        Str text);
 static void               wasm_text_write_instruction                 (Wasm_Text_Writer *writer,
                                                                        Str name);
+static void               wasm_text_write_float                       (Wasm_Text_Writer *writer,
+                                                                       double number,
+                                                                       int digits_max);
 static void               wasm_text_write_signed                      (Wasm_Text_Writer *writer,
                                                                        int64_t number);
 static void               wasm_text_write_string                      (Wasm_Text_Writer *writer,
@@ -826,6 +835,60 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             wasm_text_write_signed(&formatter->writer, number);
             break;
         }
+        case WASM_OPCODE_F32_CONST: {
+            // The immediate is the 4 bytes of the float, least significant first.
+            uint32_t bits = 0;
+            for (size_t i = 0; i < sizeof(bits); i += 1) {
+                bits |= (uint32_t)wasm_text_read_byte(formatter) << (8 * i);
+            }
+            if (formatter->status != WASM_TEXT_STATUS_OK) {
+                return false;
+            }
+            float single = 0.0f;
+            memcpy(&single, &bits, sizeof(single));
+            wasm_text_write_instruction(&formatter->writer, STR("f32.const "));
+            wasm_text_write_float(&formatter->writer, (double)single, WASM_TEXT_DIGITS_F32);
+            break;
+        }
+        case WASM_OPCODE_F32_ADD:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.add"));
+            break;
+        case WASM_OPCODE_F32_CONVERT_I32_U:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.convert_i32_u"));
+            break;
+        case WASM_OPCODE_F32_CONVERT_I64_S:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.convert_i64_s"));
+            break;
+        case WASM_OPCODE_F32_DIV:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.div"));
+            break;
+        case WASM_OPCODE_F32_EQ:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.eq"));
+            break;
+        case WASM_OPCODE_F32_GE:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.ge"));
+            break;
+        case WASM_OPCODE_F32_GT:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.gt"));
+            break;
+        case WASM_OPCODE_F32_LE:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.le"));
+            break;
+        case WASM_OPCODE_F32_LT:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.lt"));
+            break;
+        case WASM_OPCODE_F32_MUL:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.mul"));
+            break;
+        case WASM_OPCODE_F32_NE:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.ne"));
+            break;
+        case WASM_OPCODE_F32_SUB:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.sub"));
+            break;
+        case WASM_OPCODE_I64_TRUNC_F32_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.trunc_f32_s"));
+            break;
         case WASM_OPCODE_I64_ADD:
             wasm_text_write_instruction(&formatter->writer, STR("i64.add"));
             break;
@@ -899,6 +962,8 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
         case WASM_OPCODE_I32_LOAD8_U:
         case WASM_OPCODE_I32_STORE:
         case WASM_OPCODE_I32_STORE8:
+        case WASM_OPCODE_F32_LOAD:
+        case WASM_OPCODE_F32_STORE:
         case WASM_OPCODE_I64_LOAD:
         case WASM_OPCODE_I64_STORE: {
             // The immediates are the alignment, as a power of two, and the offset. Like
@@ -912,6 +977,12 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
                 alignment_natural = WASM_TEXT_ALIGNMENT_I32;
             } else if (opcode == WASM_OPCODE_I32_STORE) {
                 wasm_text_write_instruction(&formatter->writer, STR("i32.store"));
+                alignment_natural = WASM_TEXT_ALIGNMENT_I32;
+            } else if (opcode == WASM_OPCODE_F32_LOAD) {
+                wasm_text_write_instruction(&formatter->writer, STR("f32.load"));
+                alignment_natural = WASM_TEXT_ALIGNMENT_I32;
+            } else if (opcode == WASM_OPCODE_F32_STORE) {
+                wasm_text_write_instruction(&formatter->writer, STR("f32.store"));
                 alignment_natural = WASM_TEXT_ALIGNMENT_I32;
             } else if (opcode == WASM_OPCODE_I32_LOAD8_U) {
                 wasm_text_write_instruction(&formatter->writer, STR("i32.load8_u"));
@@ -1047,7 +1118,17 @@ static bool wasm_text_format_globals(Wasm_Text_Formatter *formatter, Wasm_Text_S
         byte mutability = wasm_text_read_byte(formatter);
         size_t initial_offset = formatter->offset;
         byte initial_opcode = wasm_text_read_byte(formatter);
-        int64_t initial_value = wasm_text_read_signed_64(formatter);
+        int64_t initial_value = 0;
+        float initial_float = 0.0f;
+        if (initial_opcode == WASM_OPCODE_F32_CONST) {
+            uint32_t bits = 0;
+            for (size_t byte_index = 0; byte_index < sizeof(bits); byte_index += 1) {
+                bits |= (uint32_t)wasm_text_read_byte(formatter) << (8 * byte_index);
+            }
+            memcpy(&initial_float, &bits, sizeof(initial_float));
+        } else {
+            initial_value = wasm_text_read_signed_64(formatter);
+        }
         byte end_opcode = wasm_text_read_byte(formatter);
         if (formatter->status != WASM_TEXT_STATUS_OK) {
             return false;
@@ -1068,6 +1149,8 @@ static bool wasm_text_format_globals(Wasm_Text_Formatter *formatter, Wasm_Text_S
             initial_name = STR("i32.const ");
         } else if (initial_opcode == WASM_OPCODE_I64_CONST) {
             initial_name = STR("i64.const ");
+        } else if (initial_opcode == WASM_OPCODE_F32_CONST) {
+            initial_name = STR("f32.const ");
         }
         if (initial_name.bytes == NULL || end_opcode != WASM_OPCODE_END) {
             return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, initial_offset);
@@ -1079,7 +1162,11 @@ static bool wasm_text_format_globals(Wasm_Text_Formatter *formatter, Wasm_Text_S
         wasm_text_write(&formatter->writer, type_name);
         wasm_text_write(&formatter->writer, STR(") ("));
         wasm_text_write(&formatter->writer, initial_name);
-        wasm_text_write_signed(&formatter->writer, initial_value);
+        if (initial_opcode == WASM_OPCODE_F32_CONST) {
+            wasm_text_write_float(&formatter->writer, (double)initial_float, WASM_TEXT_DIGITS_F32);
+        } else {
+            wasm_text_write_signed(&formatter->writer, initial_value);
+        }
         wasm_text_write(&formatter->writer, STR("))"));
     }
 
@@ -1443,6 +1530,9 @@ static Str wasm_text_value_type_name(byte value_type) {
     if (value_type == WASM_TYPE_I64) {
         return STR("i64");
     }
+    if (value_type == WASM_TYPE_F32) {
+        return STR("f32");
+    }
     return STR_EMPTY;
 }
 
@@ -1509,6 +1599,32 @@ static void wasm_text_write_string(Wasm_Text_Writer *writer, byte const *bytes, 
         }
     }
     wasm_text_write(writer, STR("\""));
+}
+
+/**
+ * Writes `number`, which is finite, with the fewest digits that read back as the same float: the
+ * digits of a `float` are at most `digits_max`, which is 9, and the ones of a `double` are at most
+ * 17. A number that has no fraction is written with none, as `wasm2wat` writes it, so 2.0 is `2`.
+ */
+static void wasm_text_write_float(Wasm_Text_Writer *writer, double number, int digits_max) {
+    assert(digits_max >= 1);
+    assert(digits_max <= WASM_TEXT_DIGITS_F64);
+
+    // The longest is a sign, 17 digits, a point, `e-324` and the zero that ends it.
+    char text[40] = {0};
+    for (int digits = 1; digits <= digits_max; digits += 1) {
+        int length = snprintf(text, sizeof(text), "%.*g", digits, number);
+        assert(length > 0 && (size_t)length < sizeof(text));
+        double read_back = strtod(text, NULL);
+        bool is_same = read_back == number;
+        if (digits_max == WASM_TEXT_DIGITS_F32) {
+            is_same = (float)read_back == (float)number;
+        }
+        if (is_same || digits == digits_max) {
+            break;
+        }
+    }
+    wasm_text_write(writer, str_make(text, strlen(text)));
 }
 
 static void wasm_text_write_signed(Wasm_Text_Writer *writer, int64_t number) {

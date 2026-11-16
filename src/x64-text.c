@@ -47,6 +47,11 @@ enum {
     X64_TEXT_DECIMAL_LIMIT = 65536,
     // The byte that starts the instructions of two bytes of opcode.
     X64_TEXT_OPCODE_TWO_BYTE = 0x0F,
+    // The prefixes of the instructions of floats, and the opcode of the one that has none.
+    X64_TEXT_PREFIX_OPERAND_SIZE = 0x66,
+    X64_TEXT_PREFIX_SCALAR_DOUBLE = 0xF2,
+    X64_TEXT_PREFIX_SCALAR_SINGLE = 0xF3,
+    X64_TEXT_OPCODE_SSE_COMPARE = 0x2E,
     // A condition that the processor does not have, which stands for the jump that is always
     // taken.
     X64_TEXT_CONDITION_ALWAYS = 16,
@@ -146,8 +151,12 @@ static bool             x64_text_format_jump        (X64_Text_Formatter *formatt
 static bool             x64_text_format_operands    (X64_Text_Formatter *formatter,
                                                      X64_Text_Cursor *cursor, byte opcode,
                                                      byte rex);
+static bool             x64_text_format_sse         (X64_Text_Formatter *formatter,
+                                                     X64_Text_Cursor *cursor, byte rex,
+                                                     byte prefix, byte opcode);
 static bool             x64_text_format_two_byte    (X64_Text_Formatter *formatter,
-                                                     X64_Text_Cursor *cursor, byte rex);
+                                                     X64_Text_Cursor *cursor, byte rex,
+                                                     byte prefix);
 static bool             x64_text_headers_read       (X64_Text_Formatter *formatter);
 static uint16_t         x64_text_load_u16           (byte const *source);
 static uint32_t         x64_text_load_u32           (byte const *source);
@@ -499,9 +508,17 @@ static size_t x64_text_format_instruction(X64_Text_Formatter *formatter,
     size_t start = cursor->position;
     size_t error_offset = formatter->text.file_offset + start;
 
+    // An instruction of floats starts with a prefix that says which one it is, before the one
+    // that says that the operands are 64-bit.
+    byte opcode = x64_text_read_byte(cursor);
+    byte prefix = 0;
+    if (opcode == X64_TEXT_PREFIX_OPERAND_SIZE || opcode == X64_TEXT_PREFIX_SCALAR_DOUBLE ||
+        opcode == X64_TEXT_PREFIX_SCALAR_SINGLE) {
+        prefix = opcode;
+        opcode = x64_text_read_byte(cursor);
+    }
     // The prefix says that the operands are 64-bit, and that the registers are one of `r8` to
     // `r15`. It comes before the opcode.
-    byte opcode = x64_text_read_byte(cursor);
     byte rex = 0;
     if ((opcode & 0xF0) == 0x40) {
         rex = opcode;
@@ -533,7 +550,9 @@ static size_t x64_text_format_instruction(X64_Text_Formatter *formatter,
     } else if (opcode >= 0x70 && opcode <= 0x7F) {
         is_known = x64_text_format_jump(formatter, cursor, (byte)(opcode & 0x0F), 1);
     } else if (opcode == X64_TEXT_OPCODE_TWO_BYTE) {
-        is_known = x64_text_format_two_byte(formatter, cursor, rex);
+        is_known = x64_text_format_two_byte(formatter, cursor, rex, prefix);
+    } else if (prefix != 0) {
+        is_known = false;
     } else {
         switch (opcode) {
         case 0x01:
@@ -597,16 +616,98 @@ static size_t x64_text_format_instruction(X64_Text_Formatter *formatter,
 }
 
 /**
+ * Formats the instructions of floats, after the prefix and the 0x0F that start them: the
+ * arithmetic of two registers of floats, the comparison of two of them, the conversions between a
+ * register of floats and a register of integers, and the moves between them. Each has two
+ * registers, so the operand byte has the register of floats in one of its places, and the one of
+ * integers or of floats in the other. Returns false when the instruction is not one of them.
+ */
+static bool x64_text_format_sse(X64_Text_Formatter *formatter, X64_Text_Cursor *cursor, byte rex,
+                                byte prefix, byte opcode) {
+    X64_Text_Writer *writer = &formatter->writer;
+    bool is_wide = (rex & 0x08) != 0;
+
+    X64_Text_Operand operand = x64_text_operand_read(cursor, rex);
+    if (not operand.is_supported || not operand.is_register) {
+        return false;
+    }
+
+    // The mnemonic, whether the register of the middle bits and the one of the low bits are
+    // registers of floats, and which is written first.
+    Str mnemonic = STR_EMPTY;
+    bool is_middle_float = true;
+    bool is_low_float = true;
+    bool is_middle_first = true;
+    bool is_single = prefix == X64_TEXT_PREFIX_SCALAR_SINGLE;
+    if (prefix == 0 && opcode == X64_TEXT_OPCODE_SSE_COMPARE) {
+        mnemonic = STR("ucomiss ");
+    } else if (is_single && opcode == 0x58) {
+        mnemonic = STR("addss ");
+    } else if (is_single && opcode == 0x59) {
+        mnemonic = STR("mulss ");
+    } else if (is_single && opcode == 0x5C) {
+        mnemonic = STR("subss ");
+    } else if (is_single && opcode == 0x5E) {
+        mnemonic = STR("divss ");
+    } else if (is_single && opcode == 0x2A) {
+        mnemonic = STR("cvtsi2ss ");
+        is_low_float = false;
+    } else if (is_single && opcode == 0x2C) {
+        mnemonic = STR("cvttss2si ");
+        is_middle_float = false;
+    } else if (prefix == X64_TEXT_PREFIX_OPERAND_SIZE && opcode == 0x6E) {
+        mnemonic = is_wide ? STR("movq ") : STR("movd ");
+        is_low_float = false;
+    } else if (prefix == X64_TEXT_PREFIX_OPERAND_SIZE && opcode == 0x7E) {
+        mnemonic = is_wide ? STR("movq ") : STR("movd ");
+        is_low_float = false;
+        is_middle_first = false;
+    } else {
+        return false;
+    }
+
+    x64_text_write(writer, mnemonic);
+    byte first = operand.register_number;
+    byte second = operand.base;
+    bool is_first_float = is_middle_float;
+    bool is_second_float = is_low_float;
+    if (not is_middle_first) {
+        // The register of integers is written first, and it is in the low bits.
+        first = operand.base;
+        second = operand.register_number;
+        is_first_float = false;
+        is_second_float = true;
+    }
+    for (size_t i = 0; i < 2; i += 1) {
+        byte number = i == 0 ? first : second;
+        bool is_float = i == 0 ? is_first_float : is_second_float;
+        if (i == 1) {
+            x64_text_write(writer, STR(", "));
+        }
+        if (is_float) {
+            x64_text_write(writer, STR("%xmm"));
+            x64_text_write_unsigned(writer, number);
+        } else {
+            x64_text_write_register(writer, number, is_wide);
+        }
+    }
+    return true;
+}
+
+/**
  * Formats the instructions of two bytes of opcode, after the 0x0F that starts them: `imul` of two
  * registers, `movzx` of a byte, `set` of a condition and the conditional jumps with a distance of
  * 32 bits. Returns false when the instruction is not one of them.
  */
 static bool x64_text_format_two_byte(X64_Text_Formatter *formatter, X64_Text_Cursor *cursor,
-                                     byte rex) {
+                                     byte rex, byte prefix) {
     X64_Text_Writer *writer = &formatter->writer;
     bool is_wide = (rex & 0x08) != 0;
     byte opcode = x64_text_read_byte(cursor);
 
+    if (prefix != 0 || opcode == X64_TEXT_OPCODE_SSE_COMPARE) {
+        return x64_text_format_sse(formatter, cursor, rex, prefix, opcode);
+    }
     if (opcode >= 0x80 && opcode <= 0x8F) {
         return x64_text_format_jump(formatter, cursor, (byte)(opcode & 0x0F), 4);
     }

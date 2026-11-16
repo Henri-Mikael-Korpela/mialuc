@@ -77,8 +77,32 @@ enum {
     X64_OPCODE_TWO_BYTE_IMUL = 0xAF,
     X64_OPCODE_TWO_BYTE_MOVZX_BYTE = 0xB6,
     X64_OPCODE_TWO_BYTE_SET = 0x90,
+    // The prefixes that say which instruction of the SSE extension an opcode is, which comes before
+    // the prefix of the registers: of a scalar of 32 bits, of a scalar of 64 bits and of a move
+    // between a register and a register of floats.
+    X64_PREFIX_SCALAR_SINGLE = 0xF3,
+    X64_PREFIX_OPERAND_SIZE = 0x66,
+    // The opcodes, after `0x0F`, of the instructions of floats. `cvtsi2ss` makes a float of an
+    // integer, `cvttss2si` makes an integer of a float by dropping its fraction, `ucomiss` compares
+    // two floats and sets the flags of an unsigned comparison, with the parity flag set when one is
+    // not a number, and `movd` moves 32 bits between a register and a register of floats.
+    X64_OPCODE_SSE_CONVERT_FROM_INTEGER = 0x2A,
+    X64_OPCODE_SSE_CONVERT_TO_INTEGER = 0x2C,
+    X64_OPCODE_SSE_COMPARE = 0x2E,
+    X64_OPCODE_SSE_ADD = 0x58,
+    X64_OPCODE_SSE_MULTIPLY = 0x59,
+    X64_OPCODE_SSE_SUBTRACT = 0x5C,
+    X64_OPCODE_SSE_DIVIDE = 0x5E,
+    X64_OPCODE_SSE_MOVE_TO_FLOAT = 0x6E,
+    X64_OPCODE_SSE_MOVE_FROM_FLOAT = 0x7E,
+    // The registers of floats, numbered like the processor does. The code uses the first four: the
+    // arguments and the result are in them, and so are the two operands of an operation.
+    X64_REGISTER_XMM0 = 0,
+    X64_REGISTER_XMM1 = 1,
     // The numbers of the conditions of `set` and of the conditional jumps, which are added to their
     // opcodes. The signed ones are used for an `Int`, whose order is signed.
+    X64_CONDITION_PARITY = 0xA,
+    X64_CONDITION_NOT_PARITY = 0xB,
     X64_CONDITION_BELOW = 0x2,
     X64_CONDITION_ABOVE_EQUAL = 0x3,
     X64_CONDITION_EQUAL = 0x4,
@@ -148,6 +172,7 @@ enum {
     X64_DWARF_REGISTER_RSP = 7,
     X64_DWARF_REGISTER_RIP = 16,
     X64_DWARF_ENCODING_BOOLEAN = 0x02,
+    X64_DWARF_ENCODING_FLOAT = 0x04,
     X64_DWARF_ENCODING_SIGNED = 0x05,
     X64_DWARF_ENCODING_UNSIGNED_CHAR = 0x08,
     X64_DWARF_OP_ADDR = 0x03,
@@ -343,6 +368,7 @@ typedef struct {
     uint32_t bool_type;
     uint32_t byte_type;
     uint32_t c_str_type;
+    uint32_t f32_type;
     uint32_t int_type;
     uint32_t str_type;
     // The start of the unit in `.debug_info`, which the places of the entries are counted from.
@@ -793,7 +819,22 @@ static void         x64_write_registers          (X64_Builder *builder, byte opc
 static void         x64_write_rip_displacement   (X64_Builder *builder, uint64_t target_rva);
 static void         x64_write_rip_memory         (X64_Builder *builder, byte opcode,
                                                   byte register_number, uint64_t target_rva);
+static uint32_t     x64_float_bits               (double number);
 static void         x64_write_set                (X64_Builder *builder, byte condition);
+static void         x64_write_set_register       (X64_Builder *builder, byte condition,
+                                                  byte register_number);
+static void         x64_write_sse                (X64_Builder *builder, byte prefix, bool is_wide,
+                                                  byte opcode, byte register_number,
+                                                  byte operand);
+static void         x64_write_float_operation    (X64_Builder *builder,
+                                                  Ast_Node_Type node_type);
+static void         x64_write_float_to_integer   (X64_Builder *builder, int32_t source);
+static X64_Type     x64_arithmetic_type          (X64_Builder const *builder,
+                                                  Ast_Node_Index operation);
+static bool         x64_parameter_is_float_at    (X64_Builder const *builder,
+                                                  Ast_Node_Index procedure, size_t word);
+static bool         x64_float_comparison_write   (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame);
 static void         x64_write_signed_leb128      (X64_Writer *writer, int64_t number);
 static void         x64_write_string             (X64_Writer *writer, Str text);
 static void         x64_write_trap_unless        (X64_Builder *builder, byte condition);
@@ -1423,7 +1464,8 @@ static bool x64_data_layout(X64_Builder *builder) {
         // A global variable is a number, a truth value, a string or the members of an enum, which
         // are the values that a constant expression or the information about a type has.
         bool is_valid = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_BYTE ||
-                        type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_STR ||
+                        type.kind == X64_TYPE_KIND_F32 || type.kind == X64_TYPE_KIND_INT ||
+                        type.kind == X64_TYPE_KIND_STR ||
                         (type.kind == X64_TYPE_KIND_ARRAY && x64_type_info_access_is(builder,
                                                                                    value));
         if (not is_valid) {
@@ -1516,6 +1558,10 @@ static void x64_data_start_write(X64_Builder *builder) {
                 (int64_t)builder->nodes[constant.string].payload.string_literal.text.length);
             x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX,
                                  place + X64_WORD_SIZE_BYTES);
+        } else if (builder->layouts[definition].type.kind == X64_TYPE_KIND_F32) {
+            x64_write_load_integer(builder, X64_REGISTER_RAX,
+                                   (int64_t)x64_float_bits(constant.floating));
+            x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, place);
         } else {
             x64_write_load_integer(builder, X64_REGISTER_RAX, constant.integer);
             x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, place);
@@ -1819,8 +1865,17 @@ static bool x64_procedure_write(X64_Builder *builder, size_t position) {
 
     size_t argument_word_count = x64_parameter_word_count(builder, procedure);
     for (size_t i = 0; i < argument_word_count && i < X64_ARGUMENT_REGISTER_COUNT; i += 1) {
+        int32_t home = (int32_t)(X64_ARGUMENT_HOME_OFFSET_BYTES + i * X64_WORD_SIZE_BYTES);
+        if (x64_parameter_is_float_at(builder, procedure, i)) {
+            // A float is in the register of floats of its word, whose other 32 bits are not
+            // defined, so `movd eax, xmm` takes the 32 that are, and `rax` has the others zero.
+            x64_write_sse(builder, X64_PREFIX_OPERAND_SIZE, false,
+                          X64_OPCODE_SSE_MOVE_FROM_FLOAT, (byte)i, X64_REGISTER_RAX);
+            x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, home);
+            continue;
+        }
         x64_write_memory(builder, X64_OPCODE_STORE, X64_ARGUMENT_REGISTERS[i], X64_REGISTER_RBP,
-                         (int32_t)(X64_ARGUMENT_HOME_OFFSET_BYTES + i * X64_WORD_SIZE_BYTES));
+                         home);
     }
 
     x64_procedure_layout(builder, procedure);
@@ -2304,6 +2359,12 @@ static void x64_jump_end_write(X64_Builder *builder, X64_Statement_Frame *frames
             x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
                              x64_stack_displacement(builder, builder->stack_words - 1, 1));
             x64_stack_pop(builder, 1);
+            if (type.kind == X64_TYPE_KIND_F32) {
+                // A float is returned in `xmm0`, and in `rax` too, so that the procedure can be
+                // called from the C library as well as from here.
+                x64_write_sse(builder, X64_PREFIX_OPERAND_SIZE, false,
+                              X64_OPCODE_SSE_MOVE_TO_FLOAT, X64_REGISTER_XMM0, X64_REGISTER_RAX);
+            }
         }
         x64_epilogue_write(builder);
         return;
@@ -3083,9 +3144,9 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
     }
     X64_Type value_type = type;
     if (node_type != AST_NODE_TYPE_ASSIGNMENT) {
-        // The operators work on an `Int` only, the place and the value alike.
-        value_type = x64_type_make(X64_TYPE_KIND_INT);
-        if (type.kind != X64_TYPE_KIND_INT) {
+        // The operators work on an `Int` or on an `F32`, the place and the value alike.
+        value_type = type;
+        if (type.kind != X64_TYPE_KIND_INT && type.kind != X64_TYPE_KIND_F32) {
             return x64_fail(builder, X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, subject);
         }
         mismatch = X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID;
@@ -3115,7 +3176,14 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
         int32_t operand = x64_stack_displacement(builder, builder->stack_words - 1, 1);
         x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_R10, 0);
         x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, operand);
-        switch (node_type) {
+        bool is_float = type.kind == X64_TYPE_KIND_F32;
+        if (is_float) {
+            x64_write_float_operation(builder, node_type);
+        }
+        switch (is_float ? AST_NODE_TYPE_ASSIGNMENT : node_type) {
+        case AST_NODE_TYPE_ASSIGNMENT:
+            // A float operation was written above, and left its result in `rax`.
+            break;
         case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
             x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
             break;
@@ -3657,7 +3725,7 @@ static X64_Type x64_child_wanted(X64_Builder const *builder, X64_Expression_Fram
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_MULTIPLICATION:
     case AST_NODE_TYPE_SUBTRACTION:
-        return x64_type_make(X64_TYPE_KIND_INT);
+        return x64_arithmetic_type(builder, parent->node);
     case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_NOT:
     case AST_NODE_TYPE_OR:
@@ -4218,13 +4286,36 @@ static void x64_sequence_length_load(X64_Builder *builder, X64_Type type, byte r
  * instruction is needed. Returns false after it recorded an error.
  */
 static bool x64_cast_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
+    assert(builder->nodes[frame->node].node_type == AST_NODE_TYPE_CAST);
+
     Ast_Node const *cast = &builder->nodes[frame->node];
     X64_Type target = x64_type_of_name(builder, cast->payload.cast.type_name);
     X64_Type source = x64_expression_type(builder, cast->first_child);
-    bool is_source_valid = source.kind == X64_TYPE_KIND_BYTE || source.kind == X64_TYPE_KIND_BOOL ||
-                           source.kind == X64_TYPE_KIND_INT;
-    if (target.kind != X64_TYPE_KIND_INT || not is_source_valid) {
+    bool is_integer_source = source.kind == X64_TYPE_KIND_BYTE || source.kind == X64_TYPE_KIND_BOOL ||
+                             source.kind == X64_TYPE_KIND_INT;
+    bool is_valid = (target.kind == X64_TYPE_KIND_INT &&
+                     (is_integer_source || source.kind == X64_TYPE_KIND_F32)) ||
+                    (target.kind == X64_TYPE_KIND_F32 &&
+                     ((is_integer_source && source.kind != X64_TYPE_KIND_BOOL) ||
+                      source.kind == X64_TYPE_KIND_F32));
+    if (not is_valid) {
         return x64_fail(builder, X64_BUILD_STATUS_CAST_INVALID, cast->payload.cast.type_name);
+    }
+
+    // The operand is a word on the stack of values, which the value of the cast replaces.
+    int32_t place = x64_stack_displacement(builder, frame->stack_start, 1);
+    if (target.kind == X64_TYPE_KIND_F32 && source.kind != X64_TYPE_KIND_F32) {
+        // `cvtsi2ss xmm0, rax` makes the float, and `movd eax, xmm0` moves it back to a word,
+        // with the other 32 bits zero.
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+        x64_write_sse(builder, X64_PREFIX_SCALAR_SINGLE, true, X64_OPCODE_SSE_CONVERT_FROM_INTEGER,
+                      X64_REGISTER_XMM0, X64_REGISTER_RAX);
+        x64_write_sse(builder, X64_PREFIX_OPERAND_SIZE, false, X64_OPCODE_SSE_MOVE_FROM_FLOAT,
+                      X64_REGISTER_XMM0, X64_REGISTER_RAX);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+    } else if (target.kind == X64_TYPE_KIND_INT && source.kind == X64_TYPE_KIND_F32) {
+        x64_write_float_to_integer(builder, place);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
     }
     return true;
 }
@@ -4394,6 +4485,14 @@ static bool x64_constant_write(X64_Builder *builder, X64_Expression_Frame const 
     if (type.kind == X64_TYPE_KIND_NONE) {
         return x64_fail_unsupported(builder);
     }
+    if (type.kind == X64_TYPE_KIND_F32) {
+        // The word is the 32 bits of the float, with the others zero.
+        x64_write_load_integer(builder, X64_REGISTER_RAX, (int64_t)x64_float_bits(constant.floating));
+        int32_t float_target = x64_stack_push(builder, 1);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                         float_target);
+        return true;
+    }
     x64_write_load_integer(builder, X64_REGISTER_RAX, constant.integer);
     int32_t target = x64_stack_push(builder, 1);
     x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
@@ -4415,7 +4514,11 @@ static bool x64_operation_write(X64_Builder *builder, X64_Expression_Frame const
 
     bool is_logical = node_type == AST_NODE_TYPE_AND || node_type == AST_NODE_TYPE_OR ||
                       node_type == AST_NODE_TYPE_NOT;
+    // The operands are `Int` values or floats of one type, which an untyped one takes.
     X64_Type operand_type = x64_type_make(X64_TYPE_KIND_INT);
+    if (not is_logical) {
+        operand_type = x64_arithmetic_type(builder, node);
+    }
     X64_Build_Status status = X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID;
     if (is_logical) {
         operand_type = x64_type_make(X64_TYPE_KIND_BOOL);
@@ -4441,6 +4544,15 @@ static bool x64_operation_write(X64_Builder *builder, X64_Expression_Frame const
                          x64_stack_displacement(builder, frame->stack_start + 1, 1));
     }
 
+    if (operand_type.kind == X64_TYPE_KIND_F32) {
+        x64_write_float_operation(builder, node_type);
+        x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+        int32_t float_result = x64_stack_push(builder, 1);
+        assert(float_result == first);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                         float_result);
+        return true;
+    }
     switch (node_type) {
     case AST_NODE_TYPE_ADDITION:
         x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
@@ -4499,7 +4611,8 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     }
     bool is_equality = operator == AST_COMPARISON_OPERATOR_EQUAL ||
                        operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
-    bool is_ordered = type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_BYTE;
+    bool is_ordered = type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_BYTE ||
+                      type.kind == X64_TYPE_KIND_F32;
     bool is_equatable = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_ENUM ||
                         type.kind == X64_TYPE_KIND_POINTER ||
                         type.kind == X64_TYPE_KIND_PROCEDURE;
@@ -4508,6 +4621,10 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
         not x64_type_accepts(builder, type, right)) {
         return x64_fail(builder, X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                         x64_expression_subject(builder, node));
+    }
+
+    if (type.kind == X64_TYPE_KIND_F32) {
+        return x64_float_comparison_write(builder, frame);
     }
 
     byte condition = X64_CONDITION_EQUAL;
@@ -4668,6 +4785,14 @@ static bool x64_call_write(X64_Builder *builder, X64_Expression_Frame const *fra
         for (size_t j = 0; j < argument_words && word < X64_ARGUMENT_REGISTER_COUNT; j += 1) {
             x64_write_memory(builder, X64_OPCODE_LOAD, X64_ARGUMENT_REGISTERS[word],
                              X64_REGISTER_RBP, source + (int32_t)(j * X64_WORD_SIZE_BYTES));
+            if (x64_parameter_type(builder, procedure, i).kind == X64_TYPE_KIND_F32) {
+                // A float is passed in the register of floats of its word, and also in the
+                // register of integers, where a procedure that takes a variable number of
+                // arguments looks for it, as the calling convention says.
+                x64_write_sse(builder, X64_PREFIX_OPERAND_SIZE, false,
+                              X64_OPCODE_SSE_MOVE_TO_FLOAT, (byte)word,
+                              X64_ARGUMENT_REGISTERS[word]);
+            }
             word += 1;
         }
         argument_start += argument_words;
@@ -4694,6 +4819,12 @@ static bool x64_call_write(X64_Builder *builder, X64_Expression_Frame const *fra
             x64_stack_pop(builder, result_words);
         }
     } else if (is_result_used) {
+        if (return_type.kind == X64_TYPE_KIND_F32) {
+            // A float is returned in `xmm0`, by the procedures of the C library as well, so it is
+            // moved to `rax` to be stored like any other word.
+            x64_write_sse(builder, X64_PREFIX_OPERAND_SIZE, false, X64_OPCODE_SSE_MOVE_FROM_FLOAT,
+                          X64_REGISTER_XMM0, X64_REGISTER_RAX);
+        }
         int32_t target = x64_stack_push(builder, 1);
         x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
     }
@@ -4952,8 +5083,8 @@ static bool x64_type_accepts(X64_Builder const *builder, X64_Type wanted,
  * Returns the type that `expression` has where a value of `wanted` is wanted, or
  * `X64_TYPE_KIND_NONE` for no type in particular. It is the type of the expression, except that an
  * untyped constant becomes the type that is wanted when it fits in it: an untyped string is a
- * `C_Str`, the address of a copy of its bytes with a zero after them, and an untyped integer from 0
- * to 255 is a `Byte`. A struct literal without a name is of the struct that is wanted, and a member
+ * `C_Str`, the address of a copy of its bytes with a zero after them, an untyped integer from 0
+ * to 255 is a `Byte` and an untyped float that is not above the largest `F32` is an `F32`. A struct literal without a name is of the struct that is wanted, and a member
  * of an enum written without its enum, such as `.RED`, is of the enum that is wanted, when it has
  * the member. `nil` is a pointer of any type, and an array is an array slice of all of its
  * elements, which `x64_conversion_write` makes of it. The caller compares the type with `wanted`,
@@ -4968,6 +5099,10 @@ static X64_Type x64_expression_type_for(X64_Builder const *builder, Ast_Node_Ind
     }
     if (constant.status == CONSTANT_STATUS_OK && constant_is_byte(constant) &&
         wanted.kind == X64_TYPE_KIND_BYTE) {
+        return wanted;
+    }
+    if (constant.status == CONSTANT_STATUS_OK && constant.type == CONSTANT_TYPE_UNTYPED_FLOAT &&
+        wanted.kind == X64_TYPE_KIND_F32 && constant_is_f32(constant)) {
         return wanted;
     }
     if (builder->nodes[expression].node_type == AST_NODE_TYPE_STRUCT_LITERAL &&
@@ -5080,8 +5215,8 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
 /**
  * Returns the type of `expression`, which is not a place that is reached through another, see
  * `x64_expression_type`. A constant has the type that it has where nothing else says, see
- * `constant_type_default`, which is `Int` for an untyped integer and `Bool` for an untyped truth
- * value and `Str` for an untyped string. A variable has the type that the layout of its procedure
+ * `constant_type_default`, which is `Int` for an untyped integer, `F32` for an untyped float and
+ * `Bool` for an untyped truth value and `Str` for an untyped string. A variable has the type that the layout of its procedure
  * worked out, see `x64_procedure_layout`, and a global variable the type that the layout of `.data`
  * worked out, see `x64_data_layout`.
  */
@@ -5096,16 +5231,16 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
             return x64_type_make(X64_TYPE_KIND_BOOL);
         case CONSTANT_TYPE_BYTE:
             return x64_type_make(X64_TYPE_KIND_BYTE);
+        case CONSTANT_TYPE_F32:
+            return x64_type_make(X64_TYPE_KIND_F32);
         case CONSTANT_TYPE_INT:
             return x64_type_make(X64_TYPE_KIND_INT);
         case CONSTANT_TYPE_STR:
             return x64_type_make(X64_TYPE_KIND_STR);
         case CONSTANT_TYPE_UNTYPED_BOOL:
+        case CONSTANT_TYPE_UNTYPED_FLOAT:
         case CONSTANT_TYPE_UNTYPED_INTEGER:
         case CONSTANT_TYPE_UNTYPED_STRING:
-            break;
-        case CONSTANT_TYPE_UNTYPED_FLOAT:
-            // The target has no type of floats yet, so a float has none.
             break;
         }
         return x64_type_make(X64_TYPE_KIND_NONE);
@@ -5116,7 +5251,7 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_MULTIPLICATION:
     case AST_NODE_TYPE_SUBTRACTION:
-        return x64_type_make(X64_TYPE_KIND_INT);
+        return x64_arithmetic_type(builder, expression);
     case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_COMPARISON:
     case AST_NODE_TYPE_NOT:
@@ -5875,8 +6010,8 @@ static bool x64_structs_check(X64_Builder *builder) {
             Ast_Node_Index type_node = builder->nodes[field].first_child;
             X64_Type type = x64_type_of_element_node(builder, type_node);
             bool is_valid = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_BYTE ||
-                            type.kind == X64_TYPE_KIND_ENUM || type.kind == X64_TYPE_KIND_INT ||
-                            type.kind == X64_TYPE_KIND_POINTER ||
+                            type.kind == X64_TYPE_KIND_ENUM || type.kind == X64_TYPE_KIND_F32 ||
+                            type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_POINTER ||
                             type.kind == X64_TYPE_KIND_PROCEDURE ||
                             type.kind == X64_TYPE_KIND_STR || type.kind == X64_TYPE_KIND_STRUCT;
             if (not is_valid) {
@@ -5918,6 +6053,7 @@ static X64_Type x64_type_pointer_to(X64_Type target) {
     case X64_TYPE_KIND_BYTE:
     case X64_TYPE_KIND_C_STR:
     case X64_TYPE_KIND_ENUM:
+    case X64_TYPE_KIND_F32:
     case X64_TYPE_KIND_INT:
     case X64_TYPE_KIND_PROCEDURE:
     case X64_TYPE_KIND_STR:
@@ -5979,14 +6115,15 @@ static X64_Type x64_type_element(X64_Type sequence) {
 
 /**
  * Returns the type of an array of `length` elements of `element`, or of an array slice of them for
- * `X64_TYPE_KIND_SLICE` as `kind`. The elements are an `Int`, a `Bool`, a `Byte`, a `Str`, an enum,
- * a struct or a pointer, and any other type gives a type of the kind `X64_TYPE_KIND_NONE`.
+ * `X64_TYPE_KIND_SLICE` as `kind`. The elements are an `Int`, an `F32`, a `Bool`, a `Byte`, a `Str`,
+ * an enum, a struct or a pointer, and any other type gives a type of the kind `X64_TYPE_KIND_NONE`.
  */
 static X64_Type x64_type_sequence_of(X64_Type element, X64_Type_Kind kind, int64_t length) {
     assert(kind == X64_TYPE_KIND_ARRAY || kind == X64_TYPE_KIND_SLICE);
 
     if (element.kind != X64_TYPE_KIND_BOOL && element.kind != X64_TYPE_KIND_BYTE &&
-        element.kind != X64_TYPE_KIND_ENUM && element.kind != X64_TYPE_KIND_INT &&
+        element.kind != X64_TYPE_KIND_ENUM && element.kind != X64_TYPE_KIND_F32 &&
+        element.kind != X64_TYPE_KIND_INT &&
         element.kind != X64_TYPE_KIND_POINTER && element.kind != X64_TYPE_KIND_PROCEDURE &&
         element.kind != X64_TYPE_KIND_STR && element.kind != X64_TYPE_KIND_STRUCT) {
         return x64_type_make(X64_TYPE_KIND_NONE);
@@ -6029,7 +6166,8 @@ static bool x64_type_is_scalar(X64_Builder const *builder, X64_Type type) {
 /**
  * Returns the number of words of 8 bytes that a value of `type` takes: one for an `Int`, which is
  * a 64-bit integer, one for a `Bool`, which is 0 or 1 in a word, so that it is passed to and from
- * the C library like an integer, one for a `Byte`, from 0 to 255 in a word, and one for a `C_Str`
+ * the C library like an integer, one for an `F32`, whose 32 bits are the low ones of its word, and
+ * the others zero, one for a `Byte`, from 0 to 255 in a word, and one for a `C_Str`
  * and a pointer, which are addresses. An enum is the number of its member, counted from 0 in the
  * order of the definition. A `Str` is the address of its bytes and their number. An array is the
  * address of its first element, because its length is part of its type, and an array slice is the
@@ -6044,6 +6182,7 @@ static size_t x64_type_word_count(X64_Builder const *builder, X64_Type type) {
     case X64_TYPE_KIND_C_STR:
     case X64_TYPE_KIND_ENUM:
     case X64_TYPE_KIND_ENUM_LITERAL:
+    case X64_TYPE_KIND_F32:
     case X64_TYPE_KIND_INT:
     case X64_TYPE_KIND_NIL:
     case X64_TYPE_KIND_POINTER:
@@ -6116,6 +6255,8 @@ static X64_Type x64_type_of_name(X64_Builder const *builder, Str name) {
         base = x64_type_make(X64_TYPE_KIND_BYTE);
     } else if (str_equals(base_name, STR("C_Str"))) {
         base = x64_type_make(X64_TYPE_KIND_C_STR);
+    } else if (str_equals(base_name, STR("F32"))) {
+        base = x64_type_make(X64_TYPE_KIND_F32);
     } else if (str_equals(base_name, STR("Int"))) {
         base = x64_type_make(X64_TYPE_KIND_INT);
     } else if (str_equals(base_name, STR("Str"))) {
@@ -6689,15 +6830,233 @@ static void x64_write_divide(X64_Builder *builder, byte divisor) {
  * and 0 otherwise, and `movzx rax, al`, so that `rax` is that `Bool`.
  */
 static void x64_write_set(X64_Builder *builder, byte condition) {
+    x64_write_set_register(builder, condition, X64_REGISTER_RAX);
+}
+
+/**
+ * Writes `set` of `condition` to the lowest byte of `rax` or `rcx`, and `movzx` of it to the whole
+ * register, so that it is the `Bool` of the flags of the last comparison. Neither instruction
+ * changes the flags, so a second one can follow, which is how a comparison of floats is made.
+ */
+static void x64_write_set_register(X64_Builder *builder, byte condition, byte register_number) {
     assert(condition < 16);
+    assert(register_number == X64_REGISTER_RAX || register_number == X64_REGISTER_RCX);
 
     x64_write_byte(&builder->writer, X64_OPCODE_TWO_BYTE);
     x64_write_byte(&builder->writer, (byte)(X64_OPCODE_TWO_BYTE_SET | condition));
-    x64_write_byte(&builder->writer, 0xC0);
+    x64_write_byte(&builder->writer, (byte)(0xC0 | register_number));
     x64_write_byte(&builder->writer, X64_REX_WIDE);
     x64_write_byte(&builder->writer, X64_OPCODE_TWO_BYTE);
     x64_write_byte(&builder->writer, X64_OPCODE_TWO_BYTE_MOVZX_BYTE);
-    x64_write_byte(&builder->writer, 0xC0);
+    x64_write_byte(&builder->writer, (byte)(0xC0 | (register_number << 3) | register_number));
+}
+
+/**
+ * Writes an instruction of the SSE extension that has the register `register_number`, in the
+ * middle bits of its operand byte, and `operand`, a register too, in the low bits: `prefix` if it
+ * is not zero, the prefix of 64-bit operands when `is_wide` is set, `0x0F` and `opcode`. A register
+ * of floats and a register of integers have the same numbers, so which is which depends on the
+ * instruction.
+ */
+static void x64_write_sse(X64_Builder *builder, byte prefix, bool is_wide, byte opcode,
+                          byte register_number, byte operand) {
+    assert(register_number < 16);
+    assert(operand < 16);
+
+    if (prefix != 0) {
+        x64_write_byte(&builder->writer, prefix);
+    }
+    byte rex = (byte)(((register_number >> 3) << 2) | (operand >> 3));
+    if (is_wide || rex != 0) {
+        x64_write_byte(&builder->writer, (byte)(0x40 | (is_wide ? 0x08 : 0) | rex));
+    }
+    x64_write_byte(&builder->writer, X64_OPCODE_TWO_BYTE);
+    x64_write_byte(&builder->writer, opcode);
+    x64_write_byte(&builder->writer,
+                   (byte)(0xC0 | ((register_number & 7) << 3) | (operand & 7)));
+}
+
+/**
+ * Returns the 32 bits of `number` as a float, which is its nearest `F32`, as an integer.
+ */
+static uint32_t x64_float_bits(double number) {
+    float single = (float)number;
+    uint32_t bits = 0;
+    memcpy(&bits, &single, sizeof(bits));
+    return bits;
+}
+
+/**
+ * Writes the operation of the node type `node_type`, an arithmetic operator or the operator of a
+ * compound assignment, on the two floats in `rax` and `rcx`, and leaves the result in `rax`: they
+ * are moved to `xmm0` and `xmm1`, `xmm0` is changed by `addss`, `subss`, `mulss` or `divss`, and
+ * moved back. A result that is too large is infinity, and a division by zero is infinity or not a
+ * number, as the instructions of floats give them, so nothing traps.
+ */
+static void x64_write_float_operation(X64_Builder *builder, Ast_Node_Type node_type) {
+    byte opcode = X64_OPCODE_SSE_ADD;
+    switch (node_type) {
+    case AST_NODE_TYPE_ADDITION:
+    case AST_NODE_TYPE_ADDITION_ASSIGNMENT:
+        opcode = X64_OPCODE_SSE_ADD;
+        break;
+    case AST_NODE_TYPE_DIVISION:
+    case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
+        opcode = X64_OPCODE_SSE_DIVIDE;
+        break;
+    case AST_NODE_TYPE_MULTIPLICATION:
+    case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
+        opcode = X64_OPCODE_SSE_MULTIPLY;
+        break;
+    case AST_NODE_TYPE_SUBTRACTION:
+    case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
+        opcode = X64_OPCODE_SSE_SUBTRACT;
+        break;
+    default:
+        assert(false);
+        break;
+    }
+
+    x64_write_sse(builder, X64_PREFIX_OPERAND_SIZE, false, X64_OPCODE_SSE_MOVE_TO_FLOAT,
+                  X64_REGISTER_XMM0, X64_REGISTER_RAX);
+    x64_write_sse(builder, X64_PREFIX_OPERAND_SIZE, false, X64_OPCODE_SSE_MOVE_TO_FLOAT,
+                  X64_REGISTER_XMM1, X64_REGISTER_RCX);
+    x64_write_sse(builder, X64_PREFIX_SCALAR_SINGLE, false, opcode, X64_REGISTER_XMM0,
+                  X64_REGISTER_XMM1);
+    x64_write_sse(builder, X64_PREFIX_OPERAND_SIZE, false, X64_OPCODE_SSE_MOVE_FROM_FLOAT,
+                  X64_REGISTER_XMM0, X64_REGISTER_RAX);
+}
+
+/**
+ * Writes the conversion of the float in the word at `source` from `rbp` to an `Int` in `rax`, which
+ * drops its fraction. `cvttss2si` gives the lowest `Int` for what it cannot convert, a number that
+ * is too large or too small, and not a number, and that is also the right answer for exactly that
+ * number, so the word is compared with it when the result is the lowest `Int`, and the program
+ * stops for any other, with a breakpoint, as a conversion that has no result does in WebAssembly.
+ */
+static void x64_write_float_to_integer(X64_Builder *builder, int32_t source) {
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, source);
+    x64_write_sse(builder, X64_PREFIX_OPERAND_SIZE, false, X64_OPCODE_SSE_MOVE_TO_FLOAT,
+                  X64_REGISTER_XMM0, X64_REGISTER_RAX);
+    x64_write_sse(builder, X64_PREFIX_SCALAR_SINGLE, true, X64_OPCODE_SSE_CONVERT_TO_INTEGER,
+                  X64_REGISTER_RAX, X64_REGISTER_XMM0);
+
+    // `cmp rax, rcx` with the lowest `Int`, and a short jump over the rest when it is not that.
+    x64_write_load_integer(builder, X64_REGISTER_RCX, INT64_MIN);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_write_byte(&builder->writer, (byte)(0x70 | X64_CONDITION_NOT_EQUAL));
+    size_t distance_place = builder->writer.length;
+    x64_write_byte(&builder->writer, 0);
+    // The float that is exactly the lowest `Int` is minus 2 to the power of 63, whose 32 bits are
+    // 0xDF000000.
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RDX, X64_REGISTER_RBP, source);
+    x64_write_load_integer(builder, X64_REGISTER_RCX, 0xDF000000);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RDX);
+    x64_write_trap_unless(builder, X64_CONDITION_EQUAL);
+    size_t distance = builder->writer.length - (distance_place + 1);
+    assert(distance <= INT8_MAX);
+    if (distance_place < builder->writer.length && distance_place < builder->writer.capacity) {
+        builder->writer.bytes[distance_place] = (byte)distance;
+    }
+}
+
+/**
+ * Returns the type of the arithmetic `operation`, `+`, `-`, `*` or `/`, which is the type of its
+ * operands: `F32` when an operand is one, and `Int` otherwise, which the check of the operands
+ * then finds wrong when they are not. An untyped operand is of the type of the other one, so the
+ * type is the one of the left operand, unless that is a constant and the right one is not.
+ */
+static X64_Type x64_arithmetic_type(X64_Builder const *builder, Ast_Node_Index operation) {
+    Ast_Node_Index left = builder->nodes[operation].first_child;
+    Ast_Node_Index right = builder->nodes[operation].last_child;
+    if (x64_is_constant(builder, left) && not x64_is_constant(builder, right)) {
+        X64_Type right_type = x64_expression_type(builder, right);
+        if (right_type.kind == X64_TYPE_KIND_F32) {
+            return right_type;
+        }
+    }
+    X64_Type left_type = x64_expression_type(builder, left);
+    if (left_type.kind == X64_TYPE_KIND_F32) {
+        return left_type;
+    }
+    return x64_type_make(X64_TYPE_KIND_INT);
+}
+
+/**
+ * Returns whether the word `word` of the arguments of `procedure` is a parameter that is a float,
+ * which is passed in a register of floats and not in the register of integers of its word.
+ */
+static bool x64_parameter_is_float_at(X64_Builder const *builder, Ast_Node_Index procedure,
+                                      size_t word) {
+    size_t parameter_count = x64_parameter_count(builder, procedure);
+    for (size_t i = 0; i < parameter_count; i += 1) {
+        size_t first = x64_argument_word_offset(builder, procedure, i);
+        if (first == word) {
+            return x64_parameter_type(builder, procedure, i).kind == X64_TYPE_KIND_F32;
+        }
+    }
+    return false;
+}
+
+/**
+ * Writes a comparison of two floats, whose operands are on the stack of values, for the six
+ * operators, and leaves the `Bool` in the place of the first operand. `ucomiss` sets the flags like
+ * an unsigned comparison and sets the parity flag when an operand is not a number. A comparison
+ * with not a number is false, except `not=`, which is true, so `<` and `<=` compare the operands in
+ * the other order and test `above`, which is false for not a number, `==` also needs that the
+ * parity flag is not set, and `not=` that it is.
+ */
+static bool x64_float_comparison_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
+    Ast_Comparison_Operator operator = builder->nodes[frame->node].payload.comparison.operator;
+
+    int32_t first = x64_stack_displacement(builder, frame->stack_start, 1);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, first);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP,
+                     x64_stack_displacement(builder, frame->stack_start + 1, 1));
+    byte left = X64_REGISTER_XMM0;
+    byte right = X64_REGISTER_XMM1;
+    x64_write_sse(builder, X64_PREFIX_OPERAND_SIZE, false, X64_OPCODE_SSE_MOVE_TO_FLOAT, left,
+                  X64_REGISTER_RAX);
+    x64_write_sse(builder, X64_PREFIX_OPERAND_SIZE, false, X64_OPCODE_SSE_MOVE_TO_FLOAT, right,
+                  X64_REGISTER_RCX);
+
+    // `a < b` is `b > a`, so the operands are swapped for those two.
+    bool is_swapped = operator == AST_COMPARISON_OPERATOR_LESS ||
+                      operator == AST_COMPARISON_OPERATOR_LESS_EQUAL;
+    if (is_swapped) {
+        left = X64_REGISTER_XMM1;
+        right = X64_REGISTER_XMM0;
+    }
+    x64_write_sse(builder, 0, false, X64_OPCODE_SSE_COMPARE, left, right);
+
+    switch (operator) {
+    case AST_COMPARISON_OPERATOR_GREATER:
+    case AST_COMPARISON_OPERATOR_LESS:
+        x64_write_set(builder, X64_CONDITION_ABOVE);
+        break;
+    case AST_COMPARISON_OPERATOR_GREATER_EQUAL:
+    case AST_COMPARISON_OPERATOR_LESS_EQUAL:
+        x64_write_set(builder, X64_CONDITION_ABOVE_EQUAL);
+        break;
+    case AST_COMPARISON_OPERATOR_EQUAL:
+        // Equal, and not unordered.
+        x64_write_set(builder, X64_CONDITION_EQUAL);
+        x64_write_set_register(builder, X64_CONDITION_NOT_PARITY, X64_REGISTER_RCX);
+        x64_write_registers(builder, X64_OPCODE_AND, X64_REGISTER_RCX, X64_REGISTER_RAX);
+        break;
+    case AST_COMPARISON_OPERATOR_NOT_EQUAL:
+        // Not equal, or unordered.
+        x64_write_set(builder, X64_CONDITION_NOT_EQUAL);
+        x64_write_set_register(builder, X64_CONDITION_PARITY, X64_REGISTER_RCX);
+        x64_write_registers(builder, X64_OPCODE_OR, X64_REGISTER_RCX, X64_REGISTER_RAX);
+        break;
+    }
+
+    x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+    int32_t target = x64_stack_push(builder, 1);
+    assert(target == first);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+    return true;
 }
 
 /**
@@ -7124,6 +7483,11 @@ static void x64_debug_unit_write(X64_Builder *builder, size_t text_size_bytes) {
     x64_write_string(writer, STR("Byte"));
     x64_write_byte(writer, X64_DWARF_ENCODING_UNSIGNED_CHAR);
     x64_write_byte(writer, 1);
+    types.f32_type = (uint32_t)(writer->length - unit_start);
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_BASE_TYPE);
+    x64_write_string(writer, STR("F32"));
+    x64_write_byte(writer, X64_DWARF_ENCODING_FLOAT);
+    x64_write_byte(writer, 4);
     uint32_t pointer_type = (uint32_t)(writer->length - unit_start);
     x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_POINTER_TYPE);
     x64_write_byte(writer, X64_DEBUG_ADDRESS_SIZE_BYTES);
@@ -7611,6 +7975,8 @@ static uint32_t x64_debug_type_reference(X64_Builder const *builder, X64_Debug_T
     case X64_TYPE_KIND_ENUM:
     case X64_TYPE_KIND_STRUCT:
         return builder->layouts[definition].frame_offset;
+    case X64_TYPE_KIND_F32:
+        return types.f32_type;
     case X64_TYPE_KIND_INT:
         return types.int_type;
     case X64_TYPE_KIND_STR:

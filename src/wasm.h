@@ -53,6 +53,21 @@ enum {
     WASM_OPCODE_END = 0x0B,
     WASM_OPCODE_GLOBAL_GET = 0x23,
     WASM_OPCODE_GLOBAL_SET = 0x24,
+    WASM_OPCODE_F32_ADD = 0x92,
+    WASM_OPCODE_F32_CONST = 0x43,
+    WASM_OPCODE_F32_CONVERT_I32_U = 0xB3,
+    WASM_OPCODE_F32_CONVERT_I64_S = 0xB4,
+    WASM_OPCODE_F32_DIV = 0x95,
+    WASM_OPCODE_F32_EQ = 0x5B,
+    WASM_OPCODE_F32_GE = 0x60,
+    WASM_OPCODE_F32_GT = 0x5E,
+    WASM_OPCODE_F32_LE = 0x5F,
+    WASM_OPCODE_F32_LOAD = 0x2A,
+    WASM_OPCODE_F32_LT = 0x5D,
+    WASM_OPCODE_F32_MUL = 0x94,
+    WASM_OPCODE_F32_NE = 0x5C,
+    WASM_OPCODE_F32_STORE = 0x38,
+    WASM_OPCODE_F32_SUB = 0x93,
     WASM_OPCODE_I32_ADD = 0x6A,
     WASM_OPCODE_I32_CONST = 0x41,
     WASM_OPCODE_I32_AND = 0x71,
@@ -89,6 +104,7 @@ enum {
     WASM_OPCODE_I64_NE = 0x52,
     WASM_OPCODE_I64_STORE = 0x37,
     WASM_OPCODE_I64_SUB = 0x7D,
+    WASM_OPCODE_I64_TRUNC_F32_S = 0xAE,
     WASM_OPCODE_IF = 0x04,
     WASM_OPCODE_LOCAL_GET = 0x20,
     WASM_OPCODE_LOCAL_SET = 0x21,
@@ -120,7 +136,9 @@ enum {
 
     // The type of the elements of a table, which are references to functions.
     WASM_TYPE_FUNCREF = 0x70,
-    // The marker of a function type, and the types of a 32-bit and a 64-bit integer.
+    // The marker of a function type, and the types of a 32-bit and a 64-bit integer, and of a
+    // 32-bit float.
+    WASM_TYPE_F32 = 0x7D,
     WASM_TYPE_FUNCTION = 0x60,
     WASM_TYPE_I32 = 0x7F,
     WASM_TYPE_I64 = 0x7E,
@@ -160,8 +178,9 @@ typedef enum {
     // A call of a variable, a parameter or a global variable that does not hold a pointer to a
     // procedure. The subject is the name.
     WASM_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE,
-    // `cast(Type)` of a value that is not converted to that type: the type must be `Int`, and the
-    // value a `Byte`, a `Bool` or an `Int`. The subject is the name of the type.
+    // `cast(Type)` of a value that is not converted to that type: the type must be `Int` and the
+    // value a `Byte`, a `Bool`, an `Int` or a float, or the type must be a float and the value a
+    // `Byte`, an `Int` or a float. The subject is the name of the type.
     WASM_BUILD_STATUS_CAST_INVALID,
     WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
     WASM_BUILD_STATUS_CONDITION_TYPE_INVALID,

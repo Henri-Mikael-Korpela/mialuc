@@ -181,17 +181,24 @@ bool constant_is_byte(Constant_Value value) {
            value.integer <= 255;
 }
 
+bool constant_is_f32(Constant_Value value) {
+    assert(value.status == CONSTANT_STATUS_OK);
+
+    // The largest `F32` is the bound, and a number above it has no `F32` to be rounded to.
+    return value.type == CONSTANT_TYPE_UNTYPED_FLOAT && value.floating >= -3.4028234663852886e38 &&
+           value.floating <= 3.4028234663852886e38;
+}
+
 Constant_Type constant_type_default(Constant_Type type) {
     switch (type) {
     case CONSTANT_TYPE_BOOL:
     case CONSTANT_TYPE_BYTE:
+    case CONSTANT_TYPE_F32:
     case CONSTANT_TYPE_INT:
     case CONSTANT_TYPE_STR:
         return type;
     case CONSTANT_TYPE_UNTYPED_FLOAT:
-        // There is no type of floats yet for a float to become, so it stays untyped, and a target
-        // does not build it.
-        return type;
+        return CONSTANT_TYPE_F32;
     case CONSTANT_TYPE_UNTYPED_BOOL:
         return CONSTANT_TYPE_BOOL;
     case CONSTANT_TYPE_UNTYPED_INTEGER:
@@ -408,6 +415,9 @@ static Constant_Value constant_convert(Ast_Node const *nodes, Ast_Node_Index def
     } else if (str_equals(name, STR("Byte"))) {
         target = CONSTANT_TYPE_BYTE;
         untyped = CONSTANT_TYPE_UNTYPED_INTEGER;
+    } else if (str_equals(name, STR("F32"))) {
+        target = CONSTANT_TYPE_F32;
+        untyped = CONSTANT_TYPE_UNTYPED_FLOAT;
     } else if (str_equals(name, STR("Bool"))) {
         target = CONSTANT_TYPE_BOOL;
         untyped = CONSTANT_TYPE_UNTYPED_BOOL;
@@ -426,6 +436,13 @@ static Constant_Value constant_convert(Ast_Node const *nodes, Ast_Node_Index def
     }
     if (target == CONSTANT_TYPE_BYTE && not constant_is_byte(value)) {
         return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, definition);
+    }
+    if (target == CONSTANT_TYPE_F32) {
+        if (not constant_is_f32(value)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, definition);
+        }
+        // The constant has the number that an `F32` holds, not the digits that were written.
+        value.floating = (double)(float)value.floating;
     }
     value.type = target;
     return value;
@@ -477,17 +494,38 @@ static Constant_Value constant_arithmetic(Ast_Node const *nodes, Ast_Node_Index 
 }
 
 /**
- * Returns the value of the arithmetic `operation` of two untyped floats, which is an untyped float.
- * The result is worked out as a `double`. A division by zero is an error, and so is a result that
- * is infinite, so that no constant is ever one.
+ * Returns the value of the arithmetic `operation` of two constants that are floats. Two untyped
+ * floats give an untyped one, an untyped one with an `F32` gives an `F32`, and two typed floats must
+ * have the same type. The result is worked out as a `double` and rounded to the type, which is the
+ * result that a running program has. A division by zero is an error, and so is a result that is
+ * infinite, so that no constant is ever one.
  */
 static Constant_Value constant_float_arithmetic(Ast_Node const *nodes, Ast_Node_Index operation,
                                                 Constant_Value left, Constant_Value right) {
     assert(constant_type_is_float(left.type));
     assert(constant_type_is_float(right.type));
 
+    Constant_Type type = CONSTANT_TYPE_UNTYPED_FLOAT;
+    if (left.type == CONSTANT_TYPE_F32 || right.type == CONSTANT_TYPE_F32) {
+        type = CONSTANT_TYPE_F32;
+        // An untyped operand takes the type of the typed one, so it has to fit in it.
+        if (left.type == CONSTANT_TYPE_UNTYPED_FLOAT && not constant_is_f32(left)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, operation);
+        }
+        if (right.type == CONSTANT_TYPE_UNTYPED_FLOAT && not constant_is_f32(right)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, operation);
+        }
+    }
+
+    // The operands of an `F32` are the numbers that an `F32` holds, which an untyped operand is
+    // rounded to, as it is where it is used.
     double a = left.floating;
     double b = right.floating;
+    if (type == CONSTANT_TYPE_F32) {
+        a = (double)(float)a;
+        b = (double)(float)b;
+    }
+
     double result = 0.0;
     Ast_Node_Type operator = nodes[operation].node_type;
     if (operator == AST_NODE_TYPE_ADDITION) {
@@ -503,11 +541,15 @@ static Constant_Value constant_float_arithmetic(Ast_Node const *nodes, Ast_Node_
         }
         result = a / b;
     }
+    if (type == CONSTANT_TYPE_F32) {
+        // A result that is above the largest `F32` is infinite once it is rounded.
+        result = (double)(float)result;
+    }
     // The operands are finite, so the result is a number or an infinity, and never not a number.
     if (result > 1.7976931348623157e308 || result < -1.7976931348623157e308) {
         return constant_fail(CONSTANT_STATUS_OVERFLOW, operation);
     }
-    return constant_float_make(CONSTANT_TYPE_UNTYPED_FLOAT, result);
+    return constant_float_make(type, result);
 }
 
 /**
@@ -615,8 +657,26 @@ static Constant_Value constant_comparison(Ast_Node const *nodes, Ast_Node_Index 
             return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
         }
     } else if (constant_type_is_float(left.type) && constant_type_is_float(right.type)) {
+        bool is_left_untyped = left.type == CONSTANT_TYPE_UNTYPED_FLOAT;
+        bool is_right_untyped = right.type == CONSTANT_TYPE_UNTYPED_FLOAT;
+        if (not is_left_untyped && not is_right_untyped && left.type != right.type) {
+            return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, comparison);
+        }
+        if (left.type == CONSTANT_TYPE_F32 && is_right_untyped && not constant_is_f32(right)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
+        }
+        if (right.type == CONSTANT_TYPE_F32 && is_left_untyped && not constant_is_f32(left)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
+        }
+
+        // An untyped operand is rounded to the type of the other, as it is where it is used, so
+        // that the comparison holds exactly when it does in the running program.
         double a = left.floating;
         double b = right.floating;
+        if (left.type == CONSTANT_TYPE_F32 || right.type == CONSTANT_TYPE_F32) {
+            a = (double)(float)a;
+            b = (double)(float)b;
+        }
         bool holds = false;
         switch (operator) {
         case AST_COMPARISON_OPERATOR_EQUAL:
@@ -733,7 +793,7 @@ static bool constant_type_is_bool(Constant_Type type) {
 }
 
 static bool constant_type_is_float(Constant_Type type) {
-    return type == CONSTANT_TYPE_UNTYPED_FLOAT;
+    return type == CONSTANT_TYPE_F32 || type == CONSTANT_TYPE_UNTYPED_FLOAT;
 }
 
 static bool constant_type_is_integer(Constant_Type type) {

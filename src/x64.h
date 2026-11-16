@@ -15,8 +15,9 @@ typedef enum {
     // string, or the name of the definition that it is in.
     X64_BUILD_STATUS_ADDRESS_INVALID,
     // An operand of `+`, `-`, `*` or `/`, or the variable or the value of an assignment such as
-    // `x += 1`, is not an `Int`. The subject is the first name or string of the operand, or the
-    // name of the definition that it is in.
+    // `x += 1`, is not an `Int`, or not an `F32` when the operation is one of floats, or the two
+    // operands are of different types. The subject is the first name or string of the operand, or
+    // the name of the definition that it is in.
     X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
     // An element of an array literal, or the value that is assigned to an element or to a range of
     // elements, is not of the type of the elements. The subject is its first name or string.
@@ -44,8 +45,8 @@ typedef enum {
     // The call of a variable, a parameter or a global variable that does not hold a pointer to a
     // procedure. The subject is its name.
     X64_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE,
-    // The operands of a comparison are not two `Int` values, or not two `Bool` values for `==` and
-    // `not=`. The subject is the first name or string of the comparison.
+    // The operands of a comparison are not two `Int` values or two `F32` values, or not two `Bool`
+    // values for `==` and `not=`. The subject is the first name or string of the comparison.
     X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
     // The condition of an if statement is not a `Bool`. The subject is the first name or string of
     // the condition, or the name of the definition that it is in.
@@ -79,8 +80,9 @@ typedef enum {
     // An operand of `and`, `or` or `not` is not a `Bool`. The subject is the first name or string
     // of the operand, or the name of the definition that it is in.
     X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
-    // `cast(Type)` of a value that is not converted to that type: the type must be `Int`, and the
-    // value a `Byte`, a `Bool` or an `Int`. The subject is the name of the type.
+    // `cast(Type)` of a value that is not converted to that type: the type must be `Int` and the
+    // value a `Byte`, a `Bool`, an `Int` or an `F32`, or the type must be `F32` and the value a
+    // `Byte`, an `Int` or an `F32`. The subject is the name of the type.
     X64_BUILD_STATUS_CAST_INVALID,
     // There is no procedure called `main`, or it is not `main :: proc() Int ->`. The subject is
     // `main` in the source in the second case, and has `bytes` NULL in the first, which is about
@@ -205,6 +207,7 @@ typedef enum {
     X64_TYPE_KIND_C_STR,
     X64_TYPE_KIND_ENUM,
     X64_TYPE_KIND_ENUM_LITERAL,
+    X64_TYPE_KIND_F32,
     X64_TYPE_KIND_INT,
     X64_TYPE_KIND_NIL,
     X64_TYPE_KIND_NONE,
@@ -356,8 +359,11 @@ typedef struct {
  * library, so that the output of the program is flushed before it ends and its result is the exit
  * code of the process.
  *
- * `Int` is a 64-bit integer, `Bool` is 0 or 1 in 64 bits, and `C_Str` is the 64-bit address of
- * bytes that end with a zero. A string literal is untyped, and the target does not build a `Str`,
+ * `Int` is a 64-bit integer, `Bool` is 0 or 1 in 64 bits, `C_Str` is the 64-bit address of
+ * bytes that end with a zero, and `F32` is a 32-bit float, which is kept in the low 32 bits of a
+ * word, and which is passed and returned as the calling convention says: in `xmm0` to `xmm3` for
+ * the first four words of the arguments and in `xmm0` for a result, also in the integer register
+ * of the word, so that a variadic procedure of the C library finds it either way. A string literal is untyped, and the target does not build a `Str`,
  * so it is only accepted where a `C_Str` is wanted, which it then becomes, and as the argument of
  * `str_to_c_str`, which makes the `C_Str` too. A constant that is a number or a truth value is
  * loaded as its value, which the analysis worked out.

@@ -993,8 +993,9 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 result.subject.bytes);
         break;
     case X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: an operand of arithmetic at '%.*s' is not an Int.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes);
+        fprintf(stderr, "%s:%zu:%zu: an operand of arithmetic at '%.*s' is not an Int or an F32, "
+                "or is not of the type of the other operand.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: the element at '%.*s' is not of the type of the elements of "
@@ -1092,9 +1093,9 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_CAST_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool or an Int "
-                "can be cast to Int, and nothing else is converted.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
+        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool, an Int or "
+                "an F32 can be cast to Int, and a Byte, an Int or an F32 to F32.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: an operand of 'and', 'or' or 'not' at '%.*s' is not a "
@@ -1283,8 +1284,9 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be used in arithmetic.\n",
-                path, position.line, position.column, subject_length, result.subject.bytes);
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int or an F32, or is not of the type of the "
+                "other operand, so it cannot be used in arithmetic.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not of the type of the elements of the array.\n",
@@ -1381,13 +1383,14 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_CAST_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool or an Int "
-                "can be cast to Int, and nothing else is converted.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
+        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool, an Int or "
+                "an F32 can be cast to Int, and a Byte, an Int or an F32 to F32.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "
-                "must be Int, or both must be Bool or pointers of one type for == and not=.\n",
+                "must be Int, or both must be F32, or both must be Bool or pointers of one type "
+                "for == and not=.\n",
                 path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
