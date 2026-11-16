@@ -71,6 +71,8 @@ A struct literal makes the place of its value on the stack of values before its 
 
 A procedure whose result is more than a word, such as a struct, gets the address of a place for its result from its caller, as the first word of its arguments, before the others, which is what the calling convention of Windows on x64 does with a struct: the caller makes the place on its stack of values before it works out the arguments, the procedure writes the result there when it returns, and returns the address in `rax`. A foreign procedure takes and returns values of one word only, which are what a function of C takes and returns in registers.
 
+A procedure that returns several values returns them as one result of the words of all of its values, one after the other, which is more than a word, so the result has a place that the caller makes and the procedure writes, as above. A `return` works its values out from left to right, so they are on the stack of values in the order of the source, and the words of the place are the same words, which the caller finds in the same order. The definition of several names, `quotient, remainder := divide(31, 4)`, makes the place for the call, and then stores each value into the place of its variable from the last name to the first, which takes it off the stack. A call that is a statement takes the place off the stack without reading it, and a name `_` is stored in a variable that nothing reads. A foreign procedure returns one value, in `rax`, so several return types are an error for it.
+
 ## Enums and pointers to procedures
 
 A member of an enum is its number, `mov` of it, whether it is written as `Color.RED`, as `.RED` where an enum is wanted, which is the enum of the place, or as a constant that is the member. Members are compared with `cmp`, like `Int` values, and the default value of an enum is 0, its first member. A match of an enum compares the number of the subject with the number of the member of each case, and a match without a default case and without `partial` has a case for every member, which the compiler checks.
@@ -98,6 +100,7 @@ The target builds procedures whose parameters, results and variables are of the 
 - the operands of a comparison are not both `Int` or both `Byte`, or not both `Bool`, members of one enum, pointers of one type, pointers to procedures of one type, or a pointer and `nil`, for `==` and `not=`,
 - an operand of `and`, `or` or `not` is not a `Bool`,
 - a call has a different number of arguments than the procedure has parameters, or an argument is not of the type of its parameter, or the call of a procedure without a return type is used as a value,
+- a `return` gives another number of values than the procedure has return types, or a call that returns several values is used where one value is wanted, such as an argument or the value of a variable with one name, or the definition of several names is not of a call, or the call returns another number of values than there are names, or a foreign procedure has several return types,
 - a procedure with no return type has a `return` statement, or the value that a procedure returns is not of its return type,
 - the value of a variable, or the value that is assigned to it, is not of the type of the variable,
 - the condition of an if statement is not a `Bool`,

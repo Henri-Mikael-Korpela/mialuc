@@ -140,6 +140,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 # shown in the group "Other", so that a new one is never lost.
 KEYWORD_CATEGORIES = {
     "Control flow": "break case continue defer else for if in match return",
+    "Conversions": "cast",
     "Definitions": "const enum foreign import proc struct union",
     "Logical operators": "and not or",
     "Reflection": "type_info_of",
@@ -150,7 +151,7 @@ UNUSED_KEYWORD_CATEGORIES = {
     "Definitions": ("abstract alias class distinct dynamic extern final gen generate impl interface "
                     "macro mutable trait virtual"),
     "Visibility and safety": "private public safe unsafe",
-    "Operators and conversions": ("as cast delete is new of operator override ref self super this "
+    "Operators and conversions": ("as delete is new of operator override ref self super this "
                                   "transmute type_id_of type_of use"),
 }
 
@@ -167,7 +168,7 @@ AST_CATEGORY_SUFFIXES = [
 ]
 AST_TYPE_NODES = {"ARRAY_TYPE", "ENUM_TYPE", "POINTER_TYPE", "PROCEDURE_TYPE", "STRUCT_TYPE",
                   "TYPE_NAME"}
-AST_OPERATOR_NODES = {"ADDITION", "AND", "COMPARISON", "DIVISION", "MULTIPLICATION", "NOT", "OR",
+AST_OPERATOR_NODES = {"ADDITION", "AND", "CAST", "COMPARISON", "DIVISION", "MULTIPLICATION", "NOT", "OR",
                       "SUBTRACTION", "ADDRESS_OF", "DEREFERENCE"}
 AST_EXPRESSION_NODES = {"CALL", "FIELD_ACCESS", "IDENTIFIER", "SLICE", "SUBSCRIPT", "TYPE_INFO_OF"}
 

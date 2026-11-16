@@ -51,6 +51,7 @@
   - [Pointers in structs and arrays](#pointers-in-structs-and-arrays)
 - [Procedures](#procedures)
   - [Calling procedures](#calling-procedures)
+  - [Multiple return values](#multiple-return-values)
   - [Pointers to procedures](#pointers-to-procedures)
 - [Scope resolution](#scope-resolution)
 - [Attributes](#attributes)
@@ -172,7 +173,7 @@ Mialu also defines the following unused keywords. They are reserved for possible
 
 ```
 abstract alias as async await
-cast catch class
+catch class
 delete distinct do dynamic
 extern
 final finally
@@ -604,6 +605,8 @@ The default value is 0 for an `Int`, `false` for a `Bool`, the empty string `""`
 > **Lessons learnt from C** In C, a local variable that is defined without a value holds whatever was in that memory before, and reading it is undefined behavior. The bug depends on what the program did earlier, so it can come and go with a change that has nothing to do with it. In Mialu every variable has a value from its definition on, either the one that is written or the default value of its type. In the future, the compiler may leave out default value initialization since if it can guarantee the type is initialized later that prevents undefined value from being read.
 
 A variable is defined once, with its initial value, and every variable has one. It can be used in the statements below its definition, but not above it and not in its own initial value. The variables of a procedure are not visible outside of it, so two procedures can have a variable of the same name.
+
+The values of a call of a procedure that returns several values are defined together, with a name for each, as in `quotient, remainder := divide(31, 4)`, see [Multiple return values](#multiple-return-values).
 
 A variable that is defined outside of every procedure is a [global variable](#global-variables).
 
@@ -1669,7 +1672,7 @@ procedure_name :: proc(param1: Type1, param2: Type2) ReturnType ->
     // procedure body
 ```
 
-A procedure parameter list can be empty, and the return type can be omitted if the procedure does not return a value. Example of a procedure with no parameters and no return type:
+A procedure parameter list can be empty, and the return type can be omitted if the procedure does not return a value. A procedure can also return several values, see [Multiple return values](#multiple-return-values). Example of a procedure with no parameters and no return type:
 
 ```
 procedure_name :: proc() ->
@@ -1724,9 +1727,41 @@ ignores_result :: proc(n: Int) Int ->
 
 A call that is a statement is the way to call a procedure that returns nothing.
 
+### Multiple return values
+
+A procedure can return several values. Its return types are written between parentheses and separated by commas, and a `return` statement gives a value for each of them, separated by commas, in the same order:
+
+```
+divide :: proc(a: Int, b: Int) (Int, Int) ->
+    return a / b, a - a / b * b
+
+describe :: proc(n: Int) (Bool, Str, Int) ->
+    if n < 0 ->
+        return false, "negative", 0 - n
+    return true, "not negative", n
+```
+
+The values can be of different types, and any type that a procedure can return, a `Str` and a struct too. A single return type is written without parentheses, so `(Int)` is an error. Every `return` must give as many values as the procedure has return types, and each value must be of its type, because nothing is converted, so `return 1` in `divide` is an error. The values are evaluated from left to right, before the deferred statements of the blocks that the `return` leaves run, see [Defer](#defer).
+
+The values of a call are taken by defining a variable for each of them, with the names separated by commas before `:=`. The first name gets the first value, the second name the second one, and so on, and each variable has the type of its value:
+
+```
+use_divide :: proc() Int ->
+    quotient, remainder := divide(31, 4)
+    return quotient * 10 + remainder
+```
+
+Here `use_divide` returns 73. The call is evaluated first, and then the variables are defined, so the names are not in scope in the arguments, and they follow the rules for the names of the variables, see [Scope resolution](#scope-resolution). There must be as many names as the procedure returns values, and a definition has at most 8 names, so `quotient := divide(31, 4)` and `a, b, c := divide(31, 4)` are errors. A value that is not wanted takes the name `_`, as in `quotient, _ := divide(31, 4)`. That does not define a variable, so `_` cannot be used as a name, and any number of values of a call can be left out in this way. A call that is a statement throws all of its values away, as for a procedure that returns one value.
+
+The type of the variables is always deduced, so `quotient, remainder : Int = divide(31, 4)` is not written. The definition is the only place that takes several values, so a call that returns several values is not an operand, an argument or a value of a `return`, which each take one value: `add(divide(31, 4))` and `return divide(31, 4)` are errors, and the values have to be named and given on. Several values are not assigned to existing variables with a single `=` either, and a variable is assigned to with a statement of its own.
+
+A pointer to a procedure that returns several values has them in parentheses in its type too, `^proc(Int, Int) (Int, Int)`, and it is called like any procedure, with the values taken as above, see [Pointers to procedures](#pointers-to-procedures). Two pointers to procedures are of the same type when they return the same types in the same order. A foreign procedure of the C library returns one value only.
+
+> **Lessons learnt from C** In C, a function returns one value, so a function that has two results returns one of them through a pointer that the caller passes in, or makes a struct for the two of them, which has a name that nothing else uses. The pointer can be left unset, and then the result is lost without the compiler noticing. In Mialu each result is a value of the procedure, and it is taken with a name of its own where it is called.
+
 ### Pointers to procedures
 
-A procedure is not a value that can be stored, but a pointer to it is. The type of a pointer to a procedure is written with a caret, and then `proc`, the types of the parameters between parentheses, and the return type, like the head of a procedure without the names of its parameters: `^proc(Int, Int) Int` is a pointer to a procedure that takes two `Int` values and returns an `Int`, `^proc() Int` to one that takes nothing, and `^proc(^Int)` to one that returns nothing. The caret is always written, because what a variable holds is the pointer, so `proc(Int) Int` alone is not a type.
+A procedure is not a value that can be stored, but a pointer to it is. The type of a pointer to a procedure is written with a caret, and then `proc`, the types of the parameters between parentheses, and the return type, like the head of a procedure without the names of its parameters: `^proc(Int, Int) Int` is a pointer to a procedure that takes two `Int` values and returns an `Int`, `^proc() Int` to one that takes nothing, and `^proc(^Int)` to one that returns nothing. A pointer to a procedure that returns several values has its return types in parentheses, `^proc(Int, Int) (Int, Int)`, as the head of a procedure does. The caret is always written, because what a variable holds is the pointer, so `proc(Int) Int` alone is not a type.
 
 > **Lessons learnt from C** In C, the type of a pointer to a function is written around the name of the variable, as in `int (*f)(int, int)`, which is hard to read and is the reason that people hide it behind a `typedef`. In Mialu the type is written from left to right like any other, `^proc(Int, Int) Int`, and can be used directly in a parameter, a field or an array.
 

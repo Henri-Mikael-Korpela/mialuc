@@ -1142,6 +1142,16 @@ static void main_run_command_report_x64_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: a number of the range at '%.*s' is not an Int.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
+    case X64_BUILD_STATUS_RETURN_COUNT_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' returns a number of values that is not the number of "
+                "its return types.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_RESULT_COUNT_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the number of names of '%.*s' is not the number of values "
+                "that the call gives.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case X64_BUILD_STATUS_RETURN_TYPE_MISMATCH:
         fprintf(stderr, "%s:%zu:%zu: the value that '%.*s' returns is not of its return type.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
@@ -1457,6 +1467,16 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
     case WASM_BUILD_STATUS_RANGE_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, so it cannot be the start or the "
                 "end of a range.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_RETURN_COUNT_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' returns a number of values that is not the number of "
+                "its return types.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case WASM_BUILD_STATUS_RESULT_COUNT_MISMATCH:
+        fprintf(stderr, "%s:%zu:%zu: the number of names of '%.*s' is not the number of values "
+                "that the call gives.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH:

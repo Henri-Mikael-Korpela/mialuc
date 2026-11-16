@@ -666,6 +666,15 @@ static bool         x64_range_assignment_write   (X64_Builder *builder, Ast_Node
 static void         x64_rdata_write              (X64_Builder *builder);
 static bool         x64_result_is_hidden         (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
+static X64_Type     x64_return_component         (X64_Builder const *builder,
+                                                  Ast_Node_Index signature, size_t index);
+static bool         x64_returns_equal            (X64_Builder const *builder, Ast_Node_Index first,
+                                                  Ast_Node_Index second);
+static X64_Type     x64_result_variable_type     (X64_Builder const *builder,
+                                                  Ast_Node_Index variable);
+static bool         x64_results_definition_write (X64_Builder *builder, Ast_Node_Index leader);
+static bool         x64_return_one_write         (X64_Builder *builder, Ast_Node_Index value,
+                                                  X64_Type return_type, Str name);
 static X64_Type     x64_return_type              (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
 static bool         x64_return_value_write       (X64_Builder *builder, Ast_Node_Index procedure,
@@ -1205,12 +1214,18 @@ static bool x64_constants_collect(X64_Builder *builder) {
         }
 
         // A foreign procedure returns one word, which is what a function of C returns in `rax`.
-        Str return_type = ast_procedure_return_type(&builder->nodes[procedure]);
-        if (return_type.bytes != NULL) {
-            X64_Type type = x64_type_of_name(builder, return_type);
+        // The C library returns one value.
+        size_t return_count = ast_procedure_return_count(&builder->nodes[procedure]);
+        if (is_foreign && return_count > 1) {
+            return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
+                            ast_procedure_return_type(&builder->nodes[procedure]));
+        }
+        for (size_t i = 0; i < return_count; i += 1) {
+            X64_Type type = x64_return_component(builder, procedure, i);
             if (type.kind == X64_TYPE_KIND_NONE ||
                 (is_foreign && not x64_type_is_scalar(builder, type))) {
-                return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED, return_type);
+                return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
+                                ast_procedure_return_type_at(&builder->nodes[procedure], i));
             }
         }
 
@@ -1706,7 +1721,11 @@ static void x64_procedure_layout(X64_Builder *builder, Ast_Node_Index procedure)
     for (Ast_Node_Index node = procedure; node < end; node += 1) {
         Ast_Node_Type node_type = builder->nodes[node].node_type;
         X64_Type type = x64_type_make(X64_TYPE_KIND_NONE);
-        if (node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+        if (node_type == AST_NODE_TYPE_VARIABLE_DEFINITION &&
+            (builder->nodes[node].result_count > 0 || builder->nodes[node].result_index > 0)) {
+            // A name of the definition of several has the type of the value at its place.
+            type = x64_result_variable_type(builder, node);
+        } else if (node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             Ast_Node_Index type_node = x64_variable_type_node(builder, node);
             if (type_node != AST_NODE_INDEX_NONE) {
                 type = x64_type_of_node(builder, type_node);
@@ -2816,7 +2835,38 @@ static bool x64_return_value_write(X64_Builder *builder, Ast_Node_Index procedur
         return x64_fail(builder, X64_BUILD_STATUS_RETURN_TYPE_MISSING, name);
     }
 
+    // Every value that the procedure returns must be given, and no more. They are worked out one
+    // after the other, and stay on the stack of values in the order of the source.
+    size_t return_count = ast_procedure_return_count(&builder->nodes[procedure]);
+    size_t value_count = 0;
+    for (Ast_Node_Index child = builder->nodes[statement].first_child;
+         child != AST_NODE_INDEX_NONE; child = builder->nodes[child].next_sibling) {
+        value_count += 1;
+    }
+    if (value_count != return_count) {
+        return x64_fail(builder, X64_BUILD_STATUS_RETURN_COUNT_MISMATCH, name);
+    }
     Ast_Node_Index value = builder->nodes[statement].first_child;
+    if (return_count > 1) {
+        for (size_t i = 0; i < return_count; i += 1) {
+            X64_Type component = x64_return_component(builder, procedure, i);
+            if (not x64_return_one_write(builder, value, component, name)) {
+                return false;
+            }
+            value = builder->nodes[value].next_sibling;
+        }
+        return true;
+    }
+    return x64_return_one_write(builder, value, return_type, name);
+}
+
+/**
+ * Writes one value of a `return`, which must be of `return_type`, and leaves it on the stack of
+ * values. `name` is the name of the procedure that an error points at. Returns false after it
+ * recorded an error.
+ */
+static bool x64_return_one_write(X64_Builder *builder, Ast_Node_Index value,
+                                 X64_Type return_type, Str name) {
     X64_Type value_type = x64_expression_type_for(builder, value, return_type);
     if (value_type.kind == X64_TYPE_KIND_NONE &&
         builder->nodes[value].node_type != AST_NODE_TYPE_CALL &&
@@ -2855,9 +2905,20 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
     assert(builder->nodes[statement].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
 
     Str name = builder->nodes[statement].payload.variable_definition.name;
+    // A name after the first of the definition of several is given its value by the first.
+    if (builder->nodes[statement].result_index > 0) {
+        return true;
+    }
+    if (builder->nodes[statement].result_count > 0) {
+        return x64_results_definition_write(builder, statement);
+    }
     Ast_Node_Index type_node = x64_variable_type_node(builder, statement);
     Ast_Node_Index value = builder->nodes[statement].first_child;
     X64_Type type = builder->layouts[statement].type;
+    if (type.kind == X64_TYPE_KIND_TUPLE) {
+        // The call gives several values, which need as many names.
+        return x64_fail(builder, X64_BUILD_STATUS_RESULT_COUNT_MISMATCH, name);
+    }
     int32_t displacement = -(int32_t)builder->layouts[statement].frame_offset;
     if (type_node != AST_NODE_INDEX_NONE) {
         if (type.kind == X64_TYPE_KIND_NONE) {
@@ -2912,6 +2973,58 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
         return false;
     }
     return x64_value_store(builder, type, displacement);
+}
+
+/**
+ * Writes the definition of several names, `first, second := call(...)`, whose first name is
+ * `leader`. The call leaves its values on the stack of values, one after the other, so the last
+ * name is stored first, and each store takes its value off the stack. Returns false after it
+ * recorded an error.
+ */
+static bool x64_results_definition_write(X64_Builder *builder, Ast_Node_Index leader) {
+    assert(builder->nodes[leader].result_count > 0);
+
+    Str name = builder->nodes[leader].payload.variable_definition.name;
+    Ast_Node_Index call = builder->nodes[leader].last_child;
+    size_t result_count = builder->nodes[leader].result_count;
+
+    // The call must be of a procedure that returns as many values as there are names.
+    Ast_Node_Index procedure = AST_NODE_INDEX_NONE;
+    if (builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
+        not x64_call_is_built_in(builder, call)) {
+        procedure = x64_call_procedure(builder, call);
+    }
+    if (procedure == AST_NODE_INDEX_NONE ||
+        ast_procedure_return_count(&builder->nodes[procedure]) != result_count) {
+        return x64_fail(builder, X64_BUILD_STATUS_RESULT_COUNT_MISMATCH, name);
+    }
+    if (not x64_expression_write(builder, call, x64_type_make(X64_TYPE_KIND_NONE),
+                                 X64_MODE_VALUE, true)) {
+        return false;
+    }
+
+    Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count,
+                                           builder->nodes[builder->definition].first_child);
+    for (size_t position = result_count; position > 0; position -= 1) {
+        Ast_Node_Index variable = leader;
+        if (position > 1) {
+            for (Ast_Node_Index node = leader + 1; node < end; node += 1) {
+                if (builder->nodes[node].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION &&
+                    builder->nodes[node].result_index == position - 1 &&
+                    ast_variable_leader(builder->nodes, node) == leader) {
+                    variable = node;
+                    break;
+                }
+            }
+            assert(variable != leader);
+        }
+        X64_Type type = builder->layouts[variable].type;
+        if (type.kind == X64_TYPE_KIND_NONE) {
+            return x64_fail(builder, X64_BUILD_STATUS_RESULT_COUNT_MISMATCH, name);
+        }
+        x64_value_store(builder, type, -(int32_t)builder->layouts[variable].frame_offset);
+    }
+    return true;
 }
 
 /**
@@ -5109,11 +5222,78 @@ static X64_Type x64_return_type(X64_Builder const *builder, Ast_Node_Index proce
     assert(builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE ||
            builder->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE_TYPE);
 
-    Str name = ast_procedure_return_type(&builder->nodes[procedure]);
-    if (name.bytes == NULL) {
+    size_t count = ast_procedure_return_count(&builder->nodes[procedure]);
+    if (count == 0) {
         return x64_type_make(X64_TYPE_KIND_NONE);
     }
-    return x64_type_of_name(builder, name);
+    if (count > 1) {
+        // Every one of the types must be one that the target has, which is checked where the
+        // procedures are checked, so the words of the values are known here.
+        X64_Type tuple = x64_type_make(X64_TYPE_KIND_TUPLE);
+        tuple.definition = procedure;
+        for (size_t i = 0; i < count; i += 1) {
+            if (x64_return_component(builder, procedure, i).kind == X64_TYPE_KIND_NONE) {
+                return x64_type_make(X64_TYPE_KIND_NONE);
+            }
+        }
+        return tuple;
+    }
+    return x64_return_component(builder, procedure, 0);
+}
+
+/**
+ * Returns the type of the value that `signature`, a procedure or a procedure type, returns at
+ * position `index`, which is less than the number of values that it returns, or a type of the kind
+ * `X64_TYPE_KIND_NONE` when the target has no type of that name.
+ */
+static X64_Type x64_return_component(X64_Builder const *builder, Ast_Node_Index signature,
+                                     size_t index) {
+    assert(index < ast_procedure_return_count(&builder->nodes[signature]));
+
+    return x64_type_of_name(builder,
+                            ast_procedure_return_type_at(&builder->nodes[signature], index));
+}
+
+/**
+ * Returns whether the two signatures return the same types, in the same order.
+ */
+static bool x64_returns_equal(X64_Builder const *builder, Ast_Node_Index first,
+                              Ast_Node_Index second) {
+    size_t count = ast_procedure_return_count(&builder->nodes[first]);
+    if (count != ast_procedure_return_count(&builder->nodes[second])) {
+        return false;
+    }
+    for (size_t i = 0; i < count; i += 1) {
+        if (not x64_type_equals(x64_return_component(builder, first, i),
+                                x64_return_component(builder, second, i))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * Returns the type of the variable `variable`, a definition that is one of several names of the
+ * values of a call, which is the type of the value of the call at its position, or a type of the
+ * kind `X64_TYPE_KIND_NONE` when the call is not one of a procedure that returns that many values.
+ */
+static X64_Type x64_result_variable_type(X64_Builder const *builder, Ast_Node_Index variable) {
+    Ast_Node_Index leader = variable;
+    if (builder->nodes[variable].result_index > 0) {
+        leader = ast_variable_leader(builder->nodes, variable);
+    }
+    Ast_Node_Index call = builder->nodes[leader].last_child;
+    if (builder->nodes[call].node_type != AST_NODE_TYPE_CALL ||
+        x64_call_is_built_in(builder, call)) {
+        return x64_type_make(X64_TYPE_KIND_NONE);
+    }
+    Ast_Node_Index procedure = x64_call_procedure(builder, call);
+    size_t index = builder->nodes[variable].result_index;
+    if (procedure == AST_NODE_INDEX_NONE ||
+        index >= ast_procedure_return_count(&builder->nodes[procedure])) {
+        return x64_type_make(X64_TYPE_KIND_NONE);
+    }
+    return x64_return_component(builder, procedure, index);
 }
 
 /**
@@ -5757,6 +5937,7 @@ static X64_Type x64_type_pointer_to(X64_Type target) {
     case X64_TYPE_KIND_NIL:
     case X64_TYPE_KIND_NONE:
     case X64_TYPE_KIND_SLICE:
+    case X64_TYPE_KIND_TUPLE:
         break;
     }
     return x64_type_make(X64_TYPE_KIND_NONE);
@@ -5871,6 +6052,16 @@ static size_t x64_type_word_count(X64_Builder const *builder, X64_Type type) {
     case X64_TYPE_KIND_STRUCT: {
         size_t word_count = x64_struct_word_count(builder, type.definition);
         assert(word_count != X64_WORD_COUNT_INVALID);
+        return word_count;
+    }
+    case X64_TYPE_KIND_TUPLE: {
+        // The words of the values that a procedure returns, one after the other.
+        size_t word_count = 0;
+        size_t count = ast_procedure_return_count(&builder->nodes[type.definition]);
+        for (size_t i = 0; i < count; i += 1) {
+            word_count += x64_type_word_count(builder, x64_return_component(builder,
+                                                                           type.definition, i));
+        }
         return word_count;
     }
     case X64_TYPE_KIND_NONE:
@@ -6130,12 +6321,11 @@ static bool x64_type_nodes_equal(X64_Builder const *builder, Ast_Node_Index firs
 static Ast_Node_Index x64_signature_canonical(X64_Builder const *builder,
                                               Ast_Node_Index signature) {
     size_t parameter_count = x64_parameter_count(builder, signature);
-    X64_Type return_type = x64_return_type(builder, signature);
     for (Ast_Node_Index node = 0; node < signature; node += 1) {
         Ast_Node_Type node_type = builder->nodes[node].node_type;
         if ((node_type != AST_NODE_TYPE_PROCEDURE && node_type != AST_NODE_TYPE_PROCEDURE_TYPE) ||
             x64_parameter_count(builder, node) != parameter_count ||
-            not x64_type_equals(x64_return_type(builder, node), return_type)) {
+            not x64_returns_equal(builder, node, signature)) {
             continue;
         }
         bool is_equal = true;
@@ -6167,10 +6357,12 @@ static bool x64_signatures_check(X64_Builder *builder) {
                                 x64_type_subject(builder, type_node));
             }
         }
-        Str return_type = ast_procedure_return_type(&builder->nodes[node]);
-        if (return_type.bytes != NULL &&
-            x64_type_of_name(builder, return_type).kind == X64_TYPE_KIND_NONE) {
-            return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED, return_type);
+        size_t return_count = ast_procedure_return_count(&builder->nodes[node]);
+        for (size_t i = 0; i < return_count; i += 1) {
+            if (x64_return_component(builder, node, i).kind == X64_TYPE_KIND_NONE) {
+                return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
+                                ast_procedure_return_type_at(&builder->nodes[node], i));
+            }
         }
     }
     return true;
@@ -7427,6 +7619,7 @@ static uint32_t x64_debug_type_reference(X64_Builder const *builder, X64_Debug_T
     case X64_TYPE_KIND_POINTER:
     case X64_TYPE_KIND_PROCEDURE:
     case X64_TYPE_KIND_SLICE:
+    case X64_TYPE_KIND_TUPLE:
         break;
     }
     return 0;

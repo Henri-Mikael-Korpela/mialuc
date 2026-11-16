@@ -920,6 +920,11 @@ static bool semantic_variable_check(Semantic_Analyzer *analyzer, Ast_Node_Index 
         name = analyzer->nodes[variable].payload.for_statement.name;
     }
 
+    // `_` is where a value that is not wanted goes, so any number of them can be in one procedure.
+    if (str_equals(name, STR("_"))) {
+        return true;
+    }
+
     Semantic_Binding earlier = semantic_variable_find(analyzer, procedure, variable,
                                                      AST_NODE_INDEX_NONE, name);
     if (earlier.kind != SEMANTIC_BINDING_KIND_NONE) {
@@ -1203,7 +1208,7 @@ static Semantic_Binding semantic_variable_find(Semantic_Analyzer const *analyzer
         } else if (node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             // The variable is in scope at `before` when the block that it is in goes on after it.
             bool is_in_scope = block_count == 0 || block_ends[block_count - 1] > before;
-            if (is_in_scope && current != excluded &&
+            if (is_in_scope && current != excluded && not str_equals(name, STR("_")) &&
                 str_equals(node->payload.variable_definition.name, name)) {
                 found = (Semantic_Binding){
                     .target = current,

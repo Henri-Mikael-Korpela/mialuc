@@ -120,6 +120,12 @@ typedef enum {
     X64_BUILD_STATUS_RANGE_TYPE_INVALID,
     // A `return` in a procedure that returns nothing. The subject is the name of the procedure.
     X64_BUILD_STATUS_RETURN_TYPE_MISSING,
+    // A `return` that gives more values or fewer than the procedure has return types, and a call
+    // that returns several values where one is wanted, or a definition of several names whose call
+    // returns another number of values. The subject is the name of the procedure, or of the first
+    // of the names.
+    X64_BUILD_STATUS_RETURN_COUNT_MISMATCH,
+    X64_BUILD_STATUS_RESULT_COUNT_MISMATCH,
     // A returned value of another type than the procedure returns. The subject is the name of
     // the procedure.
     X64_BUILD_STATUS_RETURN_TYPE_MISMATCH,
@@ -189,6 +195,9 @@ enum {
 // where any pointer is wanted and is the type of no variable. `X64_TYPE_KIND_ENUM_LITERAL` is the
 // type of a member of an enum written without the enum, such as `.RED`, which is accepted where an
 // enum that has the member is wanted, and is the type of no variable either.
+// `X64_TYPE_KIND_TUPLE` is the type of a call of a procedure that returns several values, whose
+// `definition` is the procedure or procedure type that returns them. Its words are the words of the
+// values one after the other, and it is the type of no variable.
 typedef enum {
     X64_TYPE_KIND_ARRAY,
     X64_TYPE_KIND_BOOL,
@@ -204,6 +213,7 @@ typedef enum {
     X64_TYPE_KIND_SLICE,
     X64_TYPE_KIND_STR,
     X64_TYPE_KIND_STRUCT,
+    X64_TYPE_KIND_TUPLE,
 } X64_Type_Kind;
 
 /**

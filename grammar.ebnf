@@ -66,6 +66,10 @@
      - A line may be indented by any number of spaces that is a multiple of 4. The grammar only
        has blocks nested up to the fourth level, see `block_1`. Deeper nesting is accepted by the
        compiler, up to 32 blocks inside each other, and the grammar needs more rules for it.
+     - A procedure that returns several values needs a `return` that gives one value for each of
+       its return types, and the definition of several names, `a, b := f()`, needs a call of a
+       procedure that returns that many. The grammar only checks that the types and the names are
+       separated by commas. A call that gives several values is accepted only there.
      - `length_of` is a built-in procedure, so it is a call of a name that nothing in the program
        defines. It takes one array or array slice.
      - `int_to_byte` is a built-in procedure like `length_of`. It takes an `Int` and gives a
@@ -331,7 +335,11 @@ array_type = "[" , ws , [ array_length , ws ] , "]" , ws , element_type ;
 
 array_length = integer_literal | "const" ;
 
-return_type = plain_type ;
+(* One type, or two or more between parentheses and separated by commas, as in `(Int, Str)`: a
+   procedure that returns several values. A single type is never written in parentheses. *)
+return_type =
+    plain_type |
+    "(" , ws , plain_type , ws , "," , ws , plain_type , { ws , "," , ws , plain_type } , ws , ")" ;
 
 (* At least one statement. Blank lines are allowed before, between and after statements, and are
    not statements. The body is indented exactly one level, 4 spaces. A tab, or any other number of
@@ -529,7 +537,16 @@ indentation_5 = "                    " ;
    `x : Int = 5` gives the type. *)
 variable_definition =
     name , ws , ":" , ws , [ type , ws ] , "=" , ws , expression |
-    name , ws , ":" , ws , type ;
+    name , ws , ":" , ws , type |
+    results_definition ;
+
+(* The values that a call of a procedure that returns several values gives, each with a name of its
+   own: `quotient, remainder := divide(31, 4)`. The types are those of the values, so no type is
+   written. The name `_` stands for a value that is not wanted. The compiler requires the
+   expression to be a call that gives as many values as there are names, which the grammar cannot
+   tell. *)
+results_definition =
+    name , ws , "," , ws , name , { ws , "," , ws , name } , ws , ":" , ws , "=" , ws , expression ;
 
 (* A variable can leave its value out when its type is written, as in `p : Person`. It then has the
    default value of its type: zero for an `Int`, `false` for a `Bool`, the empty string for a
@@ -545,8 +562,10 @@ variable_definition =
    operators and `=` change what a pointer points to: `p^ += 1`, `p^ = 2` and `p.age = 2`. *)
 assignment = name , { ws , postfix } , ws , ( "+=" | "-=" | "*=" | "/=" | "=" ) , ws , expression ;
 
-(* `return` and its value must be separated, or `return0` would be one identifier. *)
-return_statement = "return" , required_space , expression ;
+(* `return` and its value must be separated, or `return0` would be one identifier. A procedure
+   that returns several values gives one expression for each of them, separated by commas, in the
+   order of its return types. The compiler checks the number, which the grammar cannot tell. *)
+return_statement = "return" , required_space , expression , { ws , "," , ws , expression } ;
 
 (* The operators from the loosest to the tightest are `or`, `and`, `not`, a comparison, `+` and
    `-`, and `*` and `/`. `or` and `and` are left associative, so `a or b or c` is

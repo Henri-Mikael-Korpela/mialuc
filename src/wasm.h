@@ -223,6 +223,11 @@ typedef enum {
     // pointer points to. The subject is the name of the pointer.
     WASM_BUILD_STATUS_POINTER_TARGET_TYPE_MISMATCH,
     WASM_BUILD_STATUS_RANGE_TYPE_INVALID,
+    // A `return` that gives more values or fewer than the procedure has return types, or a definition
+    // of several names whose call returns another number of values. The subject is the name of the
+    // procedure, or of the first of the names.
+    WASM_BUILD_STATUS_RETURN_COUNT_MISMATCH,
+    WASM_BUILD_STATUS_RESULT_COUNT_MISMATCH,
     WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH,
     WASM_BUILD_STATUS_RETURN_TYPE_MISSING,
     // A field is accessed on a value that is not a struct. The subject is the name before the dot.

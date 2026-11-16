@@ -157,6 +157,83 @@ Str ast_procedure_return_type(Ast_Node const *procedure) {
     return return_type;
 }
 
+Ast_Node_Index ast_variable_leader(Ast_Node const *nodes, Ast_Node_Index definition) {
+    assert(nodes[definition].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
+    assert(nodes[definition].result_index > 0);
+
+    // The nodes of the call and of the names before it come after the leader and are not
+    // definitions of several names, so the closest node that has a count is the leader.
+    Ast_Node_Index leader = definition;
+    while (leader > 0) {
+        leader -= 1;
+        if (nodes[leader].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION &&
+            nodes[leader].result_count > 0) {
+            return leader;
+        }
+    }
+
+    // Unreachable: the parser makes the leader before the others.
+    assert(false);
+    return AST_NODE_INDEX_NONE;
+}
+
+size_t ast_procedure_return_count(Ast_Node const *procedure) {
+    Str return_type = ast_procedure_return_type(procedure);
+    if (return_type.bytes == NULL || return_type.length == 0) {
+        return 0;
+    }
+    if (return_type.bytes[0] != '(') {
+        return 1;
+    }
+
+    // The types are separated by commas, and no type has a comma or a parenthesis in it.
+    size_t count = 1;
+    for (size_t i = 0; i < return_type.length; i += 1) {
+        if (return_type.bytes[i] == ',') {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+Str ast_procedure_return_type_at(Ast_Node const *procedure, size_t index) {
+    assert(index < ast_procedure_return_count(procedure));
+
+    Str return_type = ast_procedure_return_type(procedure);
+    if (return_type.bytes[0] != '(') {
+        return return_type;
+    }
+
+    // The text between the parentheses, from the start of the type at `index` up to the next comma
+    // or the closing parenthesis, which is the last byte.
+    size_t start = 1;
+    size_t position = 0;
+    for (size_t i = 1; i < return_type.length; i += 1) {
+        char byte = return_type.bytes[i];
+        if (byte != ',' && i + 1 != return_type.length) {
+            continue;
+        }
+        if (position == index) {
+            size_t end = i;
+            while (start < end && (return_type.bytes[start] == ' ' ||
+                                   return_type.bytes[start] == '\t')) {
+                start += 1;
+            }
+            while (end > start && (return_type.bytes[end - 1] == ' ' ||
+                                   return_type.bytes[end - 1] == '\t')) {
+                end -= 1;
+            }
+            return str_make(return_type.bytes + start, end - start);
+        }
+        position += 1;
+        start = i + 1;
+    }
+
+    // Unreachable: `index` is less than the count.
+    assert(false);
+    return STR_EMPTY;
+}
+
 bool ast_procedure_is_foreign(Ast_Node const *nodes, Ast_Node_Index procedure) {
     assert(nodes != NULL);
     assert(nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
@@ -498,8 +575,14 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
                    node.payload.union_match.discriminant.bytes);
             break;
         case AST_NODE_TYPE_VARIABLE_DEFINITION:
-            printf("VARIABLE_DEFINITION %.*s\n", (int)node.payload.variable_definition.name.length,
+            printf("VARIABLE_DEFINITION %.*s", (int)node.payload.variable_definition.name.length,
                    node.payload.variable_definition.name.bytes);
+            if (node.result_count > 0) {
+                printf(" (the first of %u values)", (unsigned)node.result_count);
+            } else if (node.result_index > 0) {
+                printf(" (value %u)", (unsigned)node.result_index);
+            }
+            printf("\n");
             break;
         }
 

@@ -48,6 +48,12 @@ typedef struct {
     Parse_Struct_Frame_Kind kind;
 } Parse_Struct_Frame;
 
+enum {
+    // The most values that a call can return and that one definition can name, see
+    // `parse_results_definition`.
+    PARSE_RESULT_COUNT_MAX = 8,
+};
+
 /**
  * The state shared by the parsing functions. A parsing function returns the index of the node it
  * made, or `AST_NODE_INDEX_NONE` after it recorded an error here, and its caller then returns
@@ -145,6 +151,7 @@ static Ast_Node_Index parse_type_name           (Parser *parser, Str expected,
 static Ast_Node_Index parse_procedure_type      (Parser *parser);
 static Ast_Node_Index parse_range_or_expression (Parser *parser);
 static Ast_Node_Index parse_variable_definition (Parser *parser);
+static Ast_Node_Index parse_results_definition  (Parser *parser);
 
 Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
     assert(tokens.elements != NULL);
@@ -814,37 +821,76 @@ static bool parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure
            parser->nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE_TYPE);
 
     Token const *first = parse_token_current(parser);
-    if (first->kind != TOKEN_KIND_IDENTIFIER && first->kind != TOKEN_KIND_CARET) {
+    if (first->kind != TOKEN_KIND_IDENTIFIER && first->kind != TOKEN_KIND_CARET &&
+        first->kind != TOKEN_KIND_PARENTHESIS_LEFT) {
         return true;
     }
 
-    // Every caret consumes a token, so there are fewer carets than tokens, which bounds the loop.
-    for (size_t i = 0; i < parser->token_count; i += 1) {
-        if (parse_token_current(parser)->kind != TOKEN_KIND_CARET) {
+    // Several return types are written between parentheses and separated by commas. The text then
+    // runs from the opening parenthesis to the closing one, and at least two types are in it,
+    // because one is written without parentheses.
+    bool is_list = first->kind == TOKEN_KIND_PARENTHESIS_LEFT;
+    if (is_list) {
+        parse_token_advance(parser);
+    }
+
+    Token const *name = first;
+    char const *source_bytes = NULL;
+    size_t type_count = 0;
+    // Every type consumes a token, so there are fewer types than tokens, which bounds the loop.
+    for (size_t type = 0; type < parser->token_count; type += 1) {
+        // Every caret consumes a token, so there are fewer carets than tokens.
+        for (size_t i = 0; i < parser->token_count; i += 1) {
+            if (parse_token_current(parser)->kind != TOKEN_KIND_CARET) {
+                break;
+            }
+            parse_token_advance(parser);
+        }
+
+        name = parse_token_current(parser);
+        if (name->kind != TOKEN_KIND_IDENTIFIER) {
+            // The false return value reports the failure, so the node index is not needed.
+            if (name->kind == TOKEN_KIND_KEYWORD_PROC) {
+                (void)parse_fail(parser, STR("the name of the return type after '^', because a "
+                                             "procedure does not return a pointer to a "
+                                             "procedure"));
+                return false;
+            }
+            if (is_list) {
+                (void)parse_fail(parser, STR("the name of a return type"));
+                return false;
+            }
+            (void)parse_fail(parser, STR("the name of the return type after '^'"));
+            return false;
+        }
+        parse_token_advance(parser);
+        type_count += 1;
+        // The tokens do not point at the source, but a name does, and its offset says where the
+        // source starts.
+        source_bytes = name->payload.identifier.text.bytes - name->source_offset;
+
+        if (not is_list || parse_token_current(parser)->kind != TOKEN_KIND_COMMA) {
             break;
         }
         parse_token_advance(parser);
     }
 
-    Token const *name = parse_token_current(parser);
-    if (name->kind != TOKEN_KIND_IDENTIFIER) {
-        // The false return value reports the failure, so the node index is not needed.
-        if (name->kind == TOKEN_KIND_KEYWORD_PROC) {
-            (void)parse_fail(parser, STR("the name of the return type after '^', because a "
-                                         "procedure does not return a pointer to a procedure"));
+    char const *type_bytes = source_bytes + first->source_offset;
+    char const *type_end = name->payload.identifier.text.bytes + name->payload.identifier.text.length;
+    if (is_list) {
+        Token const *close = parse_token_current(parser);
+        if (close->kind != TOKEN_KIND_PARENTHESIS_RIGHT) {
+            (void)parse_fail(parser, STR("',' or ')' after a return type"));
             return false;
         }
-        (void)parse_fail(parser, STR("the name of the return type after '^'"));
-        return false;
+        if (type_count < 2) {
+            (void)parse_fail(parser, STR("a second return type, because a single one is written "
+                                         "without parentheses"));
+            return false;
+        }
+        type_end = source_bytes + close->source_offset + 1;
+        parse_token_advance(parser);
     }
-    parse_token_advance(parser);
-
-    // The tokens do not point at the source, but the name does, and its offset says where the
-    // source starts. The text runs from the first token to the end of the name.
-    Str name_text = name->payload.identifier.text;
-    char const *source_bytes = name_text.bytes - name->source_offset;
-    char const *type_bytes = source_bytes + first->source_offset;
-    char const *type_end = name_text.bytes + name_text.length;
     assert(type_end > type_bytes);
     parser->nodes[procedure].payload.procedure.return_type =
         str_make(type_bytes, (size_t)(type_end - type_bytes));
@@ -1023,6 +1069,13 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
                 return false;
             }
             parse_node_append_child(parser, parent, statement);
+            // The other names of the definition of several are the nodes after the call.
+            for (size_t i = 1; i < parser->nodes[statement].result_count; i += 1) {
+                Ast_Node_Index other = (Ast_Node_Index)(parser->node_count -
+                                                        (parser->nodes[statement].result_count - i));
+                assert(parser->nodes[other].result_index == i);
+                parse_node_append_child(parser, parent, other);
+            }
         }
         statement_count += 1;
     }
@@ -1732,6 +1785,9 @@ static Ast_Node_Index parse_statement(Parser *parser) {
         if (after_name == TOKEN_KIND_TYPE_SEPARATOR) {
             return parse_variable_definition(parser);
         }
+        if (after_name == TOKEN_KIND_COMMA) {
+            return parse_results_definition(parser);
+        }
         if (after_name == TOKEN_KIND_PARENTHESIS_LEFT) {
             return parse_call_statement(parser);
         }
@@ -1866,6 +1922,80 @@ static Ast_Node_Index parse_variable_definition(Parser *parser) {
     return definition;
 }
 
+/**
+ * Parses `first, second := call(...)`, the definition of the values that a call returns. The first
+ * name is the node that has the call, made first like the node of every statement, and the nodes
+ * of the other names are made after the call, so that they are not in scope in its arguments, in
+ * the order of the source. The caller appends the other names after the first, see
+ * `parse_procedure_body`. Returns the first name.
+ */
+static Ast_Node_Index parse_results_definition(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->token_index < parser->token_count);
+
+    // The names are kept until the call is parsed, because their nodes come after it.
+    Str names[PARSE_RESULT_COUNT_MAX];
+    uint32_t offsets[PARSE_RESULT_COUNT_MAX];
+    size_t name_count = 0;
+    // Every name consumes a token, so there are fewer names than tokens, which bounds the loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        Token const *name = parse_token_current(parser);
+        if (name->kind != TOKEN_KIND_IDENTIFIER) {
+            return parse_fail(parser, STR("a variable name"));
+        }
+        if (name_count == PARSE_RESULT_COUNT_MAX) {
+            return parse_fail(parser, STR("fewer names, because a call returns up to 8 values"));
+        }
+        names[name_count] = name->payload.identifier.text;
+        offsets[name_count] = name->source_offset;
+        name_count += 1;
+        parse_token_advance(parser);
+        if (parse_token_current(parser)->kind != TOKEN_KIND_COMMA) {
+            break;
+        }
+        parse_token_advance(parser);
+    }
+    assert(name_count >= 2);
+
+    Ast_Node_Index leader = parse_node_make(parser, AST_NODE_TYPE_VARIABLE_DEFINITION);
+    if (leader == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parser->nodes[leader].source_offset = offsets[0];
+    parser->nodes[leader].payload.variable_definition.name = names[0];
+    parser->nodes[leader].result_count = (uint16_t)name_count;
+
+    // Only `:=` is accepted: the values are new variables, whose types are those of the results.
+    if (not parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':='"))) {
+        return AST_NODE_INDEX_NONE;
+    }
+    if (not parse_token_expect(parser, TOKEN_KIND_EQUALS, STR("'=' after ':', because the types "
+                                                              "of several names are deduced"))) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    Ast_Node_Index value = parse_expression(parser);
+    if (value == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_node_append_child(parser, leader, value);
+
+    for (size_t i = 1; i < name_count; i += 1) {
+        Ast_Node_Index definition = parse_node_make(parser, AST_NODE_TYPE_VARIABLE_DEFINITION);
+        if (definition == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[definition].source_offset = offsets[i];
+        parser->nodes[definition].payload.variable_definition.name = names[i];
+        parser->nodes[definition].result_index = (uint16_t)i;
+    }
+
+    if (not parse_line_end_expect(parser)) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return leader;
+}
+
 static Ast_Node_Index parse_return_statement(Parser *parser) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parser->token_index < parser->token_count);
@@ -1883,17 +2013,29 @@ static Ast_Node_Index parse_return_statement(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
-    Ast_Node_Index value = parse_expression(parser);
-    if (value == AST_NODE_INDEX_NONE) {
-        return AST_NODE_INDEX_NONE;
+    // Every value consumes a token, so there are fewer values than tokens, which bounds the loop.
+    // A comma means that another value has to follow.
+    Ast_Node_Index first_value = AST_NODE_INDEX_NONE;
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        Ast_Node_Index value = parse_expression(parser);
+        if (value == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, statement, value);
+        if (first_value == AST_NODE_INDEX_NONE) {
+            first_value = value;
+        }
+        if (parse_token_current(parser)->kind != TOKEN_KIND_COMMA) {
+            break;
+        }
+        parse_token_advance(parser);
     }
-    parse_node_append_child(parser, statement, value);
 
     if (not parse_line_end_expect(parser)) {
         return AST_NODE_INDEX_NONE;
     }
 
-    assert(parser->nodes[statement].first_child == value);
+    assert(parser->nodes[statement].first_child == first_value);
     return statement;
 }
 

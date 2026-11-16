@@ -413,6 +413,21 @@ static size_t          wasm_global_slot_index                 (Wasm_Builder cons
 static size_t          wasm_global_slot_count                 (Wasm_Builder const *builder);
 static void            wasm_build_global_section              (Wasm_Builder *builder);
 static bool            wasm_data_measure                      (Wasm_Builder *builder);
+static Wasm_Type       wasm_signature_return_type             (Wasm_Builder const *builder,
+                                                               Ast_Node_Index signature,
+                                                               size_t index);
+static Str             wasm_signature_return_unsupported      (Wasm_Builder const *builder,
+                                                               Ast_Node_Index signature);
+static size_t          wasm_signature_return_slot_count       (Wasm_Builder const *builder,
+                                                               Ast_Node_Index signature);
+static Wasm_Type       wasm_call_result_type                  (Wasm_Builder const *builder,
+                                                               Ast_Node_Index call, size_t index);
+static bool            wasm_build_code_section_body_results   (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index leader);
+static void            wasm_variable_store                    (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Ast_Node_Index variable);
 static Wasm_Type       wasm_literal_expected_type             (Wasm_Builder const *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index literal);
@@ -1035,10 +1050,9 @@ static bool wasm_check_signatures(Wasm_Builder *builder, Ast_Node_Index module,
                                  wasm_type_subject(builder, parameter));
             }
         }
-        Str return_type = ast_procedure_return_type(&builder->nodes[node]);
-        if (return_type.bytes != NULL &&
-            wasm_type_of_name(builder, return_type).kind == WASM_VALUE_TYPE_NONE) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED, return_type);
+        Str unsupported = wasm_signature_return_unsupported(builder, node);
+        if (unsupported.bytes != NULL) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED, unsupported);
         }
     }
 
@@ -1086,11 +1100,9 @@ static bool wasm_check_signatures(Wasm_Builder *builder, Ast_Node_Index module,
                 parameter = parameter_node->next_sibling;
             }
 
-            Str return_type = builder->nodes[value].payload.procedure.return_type;
-            if (return_type.bytes != NULL) {
-                if (wasm_type_of_name(builder, return_type).kind == WASM_VALUE_TYPE_NONE) {
-                    return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED, return_type);
-                }
+            Str unsupported = wasm_signature_return_unsupported(builder, value);
+            if (unsupported.bytes != NULL) {
+                return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED, unsupported);
             }
         }
 
@@ -1624,13 +1636,11 @@ static void wasm_write_signature(Wasm_Builder *builder, Ast_Node_Index signature
         wasm_write_type(builder, wasm_type_of_node(builder, type));
     }
 
-    Str return_type_name = ast_procedure_return_type(&builder->nodes[signature]);
-    if (return_type_name.bytes == NULL) {
-        wasm_write_unsigned(&builder->writer, 0);
-    } else {
-        Wasm_Type return_type = wasm_type_of_name(builder, return_type_name);
-        wasm_write_unsigned(&builder->writer, wasm_type_slot_count(builder, return_type));
-        wasm_write_type(builder, return_type);
+    // The values that are returned are the results of the function, one after the other.
+    size_t return_count = ast_procedure_return_count(&builder->nodes[signature]);
+    wasm_write_unsigned(&builder->writer, wasm_signature_return_slot_count(builder, signature));
+    for (size_t i = 0; i < return_count; i += 1) {
+        wasm_write_type(builder, wasm_signature_return_type(builder, signature, i));
     }
 }
 
@@ -1935,7 +1945,7 @@ static bool wasm_build_code_section_body(Wasm_Builder *builder, Ast_Node_Index d
     // WebAssembly does not know that the end cannot be reached, so it is marked as unreachable.
     if (builder->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE) {
         Ast_Node const *procedure_node = &builder->nodes[value];
-        bool has_result = procedure_node->payload.procedure.return_type.bytes != NULL;
+        bool has_result = ast_procedure_return_count(procedure_node) > 0;
         Ast_Node_Type last_type = builder->nodes[procedure_node->last_child].node_type;
         // A `return` gives the frame back before it returns, so only the end of the body, which
         // is reached when the last statement is something else, has to do it.
@@ -3022,12 +3032,19 @@ static bool wasm_build_code_section_body_call_statement(Wasm_Builder *builder,
         return false;
     }
 
+    // A call of a procedure that returns several values leaves all of them.
+    size_t slot_count = 0;
     Wasm_Type value_type = wasm_expression_type(builder, call);
     if (value_type.kind != WASM_VALUE_TYPE_NONE) {
-        size_t slot_count = wasm_type_slot_count(builder, value_type);
-        for (size_t slot = 0; slot < slot_count; slot += 1) {
-            wasm_write_byte(&builder->writer, WASM_OPCODE_DROP);
+        slot_count = wasm_type_slot_count(builder, value_type);
+    } else if (not wasm_call_is_built_in(builder, call)) {
+        Ast_Node_Index callee = wasm_call_signature(builder, call);
+        if (callee != AST_NODE_INDEX_NONE) {
+            slot_count = wasm_signature_return_slot_count(builder, callee);
         }
+    }
+    for (size_t slot = 0; slot < slot_count; slot += 1) {
+        wasm_write_byte(&builder->writer, WASM_OPCODE_DROP);
     }
     return true;
 }
@@ -3090,7 +3107,7 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
         argument = builder->nodes[argument].next_sibling;
     }
 
-    bool has_result = ast_procedure_return_type(&builder->nodes[callee]).bytes != NULL;
+    bool has_result = ast_procedure_return_count(&builder->nodes[callee]) > 0;
     if (not has_result && not is_result_unused) {
         return wasm_fail(builder, WASM_BUILD_STATUS_CALL_RESULT_MISSING, name);
     }
@@ -3108,23 +3125,31 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
     assert(builder->nodes[statement].node_type == AST_NODE_TYPE_RETURN_STATEMENT);
 
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
-    if (builder->nodes[procedure].payload.procedure.return_type.bytes == NULL) {
-        Str name = builder->nodes[definition].payload.constant_definition.name;
+    Str name = builder->nodes[definition].payload.constant_definition.name;
+    size_t return_count = ast_procedure_return_count(&builder->nodes[procedure]);
+    if (return_count == 0) {
         return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISSING, name);
     }
-
-    Ast_Node_Index value = builder->nodes[statement].first_child;
-    if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
-        return false;
+    // Every value that the procedure returns must be given, and no more.
+    if (wasm_children_count(builder, statement) != return_count) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_COUNT_MISMATCH, name);
     }
 
-    // The value on the stack must be what the procedure says that it returns. The expression was
-    // written already, so every name in it is known.
-    Str return_type_name = builder->nodes[procedure].payload.procedure.return_type;
-    Wasm_Type return_type = wasm_type_of_name(builder, return_type_name);
-    if (not wasm_value_is_accepted(builder, return_type, value)) {
-        Str name = builder->nodes[definition].payload.constant_definition.name;
-        return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
+    // The values are left on the stack in the order of the source, which is the order of the
+    // results of the function.
+    Ast_Node_Index value = builder->nodes[statement].first_child;
+    for (size_t i = 0; i < return_count; i += 1) {
+        if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
+            return false;
+        }
+
+        // The value on the stack must be what the procedure says that it returns. The expression
+        // was written already, so every name in it is known.
+        Wasm_Type return_type = wasm_signature_return_type(builder, procedure, i);
+        if (not wasm_value_is_accepted(builder, return_type, value)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
+        }
+        value = builder->nodes[value].next_sibling;
     }
     return true;
 }
@@ -3480,6 +3505,15 @@ static bool wasm_build_code_section_body_variable(Wasm_Builder *builder,
     assert(builder->nodes[variable].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION);
 
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+
+    // A name after the first of the definition of several is given its value by the first.
+    if (builder->nodes[variable].result_index > 0) {
+        return true;
+    }
+    if (builder->nodes[variable].result_count > 0) {
+        return wasm_build_code_section_body_results(builder, definition, variable);
+    }
+
     Ast_Node_Index declared = builder->nodes[variable].first_child;
     Ast_Node_Index value = builder->nodes[variable].last_child;
     Wasm_Type variable_type = wasm_variable_type(builder, variable);
@@ -3516,16 +3550,77 @@ static bool wasm_build_code_section_body_variable(Wasm_Builder *builder,
         }
     }
 
-    // A variable whose address is taken is stored in the frame, where the address points to.
+    wasm_variable_store(builder, procedure, variable);
+    return true;
+}
+
+/**
+ * Stores the value that is on the stack in `variable`, whose type is known: in the frame when its
+ * address is taken, where the address points to, and in its locals otherwise.
+ */
+static void wasm_variable_store(Wasm_Builder *builder, Ast_Node_Index procedure,
+                                Ast_Node_Index variable) {
+    assert(variable < builder->node_count);
+
+    Wasm_Type variable_type = wasm_variable_type(builder, variable);
     if (wasm_variable_is_in_memory(builder, variable)) {
         wasm_slots_store(builder, procedure, variable_type,
                          wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FRAME),
                          wasm_variable_frame_offset(builder, procedure, variable));
-        return true;
+        return;
     }
 
     wasm_slots_set(builder, variable_type, WASM_OPCODE_LOCAL_SET,
                    wasm_variable_local_index(builder, procedure, variable));
+}
+
+/**
+ * Writes the definition of several names, `first, second := call(...)`, whose first name is
+ * `leader`: the call leaves its values on the stack in the order of the names, so the last name is
+ * stored first. Returns false after it recorded an error.
+ */
+static bool wasm_build_code_section_body_results(Wasm_Builder *builder, Ast_Node_Index definition,
+                                                 Ast_Node_Index leader) {
+    assert(leader < builder->node_count);
+    assert(builder->nodes[leader].result_count > 0);
+
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index call = builder->nodes[leader].last_child;
+    Str name = builder->nodes[leader].payload.variable_definition.name;
+    size_t result_count = builder->nodes[leader].result_count;
+
+    // The call must be of a procedure that returns as many values as there are names.
+    Ast_Node_Index callee = AST_NODE_INDEX_NONE;
+    if (builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
+        not wasm_call_is_built_in(builder, call)) {
+        callee = wasm_call_signature(builder, call);
+    }
+    if (callee == AST_NODE_INDEX_NONE ||
+        ast_procedure_return_count(&builder->nodes[callee]) != result_count) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_RESULT_COUNT_MISMATCH, name);
+    }
+    if (not wasm_build_code_section_body_expression(builder, definition, call, false)) {
+        return false;
+    }
+
+    // The names after the first are the definitions at the end of the group, which is where the
+    // parser made them, so the last one is the last node before the next statement.
+    Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
+    for (size_t position = result_count; position > 0; position -= 1) {
+        Ast_Node_Index variable = leader;
+        if (position > 1) {
+            for (Ast_Node_Index node = leader + 1; node < end; node += 1) {
+                if (builder->nodes[node].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION &&
+                    builder->nodes[node].result_index == position - 1 &&
+                    ast_variable_leader(builder->nodes, node) == leader) {
+                    variable = node;
+                    break;
+                }
+            }
+            assert(variable != leader);
+        }
+        wasm_variable_store(builder, procedure, variable);
+    }
     return true;
 }
 
@@ -3565,6 +3660,19 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
             }
         }
 
+        if (statement_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION &&
+            statement_node->result_index > 0) {
+            // A name after the first of several has the type of the value of the call at its
+            // place, which must be one that the target has. The number of values is checked
+            // where the definition is written.
+            if (wasm_variable_type(builder, statement).kind == WASM_VALUE_TYPE_NONE) {
+                Ast_Node_Index leader = ast_variable_leader(builder->nodes, statement);
+                return wasm_fail(builder, WASM_BUILD_STATUS_RESULT_COUNT_MISMATCH,
+                                 builder->nodes[leader].payload.variable_definition.name);
+            }
+            continue;
+        }
+
         if (statement_node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
             Ast_Node_Index first = statement_node->first_child;
             Ast_Node_Index value = statement_node->last_child;
@@ -3578,6 +3686,22 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
                                      wasm_type_subject(builder, first));
                 }
             } else if (wasm_variable_type(builder, statement).kind == WASM_VALUE_TYPE_NONE) {
+                // A call that returns several values needs a name for each of them.
+                if (statement_node->result_count == 0 &&
+                    builder->nodes[value].node_type == AST_NODE_TYPE_CALL &&
+                    not wasm_call_is_built_in(builder, value)) {
+                    Ast_Node_Index callee = wasm_call_signature(builder, value);
+                    if (callee != AST_NODE_INDEX_NONE &&
+                        ast_procedure_return_count(&builder->nodes[callee]) > 1) {
+                        return wasm_fail(builder, WASM_BUILD_STATUS_RESULT_COUNT_MISMATCH,
+                                         statement_node->payload.variable_definition.name);
+                    }
+                }
+                if (statement_node->result_count > 0 &&
+                    builder->nodes[value].node_type == AST_NODE_TYPE_CALL) {
+                    return wasm_fail(builder, WASM_BUILD_STATUS_RESULT_COUNT_MISMATCH,
+                                     statement_node->payload.variable_definition.name);
+                }
                 return wasm_expression_fail(builder, definition, value);
             }
 
@@ -3793,6 +3917,15 @@ static Wasm_Type wasm_variable_type(Wasm_Builder const *builder, Ast_Node_Index 
             }
             return wasm_type_element(sequence);
         }
+        // A name of the definition of several gets the type of the value of the call at its place.
+        if (current_node->result_count > 0 || current_node->result_index > 0) {
+            Ast_Node_Index leader = current;
+            if (current_node->result_index > 0) {
+                leader = ast_variable_leader(builder->nodes, current);
+            }
+            return wasm_call_result_type(builder, builder->nodes[leader].last_child,
+                                         current_node->result_index);
+        }
         if (wasm_node_is_type(builder, current_node->first_child)) {
             return wasm_type_of_node(builder, current_node->first_child);
         }
@@ -3897,11 +4030,13 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
         if (callee == AST_NODE_INDEX_NONE) {
             return wasm_type_make(WASM_VALUE_TYPE_NONE);
         }
-        Str return_type = ast_procedure_return_type(&builder->nodes[callee]);
-        if (return_type.bytes == NULL) {
+        // A call that returns several values is not a value of one type, so it is not one where
+        // a value is wanted. The definition of several names reads its types, see
+        // `wasm_call_result_type`.
+        if (ast_procedure_return_count(&builder->nodes[callee]) != 1) {
             return wasm_type_make(WASM_VALUE_TYPE_NONE);
         }
-        return wasm_type_of_name(builder, return_type);
+        return wasm_signature_return_type(builder, callee, 0);
     }
     case AST_NODE_TYPE_STRING_LITERAL:
         return wasm_type_make(WASM_VALUE_TYPE_STR);
@@ -6304,10 +6439,16 @@ static Wasm_Type wasm_literal_expected_type_in(Wasm_Builder const *builder,
     Wasm_Type expected = wasm_type_make(WASM_VALUE_TYPE_NONE);
     switch (parent_node->node_type) {
     case AST_NODE_TYPE_RETURN_STATEMENT: {
-        Str return_type = ast_procedure_return_type(
-            &builder->nodes[wasm_procedure_of(builder, definition)]);
-        if (return_type.bytes != NULL) {
-            expected = wasm_type_of_name(builder, return_type);
+        // The place of the value among the values says which return type it is given.
+        size_t position = 0;
+        for (Ast_Node_Index value = parent_node->first_child;
+             value != literal && value != AST_NODE_INDEX_NONE;
+             value = builder->nodes[value].next_sibling) {
+            position += 1;
+        }
+        Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+        if (position < ast_procedure_return_count(&builder->nodes[procedure])) {
+            expected = wasm_signature_return_type(builder, procedure, position);
         }
         break;
     }
@@ -6497,9 +6638,7 @@ static Wasm_Type wasm_type_of_procedure(Wasm_Builder const *builder,
             return wasm_type_make(WASM_VALUE_TYPE_NONE);
         }
     }
-    Str return_type = ast_procedure_return_type(&builder->nodes[procedure_type]);
-    if (return_type.bytes != NULL &&
-        wasm_type_of_name(builder, return_type).kind == WASM_VALUE_TYPE_NONE) {
+    if (wasm_signature_return_unsupported(builder, procedure_type).bytes != NULL) {
         return wasm_type_make(WASM_VALUE_TYPE_NONE);
     }
 
@@ -7106,13 +7245,17 @@ static bool wasm_signature_equals(Wasm_Builder const *builder, Ast_Node_Index fi
         }
     }
 
-    Str first_return = ast_procedure_return_type(&builder->nodes[first]);
-    Str second_return = ast_procedure_return_type(&builder->nodes[second]);
-    if (first_return.bytes == NULL || second_return.bytes == NULL) {
-        return first_return.bytes == second_return.bytes;
+    size_t return_count = ast_procedure_return_count(&builder->nodes[first]);
+    if (return_count != ast_procedure_return_count(&builder->nodes[second])) {
+        return false;
     }
-    return wasm_type_equals(wasm_type_of_name(builder, first_return),
-                            wasm_type_of_name(builder, second_return));
+    for (size_t i = 0; i < return_count; i += 1) {
+        if (not wasm_type_equals(wasm_signature_return_type(builder, first, i),
+                                 wasm_signature_return_type(builder, second, i))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /**
@@ -7177,6 +7320,74 @@ static size_t wasm_signature_type_index(Wasm_Builder const *builder, Ast_Node_In
  * to a procedure. A constant is called by its name, and a variable, a parameter or a global
  * variable is called through the pointer it holds, whose type says the signature.
  */
+/**
+ * Returns the type of the value that `signature`, an `AST_NODE_TYPE_PROCEDURE` or an
+ * `AST_NODE_TYPE_PROCEDURE_TYPE`, returns at position `index`, which is less than the number of
+ * values that it returns, or a type of the kind `WASM_VALUE_TYPE_NONE` when the target has no type
+ * of that name.
+ */
+static Wasm_Type wasm_signature_return_type(Wasm_Builder const *builder, Ast_Node_Index signature,
+                                            size_t index) {
+    assert(signature < builder->node_count);
+
+    return wasm_type_of_name(builder,
+                             ast_procedure_return_type_at(&builder->nodes[signature], index));
+}
+
+/**
+ * Returns the return type of `signature` that the target has no type for, as the text of the
+ * source, or a `Str` whose `bytes` is NULL when it has a type for each one.
+ */
+static Str wasm_signature_return_unsupported(Wasm_Builder const *builder,
+                                             Ast_Node_Index signature) {
+    assert(signature < builder->node_count);
+
+    size_t count = ast_procedure_return_count(&builder->nodes[signature]);
+    for (size_t i = 0; i < count; i += 1) {
+        Str name = ast_procedure_return_type_at(&builder->nodes[signature], i);
+        if (wasm_type_of_name(builder, name).kind == WASM_VALUE_TYPE_NONE) {
+            return name;
+        }
+    }
+    return STR_EMPTY;
+}
+
+/**
+ * Returns the number of WebAssembly values that `signature` returns together, which is more than
+ * the number of its return types when one is a `Str`. Its return types must have been checked.
+ */
+static size_t wasm_signature_return_slot_count(Wasm_Builder const *builder,
+                                               Ast_Node_Index signature) {
+    assert(signature < builder->node_count);
+
+    size_t count = ast_procedure_return_count(&builder->nodes[signature]);
+    size_t slot_count = 0;
+    for (size_t i = 0; i < count; i += 1) {
+        slot_count += wasm_type_slot_count(builder, wasm_signature_return_type(builder, signature, i));
+    }
+    return slot_count;
+}
+
+/**
+ * Returns the type of the value at position `index` that the call `call` gives, or a type of the
+ * kind `WASM_VALUE_TYPE_NONE` when the call is not of a procedure that returns that many values.
+ */
+static Wasm_Type wasm_call_result_type(Wasm_Builder const *builder, Ast_Node_Index call,
+                                       size_t index) {
+    assert(call < builder->node_count);
+
+    if (builder->nodes[call].node_type != AST_NODE_TYPE_CALL ||
+        wasm_call_is_built_in(builder, call)) {
+        return wasm_type_make(WASM_VALUE_TYPE_NONE);
+    }
+    Ast_Node_Index callee = wasm_call_signature(builder, call);
+    if (callee == AST_NODE_INDEX_NONE ||
+        index >= ast_procedure_return_count(&builder->nodes[callee])) {
+        return wasm_type_make(WASM_VALUE_TYPE_NONE);
+    }
+    return wasm_signature_return_type(builder, callee, index);
+}
+
 static Ast_Node_Index wasm_call_signature(Wasm_Builder const *builder, Ast_Node_Index call) {
     assert(call < builder->node_count);
     assert(builder->nodes[call].node_type == AST_NODE_TYPE_CALL);

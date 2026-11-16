@@ -435,6 +435,30 @@
                     }
                 },
                 {
+                    "comment": "The several return types of a procedure or of a procedure type, written in parentheses after its parameters, as in proc(a: Int) (Int, Str) ->.",
+                    "begin": "(?<=\\))[ \\t]*(\\()(?=[ \\t]*\\^*[ \\t]*[A-Za-z_][A-Za-z0-9_]*[ \\t]*,)",
+                    "end": "\\)",
+                    "patterns": [
+                        {
+                            "match": "\\^",
+                            "name": "keyword.operator.pointer.mialu"
+                        },
+                        {
+                            "match": "((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|enum|struct|union|match|case|cast|type_info_of|const|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                            "captures": {
+                                "1": {
+                                    "name": "entity.name.type.mialu",
+                                    "patterns": [
+                                        {
+                                            "include": "#primitive-types"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                },
+                {
                     "match": "(?<=\\))[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|enum|struct|union|match|case|cast|type_info_of|const|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
                     "captures": {
                         "1": {

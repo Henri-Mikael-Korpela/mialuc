@@ -321,7 +321,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_PROCEDURE`: first one child per parameter, then one child per statement of the
  *   body, which are variable definitions, assignments, if statements, loops, jumps and return
  *   statements. A foreign procedure has one `AST_NODE_TYPE_FOREIGN_BODY` instead of statements. The
- *   return type is in the payload.
+ *   return type is in the payload, which is the text of the types that it returns: one, or two or
+ *   more in parentheses separated by commas, as in `(Int, Str)`, see `ast_procedure_return_count`.
  * - `AST_NODE_TYPE_PROCEDURE_TYPE`: one child per parameter, in the order of the source, each one a
  *   type: an `AST_NODE_TYPE_TYPE_NAME` or an `AST_NODE_TYPE_POINTER_TYPE`, and never a procedure
  *   type, an array or an array slice. It is the `proc(Int, Int) Int` of `^proc(Int, Int) Int`, the
@@ -339,7 +340,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   the subject). Whether the end is part of the range is in the payload. It is the child of an
  *   `AST_NODE_TYPE_FOR_STATEMENT` or the pattern of an `AST_NODE_TYPE_MATCH_CASE`, and not an
  *   expression itself.
- * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child, the returned value. The word `return` is in the
+ * - `AST_NODE_TYPE_RETURN_STATEMENT`: one child for each returned value, in the order of the
+ *   source, each one an expression: one value, or as many as the procedure has return types,
+ *   separated by commas in the source, as in `return a / b, a - b`. The word `return` is in the
  *   payload, like the word of a `break`.
  * - `AST_NODE_TYPE_SCOPE_STATEMENT`: an optional `AST_NODE_TYPE_LABEL`, and then the
  *   `AST_NODE_TYPE_BLOCK` that runs once, in a scope of its own. A `break` inside it leaves it.
@@ -387,7 +390,15 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   definition that gives a type can leave the value out, and then the type is its only child and
  *   the variable gets the default value of the type.
  *   Without it the type is deduced from the value, so the value is the only child. The name is in
- *   the payload.
+ *   the payload. The values of a call that returns several are defined together, as in
+ *   `quotient, remainder := divide(7, 2)`, by one definition for each name, one after the other as
+ *   statements, with nothing between them. The first, the leader, has the call as its value and
+ *   the number of names as `result_count`, and gets the first value. Each of the others has no
+ *   children, `result_index` is its position among the names, and the leader is the closest
+ *   definition before it that has a `result_count`, see `ast_variable_leader`: it gets the value
+ *   of the call that is at its position. The name `_` takes
+ *   the place of a value that is not wanted, and is not a variable that can be used. The type of a
+ *   definition of several names is always deduced.
  */
 typedef struct {
     Ast_Node_Type node_type;
@@ -400,6 +411,10 @@ typedef struct {
     // information tells from it on which line a statement is. Sources are far below 4 GiB, see
     // `SOURCE_SIZE_BYTES_MAX` in main.c.
     uint32_t source_offset;
+    // Only for an `AST_NODE_TYPE_VARIABLE_DEFINITION` of several names, see there. The two fit in
+    // the padding that the 8-byte alignment of the payload leaves. Both are 0 for every other node.
+    uint16_t result_count;
+    uint16_t result_index;
     // This union is named, because unnamed unions are C11 and the project uses C99.
     // Only the member that matches `node_type` is meaningful.
     union {
@@ -556,6 +571,13 @@ typedef struct {
 STATIC_ASSERT(sizeof(Ast_Node) == 40, ast_node_size_is_40_bytes);
 
 /**
+ * Returns the leader of `definition`, an `AST_NODE_TYPE_VARIABLE_DEFINITION` that is one of
+ * several names of the values of a call, which has a `result_index` of at least 1: the first of the
+ * names, which has the call.
+ */
+Ast_Node_Index ast_variable_leader(Ast_Node const *nodes, Ast_Node_Index definition);
+
+/**
  * Returns whether nodes of `node_type` are assignments: statements that change the value of a
  * variable, such as `x += 1`. They all have the same shape, the variable and then the value, see
  * the children of each type above.
@@ -586,6 +608,21 @@ Ast_Node_Index ast_match_case_block(Ast_Node const *nodes, Ast_Node_Index match_
  * it returns nothing. For a procedure type that is not what the payload holds, see above.
  */
 Str ast_procedure_return_type(Ast_Node const *procedure);
+
+/**
+ * Returns how many values `procedure`, an `AST_NODE_TYPE_PROCEDURE` or an
+ * `AST_NODE_TYPE_PROCEDURE_TYPE`, returns: 0 when it returns nothing, 1 for a return type that is
+ * a name, and the number of the types that are between the parentheses of a return type such as
+ * `(Int, Str)`.
+ */
+size_t ast_procedure_return_count(Ast_Node const *procedure);
+
+/**
+ * Returns the type that `procedure` returns at position `index`, which is less than the number
+ * that `ast_procedure_return_count` gives, as the text of the source, without the spaces around it.
+ * For a procedure that returns one value, it is the whole return type.
+ */
+Str ast_procedure_return_type_at(Ast_Node const *procedure, size_t index);
 
 /**
  * Returns whether `procedure`, an `AST_NODE_TYPE_PROCEDURE`, is declared in a `foreign` block: it
