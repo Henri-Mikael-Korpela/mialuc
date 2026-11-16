@@ -1,18 +1,18 @@
-// This file works out the values that are known when a program is compiled: literals, the
-// constants that are defined with them, and the operators that combine them.
+// This file works out the values that are known when a program is compiled: literals, the constants
+// that are defined with them, and the operators that combine them.
 //
 // A literal is untyped. It has a kind, which is an integer, a float, a truth value or a string, but
 // no size, so the number 200 is neither an `Int` nor a `Byte` until it is used somewhere. The place
 // decides: where a `Byte` is wanted it becomes one, if it fits, and where nothing says, it becomes
 // its default type, `Int`. An integer is never a float: `1` and `1.0` are different kinds of
-// literal, and neither is converted to the other without `cast`. A constant that is defined without a type, such as `LIMIT :: 200`, is
-// untyped in the same way, so it can be used wherever its value fits, and arithmetic of untyped
-// values gives an untyped value. That is how a literal can be given to every type that can hold it
-// without the program converting anything when it runs, and without a literal having a type that
-// is wrong for most places, as an `int` literal is in C.
+// literal, and neither is converted to the other without `cast`. A constant that is defined without
+// a type, such as `LIMIT :: 200`, is untyped in the same way, so it can be used wherever its value
+// fits, and arithmetic of untyped values gives an untyped value. That is how a literal can be given
+// to every type that can hold it without the program converting anything when it runs, and without
+// a literal having a type that is wrong for most places, as an `int` literal is in C.
 //
-// The values of all the nodes are kept in a table that the caller owns, one entry per node, so
-// that a constant that is used many times is worked out once.
+// The values of all the nodes are kept in a table that the caller owns, one entry per node, so that
+// a constant that is used many times is worked out once.
 #include <assert.h>
 #include <iso646.h>
 #include <stdbool.h>
@@ -57,6 +57,7 @@ static Constant_Value constant_logical         (Ast_Node const *nodes, Ast_Node_
                                                 Constant_Value left, Constant_Value right);
 static Constant_Value constant_float_arithmetic(Ast_Node const *nodes, Ast_Node_Index operation,
                                                 Constant_Value left, Constant_Value right);
+static Constant_Type  constant_float_type      (Constant_Value left, Constant_Value right);
 static Constant_Value constant_float_make      (Constant_Type type, double floating);
 static Constant_Value constant_make            (Constant_Type type, int64_t integer);
 static Constant_Value constant_multiply        (Constant_Value left, Constant_Value right,
@@ -194,11 +195,13 @@ Constant_Type constant_type_default(Constant_Type type) {
     case CONSTANT_TYPE_BOOL:
     case CONSTANT_TYPE_BYTE:
     case CONSTANT_TYPE_F32:
+    case CONSTANT_TYPE_F64:
     case CONSTANT_TYPE_INT:
     case CONSTANT_TYPE_STR:
         return type;
     case CONSTANT_TYPE_UNTYPED_FLOAT:
-        return CONSTANT_TYPE_F32;
+        // The widest float, which holds every number that a literal can be, and every `F32`.
+        return CONSTANT_TYPE_F64;
     case CONSTANT_TYPE_UNTYPED_BOOL:
         return CONSTANT_TYPE_BOOL;
     case CONSTANT_TYPE_UNTYPED_INTEGER:
@@ -418,6 +421,9 @@ static Constant_Value constant_convert(Ast_Node const *nodes, Ast_Node_Index def
     } else if (str_equals(name, STR("F32"))) {
         target = CONSTANT_TYPE_F32;
         untyped = CONSTANT_TYPE_UNTYPED_FLOAT;
+    } else if (str_equals(name, STR("F64"))) {
+        target = CONSTANT_TYPE_F64;
+        untyped = CONSTANT_TYPE_UNTYPED_FLOAT;
     } else if (str_equals(name, STR("Bool"))) {
         target = CONSTANT_TYPE_BOOL;
         untyped = CONSTANT_TYPE_UNTYPED_BOOL;
@@ -494,20 +500,41 @@ static Constant_Value constant_arithmetic(Ast_Node const *nodes, Ast_Node_Index 
 }
 
 /**
+ * Returns the type of the arithmetic or the comparison of two constants that are floats: the type
+ * of the operand that has one, which is `CONSTANT_TYPE_UNTYPED_FLOAT` when neither has. Two typed
+ * floats must have the same type, and when they do not, the result is
+ * `CONSTANT_TYPE_UNTYPED_INTEGER`, which no float has and the caller turns into an error.
+ */
+static Constant_Type constant_float_type(Constant_Value left, Constant_Value right) {
+    assert(constant_type_is_float(left.type));
+    assert(constant_type_is_float(right.type));
+
+    if (left.type == CONSTANT_TYPE_UNTYPED_FLOAT) {
+        return right.type;
+    }
+    if (right.type == CONSTANT_TYPE_UNTYPED_FLOAT || right.type == left.type) {
+        return left.type;
+    }
+    return CONSTANT_TYPE_UNTYPED_INTEGER;
+}
+
+/**
  * Returns the value of the arithmetic `operation` of two constants that are floats. Two untyped
- * floats give an untyped one, an untyped one with an `F32` gives an `F32`, and two typed floats must
- * have the same type. The result is worked out as a `double` and rounded to the type, which is the
- * result that a running program has. A division by zero is an error, and so is a result that is
- * infinite, so that no constant is ever one.
+ * floats give an untyped one, an untyped one with a typed float gives that type, and two typed
+ * floats must have the same type. The result is worked out as a `double` and rounded to the type,
+ * which is the result that a running program has. A division by zero is an error, and so is a
+ * result that is infinite, so that no constant is ever one.
  */
 static Constant_Value constant_float_arithmetic(Ast_Node const *nodes, Ast_Node_Index operation,
                                                 Constant_Value left, Constant_Value right) {
     assert(constant_type_is_float(left.type));
     assert(constant_type_is_float(right.type));
 
-    Constant_Type type = CONSTANT_TYPE_UNTYPED_FLOAT;
-    if (left.type == CONSTANT_TYPE_F32 || right.type == CONSTANT_TYPE_F32) {
-        type = CONSTANT_TYPE_F32;
+    Constant_Type type = constant_float_type(left, right);
+    if (type == CONSTANT_TYPE_UNTYPED_INTEGER) {
+        return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, operation);
+    }
+    if (type == CONSTANT_TYPE_F32) {
         // An untyped operand takes the type of the typed one, so it has to fit in it.
         if (left.type == CONSTANT_TYPE_UNTYPED_FLOAT && not constant_is_f32(left)) {
             return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, operation);
@@ -659,7 +686,7 @@ static Constant_Value constant_comparison(Ast_Node const *nodes, Ast_Node_Index 
     } else if (constant_type_is_float(left.type) && constant_type_is_float(right.type)) {
         bool is_left_untyped = left.type == CONSTANT_TYPE_UNTYPED_FLOAT;
         bool is_right_untyped = right.type == CONSTANT_TYPE_UNTYPED_FLOAT;
-        if (not is_left_untyped && not is_right_untyped && left.type != right.type) {
+        if (constant_float_type(left, right) == CONSTANT_TYPE_UNTYPED_INTEGER) {
             return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, comparison);
         }
         if (left.type == CONSTANT_TYPE_F32 && is_right_untyped && not constant_is_f32(right)) {
@@ -793,7 +820,8 @@ static bool constant_type_is_bool(Constant_Type type) {
 }
 
 static bool constant_type_is_float(Constant_Type type) {
-    return type == CONSTANT_TYPE_F32 || type == CONSTANT_TYPE_UNTYPED_FLOAT;
+    return type == CONSTANT_TYPE_F32 || type == CONSTANT_TYPE_F64 ||
+           type == CONSTANT_TYPE_UNTYPED_FLOAT;
 }
 
 static bool constant_type_is_integer(Constant_Type type) {

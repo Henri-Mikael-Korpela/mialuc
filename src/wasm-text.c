@@ -17,8 +17,8 @@
 enum {
     // The longest decimal number that is written: `UINT64_MAX` has 20 digits.
     WASM_TEXT_DECIMAL_DIGITS_MAX = 20,
-    // The most digits that tell two `float` values apart, and two `double` values, which is how many
-    // `wasm_text_write_float` needs to write a number so that it reads back the same.
+    // The most digits that tell two `float` values apart, and two `double` values, which is how
+    // many `wasm_text_write_float` needs to write a number so that it reads back the same.
     WASM_TEXT_DIGITS_F32 = 9,
     WASM_TEXT_DIGITS_F64 = 17,
     // The natural alignment of a 64-bit load or store, as a power of two: 8 bytes.
@@ -850,6 +850,66 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             wasm_text_write_float(&formatter->writer, (double)single, WASM_TEXT_DIGITS_F32);
             break;
         }
+        case WASM_OPCODE_F64_CONST: {
+            // The immediate is the 8 bytes of the float, least significant first.
+            uint64_t bits = 0;
+            for (size_t i = 0; i < sizeof(bits); i += 1) {
+                bits |= (uint64_t)wasm_text_read_byte(formatter) << (8 * i);
+            }
+            if (formatter->status != WASM_TEXT_STATUS_OK) {
+                return false;
+            }
+            double number = 0.0;
+            memcpy(&number, &bits, sizeof(number));
+            wasm_text_write_instruction(&formatter->writer, STR("f64.const "));
+            wasm_text_write_float(&formatter->writer, number, WASM_TEXT_DIGITS_F64);
+            break;
+        }
+        case WASM_OPCODE_F32_DEMOTE_F64:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.demote_f64"));
+            break;
+        case WASM_OPCODE_F64_ADD:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.add"));
+            break;
+        case WASM_OPCODE_F64_CONVERT_I32_U:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.convert_i32_u"));
+            break;
+        case WASM_OPCODE_F64_CONVERT_I64_S:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.convert_i64_s"));
+            break;
+        case WASM_OPCODE_F64_DIV:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.div"));
+            break;
+        case WASM_OPCODE_F64_EQ:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.eq"));
+            break;
+        case WASM_OPCODE_F64_GE:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.ge"));
+            break;
+        case WASM_OPCODE_F64_GT:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.gt"));
+            break;
+        case WASM_OPCODE_F64_LE:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.le"));
+            break;
+        case WASM_OPCODE_F64_LT:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.lt"));
+            break;
+        case WASM_OPCODE_F64_MUL:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.mul"));
+            break;
+        case WASM_OPCODE_F64_NE:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.ne"));
+            break;
+        case WASM_OPCODE_F64_PROMOTE_F32:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.promote_f32"));
+            break;
+        case WASM_OPCODE_F64_SUB:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.sub"));
+            break;
+        case WASM_OPCODE_I64_TRUNC_F64_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.trunc_f64_s"));
+            break;
         case WASM_OPCODE_F32_ADD:
             wasm_text_write_instruction(&formatter->writer, STR("f32.add"));
             break;
@@ -964,6 +1024,8 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
         case WASM_OPCODE_I32_STORE8:
         case WASM_OPCODE_F32_LOAD:
         case WASM_OPCODE_F32_STORE:
+        case WASM_OPCODE_F64_LOAD:
+        case WASM_OPCODE_F64_STORE:
         case WASM_OPCODE_I64_LOAD:
         case WASM_OPCODE_I64_STORE: {
             // The immediates are the alignment, as a power of two, and the offset. Like
@@ -984,6 +1046,10 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             } else if (opcode == WASM_OPCODE_F32_STORE) {
                 wasm_text_write_instruction(&formatter->writer, STR("f32.store"));
                 alignment_natural = WASM_TEXT_ALIGNMENT_I32;
+            } else if (opcode == WASM_OPCODE_F64_LOAD) {
+                wasm_text_write_instruction(&formatter->writer, STR("f64.load"));
+            } else if (opcode == WASM_OPCODE_F64_STORE) {
+                wasm_text_write_instruction(&formatter->writer, STR("f64.store"));
             } else if (opcode == WASM_OPCODE_I32_LOAD8_U) {
                 wasm_text_write_instruction(&formatter->writer, STR("i32.load8_u"));
                 alignment_natural = 0;
@@ -1120,12 +1186,19 @@ static bool wasm_text_format_globals(Wasm_Text_Formatter *formatter, Wasm_Text_S
         byte initial_opcode = wasm_text_read_byte(formatter);
         int64_t initial_value = 0;
         float initial_float = 0.0f;
+        double initial_double = 0.0;
         if (initial_opcode == WASM_OPCODE_F32_CONST) {
             uint32_t bits = 0;
             for (size_t byte_index = 0; byte_index < sizeof(bits); byte_index += 1) {
                 bits |= (uint32_t)wasm_text_read_byte(formatter) << (8 * byte_index);
             }
             memcpy(&initial_float, &bits, sizeof(initial_float));
+        } else if (initial_opcode == WASM_OPCODE_F64_CONST) {
+            uint64_t bits = 0;
+            for (size_t byte_index = 0; byte_index < sizeof(bits); byte_index += 1) {
+                bits |= (uint64_t)wasm_text_read_byte(formatter) << (8 * byte_index);
+            }
+            memcpy(&initial_double, &bits, sizeof(initial_double));
         } else {
             initial_value = wasm_text_read_signed_64(formatter);
         }
@@ -1151,6 +1224,8 @@ static bool wasm_text_format_globals(Wasm_Text_Formatter *formatter, Wasm_Text_S
             initial_name = STR("i64.const ");
         } else if (initial_opcode == WASM_OPCODE_F32_CONST) {
             initial_name = STR("f32.const ");
+        } else if (initial_opcode == WASM_OPCODE_F64_CONST) {
+            initial_name = STR("f64.const ");
         }
         if (initial_name.bytes == NULL || end_opcode != WASM_OPCODE_END) {
             return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED, initial_offset);
@@ -1164,6 +1239,8 @@ static bool wasm_text_format_globals(Wasm_Text_Formatter *formatter, Wasm_Text_S
         wasm_text_write(&formatter->writer, initial_name);
         if (initial_opcode == WASM_OPCODE_F32_CONST) {
             wasm_text_write_float(&formatter->writer, (double)initial_float, WASM_TEXT_DIGITS_F32);
+        } else if (initial_opcode == WASM_OPCODE_F64_CONST) {
+            wasm_text_write_float(&formatter->writer, initial_double, WASM_TEXT_DIGITS_F64);
         } else {
             wasm_text_write_signed(&formatter->writer, initial_value);
         }
@@ -1532,6 +1609,9 @@ static Str wasm_text_value_type_name(byte value_type) {
     }
     if (value_type == WASM_TYPE_F32) {
         return STR("f32");
+    }
+    if (value_type == WASM_TYPE_F64) {
+        return STR("f64");
     }
     return STR_EMPTY;
 }

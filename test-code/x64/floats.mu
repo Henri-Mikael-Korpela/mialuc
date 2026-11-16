@@ -1,7 +1,7 @@
 // Floats: `F32` is a 32-bit floating point number, written as a float literal such as `1.42`, and
 // an operation of floats follows IEEE 754. The C library of the platform has no way to print an F32
 // here, because `printf` takes a double, so each result is multiplied by 1000 and printed as the
-// Int that a cast makes of it. Procedures of the C library that take and give a `float` are
+// Int that a cast makes of it, see doubles.mu for printing an F64. Procedures of the C library that take and give a `float` are
 // declared with F32, as `sqrtf` is. The exit code of the program is the number of results that are
 // not what they should be, so 0 means that all of them are.
 
@@ -16,7 +16,7 @@ foreign libc ->
 HALF :: 0.5
 
 /// The initial value of a global variable is a constant, such as a float literal.
-total #(static) := 0.25
+total #(static) : F32 = 0.25
 
 Point :: struct ->
     x: F32
@@ -26,7 +26,7 @@ scale :: proc(x: F32, factor: F32) F32 ->
     return x * factor + 1.0
 
 arithmetic :: proc() F32 ->
-    a := 1.5
+    a : F32 = 1.5
     b : F32 = 2.25
     a += b
     a *= 2.0
@@ -54,7 +54,7 @@ compare :: proc(a: F32, b: F32) Int ->
 
 /// Dividing zero by zero gives not a number, which is not equal to anything, itself included.
 not_a_number :: proc() Int ->
-    zero := 0.0
+    zero : F32 = 0.0
     nan := zero / zero
     result := 0
     if nan == nan ->
@@ -79,7 +79,7 @@ struct_fields :: proc() F32 ->
 
 array_of_floats :: proc() F32 ->
     values := [const]F32 { 1.5, 2.5, 3.0 }
-    sum := 0.0
+    sum : F32 = 0.0
     for value in values ->
         sum += value
     values[0] = 10.0
@@ -87,7 +87,7 @@ array_of_floats :: proc() F32 ->
     return sum + values[0] + values[1]
 
 pointer_to_float :: proc() F32 ->
-    f := 3.5
+    f : F32 = 3.5
     p := %f
     p^ += 1.0
     p^ = p^ * 2.0

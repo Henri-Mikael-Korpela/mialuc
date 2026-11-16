@@ -29,6 +29,8 @@ typedef enum {
     // A constant that is defined with the type `F32`, or arithmetic of one with an untyped float.
     // Its value is a number that an `F32` can hold.
     CONSTANT_TYPE_F32,
+    // A constant that is defined with the type `F64`, or arithmetic of one with an untyped float.
+    CONSTANT_TYPE_F64,
     CONSTANT_TYPE_INT,
     CONSTANT_TYPE_STR,
     // `true`, `false`, a comparison of constants, and `and`, `or` and `not` of untyped truth
@@ -69,8 +71,8 @@ typedef enum {
     // arithmetic does not wrap around as the arithmetic of a running program does, because the
     // number is wrong as soon as it would. `error` is the operator.
     CONSTANT_STATUS_OVERFLOW,
-    // A typed constant whose type is not `Int`, `Byte`, `F32`, `Bool` or `Str`, which are the types
-    // that a constant can have. `error` is the definition.
+    // A typed constant whose type is not `Int`, `Byte`, `F32`, `F64`, `Bool` or `Str`, which are
+    // the types that a constant can have. `error` is the definition.
     CONSTANT_STATUS_TYPE_INVALID,
     // A value that is not of the type that it is given, such as a string for a constant of type
     // `Int`, or a typed `Int` for one of type `Byte`. `error` is the definition.
@@ -91,7 +93,7 @@ typedef enum {
  * when the value is not a string. On an error `error` is the node that the error is about, see
  * `Constant_Status`, and is `AST_NODE_INDEX_NONE` otherwise. `floating` is the number of a float,
  * which is the value that an `F32` holds when the type is `CONSTANT_TYPE_F32`, and is zero for
- * the other types.
+ * the types that are not floats.
  */
 typedef struct {
     double floating;
@@ -121,7 +123,8 @@ typedef struct {
  * Arithmetic is exact, so a step whose result does not fit in 64 bits, or that divides by zero, is
  * an error rather than a number that wrapped around or a trap. Arithmetic of floats is done with
  * `double` and then rounded to the type, which for `+`, `-`, `*` and `/` of `F32` values is the
- * correctly rounded result that the running program has. An untyped operand takes the type
+ * correctly rounded result that the running program has, and for `F64` values is the result that
+ * the program has. An untyped operand takes the type
  * of a typed one, if it fits in it, so `LIMIT + 1` is an `Int` when `LIMIT : Int : 5`, and two
  * untyped operands give an untyped result. A comparison gives an untyped truth value, so that it
  * can be used wherever a `Bool` is.
@@ -158,7 +161,7 @@ bool constant_is_f32(Constant_Value value);
 
 /**
  * Returns the type that a value of `type` has where nothing says which type it should be, such as
- * the value of `x := 42`: `Int` for an untyped integer, `F32` for an untyped float, `Bool` for an
+ * the value of `x := 42`: `Int` for an untyped integer, `F64` for an untyped float, `Bool` for an
  * untyped truth value and `Str` for an untyped string. A typed value keeps its type.
  */
 Constant_Type constant_type_default(Constant_Type type);

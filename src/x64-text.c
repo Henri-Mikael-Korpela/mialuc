@@ -639,21 +639,27 @@ static bool x64_text_format_sse(X64_Text_Formatter *formatter, X64_Text_Cursor *
     bool is_low_float = true;
     bool is_middle_first = true;
     bool is_single = prefix == X64_TEXT_PREFIX_SCALAR_SINGLE;
+    bool is_double = prefix == X64_TEXT_PREFIX_SCALAR_DOUBLE;
     if (prefix == 0 && opcode == X64_TEXT_OPCODE_SSE_COMPARE) {
         mnemonic = STR("ucomiss ");
-    } else if (is_single && opcode == 0x58) {
-        mnemonic = STR("addss ");
-    } else if (is_single && opcode == 0x59) {
-        mnemonic = STR("mulss ");
-    } else if (is_single && opcode == 0x5C) {
-        mnemonic = STR("subss ");
-    } else if (is_single && opcode == 0x5E) {
-        mnemonic = STR("divss ");
-    } else if (is_single && opcode == 0x2A) {
-        mnemonic = STR("cvtsi2ss ");
+    } else if (prefix == X64_TEXT_PREFIX_OPERAND_SIZE && opcode == X64_TEXT_OPCODE_SSE_COMPARE) {
+        mnemonic = STR("ucomisd ");
+    } else if ((is_single || is_double) && opcode == 0x58) {
+        mnemonic = is_single ? STR("addss ") : STR("addsd ");
+    } else if ((is_single || is_double) && opcode == 0x59) {
+        mnemonic = is_single ? STR("mulss ") : STR("mulsd ");
+    } else if ((is_single || is_double) && opcode == 0x5C) {
+        mnemonic = is_single ? STR("subss ") : STR("subsd ");
+    } else if ((is_single || is_double) && opcode == 0x5E) {
+        mnemonic = is_single ? STR("divss ") : STR("divsd ");
+    } else if ((is_single || is_double) && opcode == 0x5A) {
+        // The float of 32 bits that a float of 64 bits is rounded to, and the other way round.
+        mnemonic = is_single ? STR("cvtss2sd ") : STR("cvtsd2ss ");
+    } else if ((is_single || is_double) && opcode == 0x2A) {
+        mnemonic = is_single ? STR("cvtsi2ss ") : STR("cvtsi2sd ");
         is_low_float = false;
-    } else if (is_single && opcode == 0x2C) {
-        mnemonic = STR("cvttss2si ");
+    } else if ((is_single || is_double) && opcode == 0x2C) {
+        mnemonic = is_single ? STR("cvttss2si ") : STR("cvttsd2si ");
         is_middle_float = false;
     } else if (prefix == X64_TEXT_PREFIX_OPERAND_SIZE && opcode == 0x6E) {
         mnemonic = is_wide ? STR("movq ") : STR("movd ");

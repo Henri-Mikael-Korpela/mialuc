@@ -214,6 +214,7 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 | `Byte` | An unsigned 8-bit integer, from 0 to 255. It is the unit of memory and of binary data. See [Bytes](#bytes). |
 | `Int` | A signed 64-bit integer. Written as a number, such as `42`, `0b101010` or `0x2A`. See [Integers](#integers). |
 | `F32` | A 32-bit floating point number. Written as a number with a fractional part, such as `1.42`. See [Floats](#floats). |
+| `F64` | A 64-bit floating point number. Written as a number with a fractional part, such as `1.42`, and the type of one where nothing says. See [Floats](#floats). |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
 | `C_Str` | A null-terminated C string, the address of bytes that end with a zero. It is for passing text to and from code written in C, to a parameter of type `char *` or `char const *`. See [C strings](#c-strings). |
 
@@ -222,7 +223,6 @@ The following primitive data types are reserved for possible future use:
 | Category | Types |
 | -------- | ----- |
 | Character | `Rune` |
-| Floating point number | `F64` |
 | Signed integer | `I8 I16 I32 I64` |
 | Unsigned integer | `U8 U16 U32 U64` |
 
@@ -293,7 +293,7 @@ Whether a `-` is part of a literal depends on where it is. A `-` where an operan
 
 ### Floats
 
-`F32` is a 32-bit floating point number, the IEEE 754 binary32 type that is a `float` in C: it holds numbers of about 7 decimal digits, from about 1.2e-38 to 3.4e38 in size, and also infinity, minus infinity and not a number. It is written as a [float literal](#float-literals), and its default value is `0.0`.
+There are two floating point types: `F32` is a 32-bit floating point number, the IEEE 754 binary32 type that is a `float` in C, which holds numbers of about 7 decimal digits, from about 1.2e-38 to 3.4e38 in size, and `F64` is a 64-bit one, the binary64 type that is a `double` in C, which holds about 15 decimal digits, from about 2.2e-308 to 1.8e308 in size. Both also hold infinity, minus infinity and not a number. They are written as [float literals](#float-literals), and their default value is `0.0`. An `F64` is the type of a float literal where nothing says, as in `x := 1.42`, and an `F32` is written out: `x : F32 = 1.42`.
 
 ```
 scale :: proc(x: F32, factor: F32) F32 ->
@@ -304,9 +304,11 @@ average :: proc(a: F32, b: F32) F32 ->
     return sum / 2.0
 ```
 
-The arithmetic operators `+`, `-`, `*` and `/` take two `F32` values and give an `F32`, and so do the assignment operators `+=`, `-=`, `*=` and `/=`, see [Operators](#operators). The comparison operators take two `F32` values, see [Comparison operators](#comparison-operators). Nothing is converted implicitly, so an `Int` is not an `F32` and an operand that is a mixture of them is an error, and `cast` converts, see [Casts](#casts): `cast(F32)count` makes an `F32` of an `Int`, and `cast(Int)ratio` makes an `Int` of an `F32`, dropping its fraction. An untyped float, which a float literal is, becomes an `F32` where one is wanted, see [Untyped constants](#untyped-constants).
+The arithmetic operators `+`, `-`, `*` and `/` take two floats of one type and give a float of that type, and so do the assignment operators `+=`, `-=`, `*=` and `/=`, see [Operators](#operators). The comparison operators take two floats of one type, see [Comparison operators](#comparison-operators). Nothing is converted implicitly, so an `Int` is not a float, an `F32` is not an `F64`, and an operand that is a mixture of them is an error, and `cast` converts, see [Casts](#casts): `cast(F32)count` makes an `F32` of an `Int`, `cast(Int)ratio` makes an `Int` of a float, dropping its fraction, and `cast(F64)small` and `cast(F32)large` change the size. An untyped float, which a float literal is, becomes an `F32` or an `F64` where one is wanted, see [Untyped constants](#untyped-constants).
 
-An operation of floats follows IEEE 754, so it never traps and never wraps around: a result that is too large is infinity, `1.0 / 0.0` is infinity when the program runs, and `0.0 / 0.0` is not a number. A comparison with not a number is false for all of `==`, `<`, `<=`, `>` and `>=`, and true for `not=`, so a number that is not equal to itself is not a number. Every result is rounded to the nearest `F32`, so `0.1 + 0.2 == 0.3` is not true in the way that it is not in any language that has floats, and a comparison for equality of results that are computed is usually wrong: compare the difference with a small number instead. The result of a division by zero is known when the program is compiled when both operands are constants, which is an error, see [Constants](#constants).
+An operation of floats follows IEEE 754, so it never traps and never wraps around: a result that is too large is infinity, `1.0 / 0.0` is infinity when the program runs, and `0.0 / 0.0` is not a number. A comparison with not a number is false for all of `==`, `<`, `<=`, `>` and `>=`, and true for `not=`, so a number that is not equal to itself is not a number. Every result is rounded to the nearest number of its type, so `0.1 + 0.2 == 0.3` is not true in the way that it is not in any language that has floats, in either type, and a comparison for equality of results that are computed is usually wrong: compare the difference with a small number instead. The result of a division by zero is known when the program is compiled when both operands are constants, which is an error, see [Constants](#constants).
+
+The result of an `F32` is the same on every target, because the operations are the ones of the standard and nothing in between is kept in more digits than the type has. A procedure of the C library that takes a `float` is declared with an `F32` and one that takes a `double` with an `F64`, see [Foreign procedures in the C library](#foreign-procedures-in-the-c-library).
 
 > **Lessons learnt from C** In C, an integer is converted to a float and a float to a double without being asked to, so `1 / 2 * x` is 0 and `1.0 / 2 * x` is not, and a `float` that is passed to a procedure that takes a variable number of arguments is converted to a `double`, which a format that expects a `float` reads wrongly. In Mialu a float is never converted to another type unless `cast` says so, so `1 / 2.0` is an error, and what a procedure receives is of the type that is written.
 
@@ -324,7 +326,7 @@ There are digits on both sides of the dot, so `1.` and `.5` are not literals: wr
 
 A float literal is not an integer: `1.0` and `1` are different literals, and an integer is not converted to a float or the other way round without `cast`. The value of a literal is the number that its digits are nearest to, as a 64-bit floating point number (a `double` in C), so `1.42` is stored as the nearest number to it that the type can hold, which is not exactly 1.42 for most numbers, as in every language that has floats. A literal that is larger than the largest 64-bit float, about 1.8e308, is an error. A `-` directly before the digits makes a signed float literal in the same places where it makes a signed integer literal, see [Signed integer literals](#signed-integer-literals), so `-0.5` is one literal and `a - 0.5` subtracts.
 
-A float literal is untyped, like an integer literal, and it is an [`F32`](#floats) where one is wanted, and where nothing says, as in `x := 1.42`, which is the default type of a float, see [Untyped constants](#untyped-constants). A literal that is too large for an `F32`, above about 3.4e38, is an error there. Arithmetic and comparisons of float literals are known when the program is compiled, as they are for integer literals, so `1.5 + 2.25` is the untyped float 3.75, and dividing by zero is an error there.
+A float literal is untyped, like an integer literal, and it is an [`F32`](#floats) or an [`F64`](#floats) where one is wanted, and an `F64` where nothing says, as in `x := 1.42`, which is the default type of a float, see [Untyped constants](#untyped-constants). A literal that is too large for an `F32`, above about 3.4e38, is an error where an `F32` is wanted, and it is rounded to the nearest number of the type, so `0.1` is not exactly 0.1 in either. Arithmetic and comparisons of float literals are known when the program is compiled, as they are for integer literals, so `1.5 + 2.25` is the untyped float 3.75, and dividing by zero is an error there.
 
 ### Strings
 
@@ -414,7 +416,7 @@ See [Variables](#variables) for variable definitions and [Constants](#constants)
 
 ### Arithmetic operators
 
-Addition, subtraction, multiplication and division are defined for [`Int`](#integers) and for [`F32`](#floats), so both operands must be `Int` or both must be `F32`, and the result is of the same type, and `a + 1.5` is an error when `a` is an `Int`. A [`Byte`](#bytes) has no arithmetic, and is converted with [`cast(Int)`](#casts) first.
+Addition, subtraction, multiplication and division are defined for [`Int`](#integers) and for the [float types](#floats), so both operands must be `Int` or both must be of one float type, and the result is of the same type, and `a + 1.5` is an error when `a` is an `Int`, and so is the sum of an `F32` and an `F64`. A [`Byte`](#bytes) has no arithmetic, and is converted with [`cast(Int)`](#casts) first.
 
 | Operator | Meaning | Precedence | Example |
 |----------|---------|------------|---------|
@@ -425,7 +427,7 @@ Addition, subtraction, multiplication and division are defined for [`Int`](#inte
 
 `+` and `-` have the same precedence, and so do `*` and `/`, and operators of the same precedence are left associative. So `a + b + c` means `(a + b) + c`, `a - b + c` means `(a - b) + c`, `5 - 1 + 2` is 6 and not 2, and `8 / 2 * 3` is 12 and not 1. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2. Parentheses are not part of the language, so the order is changed by naming a part of the expression in a variable.
 
-Division of `Int` values truncates toward zero, so `7 / 2` is 3 and `-7 / 2` is -3, while division of `F32` values is not truncated, so `7.0 / 2.0` is 3.5. Dividing by zero is an error at run time, see [WebAssembly](#webassembly), and an error at compile-time when both operands are constants, see [Constants](#constants). Arithmetic that goes beyond the range of an `Int` wraps around when the program runs. The arithmetic can be combined with an assignment, see [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators).
+Division of `Int` values truncates toward zero, so `7 / 2` is 3 and `-7 / 2` is -3, while division of floats is not truncated, so `7.0 / 2.0` is 3.5. Dividing by zero is an error at run time, see [WebAssembly](#webassembly), and an error at compile-time when both operands are constants, see [Constants](#constants). Arithmetic that goes beyond the range of an `Int` wraps around when the program runs. The arithmetic can be combined with an assignment, see [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators).
 
 ### Assignment and compound assignment operators
 
@@ -454,9 +456,9 @@ swap :: proc() Int ->
     return a * 10 + b
 ```
 
-`swap` returns 73. An assignment can be in a block of an if or a for statement, and the variable that it assigns to can be defined above the block. A variable that is defined with a type and no value, such as `x : Int`, is given its value with `=` as well. The name must stand for a variable, so `n = 2` is an error for a parameter `n`, and so is assigning to a constant or to the iterator of a for statement. The other assignments work on an `Int` or an `F32`. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was.
+`swap` returns 73. An assignment can be in a block of an if or a for statement, and the variable that it assigns to can be defined above the block. A variable that is defined with a type and no value, such as `x : Int`, is given its value with `=` as well. The name must stand for a variable, so `n = 2` is an error for a parameter `n`, and so is assigning to a constant or to the iterator of a for statement. The other assignments work on an `Int` or a float. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was.
 
-A compound assignment operator applies an arithmetic operator to the variable and the value, and stores the result in the variable, so `x += 2` means `x = x + 2`. The variable and the value must be both `Int` or both `F32`.
+A compound assignment operator applies an arithmetic operator to the variable and the value, and stores the result in the variable, so `x += 2` means `x = x + 2`. The variable and the value must be both `Int` or both floats of one type.
 
 | Operator | Meaning |
 |----------|---------|
@@ -524,7 +526,7 @@ is_even :: proc(n: Int) Bool ->
     return n / 2 * 2 == n
 ```
 
-Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. Two [`F32`](#floats) values can be compared with all six operators too, and an untyped float is an `F32` there, so `x < 0.5` is allowed. A comparison with not a number is false, except `not=`, which is true. `Int`, `Byte` and `F32` are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an untyped integer from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Strings cannot be compared.
+Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. Two [floats](#floats) of one type can be compared with all six operators too, and an untyped float is of that type there, so `x < 0.5` is allowed whether `x` is an `F32` or an `F64`. A comparison with not a number is false, except `not=`, which is true. `Int`, `Byte` and the floats are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an untyped integer from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Strings cannot be compared.
 
 A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, see [Operators](#operators).
 
@@ -578,17 +580,21 @@ increment :: proc() Int ->
 
 A cast converts a value to another type with `cast(Type)` before the value: `my_int := cast(Int)my_byte`. Nothing is converted implicitly in Mialu, so a cast is how a value of one type is used as a value of another, and it is written wherever the conversion happens, which makes it easy to find.
 
-A cast to `Int` of a `Byte` or a `Bool` never loses anything, and a cast of an `Int` to an `F32` rounds to the nearest `F32` when the number has more digits than it holds, and a cast of an `F32` to an `Int` drops the fraction, truncating toward zero, and stops the program for a number that is not in the range of an `Int` and for not a number, since there is no `Int` for it. Today these casts are allowed, and every other one is an error:
+A cast to `Int` of a `Byte` or a `Bool` never loses anything, and a cast of an `Int` to a float rounds to the nearest number of the type when the number has more digits than it holds, and a cast of a float to an `Int` drops the fraction, truncating toward zero, and stops the program for a number that is not in the range of an `Int` and for not a number, since there is no `Int` for it. A cast of an `F32` to an `F64` never loses anything, and a cast of an `F64` to an `F32` rounds, to infinity for a number that is too large. Today these casts are allowed, and every other one is an error:
 
 | From | To | Result |
 |------|----|--------|
 | `Byte` | `Int` | The number of the byte, from 0 to 255. |
 | `Bool` | `Int` | 1 for `true` and 0 for `false`. |
 | `Int` | `Int` | The same number. |
-| `F32` | `Int` | The number with its fraction dropped, truncated toward zero, so `-3.75` is -3. The program stops for a number that is not in the range of an `Int`, and for not a number. |
-| `Byte` | `F32` | The number of the byte, exactly. |
+| `F32` or `F64` | `Int` | The number with its fraction dropped, truncated toward zero, so `-3.75` is -3. The program stops for a number that is not in the range of an `Int`, and for not a number. |
+| `Byte` | `F32` or `F64` | The number of the byte, exactly. |
 | `Int` | `F32` | The nearest `F32`, which is the number itself when it has at most 24 significant bits. |
+| `Int` | `F64` | The nearest `F64`, which is the number itself when it has at most 53 significant bits. |
+| `F32` | `F64` | The same number, exactly. |
+| `F64` | `F32` | The nearest `F32`, which is infinity or minus infinity for a number that is too large. |
 | `F32` | `F32` | The same number. |
+| `F64` | `F64` | The same number. |
 
 ```
 count := cast(Int)small + cast(Int)flag
@@ -647,7 +653,7 @@ An untyped constant becomes a value of its type when the program is compiled, so
 | Kind | Literals | Becomes | Default type |
 | ---- | -------- | ------- | ------------ |
 | Untyped integer | `42`, `0b101010`, `0x2A` | `Int`, or a `Byte` when it is from 0 to 255 | `Int` |
-| Untyped float | `1.42`, `0.5` | `F32`, when it is not above the largest `F32` | `F32` |
+| Untyped float | `1.42`, `0.5` | `F32`, when it is not above the largest `F32`, or `F64` | `F64` |
 | Untyped boolean | `true`, `false` | `Bool` | `Bool` |
 | Untyped string | `"Hello"` | `Str`, or a `C_Str` | `Str` |
 
@@ -1989,7 +1995,7 @@ The target makes a foreign procedure an imported function of the module. See [We
 
 ### Foreign procedures in the C library
 
-A foreign procedure of `libc` is a function of the C library of the platform, which the program links to and calls by the name of the procedure, as C code does. See [x64-win32](build-target-x64-win32.md#foreign-procedures).
+A foreign procedure of `libc` is a function of the C library of the platform, which the program links to and calls by the name of the procedure, as C code does. A parameter or a result that is an `F32` is a `float` in C, and one that is an `F64` is a `double`, so `sqrtf :: proc(x: F32) F32 -> ...` and `sqrt :: proc(x: F64) F64 -> ...` are the functions of `math.h`, and `printf :: proc(format: C_Str, value: F64) Int -> ...` takes a `double` for `%f`. C converts a `float` to a `double` when it is one of the variable number of arguments of a procedure like `printf`, and Mialu does not, so an `F32` is made an `F64` with `cast` first. See [x64-win32](build-target-x64-win32.md#foreign-procedures).
 
 ## Compilation targets
 
