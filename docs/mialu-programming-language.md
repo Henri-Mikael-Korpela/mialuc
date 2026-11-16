@@ -185,10 +185,8 @@ new
 of operator override
 private public
 ref
-safe self switch
-super
-this throw throws trait
-transmute try type_id_of type_of
+safe self switch super
+this throw throws trait transmute try type_id_of type_of
 unsafe use
 virtual
 where while
