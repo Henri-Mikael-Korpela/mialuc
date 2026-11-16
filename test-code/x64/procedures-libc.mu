@@ -2,6 +2,8 @@
 // that str_to_c_str makes lives until the procedure that called it returns. The exit code of the
 // program is the result of main, which is 7.
 
+package libc_procedures
+
 import foreign libc
 
 foreign libc ->

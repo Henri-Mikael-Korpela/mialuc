@@ -4,6 +4,7 @@
 
 - [Introduction](#introduction)
 - [Source code representation](#source-code-representation)
+- [Packages](#packages)
 - [Lines, spaces and indentation](#lines-spaces-and-indentation)
 - [Comments](#comments)
 - [Reserved words](#reserved-words)
@@ -80,6 +81,33 @@ Where does the name Mialu come from? It comes from the first syllables of my chi
 
 Mialu source code is a sequence of Unicode characters, encoded in UTF-8. Source code files should have the `.mu` extension.
 
+## Packages
+
+Every Mialu source file belongs to a package, and says which one with a package definition:
+
+```
+package helloworld
+
+main :: proc() Int ->
+    return 0
+```
+
+The package definition is `package` and the name of the package, on a line of its own, written in the first column. It is required: a source file without it is an error, and so is a source file that has more than one. It is the first thing in the file, with the exception of [comments](#comments) and blank lines, which can be above it and below it, so everything else, including `import foreign` and every definition, comes after it:
+
+```
+// Greets the world.
+
+package helloworld // The name of the package.
+
+/// Returns the answer.
+answer :: proc() Int ->
+    return 42
+```
+
+`package` is a [keyword](#reserved-words), so it cannot be used as a name, and the name of the package is an [identifier](#identifiers), so it follows the rules of one: it has alphanumeric characters and underscores, does not begin with a digit, and is not a reserved word. The convention is to write it in lowercase with underscores, such as `helloworld` or `secret_project`, and to name the package after what the code in it is for. The name has no effect on the program that is built yet, and the compiler does not check it any further: it is kept in the syntax tree, which `mialuc dump-ast` prints on the first line, `MODULE package helloworld`.
+
+The code examples of this specification that show a part of a program, such as a single procedure, leave the package definition out to keep the example short. A whole program, which can be compiled as it is, has it.
+
 ## Lines, spaces and indentation
 
 Mialu doesn't use curly brackets for defining blocks. Mialu borrows its indentation-based syntax from Python, so the structure of the code is defined by its indentation, like this
@@ -154,7 +182,7 @@ if import in
 match
 not
 or
-proc
+package proc
 return
 struct
 type_info_of
@@ -392,6 +420,8 @@ A `C_Str` is for interoperating with existing C code, as in [foreign procedures]
 A `Str` value is never converted to a `C_Str` implicitly. A string literal, and a constant that is an untyped string, is not a `Str` yet: it is a `C_Str` where one is wanted, which is the same as `str_to_c_str` of it, see [Untyped constants](#untyped-constants). The built-in procedure `str_to_c_str` makes a `C_Str` of a `Str` explicitly, and the `C_Str` it gives can be kept in a variable, passed on or returned. Example:
 
 ```
+package greetings
+
 import foreign libc
 
 foreign libc ->
@@ -2017,6 +2047,8 @@ The attributes are built into the language. Mialu has two so far: `static`, whic
 A program can call procedures that are not written in Mialu but in another language, which is JavaScript or the C library. They are called foreign procedures, and the language that they are in is the foreign target. Two things are needed: an import, which says where the procedures come from, and a foreign block, which lists the ones that the program uses, with their parameters and return types:
 
 ```
+package alert_hello
+
 import foreign js "functions"
 
 foreign js ->
@@ -2026,7 +2058,7 @@ print_hello :: proc() ->
     alert("Hello, world!")
 ```
 
-`import foreign js "functions"` is written in the first column, like a definition. `foreign` and `import` are [keywords](#keywords). `js` is the foreign target, JavaScript, and the other is `libc`, the C library of the platform, which is imported with `import foreign libc` and needs no name, because there is one C library. `js` and `libc` are not keywords. The text in quotes is the name of the object that the procedures of `js` are properties of. It is a name and not a path, and Mialu does not check that it exists, because that is only known when the program runs. A program imports once for each target, above the first foreign block of that target, and a second `import foreign` of one target is an error, as is a block without the import of its target.
+`import foreign js "functions"` is written in the first column, like a definition, below the [package definition](#packages). `foreign` and `import` are [keywords](#keywords). `js` is the foreign target, JavaScript, and the other is `libc`, the C library of the platform, which is imported with `import foreign libc` and needs no name, because there is one C library. `js` and `libc` are not keywords. The text in quotes is the name of the object that the procedures of `js` are properties of. It is a name and not a path, and Mialu does not check that it exists, because that is only known when the program runs. A program imports once for each target, above the first foreign block of that target, and a second `import foreign` of one target is an error, as is a block without the import of its target.
 
 A foreign block is `foreign js ->` or `foreign libc ->` in the first column, and below it, indented one level, the procedures, one on each line. A program can have any number of blocks. A foreign procedure is written like a procedure, but where its body would be it has `...`, which stands for the code that is somewhere else:
 

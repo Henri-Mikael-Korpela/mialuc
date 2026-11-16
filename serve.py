@@ -141,7 +141,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 KEYWORD_CATEGORIES = {
     "Control flow": "break case continue defer else for if in match return",
     "Conversions": "cast",
-    "Definitions": "const enum foreign import proc struct union",
+    "Definitions": "const enum foreign import package proc struct union",
     "Logical operators": "and not or",
     "Reflection": "type_info_of",
     "Values": "false nil true",

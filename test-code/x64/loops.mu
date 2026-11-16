@@ -2,6 +2,8 @@
 // `continue`, also with labels. The results are the ones that the language specification gives for
 // the same procedures. The exit code of the program is the number of results that are wrong, 0.
 
+package loop_forms
+
 import foreign libc
 
 foreign libc ->

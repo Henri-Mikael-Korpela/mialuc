@@ -4,6 +4,8 @@
 // is `nil` traps when it is called. The results are the ones that the language specification
 // gives. The exit code of the program is the number of wrong results, 0.
 
+package procedure_pointers
+
 import foreign libc
 
 foreign libc ->

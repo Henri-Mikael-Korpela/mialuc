@@ -4,6 +4,8 @@
 // F64 without `cast`. An operation of floats follows IEEE 754: it never traps, a result that is
 // too large is infinity, and a comparison with not a number is false, except `not=`.
 
+package float_math
+
 /// A constant that is a float, which the compiler works out.
 HALF :: 0.5
 

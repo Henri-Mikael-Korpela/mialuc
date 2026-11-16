@@ -1,3 +1,5 @@
+package libc_bridge
+
 import foreign libc
 
 foreign libc ->

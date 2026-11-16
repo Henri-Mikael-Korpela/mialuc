@@ -1,5 +1,7 @@
 // If statements: with an else branch, with else if, nested, and with variables of a block.
 
+package condition_checks
+
 foo_with_if :: proc() Int ->
     x := 4
     if x > 5 ->

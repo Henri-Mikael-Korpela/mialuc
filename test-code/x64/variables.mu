@@ -3,6 +3,8 @@
 // frame of its procedure, where a debugger finds it too. The exit code of the program is the value
 // of total at the end of main, which is 42.
 
+package variable_definitions
+
 import foreign libc
 
 foreign libc ->

@@ -302,7 +302,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   order of the source. The subject is computed once, and the first case whose pattern it
  *   matches runs, or the default case when none does. The word `match` is in the payload. It is a
  *   statement of a procedure body.
- * - `AST_NODE_TYPE_MODULE`: one child per top-level definition, which is an
+ * - `AST_NODE_TYPE_MODULE`: the name of its package is in the payload, which is the name of the
+ *   package definition that the source starts with and which has no node of its own. One child
+ *   per top-level definition, which is an
  *   `AST_NODE_TYPE_CONSTANT_DEFINITION` or an `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`, and one
  *   per `import foreign`, which is an `AST_NODE_TYPE_FOREIGN_IMPORT`. A procedure that a
  *   `foreign js ->` block declares is a constant definition of the module like any other, so the
@@ -510,6 +512,11 @@ typedef struct {
             uint32_t name_length;
             Ast_Foreign_Target target;
         } foreign_import;
+        struct {
+            // The name of the package that the source file defines with `package name`, as a
+            // view of the source text.
+            Str package_name;
+        } module;
         struct {
             // Views the source text. `bytes` is NULL for a literal that has no name.
             Str name;

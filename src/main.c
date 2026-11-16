@@ -774,6 +774,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_KIND_KEYWORD_OR:
             printf("KEYWORD_OR\n");
             break;
+        case TOKEN_KIND_KEYWORD_PACKAGE:
+            printf("KEYWORD_PACKAGE\n");
+            break;
         case TOKEN_KIND_KEYWORD_PROC:
             printf("KEYWORD_PROC\n");
             break;

@@ -1,6 +1,8 @@
 // Structs: struct objects and their fields, nested structs, default values, passing objects
 // to procedures by value, and structs in arrays.
 
+package struct_records
+
 /// A struct with two fields. A struct literal gives either all of the fields a value, or none with `{}`, so that no field is forgotten, and then every field is the default.
 Person :: struct ->
     age: Int

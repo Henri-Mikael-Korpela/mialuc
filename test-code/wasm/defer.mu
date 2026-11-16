@@ -3,6 +3,8 @@
 // `break`, a `continue` or a `return` that leaves it. The deferred statements of a block run in
 // the reverse order of their `defer`s. Each example notes what it does as digits of `trace`.
 
+package deferred_cleanup
+
 /// The steps that the examples take, one digit for each, in the order that they are taken.
 trace #(static) := 0
 

@@ -4,6 +4,8 @@
 // for `%f`. The exit code of the program is the number of results that are not what they should
 // be, so 0 means that all of them are.
 
+package double_math
+
 import foreign libc
 
 foreign libc ->

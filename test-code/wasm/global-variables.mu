@@ -1,6 +1,8 @@
 // Global variables have static storage, so they keep their value between calls. They can be
 // used in every procedure of the module, also above where they are defined.
 
+package global_state
+
 /// The type of a global variable can be deduced, as for a variable.
 total_calls #(static) := 0
 /// Or written, which is the same.

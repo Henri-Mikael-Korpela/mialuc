@@ -3,6 +3,8 @@
 // comparison, shows that the object is in the case, which the compiler checks. The exit code of
 // the program is the number of wrong results, 0.
 
+package tagged_unions
+
 import foreign libc
 
 foreign libc ->

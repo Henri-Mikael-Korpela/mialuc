@@ -11,6 +11,8 @@ A foreign procedure is declared in a `foreign libc` block, see [Foreign procedur
 A foreign procedure of `libc` is a function of the C library of the platform, which the program links to and calls by the name of the procedure, as C code does. The types of the parameters and the result are the ones that the function has in C: a `C_Str` for a `char *` or a `char const *`, and an `Int` for an integer of 64 bits. The compiler trusts the declaration. A C function that returns an `int` has 32 bits, and the other 32 bits of an `Int` that is declared as its result are not defined, so such a function is declared without a result, or its result is not used.
 
 ```
+package hello_world
+
 import foreign libc
 
 foreign libc ->
@@ -148,7 +150,7 @@ The source file is named by its absolute path, so a debugger finds it whatever d
 ```
 mialuc build --target x64-win32 --debug -o variables.exe test-code/x64/variables.mu
 gdb variables.exe
-(gdb) break variables.mu:22
+(gdb) break variables.mu:24
 (gdb) run
 (gdb) info locals
 ```

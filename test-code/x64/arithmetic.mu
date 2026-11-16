@@ -3,6 +3,8 @@
 // procedure can have any number of parameters: the first four words of the arguments are passed
 // in registers and the others on the stack. The exit code of the program is 42.
 
+package integer_arithmetic
+
 import foreign libc
 
 foreign libc ->

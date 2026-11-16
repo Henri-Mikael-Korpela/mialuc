@@ -1,6 +1,8 @@
 // Scopes and labels: leaving a scope, a loop or an if statement early with `break`, and
 // going on with the next pass of a loop with `continue`, also by the label of an outer one.
 
+package control_flow
+
 /// A line with only `->` starts a scope, a block of its own. `break` leaves the innermost one.
 break_early :: proc() Int ->
     x := 1

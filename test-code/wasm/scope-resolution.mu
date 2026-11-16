@@ -1,6 +1,8 @@
 // Names are resolved in the module: a constant and a global variable can be used by every
 // procedure of it.
 
+package scope_resolution
+
 /// A constant of the module, which every procedure can use.
 NAME :: "Bob"
 

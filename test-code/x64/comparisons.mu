@@ -2,6 +2,8 @@
 // the logical operators `and`, `or` and `not`. A Bool is 0 or 1 in a word, so printf is declared
 // with a Bool, which it shows as the number. The exit code of the program is 0.
 
+package comparison_checks
+
 import foreign libc
 
 foreign libc ->

@@ -5,6 +5,8 @@
 // return types, as in `^proc(Int, Int) (Int, Int)`. The exit code of the program is the number of
 // wrong results, 0.
 
+package multiple_results
+
 import foreign libc
 
 foreign libc ->

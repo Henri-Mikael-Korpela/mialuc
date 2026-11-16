@@ -1,3 +1,5 @@
+package match_cases
+
 /// A match statement compares one value, its subject, with the pattern of each case below it, and
 /// runs the block of the first case that matches. `case ->` is the default case, which runs when
 /// no other case does.

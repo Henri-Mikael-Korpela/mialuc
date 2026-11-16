@@ -2,6 +2,8 @@
 // digit separators between two digits. Each is printed in decimal, so that the output shows that
 // every form is the same Int. The exit code of the program is the value of `0x2A`, which is 42.
 
+package integer_literals
+
 import foreign libc
 
 foreign libc ->

@@ -119,6 +119,7 @@ static bool           parse_line_end_expect     (Parser *parser);
 static bool           parse_match_case          (Parser *parser, Ast_Node_Index match);
 static Ast_Node_Index parse_match_statement     (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_module              (Parser *parser);
+static bool           parse_package_definition  (Parser *parser, Ast_Node_Index module);
 static void           parse_node_append_child   (Parser *parser, Ast_Node_Index parent,
                                                  Ast_Node_Index child);
 static Ast_Node_Index parse_node_make           (Parser *parser, Ast_Node_Type node_type);
@@ -198,6 +199,10 @@ static Ast_Node_Index parse_module(Parser *parser) {
 
     Ast_Node_Index module = parse_node_make(parser, AST_NODE_TYPE_MODULE);
     if (module == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+
+    if (not parse_package_definition(parser, module)) {
         return AST_NODE_INDEX_NONE;
     }
 
@@ -474,6 +479,36 @@ static Ast_Node_Index parse_enum_type(Parser *parser, uint32_t indentation_level
         return parse_fail(parser, STR("a member"));
     }
     return root;
+}
+
+/**
+ * Parses `package name`, which every source file starts with, comments aside, and keeps the name
+ * in the payload of `module`. It has no node of its own, as it is not a definition.
+ */
+static bool parse_package_definition(Parser *parser, Ast_Node_Index module) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parser->nodes[module].node_type == AST_NODE_TYPE_MODULE);
+
+    Token const *indentation = parse_token_current(parser);
+    if (indentation->kind != TOKEN_KIND_INDENTATION ||
+        indentation->payload.indentation.level != INDENTATION_LEVEL_TOP ||
+        parser->token_index + 1 >= parser->token_count ||
+        parser->tokens[parser->token_index + 1].kind != TOKEN_KIND_KEYWORD_PACKAGE) {
+        (void)parse_fail(parser, STR("the package definition, `package name`, to start the source"));
+        return false;
+    }
+    parse_token_advance(parser);
+    parse_token_advance(parser);
+
+    Token const *name = parse_token_current(parser);
+    if (name->kind != TOKEN_KIND_IDENTIFIER) {
+        (void)parse_fail(parser, STR("the name of the package"));
+        return false;
+    }
+    parser->nodes[module].payload.module.package_name = name->payload.identifier.text;
+    parse_token_advance(parser);
+
+    return parse_line_end_expect(parser);
 }
 
 /**

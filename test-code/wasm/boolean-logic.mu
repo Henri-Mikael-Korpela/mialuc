@@ -1,5 +1,7 @@
 // Booleans: comparisons, the operators `and`, `or` and `not`, and how tightly each binds.
 
+package boolean_logic
+
 always_true :: proc() Bool ->
     return true
 

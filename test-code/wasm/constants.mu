@@ -3,6 +3,8 @@
 // string, but no type until it is used, and then it becomes the type that its place wants, when
 // its value fits in it. Where nothing says which type, it has its default type: Int, Bool or Str.
 
+package constant_values
+
 import foreign js "host"
 
 foreign js ->

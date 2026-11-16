@@ -1,6 +1,8 @@
 // String constants and procedures that take and return strings. Strings are UTF-8, so the
 // last constant has characters that take more than one byte.
 
+package string_constants
+
 /// A string constant. The module holds its bytes, and its name is replaced by them.
 greeting :: "Hello, world"
 

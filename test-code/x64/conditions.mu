@@ -3,6 +3,8 @@
 // constants and ranges, with cases that share a block and a default case. The exit code of the
 // program is 0 when every check holds.
 
+package condition_checks
+
 import foreign libc
 
 foreign libc ->

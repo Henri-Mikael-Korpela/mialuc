@@ -1,5 +1,7 @@
 // Variables: defining them with a deduced or written type, and assigning to them again.
 
+package variable_definitions
+
 /// The type of a variable is deduced from its value.
 foo :: proc() Int ->
     x := 4

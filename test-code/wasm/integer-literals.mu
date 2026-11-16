@@ -3,6 +3,8 @@
 // same Int, so they can be mixed in arithmetic, comparisons, array lengths, Bytes and global
 // variables.
 
+package integer_literals
+
 integer_binary_literal :: proc() Int ->
     return 0b100
 

@@ -2,6 +2,8 @@
 // runs, and keep what the procedures assign to them. The results are the ones that the language
 // specification gives. The exit code of the program is the number of wrong results, 0.
 
+package global_state
+
 import foreign libc
 
 foreign libc ->

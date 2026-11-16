@@ -3,6 +3,8 @@
 // `defer` first. The results are the ones that the language specification gives. The exit code of
 // the program is the number of results that are wrong, 0.
 
+package deferred_cleanup
+
 import foreign libc
 
 foreign libc ->

@@ -652,6 +652,8 @@ static Token_Kind tokenizer_keyword_type(Str text) {
         return TOKEN_KIND_KEYWORD_AND;
     } else if (str_equals(text, STR("or"))) {
         return TOKEN_KIND_KEYWORD_OR;
+    } else if (str_equals(text, STR("package"))) {
+        return TOKEN_KIND_KEYWORD_PACKAGE;
     }
     return TOKEN_KIND_IDENTIFIER;
 }

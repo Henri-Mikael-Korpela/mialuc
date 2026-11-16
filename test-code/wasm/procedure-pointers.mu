@@ -1,6 +1,8 @@
 // Pointers to procedures: assigning a procedure to a variable, passing it to another
 // procedure, keeping it in arrays and structs, and the traps when it is `nil`.
 
+package procedure_pointers
+
 add :: proc(a: Int, b: Int) Int ->
     return a + b
 

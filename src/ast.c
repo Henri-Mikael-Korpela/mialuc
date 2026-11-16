@@ -491,7 +491,8 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             printf("MATCH_STATEMENT\n");
             break;
         case AST_NODE_TYPE_MODULE:
-            printf("MODULE\n");
+            printf("MODULE package %.*s\n", (int)node.payload.module.package_name.length,
+                   node.payload.module.package_name.bytes);
             break;
         case AST_NODE_TYPE_MULTIPLICATION:
             printf("MULTIPLICATION\n");

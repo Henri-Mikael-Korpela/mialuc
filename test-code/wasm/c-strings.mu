@@ -4,6 +4,8 @@
 // constant that is a string only. A string literal, and a constant that is a string, is untyped,
 // so it is a C_Str without str_to_c_str where a C_Str is wanted.
 
+package c_string_bridge
+
 import foreign js "functions"
 
 foreign js ->

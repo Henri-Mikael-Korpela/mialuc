@@ -1,6 +1,8 @@
 // Procedures: parameters, results, calls inside calls, recursion, and calling a procedure
 // that is defined further down in the file.
 
+package procedure_calls
+
 forty :: proc() Int ->
     return 40
 

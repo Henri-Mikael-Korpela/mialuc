@@ -1,6 +1,8 @@
 // A struct whose fields depend on an enum member, with `union match`. The compiler only lets a
 // program use the fields of a case where the matched field is known to be that case.
 
+package tagged_unions
+
 /// The enum that decides which fields of a `Token` exist.
 Token_Kind :: enum Int ->
     IDENTIFIER

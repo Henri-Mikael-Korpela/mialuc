@@ -4,6 +4,8 @@
 // their words. The results are the ones that the language specification gives. The exit code of
 // the program is the number of wrong results, 0.
 
+package struct_records
+
 import foreign libc
 
 foreign libc ->

@@ -27,6 +27,8 @@
      - Rule names are written in snake_case, without spaces.
 
    What a grammar cannot say, and the compiler checks in addition:
+     - The package definition is the first thing in the source that is not a blank line or a
+       comment, and there is only one. The name of the package is checked no further.
      - An integer literal must fit in a signed 64-bit integer, in any base: `0x7FFF_FFFF_FFFF_FFFF`
        is the largest. A signed integer literal is its negation, so `-9_223_372_036_854_775_807`
        is the lowest one.
@@ -165,7 +167,14 @@
        its value is a constant and no constant is a pointer. All of this the grammar cannot tell.
 *)
 
-module = { blank_line | definition | foreign_import | foreign_block } , end_of_input ;
+module =
+    { blank_line } , package_definition ,
+    { blank_line | definition | foreign_import | foreign_block } , end_of_input ;
+
+(* `package name` names the package that the source file is part of. Every source file has exactly
+   one, and it is the first line that is not blank or a comment: lines of comments can be above it
+   and below it. Like a definition it starts in the first column. `package` is a keyword. *)
+package_definition = "package" , required_space , name , ws , line_end ;
 
 (* A definition at file scope: a constant, or a global variable. *)
 definition = constant_definition | global_variable_definition ;
@@ -724,7 +733,7 @@ reserved_word = keyword | literal_word ;
 keyword =
     "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "struct" |
     "enum" | "not" | "and" | "or" | "foreign" | "import" | "type_info_of" | "union" | "match" |
-    "case" | "defer" | "cast" ;
+    "case" | "defer" | "cast" | "package" ;
 
 (* The words that are literals: the two values of a `Bool` and the null pointer. *)
 literal_word = "true" | "false" | "nil" ;

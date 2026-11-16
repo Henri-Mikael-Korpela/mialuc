@@ -8,6 +8,8 @@
 // order, the order of the code points, but no arithmetic. The output is plain ASCII, so that any console shows it, and the exit code of
 // the program is the number of checks that failed, so 0 means that all of them passed.
 
+package rune_characters
+
 import foreign libc
 
 foreign libc ->

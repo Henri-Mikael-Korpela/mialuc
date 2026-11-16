@@ -1,6 +1,8 @@
 // Enumerations: members numbered from zero, comparing them, using them in structs, arrays,
 // pointers and pointers to procedures, and writing the member without the name of the enum.
 
+package enum_members
+
 /// The members of an enum are numbered from zero, in the order that they are written.
 Color :: enum Int ->
     RED

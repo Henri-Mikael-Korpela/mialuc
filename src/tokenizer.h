@@ -82,6 +82,8 @@ typedef enum {
     TOKEN_KIND_KEYWORD_NIL,
     TOKEN_KIND_KEYWORD_NOT,
     TOKEN_KIND_KEYWORD_OR,
+    // Starts the package definition that every source file begins with, `package name`.
+    TOKEN_KIND_KEYWORD_PACKAGE,
     TOKEN_KIND_KEYWORD_PROC,
     TOKEN_KIND_KEYWORD_RETURN,
     TOKEN_KIND_KEYWORD_STRUCT,

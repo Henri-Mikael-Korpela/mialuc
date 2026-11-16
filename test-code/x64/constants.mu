@@ -3,6 +3,8 @@
 // one is wanted, which passes it to the C library without str_to_c_str. The exit code of the
 // program is the value of ANSWER, which is 42.
 
+package constant_values
+
 import foreign libc
 
 foreign libc ->

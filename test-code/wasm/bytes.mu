@@ -3,6 +3,8 @@
 // compared with the six comparison operators, but there is no arithmetic on them: it is done with
 // Int values. An array of Byte takes one byte of memory for each element.
 
+package byte_values
+
 /// A Byte is given an integer literal from 0 to 255.
 byte_variable :: proc() Int ->
     b : Byte = 200

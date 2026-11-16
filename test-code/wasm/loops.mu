@@ -1,6 +1,8 @@
 // For statements and loops without a range: exclusive and inclusive ranges, bounds that are
 // expressions, and `break` and `continue` in loops that are inside each other.
 
+package loop_forms
+
 /// `..<` does not include the last number.
 for_in_exclusive_range :: proc() Int ->
     x := 1

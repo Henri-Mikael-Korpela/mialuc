@@ -1,6 +1,8 @@
 // Arrays and array slices: literals, element access, slicing, copying ranges, going through
 // the elements with a for statement, and `length_of`. Indexes that are out of bounds trap.
 
+package array_basics
+
 /// The length of an array is deduced from the literal.
 array_element_access_with_deduced_length :: proc() Int ->
     a := [const]Int { 1, 2, 3, 4, 5 }

@@ -9,6 +9,8 @@
 // to an Int, which is its code point, and to 4 bytes, which are its UTF-8 encoding, and a Byte is
 // cast to a rune.
 
+package rune_characters
+
 /// A constant that is a rune, with or without its type.
 FIRST_LETTER :: 'A'
 LAST_LETTER : Rune : 'Z'

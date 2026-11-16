@@ -4,6 +4,8 @@
 // A comment can be on a line of its own, and it can be at any indentation, because a line with
 // only a comment is not part of the structure of the code.
 
+package comment_forms
+
 /// A documentation comment starts with three slashes and must be on lines of its own.
 /// It can go on over many lines, and each of them starts with three slashes.
 ///

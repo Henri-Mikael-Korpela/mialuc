@@ -1,6 +1,8 @@
 // Pointers: taking an address with `%`, following one with `^`, pointers to variables,
 // fields, elements and pointers, `nil`, and linked structs.
 
+package pointer_basics
+
 /// `%x` is the address of `x`, and its type is deduced as `^Int`.
 pointer_with_implicit_type :: proc() Int ->
     x := 4

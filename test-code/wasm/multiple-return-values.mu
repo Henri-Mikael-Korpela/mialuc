@@ -4,6 +4,8 @@
 // is not wanted takes the name `_`. In WebAssembly the values are the results of the function, so
 // JavaScript receives them as an array.
 
+package multiple_results
+
 /// Divide returns both the quotient and the remainder.
 divide :: proc(a: Int, b: Int) (Int, Int) ->
     return a / b, a - a / b * b

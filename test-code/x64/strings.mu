@@ -3,6 +3,8 @@
 // worked out when the program runs, and match statements of Str and Byte values. The exit code
 // of the program is the number of wrong results, 0.
 
+package string_values
+
 import foreign libc
 
 foreign libc ->

@@ -1,6 +1,8 @@
 // Static reflection: `type_info_of` gives the name and the members of an enum while the
 // program is compiled, and `length_of` counts the members.
 
+package type_reflection
+
 Color :: enum Int ->
     RED
     GREEN

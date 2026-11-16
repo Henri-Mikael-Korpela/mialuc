@@ -1,6 +1,8 @@
 // Arithmetic on integers: the four operators, their precedence, and the compound assignments.
 // Each procedure computes one value that the client script checks.
 
+package integer_arithmetic
+
 add_foo :: proc() Int ->
     x := 4 + 5
     return x
