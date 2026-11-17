@@ -188,8 +188,11 @@ test("a name shows its type when the pointer rests on it", async () => {
 
         // The iterator of a for statement over an array or a slice has the type of its elements,
         // where the statement defines it and where it is used, and so do the fields of it.
-        assert.match((await hover(44, 9)).contents.value, /person: Person/);
-        assert.match((await hover(45, 16)).contents.value, /person: Person/);
+        // It also says what the iterator is an element of, as code that is highlighted.
+        const iterator =
+            "```mialu\nperson: Person\n```\nelement of\n```mialu\npeople: []Person\n```";
+        assert.strictEqual((await hover(44, 9)).contents.value, iterator);
+        assert.strictEqual((await hover(45, 16)).contents.value, iterator);
         assert.match((await hover(45, 23)).contents.value, /age: Int/);
 
         // Nothing is shown on a keyword or on a space.

@@ -118,7 +118,7 @@ Usage:
 mialuc dump-types <source file>
 ```
 
-Dump-types reads the source file, checks it up to the names, as dump-ast does, and prints a line for each place where a constant, a global variable, a parameter or a variable is defined or used, in the order of the nodes of the syntax tree. A line has five fields separated by tabs: the line and the column of the name, both counted from 1 with columns that count bytes, the length of the name in bytes, the name, and its type. For a few lines of `test-code/x64/conditions.mu`:
+Dump-types reads the source file, checks it up to the names, as dump-ast does, and prints a line for each place where a constant, a global variable, a parameter or a variable is defined or used, in the order of the nodes of the syntax tree. A line has five fields separated by tabs: the line and the column of the name, both counted from 1 with columns that count bytes, the length of the name in bytes, the name, and its type. The iterator of a for statement over an array or a slice has a sixth field, the array or slice that it is an element of, written as it is declared, such as `people: []Person`, or only its type when it is not a name. For a few lines of `test-code/x64/conditions.mu`:
 
 ```
 14	1	5	LIMIT	untyped Int

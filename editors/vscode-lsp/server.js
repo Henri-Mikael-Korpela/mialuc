@@ -93,12 +93,14 @@ function lensesFromOutput(output) {
 /**
  * Turns the output of `mialuc dump-types` into the names with their types. A line of the output is
  * the line and the column of a name, both counted from 1 in bytes, the length of the name in bytes,
- * the name and the type, separated by tabs. A line that is not like that is skipped.
+ * the name and the type, and a note that some lines have, separated by tabs. A line that is not
+ * like that is skipped.
  */
 function namesFromOutput(output) {
     const names = [];
     for (const row of output.split("\n")) {
-        const [lineText, columnText, lengthText, name, type] = row.replace(/\r$/, "").split("\t");
+        const [lineText, columnText, lengthText, name, type, note] =
+            row.replace(/\r$/, "").split("\t");
         const line = Number(lineText);
         const column = Number(columnText);
         const length = Number(lengthText);
@@ -106,7 +108,7 @@ function namesFromOutput(output) {
             !Number.isInteger(length) || length < 1 || !name || !type) {
             continue;
         }
-        names.push({ line: line - 1, column: column - 1, length, name, type });
+        names.push({ line: line - 1, column: column - 1, length, name, type, note: note ?? "" });
     }
     return names;
 }
@@ -184,11 +186,14 @@ async function hover(uri, position) {
             continue;
         }
         const start = bytes.toString("utf8", 0, entry.column).length;
+        let value = "```mialu\n" + `${entry.name}: ${entry.type}` + "\n```";
+        if (entry.note !== "") {
+            // The note is the array or slice that the name is an element of, declared like any
+            // other name, so it is code too, and is highlighted as such.
+            value += "\nelement of\n```mialu\n" + entry.note + "\n```";
+        }
         return {
-            contents: {
-                kind: "markdown",
-                value: "```mialu\n" + `${entry.name}: ${entry.type}` + "\n```",
-            },
+            contents: { kind: "markdown", value },
             range: {
                 start: { line: position.line, character: start },
                 end: { line: position.line, character: start + entry.name.length },

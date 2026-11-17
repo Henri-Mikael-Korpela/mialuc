@@ -135,7 +135,13 @@ static void         main_struct_literal_rows_print         (Str source, Ast_Node
 static Ast_Node_Index main_struct_of_name              (Ast_Node const *nodes, size_t node_count,
                                                             Str name);
 static void         main_type_row_print                    (Str source, Str name,
-                                                            char const *text);
+                                                            char const *text, char const *note);
+static void         main_iterator_note_write               (Ast_Node const *nodes,
+                                                            Semantic_Binding const *bindings,
+                                                            Constant_Value const *constants,
+                                                            size_t node_count,
+                                                            Ast_Node_Index statement, char *note,
+                                                            size_t note_size_bytes);
 static bool         main_constant_type_is_untyped          (Constant_Type type);
 static Ast_Node_Index main_enum_of_access              (Ast_Node const *nodes,
                                                             Semantic_Binding const *bindings,
@@ -1128,9 +1134,9 @@ static bool main_expression_type_write(Ast_Node const *nodes, Semantic_Binding c
 
 /**
  * Prints the line of `dump-types` for the name `name`, a view of the source, with `text` as the
- * type, see `main_run_command_print_types`.
+ * type, see `main_run_command_print_types`. A `note` that is not empty is a sixth field.
  */
-static void main_type_row_print(Str source, Str name, char const *text) {
+static void main_type_row_print(Str source, Str name, char const *text, char const *note) {
     // The names are views of the source, so the offset of a name is where its bytes are. A member
     // after a dot is not where its node starts, which is why the node is not used.
     // A name that the compiler made up and that is not in the source has no place to show.
@@ -1139,8 +1145,51 @@ static void main_type_row_print(Str source, Str name, char const *text) {
     }
     size_t name_offset = (size_t)(name.bytes - source.bytes);
     Str_Position position = str_position_at(source, name_offset);
-    printf("%zu\t%zu\t%zu\t%.*s\t%s\n", position.line, position.column, name.length,
+    printf("%zu\t%zu\t%zu\t%.*s\t%s", position.line, position.column, name.length,
            (int)name.length, (char const *)name.bytes, text);
+    if (note[0] != '\0') {
+        printf("\t%s", note);
+    }
+    printf("\n");
+}
+
+/**
+ * Writes the array or slice that the for statement `statement` goes over, which the iterator is an
+ * element of, to `note` as it is declared, such as `people: []Person`: its name, when it is a
+ * name, and its type. Only the type is written for any other expression, such as `[]Person`. The
+ * note is empty for a range, whose iterator is no element, and when the type is not known.
+ */
+static void main_iterator_note_write(Ast_Node const *nodes, Semantic_Binding const *bindings,
+                                     Constant_Value const *constants, size_t node_count,
+                                     Ast_Node_Index statement, char *note,
+                                     size_t note_size_bytes) {
+    assert(statement < node_count);
+    assert(note_size_bytes > 0);
+
+    note[0] = '\0';
+    Ast_Node_Index sequence = nodes[statement].first_child;
+    if (nodes[sequence].node_type == AST_NODE_TYPE_RANGE) {
+        return;
+    }
+    char type[256] = "";
+    if (not main_expression_type_write(nodes, bindings, constants, node_count, sequence, 0, type,
+                                       sizeof(type))) {
+        return;
+    }
+    // Only a name can be said as it is, since the names are views of the source and an expression
+    // is not.
+    int written = 0;
+    if (nodes[sequence].node_type == AST_NODE_TYPE_IDENTIFIER) {
+        Str name = nodes[sequence].payload.identifier.name;
+        written = snprintf(note, note_size_bytes, "%.*s: %s", (int)name.length,
+                           (char const *)name.bytes, type);
+    } else {
+        written = snprintf(note, note_size_bytes, "%s", type);
+    }
+    // A note that does not fit is left out whole and not cut.
+    if (written < 0 || (size_t)written >= note_size_bytes) {
+        note[0] = '\0';
+    }
 }
 
 /**
@@ -1165,7 +1214,7 @@ static void main_struct_literal_rows_print(Str source, Ast_Node const *nodes, si
         char text[256] = "";
         if (field != AST_NODE_INDEX_NONE &&
             main_type_text_write(nodes, nodes[field].first_child, text, sizeof(text))) {
-            main_type_row_print(source, name, text);
+            main_type_row_print(source, name, text, "");
         }
     }
 }
@@ -1285,7 +1334,14 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
                                                   sizeof(text))) {
             continue;
         }
-        main_type_row_print(source, name, text);
+        // The iterator of a for statement says what it is an element of.
+        char note[256] = "";
+        if (target != AST_NODE_INDEX_NONE &&
+            nodes[target].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            main_iterator_note_write(nodes, bindings, constants, parse_result.nodes.length, target,
+                                     note, sizeof(note));
+        }
+        main_type_row_print(source, name, text, note);
     }
 }
 
