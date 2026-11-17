@@ -96,6 +96,14 @@ const TYPES_SOURCE = [
     "        return chosen",
     "    return .RED",
     "",
+    "Point :: struct ->",
+    "    x: Int",
+    "    next: ^Point",
+    "",
+    "length :: proc(p: ^Point) Int ->",
+    "    q := Point { x = 1, next = p }",
+    "    return p.next.x + q.x",
+    "",
 ].join("\n");
 
 test("a name shows its type when the pointer rests on it", async () => {
@@ -137,6 +145,14 @@ test("a name shows its type when the pointer rests on it", async () => {
         assert.match((await hover(10, 5)).contents.value, /RED: Color/);
         assert.match((await hover(14, 21)).contents.value, /RED: Color/);
         assert.match((await hover(15, 18)).contents.value, /GREEN: Color/);
+
+        // A field of a struct has the type that the struct gives it: where it is defined, where a
+        // literal gives it a value, and where it is read, also through a pointer.
+        assert.match((await hover(21, 5)).contents.value, /next: \^Point/);
+        assert.match((await hover(24, 25)).contents.value, /next: \^Point/);
+        assert.match((await hover(25, 14)).contents.value, /next: \^Point/);
+        assert.match((await hover(25, 18)).contents.value, /x: Int/);
+        assert.match((await hover(25, 24)).contents.value, /x: Int/);
 
         // Nothing is shown on a keyword or on a space.
         assert.strictEqual(await hover(6, 12), null);

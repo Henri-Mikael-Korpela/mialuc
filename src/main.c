@@ -113,8 +113,26 @@ static bool         main_definition_type_write             (Ast_Node const *node
                                                             Semantic_Binding const *bindings,
                                                             Constant_Value const *constants,
                                                             size_t node_count,
-                                                            Ast_Node_Index target, char *text,
+                                                            Ast_Node_Index target,
+                                                            size_t depth, char *text,
                                                             size_t text_size_bytes);
+static bool         main_expression_type_write             (Ast_Node const *nodes,
+                                                            Semantic_Binding const *bindings,
+                                                            Constant_Value const *constants,
+                                                            size_t node_count,
+                                                            Ast_Node_Index expression,
+                                                            size_t depth, char *text,
+                                                            size_t text_size_bytes);
+static Ast_Node_Index main_struct_field                (Ast_Node const *nodes,
+                                                            Ast_Node_Index struct_definition,
+                                                            Str name);
+static void         main_struct_literal_rows_print         (Str source, Ast_Node const *nodes,
+                                                            size_t node_count,
+                                                            Ast_Node_Index literal);
+static Ast_Node_Index main_struct_of_name              (Ast_Node const *nodes, size_t node_count,
+                                                            Str name);
+static void         main_type_row_print                    (Str source, Str name,
+                                                            char const *text);
 static bool         main_constant_type_is_untyped          (Constant_Type type);
 static Ast_Node_Index main_enum_of_access              (Ast_Node const *nodes,
                                                             Semantic_Binding const *bindings,
@@ -808,11 +826,14 @@ static bool main_procedure_text_write(Ast_Node const *nodes, Ast_Node_Index proc
  * definition gives, otherwise the type that its value has. For a value, the names that it is made
  * of are followed, and so are the operands of arithmetic and a call of a procedure that returns one
  * value, and a value of any other shape has no type here. Returns false when the type is not known
- * or does not fit. A struct and an enum are types and not values, so they have none.
+ * or does not fit. A struct and an enum are types and not values, so they have none. `depth` is
+ * how many definitions and expressions the type has been followed through, see
+ * `main_expression_type_write`, which this one and it call each other for.
  */
 static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding const *bindings,
                                        Constant_Value const *constants, size_t node_count,
-                                       Ast_Node_Index target, char *text, size_t text_size_bytes) {
+                                       Ast_Node_Index target, size_t depth, char *text,
+                                       size_t text_size_bytes) {
     assert(nodes != NULL);
     assert(bindings != NULL);
     assert(constants != NULL);
@@ -891,6 +912,13 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
             }
         }
 
+        if (nodes[value].node_type == AST_NODE_TYPE_FIELD_ACCESS ||
+            nodes[value].node_type == AST_NODE_TYPE_DEREFERENCE ||
+            nodes[value].node_type == AST_NODE_TYPE_SUBSCRIPT) {
+            return main_expression_type_write(nodes, bindings, constants, node_count, value,
+                                              depth + 1, text, text_size_bytes);
+        }
+
         Constant_Value known = constants[value];
         if (known.status == CONSTANT_STATUS_OK) {
             int written = snprintf(text, text_size_bytes, "%s",
@@ -926,6 +954,149 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
 }
 
 /**
+ * Returns the constant definition of the struct called `name`, or `AST_NODE_INDEX_NONE`. A struct
+ * is always the value of a constant of the module, so the search goes over the definitions.
+ */
+static Ast_Node_Index main_struct_of_name(Ast_Node const *nodes, size_t node_count, Str name) {
+    for (Ast_Node_Index index = 0; index < node_count; index += 1) {
+        if (nodes[index].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION &&
+            nodes[nodes[index].first_child].node_type == AST_NODE_TYPE_STRUCT_TYPE &&
+            str_equals(nodes[index].payload.constant_definition.name, name)) {
+            return index;
+        }
+    }
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Returns the `AST_NODE_TYPE_FIELD` called `name` of the struct that the constant definition
+ * `struct_definition` defines, or `AST_NODE_INDEX_NONE`.
+ */
+static Ast_Node_Index main_struct_field(Ast_Node const *nodes, Ast_Node_Index struct_definition,
+                                        Str name) {
+    Ast_Node_Index struct_type = nodes[struct_definition].first_child;
+    for (Ast_Node_Index field = nodes[struct_type].first_child; field != AST_NODE_INDEX_NONE;
+         field = nodes[field].next_sibling) {
+        if (str_equals(nodes[field].payload.field.name, name)) {
+            return field;
+        }
+    }
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Writes the type of the value that `expression` has to `text`, for the shapes whose type follows
+ * from the types of the names in it: a name, a field of a struct, a pointer that is dereferenced,
+ * an element of an array and a struct literal. A field is looked up in the struct that its base
+ * has, which may be behind a pointer, since a field is read through one as well. Returns false for
+ * any other shape, or when a type is not known.
+ *
+ * It and `main_definition_type_write` call each other, because the type of a name is the type of
+ * its value. A definition is above its uses, so that ends, but `depth` bounds it anyway, at the
+ * depth that a constant expression is allowed to have.
+ */
+static bool main_expression_type_write(Ast_Node const *nodes, Semantic_Binding const *bindings,
+                                       Constant_Value const *constants, size_t node_count,
+                                       Ast_Node_Index expression, size_t depth, char *text,
+                                       size_t text_size_bytes) {
+    assert(expression < node_count);
+
+    if (depth >= CONSTANT_EXPRESSION_DEPTH_MAX) {
+        return false;
+    }
+    Ast_Node const *node = &nodes[expression];
+    Semantic_Binding binding = bindings[expression];
+    switch (node->node_type) {
+    case AST_NODE_TYPE_IDENTIFIER:
+        if (binding.kind == SEMANTIC_BINDING_KIND_NONE ||
+            binding.kind == SEMANTIC_BINDING_KIND_JUMP_TARGET) {
+            return false;
+        }
+        return main_definition_type_write(nodes, bindings, constants, node_count, binding.target,
+                                          depth + 1, text, text_size_bytes);
+    case AST_NODE_TYPE_STRUCT_LITERAL:
+        return node->payload.struct_literal.name.bytes != NULL &&
+               main_text_write(text, text_size_bytes, node->payload.struct_literal.name);
+    case AST_NODE_TYPE_DEREFERENCE:
+    case AST_NODE_TYPE_SUBSCRIPT:
+    case AST_NODE_TYPE_FIELD_ACCESS: {
+        char base[256] = "";
+        if (not main_expression_type_write(nodes, bindings, constants, node_count,
+                                           node->first_child, depth + 1, base, sizeof(base))) {
+            return false;
+        }
+        if (node->node_type == AST_NODE_TYPE_DEREFERENCE) {
+            // The pointer type has the caret first, and what is pointed to is the rest.
+            return base[0] == '^' &&
+                   main_text_write(text, text_size_bytes, str_make(base + 1, strlen(base + 1)));
+        }
+        if (node->node_type == AST_NODE_TYPE_SUBSCRIPT) {
+            // The type of an array or a slice has the brackets first, and the element is the rest.
+            char const *close = base[0] == '[' ? strchr(base, ']') : NULL;
+            return close != NULL &&
+                   main_text_write(text, text_size_bytes, str_make(close + 1, strlen(close + 1)));
+        }
+        char const *struct_name = base[0] == '^' ? base + 1 : base;
+        Ast_Node_Index struct_definition = main_struct_of_name(
+            nodes, node_count, str_make(struct_name, strlen(struct_name)));
+        if (struct_definition == AST_NODE_INDEX_NONE) {
+            return false;
+        }
+        Ast_Node_Index field = main_struct_field(nodes, struct_definition,
+                                                 node->payload.field_access.name);
+        return field != AST_NODE_INDEX_NONE &&
+               main_type_text_write(nodes, nodes[field].first_child, text, text_size_bytes);
+    }
+    default:
+        return false;
+    }
+}
+
+/**
+ * Prints the line of `dump-types` for the name `name`, a view of the source, with `text` as the
+ * type, see `main_run_command_print_types`.
+ */
+static void main_type_row_print(Str source, Str name, char const *text) {
+    // The names are views of the source, so the offset of a name is where its bytes are. A member
+    // after a dot is not where its node starts, which is why the node is not used.
+    // A name that the compiler made up and that is not in the source has no place to show.
+    if (name.bytes < source.bytes || name.bytes >= source.bytes + source.length) {
+        return;
+    }
+    size_t name_offset = (size_t)(name.bytes - source.bytes);
+    Str_Position position = str_position_at(source, name_offset);
+    printf("%zu\t%zu\t%zu\t%.*s\t%s\n", position.line, position.column, name.length,
+           (int)name.length, (char const *)name.bytes, text);
+}
+
+/**
+ * Prints the lines of `dump-types` for the fields that the struct literal `literal` gives a value,
+ * each with the type of the field in the struct that the literal names. A literal without a name,
+ * and a field that the struct does not have, print nothing.
+ */
+static void main_struct_literal_rows_print(Str source, Ast_Node const *nodes, size_t node_count,
+                                           Ast_Node_Index literal) {
+    Str struct_name = nodes[literal].payload.struct_literal.name;
+    if (struct_name.bytes == NULL) {
+        return;
+    }
+    Ast_Node_Index struct_definition = main_struct_of_name(nodes, node_count, struct_name);
+    if (struct_definition == AST_NODE_INDEX_NONE) {
+        return;
+    }
+    for (Ast_Node_Index initializer = nodes[literal].first_child;
+         initializer != AST_NODE_INDEX_NONE; initializer = nodes[initializer].next_sibling) {
+        Str name = nodes[initializer].payload.field_initializer.name;
+        Ast_Node_Index field = main_struct_field(nodes, struct_definition, name);
+        char text[256] = "";
+        if (field != AST_NODE_INDEX_NONE &&
+            main_type_text_write(nodes, nodes[field].first_child, text, sizeof(text))) {
+            main_type_row_print(source, name, text);
+        }
+    }
+}
+
+/**
  * Prints a line for each place where a constant, a global variable, a parameter or a variable is
  * defined or used, and whose type is known: the line and the column of its name, both counted from
  * 1, the length of the name in bytes, the name, and the type as it is written in the source,
@@ -946,6 +1117,10 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
         Ast_Node_Index target = AST_NODE_INDEX_NONE;
         // The enum that a member belongs to, for the names whose type is that.
         Ast_Node_Index enum_definition = AST_NODE_INDEX_NONE;
+        // The expression whose type is the type of the name, for a field that is read.
+        Ast_Node_Index expression = AST_NODE_INDEX_NONE;
+        // The type that the name is given as it is, for a field that is defined.
+        Ast_Node_Index type_node = AST_NODE_INDEX_NONE;
         switch (node->node_type) {
         case AST_NODE_TYPE_CONSTANT_DEFINITION:
             name = node->payload.constant_definition.name;
@@ -986,7 +1161,21 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
         case AST_NODE_TYPE_FIELD_ACCESS:
             name = node->payload.field_access.name;
             enum_definition = main_enum_of_access(nodes, bindings, index);
+            if (enum_definition == AST_NODE_INDEX_NONE) {
+                expression = index;
+            }
             break;
+        case AST_NODE_TYPE_FIELD:
+            // The type of a field is its first child. A field that is a struct of its own has no
+            // type that can be written.
+            name = node->payload.field.name;
+            type_node = node->first_child;
+            break;
+        case AST_NODE_TYPE_STRUCT_LITERAL:
+            // The fields that are given a value have the type that the field of the struct has,
+            // which a literal without the name of its struct does not tell.
+            main_struct_literal_rows_print(source, nodes, parse_result.nodes.length, index);
+            continue;
         default:
             break;
         }
@@ -1001,18 +1190,23 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
                                     nodes[enum_definition].payload.constant_definition.name)) {
                 continue;
             }
+        } else if (type_node != AST_NODE_INDEX_NONE) {
+            if (not main_type_text_write(nodes, type_node, text, sizeof(text))) {
+                continue;
+            }
+        } else if (expression != AST_NODE_INDEX_NONE) {
+            if (not main_expression_type_write(nodes, bindings, constants,
+                                               parse_result.nodes.length, expression, 0, text,
+                                               sizeof(text))) {
+                continue;
+            }
         } else if (target == AST_NODE_INDEX_NONE ||
                    not main_definition_type_write(nodes, bindings, constants,
-                                                  parse_result.nodes.length, target, text,
+                                                  parse_result.nodes.length, target, 0, text,
                                                   sizeof(text))) {
             continue;
         }
-        // The names are views of the source, so the offset of a name is where its bytes are. A
-        // member after a dot is not where the node starts, which is why the node is not used.
-        size_t name_offset = (size_t)(name.bytes - source.bytes);
-        Str_Position position = str_position_at(source, name_offset);
-        printf("%zu\t%zu\t%zu\t%.*s\t%s\n", position.line, position.column, name.length,
-               (int)name.length, (char const *)name.bytes, text);
+        main_type_row_print(source, name, text);
     }
 }
 
