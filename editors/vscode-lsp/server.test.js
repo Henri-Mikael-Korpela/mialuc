@@ -76,6 +76,71 @@ async function withServer(script) {
     }
 }
 
+const TYPES_SOURCE = [
+    "package types",
+    "",
+    "LIMIT :: 100",
+    "NAME : Str : \"é\"",
+    "",
+    "add :: proc(a: Int, b: ^Int) Int ->",
+    "    total := a + LIMIT",
+    "    return total",
+    "",
+].join("\n");
+
+test("a name shows its type when the pointer rests on it", async () => {
+    await withServer(async (request, notify) => {
+        const initialized = await request("initialize", {
+            processId: null,
+            rootUri: null,
+            capabilities: {},
+            initializationOptions: { compilerPath: COMPILER },
+        });
+        assert.strictEqual(initialized.result.capabilities.hoverProvider, true);
+        notify("initialized", {});
+
+        const uri = "file:///types.mu";
+        notify("textDocument/didOpen", {
+            textDocument: { uri, languageId: "mialu", version: 1, text: TYPES_SOURCE },
+        });
+        const hover = async (line, character) =>
+            (await request("textDocument/hover", {
+                textDocument: { uri },
+                position: { line, character },
+            })).result;
+
+        // The lines and the characters are counted from 0.
+        const limit = await hover(2, 2);
+        assert.strictEqual(limit.contents.value, "```mialu\nLIMIT: untyped Int\n```");
+        assert.deepStrictEqual(limit.range, {
+            start: { line: 2, character: 0 },
+            end: { line: 2, character: 5 },
+        });
+        // A use of a constant shows the type of its definition, and so does a variable.
+        assert.match((await hover(6, 19)).contents.value, /LIMIT: untyped Int/);
+        assert.match((await hover(6, 4)).contents.value, /total: Int/);
+        assert.match((await hover(5, 0)).contents.value, /add: proc\(a: Int, b: \^Int\) Int/);
+        assert.match((await hover(5, 20)).contents.value, /b: \^Int/);
+        assert.match((await hover(3, 1)).contents.value, /NAME: Str/);
+
+        // Nothing is shown on a keyword or on a space.
+        assert.strictEqual(await hover(6, 12), null);
+        assert.strictEqual(await hover(40, 0), null);
+
+        // A text that does not compile keeps the types of the last text that did, where the name
+        // is still in place.
+        notify("textDocument/didChange", {
+            textDocument: { uri, version: 2 },
+            contentChanges: [{ text: TYPES_SOURCE + "broken :: proc(" }],
+        });
+        assert.match((await hover(2, 1)).contents.value, /LIMIT: untyped Int/);
+
+        notify("textDocument/didClose", { textDocument: { uri } });
+        assert.strictEqual(await hover(2, 1), null);
+        assert.strictEqual((await request("shutdown", null)).result, null);
+    });
+});
+
 test("a struct has a lens with its size above its definition", async () => {
     await withServer(async (request, notify) => {
         const initialized = await request("initialize", {
@@ -119,7 +184,7 @@ test("a struct has a lens with its size above its definition", async () => {
         const closed = await request("textDocument/codeLens", { textDocument: { uri } });
         assert.deepStrictEqual(closed.result, []);
 
-        const unknown = await request("textDocument/hover", {});
+        const unknown = await request("textDocument/definition", {});
         assert.strictEqual(unknown.error.code, -32601);
         assert.strictEqual((await request("shutdown", null)).result, null);
     });

@@ -104,7 +104,7 @@ class Connection {
 }
 
 /**
- * Starts the server and the sync of the documents, and registers the code lens provider.
+ * Starts the server and the sync of the documents, and registers the code lens and hover providers.
  */
 async function activate(context) {
     const output = vscode.window.createOutputChannel("Mialu Language Server");
@@ -184,6 +184,29 @@ async function activate(context) {
                 } catch (error) {
                     output.appendLine(String(error.message ?? error));
                     return [];
+                }
+            },
+        }),
+        vscode.languages.registerHoverProvider({ language: LANGUAGE_ID }, {
+            async provideHover(document, position) {
+                if (!vscode.workspace.getConfiguration("mialu.lsp").get("typeHover", true)) {
+                    return undefined;
+                }
+                try {
+                    const hover = await connection.request("textDocument/hover", {
+                        textDocument: { uri: document.uri.toString() },
+                        position: { line: position.line, character: position.character },
+                    });
+                    if (hover === null) {
+                        return undefined;
+                    }
+                    const { start, end } = hover.range;
+                    return new vscode.Hover(
+                        new vscode.MarkdownString(hover.contents.value),
+                        new vscode.Range(start.line, start.character, end.line, end.character));
+                } catch (error) {
+                    output.appendLine(String(error.message ?? error));
+                    return undefined;
                 }
             },
         }),

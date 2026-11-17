@@ -1,7 +1,7 @@
 {
     "name": "mialu-lsp",
     "displayName": "Mialu Language Server",
-    "description": "A language server for Mialu that shows the size of each struct above its definition.",
+    "description": "A language server for Mialu that shows the size of each struct above its definition and the type of a name when the pointer rests on it.",
     "version": "0.0.1",
     "publisher": "mialu",
     "engines": {
@@ -30,6 +30,11 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Show the size and the alignment of a struct above its definition."
+                },
+                "mialu.lsp.typeHover": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show the type of a constant, a global variable, a parameter or a variable when the pointer rests on its name."
                 }
             }
         }
