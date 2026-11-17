@@ -13,8 +13,6 @@
   - [Booleans](#booleans)
   - [Characters](#characters)
   - [Integers](#integers)
-  - [32-bit integers](#32-bit-integers)
-  - [64-bit integers](#64-bit-integers)
   - [Bytes](#bytes)
   - [Floating-point numbers](#floating-point-numbers)
   - [Strings](#strings)
@@ -365,8 +363,6 @@ The arithmetic operators `+`, `-`, `*` and `/` take two `Int` values and give an
 
 An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an error, it is not a `Byte`, and an operand of arithmetic that is not an `Int` is an error. A literal or a constant without a type is not an `Int` yet, so it becomes a `Byte` where one is wanted without being converted, see [Untyped constants](#untyped-constants). The integer types `I8`, `I16`, `I32`, `I64` and `U8`, `U16`, `U32`, `U64` are reserved for possible future use, see [Primitive data types](#primitive-data-types).
 
-### 32-bit integers
-
 An `I32` is a signed 32-bit integer: it holds the numbers from -2147483648 to 2147483647. It is the type of the `int` of C, which is what it is for: a procedure of the C library that takes or gives an `int` is declared with an `I32`, see [Foreign procedures in the C library](#foreign-procedures-in-the-c-library), and so is a procedure of JavaScript that takes numbers of 32 bits, which are plain numbers there and not a `BigInt`, see [Foreign procedures in WebAssembly](#foreign-procedures-in-webassembly). The default value of an `I32` is `0`.
 
 ```
@@ -384,8 +380,6 @@ The arithmetic operators `+`, `-`, `*` and `/` take two `I32` values, or an `I32
 An `I32` is made an `Int` or a float with a [cast](#casts), `cast(Int)n`, which never loses anything and keeps the sign, and a `Byte`, a `Bool` or a `Rune` is made an `I32` the same way. An `Int` or an `I64` is not cast to an `I32`, because it may not fit: the built-in procedure [`int_to_i32`](#int_to_i32) makes an `I32` of an `Int`, and stops the program when the number is not from -2147483648 to 2147483647.
 
 An `I32` takes the same place in memory as an `Int` does, which is 8 bytes in a struct or an array, so a pointer to an `I32`, `^I32`, is not a pointer to an `int` of C, and an array of `I32` values is not an array of `int`. An `I32` is passed and returned by value, which is what C does with an `int`.
-
-### 64-bit integers
 
 An `I64` is a signed 64-bit integer: it holds the numbers from -9223372036854775808 to 9223372036854775807, which are the numbers of an `Int`. It is not another name for `Int`, but a type of its own with the same size, in the way that an `I32` is of its own: nothing is converted to it or from it implicitly, so `n : I64 = count` is an error when `count` is an `Int`, and so is `a + count` for an `I64` `a`. It is for what has a size that is said, which is the `long long`, the `int64_t` and the `size_t` of the C library, and a number of 64 bits of JavaScript, which is a `BigInt` there, as an `Int` is, see [Foreign procedures](#foreign-procedures). A procedure that is declared with an `I64` says what it takes and gives, where an `Int` says that it is a number like any other of the program. The default value of an `I64` is `0`.
 
