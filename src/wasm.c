@@ -147,7 +147,7 @@ typedef struct {
 
 // The locals that a procedure with arrays has after its parameters and variables, for the code that
 // is written for subscripts, slices and the like to hold values in. The order is the order of the
-// locals: the first three are 64-bit, then five are 32-bit, and the last two are a 32-bit float and
+// locals: the first three are 64-bit, then six are 32-bit, and the last two are a 32-bit float and
 // a 64-bit float. A scratch local is only used between
 // two instructions that follow each other, never while an expression is evaluated in between, so
 // that one is enough for any nesting of expressions. The exception is the address of the element
@@ -164,6 +164,10 @@ typedef enum {
     WASM_SCRATCH_TEMPORARY_32,
     // The address of the array literals of the procedure, see `wasm_frame_enter`.
     WASM_SCRATCH_FRAME,
+    // Whether two strings are the same so far, which is kept with `WASM_SCRATCH_FIRST`,
+    // `WASM_SCRATCH_SECOND` and `WASM_SCRATCH_TEMPORARY_32`, see
+    // `wasm_build_code_section_body_string_comparison`.
+    WASM_SCRATCH_STRING,
     // The only scratch locals that are not integers: they hold an `F32` and an `F64` between
     // instructions.
     WASM_SCRATCH_TEMPORARY_F32,
@@ -396,6 +400,12 @@ static void            wasm_build_type_section                (Wasm_Builder *bui
                                                                Ast_Node_Index module,
                                                                size_t definition_count);
 static byte            wasm_comparison_opcode                 (Ast_Comparison_Operator operator);
+static bool            wasm_comparison_is_of_strings          (Wasm_Builder const *builder,
+                                                               Ast_Node_Index comparison);
+static void            wasm_build_code_section_body_string_comparison
+                                                              (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Ast_Comparison_Operator operator);
 static bool            wasm_check_signatures                  (Wasm_Builder *builder,
                                                                Ast_Node_Index module,
                                                                size_t definition_count);
@@ -3934,12 +3944,12 @@ static void wasm_variables_write_locals(Wasm_Builder *builder, Ast_Node_Index pr
         }
     }
 
-    // The order of `Wasm_Scratch`: three 64-bit locals, five 32-bit ones, a 32-bit float and a
+    // The order of `Wasm_Scratch`: three 64-bit locals, six 32-bit ones, a 32-bit float and a
     // 64-bit float.
     if (uses_arrays) {
         wasm_write_unsigned(&builder->writer, 3);
         wasm_write_byte(&builder->writer, WASM_TYPE_I64);
-        wasm_write_unsigned(&builder->writer, 5);
+        wasm_write_unsigned(&builder->writer, 6);
         wasm_write_byte(&builder->writer, WASM_TYPE_I32);
         wasm_write_unsigned(&builder->writer, 1);
         wasm_write_byte(&builder->writer, WASM_TYPE_F32);
@@ -4456,6 +4466,23 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     Ast_Comparison_Operator operator = node->payload.comparison.operator;
     bool is_equality = operator == AST_COMPARISON_OPERATOR_EQUAL ||
                        operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
+
+    // Strings are the same when they have the same bytes, so they are compared with `==` and
+    // `not=`, and have no order. The other operand is a `Str` too, or an untyped string, which is
+    // one there. A `C_Str` has no length, so it is not compared.
+    if (left_type.kind == WASM_VALUE_TYPE_STR || right_type.kind == WASM_VALUE_TYPE_STR) {
+        Wasm_Type string_type = wasm_type_make(WASM_VALUE_TYPE_STR);
+        if (not is_equality || not wasm_value_is_accepted(builder, string_type, left)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, left));
+        }
+        if (not wasm_value_is_accepted(builder, string_type, right)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, right));
+        }
+        return true;
+    }
+
     // Pointers have no order either, and are the same when they hold the same address. `nil` is
     // compared with a pointer of any type.
     // The members of an enum are compared like addresses: they are the same when the numbers are,
@@ -4481,6 +4508,103 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
                          wasm_expression_subject(builder, definition, right));
     }
     return true;
+}
+
+/**
+ * Returns whether the comparison `comparison` is of two strings, which is when an operand is a
+ * `Str`, or both are untyped strings.
+ */
+static bool wasm_comparison_is_of_strings(Wasm_Builder const *builder, Ast_Node_Index comparison) {
+    assert(builder->nodes[comparison].node_type == AST_NODE_TYPE_COMPARISON);
+
+    return wasm_expression_type(builder, builder->nodes[comparison].first_child).kind ==
+               WASM_VALUE_TYPE_STR ||
+           wasm_expression_type(builder, builder->nodes[comparison].last_child).kind ==
+               WASM_VALUE_TYPE_STR;
+}
+
+/**
+ * Writes the instructions that compare two strings with `==` or `not=`, whose address and length
+ * are on the stack, the first string and then the second, and leave a 32-bit integer that is 1 when
+ * the comparison holds and 0 when it does not. The strings are the same when their lengths are and
+ * every byte is. The addresses are kept in two scratch locals, which move along the strings, and
+ * the end of the first one in a third, and a fourth says whether the strings are the same so far. A
+ * loop goes over the bytes until the end of the first string, and leaves at the first byte that
+ * differs, or when the lengths differ, because then there is nothing to compare.
+ */
+static void wasm_build_code_section_body_string_comparison(Wasm_Builder *builder,
+                                                           Ast_Node_Index procedure,
+                                                           Ast_Comparison_Operator operator) {
+    assert(operator == AST_COMPARISON_OPERATOR_EQUAL ||
+           operator == AST_COMPARISON_OPERATOR_NOT_EQUAL);
+
+    Wasm_Writer *writer = &builder->writer;
+    size_t first = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+    size_t second = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_SECOND);
+    size_t end = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_TEMPORARY_32);
+    size_t is_same = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_STRING);
+
+    // The second string is taken off the stack, its length first, and then the first one, which
+    // leaves its length in `end` for now.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, is_same);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, second);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, first);
+
+    // The strings are the same so far when their lengths are, and then `end` is the address after
+    // the last byte of the first one.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, is_same);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQ);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, is_same);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, first);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+
+    // Label 0 is the loop and label 1 the block around it.
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, is_same);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, first);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GE_U);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, first);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, second);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_byte(writer, WASM_OPCODE_I32_NE);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_i32_const(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, is_same);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, first);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, first);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, second);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, second);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 0);
+
+    // The loop and the block.
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, is_same);
+    if (operator == AST_COMPARISON_OPERATOR_NOT_EQUAL) {
+        wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+    }
 }
 
 /**
@@ -4978,6 +5102,13 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
         assert(false);
         break;
     case AST_NODE_TYPE_COMPARISON:
+        // Strings are compared by their bytes, with the operands on the stack as their addresses
+        // and lengths.
+        if (wasm_comparison_is_of_strings(builder, current)) {
+            wasm_build_code_section_body_string_comparison(
+                builder, procedure, node->payload.comparison.operator);
+            break;
+        }
         // Floats are compared as floats, of the type of the operand that is not an untyped literal.
         if (wasm_comparison_float_type(builder, node->first_child, node->last_child).kind !=
             WASM_VALUE_TYPE_NONE) {
@@ -5650,6 +5781,11 @@ static bool wasm_procedure_uses_arrays(Wasm_Builder const *builder, Ast_Node_Ind
         }
         // `length_of` keeps the length of its argument in a scratch local.
         if (node_type == AST_NODE_TYPE_CALL && wasm_call_is_built_in(builder, node)) {
+            return true;
+        }
+        // The comparison of two strings keeps where it is in them in scratch locals.
+        if (node_type == AST_NODE_TYPE_COMPARISON &&
+            wasm_comparison_is_of_strings(builder, node)) {
             return true;
         }
         // A field of a pointer to a struct is in memory, though no `^` is written.

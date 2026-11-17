@@ -856,6 +856,9 @@ static X64_Type     x64_arithmetic_type          (X64_Builder const *builder,
                                                   Ast_Node_Index operation);
 static X64_Type_Kind x64_parameter_float_at       (X64_Builder const *builder,
                                                   Ast_Node_Index procedure, size_t word);
+static void         x64_string_comparison_write  (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame,
+                                                  bool is_equal);
 static bool         x64_float_comparison_write   (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame,
                                                   X64_Type_Kind kind);
@@ -4664,9 +4667,10 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
                        operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
     bool is_ordered = type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_BYTE ||
                       type.kind == X64_TYPE_KIND_RUNE || x64_type_is_float(type);
+    // Two strings are the same when they have the same bytes, and have no order.
     bool is_equatable = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_ENUM ||
                         type.kind == X64_TYPE_KIND_POINTER ||
-                        type.kind == X64_TYPE_KIND_PROCEDURE;
+                        type.kind == X64_TYPE_KIND_PROCEDURE || type.kind == X64_TYPE_KIND_STR;
     bool is_valid = is_ordered || (is_equatable && is_equality);
     if (not is_valid || not x64_type_accepts(builder, type, left) ||
         not x64_type_accepts(builder, type, right)) {
@@ -4676,6 +4680,10 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
 
     if (x64_type_is_float(type)) {
         return x64_float_comparison_write(builder, frame, type.kind);
+    }
+    if (type.kind == X64_TYPE_KIND_STR) {
+        x64_string_comparison_write(builder, frame, operator == AST_COMPARISON_OPERATOR_EQUAL);
+        return true;
     }
 
     byte condition = X64_CONDITION_EQUAL;
@@ -4713,6 +4721,56 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     assert(target == first);
     x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
     return true;
+}
+
+/**
+ * Writes the comparison of two strings with `==`, or with `not=` when `is_equal` is false, whose
+ * operands are on the stack of values, each an address and a length. The lengths are compared
+ * first, and when they are the same a loop compares the bytes one at a time, with the addresses
+ * in `r10` and `r11` and the number of bytes that are left in `rax`, and leaves at the first one
+ * that differs. The result is a `Bool` in `rax`, which is put on the stack in place of the operands.
+ */
+static void x64_string_comparison_write(X64_Builder *builder, X64_Expression_Frame const *frame,
+                                        bool is_equal) {
+    int32_t first = x64_stack_displacement(builder, frame->stack_start, 2);
+    int32_t second = x64_stack_displacement(builder, frame->stack_start + 2, 2);
+    uint32_t different_jumps = X64_JUMP_NONE;
+    uint32_t same_jumps = X64_JUMP_NONE;
+    uint32_t done_jumps = X64_JUMP_NONE;
+
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                     first + X64_WORD_SIZE_BYTES);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP,
+                     second + X64_WORD_SIZE_BYTES);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &different_jumps);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, first);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R11, X64_REGISTER_RBP, second);
+
+    uint32_t loop = (uint32_t)(builder->writer.length - builder->text_start);
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_RAX, X64_REGISTER_RAX);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &same_jumps);
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RCX,
+                              X64_REGISTER_R10, 0);
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RDX,
+                              X64_REGISTER_R11, 0);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RCX);
+    x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &different_jumps);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    x64_write_add_immediate(builder, X64_REGISTER_R11, 1);
+    x64_write_add_immediate(builder, X64_REGISTER_RAX, -1);
+    x64_jump_back_write(builder, loop);
+
+    x64_jumps_resolve(builder, same_jumps);
+    x64_write_load_integer(builder, X64_REGISTER_RAX, is_equal ? 1 : 0);
+    x64_jump_write(builder, X64_CONDITION_ALWAYS, &done_jumps);
+    x64_jumps_resolve(builder, different_jumps);
+    x64_write_load_integer(builder, X64_REGISTER_RAX, is_equal ? 0 : 1);
+    x64_jumps_resolve(builder, done_jumps);
+
+    x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+    int32_t target = x64_stack_push(builder, 1);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
 }
 
 /**

@@ -788,7 +788,7 @@ static Constant_Value constant_divide(Constant_Value left, Constant_Value right,
  * Integers are compared with any operator, when an untyped one fits in the type of a typed one and
  * the typed ones have the same type, so a `Byte` is compared with an untyped number from 0 to 255
  * but not with an `Int`. Truth values are compared with `==` and `not=` only, because they have no
- * order, and strings are not compared, as in a running program.
+ * order, and strings are compared with `==` and `not=` by their bytes, and have no order either.
  */
 static Constant_Value constant_comparison(Ast_Node const *nodes, Ast_Node_Index comparison,
                                           Constant_Value left, Constant_Value right) {
@@ -867,6 +867,17 @@ static Constant_Value constant_comparison(Ast_Node const *nodes, Ast_Node_Index 
         if (not is_equality) {
             return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, comparison);
         }
+    } else if (constant_type_is_string(left.type) && constant_type_is_string(right.type)) {
+        // Two strings are the same when they have the same bytes, and there is no order.
+        if (not is_equality) {
+            return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, comparison);
+        }
+        assert(left.string != AST_NODE_INDEX_NONE);
+        assert(right.string != AST_NODE_INDEX_NONE);
+        bool is_same = str_equals(nodes[left.string].payload.string_literal.text,
+                                  nodes[right.string].payload.string_literal.text);
+        bool holds = is_same == (operator == AST_COMPARISON_OPERATOR_EQUAL);
+        return constant_make(CONSTANT_TYPE_UNTYPED_BOOL, holds ? 1 : 0);
     } else {
         return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, comparison);
     }

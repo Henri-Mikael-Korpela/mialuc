@@ -2525,8 +2525,8 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         break;
     case WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "
-                "must be Int, or both must be floats of one type, or both must be Bool or pointers "
-                "of one type for == and not=.\n",
+                "must be Int, or both must be floats of one type, or both must be Bool, Str or "
+                "pointers of one type for == and not=.\n",
                 path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
@@ -2772,7 +2772,8 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
                 "operands that it does not take: arithmetic takes integers that are untyped or "
                 "Int, or floats, but not both, 'and', 'or' and 'not' take truth values, a Byte is "
                 "compared with a Byte or a number from 0 to 255, a Rune with a Rune, strings are "
-                "not compared, and '++' takes a string and a string or a rune.\n", path,
+                "compared with '==' and 'not=' only, and '++' takes a string and a string or a "
+                "rune.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_CONSTANT_OVERFLOW:
