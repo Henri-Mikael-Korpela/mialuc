@@ -63,11 +63,8 @@ Version :: struct ->
 /// rest of it is the next line, which no line of the header that matters is long enough to make.
 ///
 /// Bytes that are not valid UTF-8 are a line with no text, since `utf8_decode` gives the empty
-/// string for them.
-//
-// MISSING FEATURE: the escape sequences of strings and runes, which a backslash would start, so that
-// the line feed and the carriage return are written `'\n'` and `'\r'`, and not as their numbers 10
-// and 13, which are compared with a `Byte`.
+/// string for them. The end of a line is a line feed, and a carriage return before it for a header
+/// that was written on Windows, which are compared with the bytes as the runes that they are.
 read_line :: proc(file: ^Byte, buffer: []Byte) (Str, Bool) ->
     if fgets(%buffer[0], int_to_i32(length_of(buffer)), file) == nil ->
         return "", false
@@ -77,7 +74,7 @@ read_line :: proc(file: ^Byte, buffer: []Byte) (Str, Bool) ->
         if length == 0 ->
             break
         last := buffer[length - 1]
-        if last not= 10 and last not= 13 ->
+        if last not= '\n' and last not= '\r' ->
             break
         length -= 1
     text, _ := utf8_decode(buffer[0:length])
@@ -101,14 +98,15 @@ read_definition :: proc(line: Str, version: ^Version) Bool ->
     if not is_ok ->
         return false
     name := line[DEFINE_PREFIX_LENGTH:name_end]
-    if name == "MAJOR" ->
-        version.major = number
-    else if name == "MINOR" ->
-        version.minor = number
-    else if name == "PATCH" ->
-        version.patch = number
-    else ->
-        return false
+    match name ->
+        case "MAJOR" ->
+            version.major = number
+        case "MINOR" ->
+            version.minor = number
+        case "PATCH" ->
+            version.patch = number
+        case ->
+            return false
     version.found += 1
     return true
 
