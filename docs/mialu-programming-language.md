@@ -1167,6 +1167,18 @@ count_up_to :: proc(limit: Int) Int ->
 
 `count_up_to(5)` returns 5. A loop without a way out is not an error, but it never ends, and neither does a program that runs it.
 
+A for statement with only a condition is a loop that goes on while the condition is true, like `while` in C. It is written `for` and a condition of type `Bool`, such as `for length > 0 ->`, and the block, which is indented one level deeper, runs again and again as long as the condition is true. The condition is tested before each pass, so the block does not run at all when it is false from the start, and a `continue` goes back to the test. A `break` and a `return` leave the loop as in any other, and so does the condition becoming false. Example:
+
+```
+count_up_to :: proc(limit: Int) Int ->
+    count := 0
+    for count < limit ->
+        count += 1
+    return count
+```
+
+The condition is worked out again for each pass, so it is not a constant, and it is not a `Bool` conversion of a number: `for count ->` is an error, as `if count ->` is. A condition that starts with a name and `in` is read as the iterator of a for statement, so it is written another way.
+
 ### Labels and scopes
 
 A scope statement is a block of statements that is not the branch of an `if` or the body of a loop. It is written `->` alone on a line, and the block, which is indented one level deeper, runs once, from the first statement to the last:

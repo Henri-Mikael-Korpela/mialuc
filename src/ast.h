@@ -299,9 +299,12 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   is given to, written `:name if ...` or `:name for ...`. It takes the place of that statement in
  *   its block, and the node of the statement comes right after it. A label of a scope statement is
  *   its child instead. It is a statement of a procedure body.
- * - `AST_NODE_TYPE_LOOP_STATEMENT`: an infinite loop, written `for ->`. It has one child, the
- *   `AST_NODE_TYPE_BLOCK` that runs again and again until a `break` or a `return` leaves it. It is
- *   a statement of a procedure body.
+ * - `AST_NODE_TYPE_LOOP_STATEMENT`: an infinite loop, written `for ->`, or a loop with a condition,
+ *   written `for condition ->`. The last child is the `AST_NODE_TYPE_BLOCK` that runs again and
+ *   again until a `break` or a `return` leaves it. A loop with a condition has it as its first
+ *   child, an expression that is tested before each pass, and the loop ends when it is false, so
+ *   the block may not run at all. A `continue` goes back to the test. It is a statement of a
+ *   procedure body.
  * - `AST_NODE_TYPE_MATCH_CASE`: one case of an `AST_NODE_TYPE_MATCH_STATEMENT`, written
  *   `case pattern ->`. Its first child is the pattern, which is an expression or an
  *   `AST_NODE_TYPE_RANGE`, and the default case, `case ->`, has none. Then comes the

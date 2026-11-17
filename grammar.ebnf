@@ -415,7 +415,8 @@ for_statement_1 =
     required_space , "in" , required_space ,
     iteration , branch_end , block_2 ;
 loop_statement_1 =
-    indentation_1 , [ defer_prefix ] , [ label , required_space ] , "for" , branch_end , block_2 ;
+    indentation_1 , [ defer_prefix ] , [ label , required_space ] , "for" ,
+    [ required_space , condition ] , branch_end , block_2 ;
 scope_statement_1 = indentation_1 , [ "defer" , ws ] , [ label ] , branch_end , block_2 ;
 match_statement_1 =
     indentation_1 , [ defer_prefix ] , match_header , { blank_line } ,
@@ -445,7 +446,8 @@ for_statement_2 =
     required_space , "in" , required_space ,
     iteration , branch_end , block_3 ;
 loop_statement_2 =
-    indentation_2 , [ defer_prefix ] , [ label , required_space ] , "for" , branch_end , block_3 ;
+    indentation_2 , [ defer_prefix ] , [ label , required_space ] , "for" ,
+    [ required_space , condition ] , branch_end , block_3 ;
 scope_statement_2 = indentation_2 , [ "defer" , ws ] , [ label ] , branch_end , block_3 ;
 match_statement_2 =
     indentation_2 , [ defer_prefix ] , match_header , { blank_line } ,
@@ -475,7 +477,8 @@ for_statement_3 =
     required_space , "in" , required_space ,
     iteration , branch_end , block_4 ;
 loop_statement_3 =
-    indentation_3 , [ defer_prefix ] , [ label , required_space ] , "for" , branch_end , block_4 ;
+    indentation_3 , [ defer_prefix ] , [ label , required_space ] , "for" ,
+    [ required_space , condition ] , branch_end , block_4 ;
 scope_statement_3 = indentation_3 , [ "defer" , ws ] , [ label ] , branch_end , block_4 ;
 match_statement_3 =
     indentation_3 , [ defer_prefix ] , match_header , { blank_line } ,
@@ -517,7 +520,10 @@ match_header =
 pattern = range | expression ;
 
 (* A loop statement runs its block again and again, until a `break` or a `return` leaves it. It is a
-   `for` without an iterator and a range. *)
+   `for` without an iterator and a range. With a condition, `for count > 0 ->`, it runs the block
+   while the condition is true, and the condition is tested before each pass, so the block may not
+   run at all. The compiler tells the condition from the iterator of a for statement by the `in`
+   that comes after a name, so a condition does not start with a name and `in`. *)
 
 (* A scope statement is a block that runs once, in a scope of its own: a `->` alone on a line, with
    the block indented one level deeper. A `break` inside it leaves it. It can have a label, which

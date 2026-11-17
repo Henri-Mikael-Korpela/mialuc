@@ -2210,6 +2210,12 @@ static bool x64_list_statement_write(X64_Builder *builder, Ast_Node_Index proced
         *pushed = current;
         builder->loop_start = (uint32_t)(builder->writer.length - builder->text_start);
         builder->loop_exit_jumps = X64_JUMP_NONE;
+        if (builder->nodes[current].first_child != builder->nodes[current].last_child) {
+            // The condition is tested at the start of each pass, and the loop is left when it is
+            // false.
+            return x64_condition_write(builder, builder->nodes[current].first_child,
+                                       &builder->loop_exit_jumps);
+        }
         return true;
     case AST_NODE_TYPE_MATCH_STATEMENT:
         *pushed = current;

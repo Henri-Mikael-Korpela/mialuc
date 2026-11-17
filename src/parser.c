@@ -1216,7 +1216,8 @@ static Ast_Node_Index parse_if_statement(Parser *parser, Ast_Node_Index parent) 
 }
 
 /**
- * Parses the header line `for ->` of an infinite loop, or `for name in first..<end ->`, or
+ * Parses the header line `for ->` of an infinite loop, or `for condition ->` of a loop that goes on
+ * while the condition is true, or `for name in first..<end ->`, or
  * `first..<=end` for a range that includes its end, or `for name in elements ->` for the elements
  * of an array or an array slice, and appends the statement that it starts to `parent`. The
  * statement gets a range, or the expression of the elements, and an empty block, which is returned
@@ -1240,9 +1241,25 @@ static Ast_Node_Index parse_for_statement(Parser *parser, Ast_Node_Index parent)
         return parse_block_open(parser, loop);
     }
 
+    // A name and `in` start the iteration of a range or of elements. Anything else is a condition,
+    // `for length > 0 ->`, and the loop goes on while it is true: it is the loop statement with
+    // the condition before its block, which is tested before each pass.
     Token const *iterator = parse_token_current(parser);
-    if (iterator->kind != TOKEN_KIND_IDENTIFIER) {
-        return parse_fail(parser, STR("the name of the iterator"));
+    bool is_iteration = iterator->kind == TOKEN_KIND_IDENTIFIER &&
+                        parser->token_index + 1 < parser->token_count &&
+                        parser->tokens[parser->token_index + 1].kind == TOKEN_KIND_KEYWORD_IN;
+    if (not is_iteration) {
+        Ast_Node_Index loop = parse_node_make(parser, AST_NODE_TYPE_LOOP_STATEMENT);
+        if (loop == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, parent, loop);
+        Ast_Node_Index condition = parse_expression(parser);
+        if (condition == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, loop, condition);
+        return parse_block_open(parser, loop);
     }
 
     Ast_Node_Index statement = parse_node_make(parser, AST_NODE_TYPE_FOR_STATEMENT);

@@ -685,8 +685,11 @@ static bool semantic_procedure_resolve(Semantic_Analyzer *analyzer, Ast_Node_Ind
         } else if (node_type == AST_NODE_TYPE_RETURN_STATEMENT ||
                    node_type == AST_NODE_TYPE_CALL_STATEMENT ||
                    node_type == AST_NODE_TYPE_IF_STATEMENT ||
+                   node_type == AST_NODE_TYPE_LOOP_STATEMENT ||
                    node_type == AST_NODE_TYPE_MATCH_CASE ||
                    ast_node_type_is_assignment(node_type)) {
+            // The condition of a loop belongs to the loop, so the variable defined before it is in
+            // scope there.
             statement = current;
         }
     }

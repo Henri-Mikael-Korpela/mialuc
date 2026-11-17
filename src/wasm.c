@@ -2436,11 +2436,28 @@ static bool wasm_build_code_section_body_procedure(Wasm_Builder *builder,
             Ast_Node_Index block = child_node->last_child;
             wasm_frame_push(builder, frames, &frame_count, block, child);
         } else if (child_node->node_type == AST_NODE_TYPE_LOOP_STATEMENT) {
-            // The same three structured instructions as a for statement has, without a test.
+            // The same three structured instructions as a for statement has, with the test of its
+            // condition, if it has one.
             wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
             wasm_structured_begin(builder, WASM_OPCODE_LOOP);
-            wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
             Ast_Node_Index block = child_node->last_child;
+            if (child_node->first_child != block) {
+                // A condition is tested at the start of each pass, and the loop is left when it is
+                // false, which is the `br_if` out of the `block` that is outside the `loop`.
+                Ast_Node_Index condition = child_node->first_child;
+                if (not wasm_build_code_section_body_expression(builder, definition, condition,
+                                                                false)) {
+                    return false;
+                }
+                if (wasm_expression_type(builder, condition).kind != WASM_VALUE_TYPE_BOOL) {
+                    Str subject = wasm_expression_subject(builder, definition, condition);
+                    return wasm_fail(builder, WASM_BUILD_STATUS_CONDITION_TYPE_INVALID, subject);
+                }
+                wasm_write_byte(&builder->writer, WASM_OPCODE_I32_EQZ);
+                wasm_write_byte(&builder->writer, WASM_OPCODE_BR_IF);
+                wasm_write_unsigned(&builder->writer, 1);
+            }
+            wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
             wasm_frame_push(builder, frames, &frame_count, block, child);
         } else if (child_node->node_type == AST_NODE_TYPE_FOR_STATEMENT) {
             if (not wasm_build_code_section_body_for(builder, definition, child)) {
