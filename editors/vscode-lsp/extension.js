@@ -73,6 +73,10 @@ class Connection {
             const message = JSON.parse(this.pending.toString("utf8", headerEnd + 4, bodyEnd));
             this.pending = this.pending.subarray(bodyEnd);
 
+            if (message.method !== undefined && message.id === undefined) {
+                this.onNotification?.(message.method, message.params);
+                continue;
+            }
             const answered = this.waiting.get(message.id);
             if (answered === undefined) {
                 // A request or a notification of the server. It asks for nothing that this client
@@ -117,6 +121,24 @@ async function activate(context) {
         // The process of the extension host is Electron, which runs a script like Node.js with this.
         { env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true }, output);
     context.subscriptions.push({ dispose: () => connection.stop() });
+
+    // The errors that the server publishes are marked in the code and listed in the Problems tab.
+    const diagnostics = vscode.languages.createDiagnosticCollection("mialu");
+    context.subscriptions.push(diagnostics);
+    connection.onNotification = (method, params) => {
+        if (method !== "textDocument/publishDiagnostics") {
+            return;
+        }
+        const uri = vscode.Uri.parse(params.uri);
+        diagnostics.set(uri, params.diagnostics.map((item) => {
+            const diagnostic = new vscode.Diagnostic(
+                new vscode.Range(item.range.start.line, item.range.start.character,
+                    item.range.end.line, item.range.end.character),
+                item.message, vscode.DiagnosticSeverity.Error);
+            diagnostic.source = item.source;
+            return diagnostic;
+        }));
+    };
 
     await connection.request("initialize", {
         processId: process.pid,

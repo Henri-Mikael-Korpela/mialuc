@@ -11,6 +11,10 @@
 // A third feature is the outline of a document, the definitions with the fields and the members
 // below them, from `mialuc dump-outline`.
 //
+// A fourth is diagnostics: a moment after a document is opened or changed, the server checks it with
+// the compiler and publishes the error, with `textDocument/publishDiagnostics`, so that the editor
+// marks it in the code and lists it as a problem while it is typed, without a build.
+//
 // The server does not work any of that out itself. It asks the compiler, which knows the layouts
 // and the types: `mialuc dump-struct-sizes <file>` prints a line for each struct and `mialuc
 // dump-types <file>` a line for each name, see docs/mialu-cli.md. The text of an open document is
@@ -226,6 +230,113 @@ function compilerRun(command, text) {
 }
 
 /**
+ * Turns what the compiler printed to the standard error into diagnostics of `text`. An error has the
+ * form `<file>:<line>:<column>: <message>`, with the line and the column counted from 1, the column
+ * in bytes, or `<file>: <message>` when it is about the whole program, which is shown on the first
+ * line. The compiler stops at the first error, so there is one. The range is the word at the place of
+ * the error, or the character there when it is not on a word, and the columns are converted from
+ * bytes of UTF-8 to UTF-16 code units.
+ */
+function diagnosticsFromErrors(errors, file, text) {
+    const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
+    const escaped = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const located = new RegExp(`^${escaped}:(\\d+):(\\d+): (.*)$`);
+    const whole = new RegExp(`^${escaped}: (.*)$`);
+    const diagnostics = [];
+    for (const row of errors.split("\n")) {
+        const trimmed = row.replace(/\r$/, "");
+        let match = located.exec(trimmed);
+        let line = 0;
+        let column = 0;
+        let message;
+        if (match !== null) {
+            line = Math.min(Math.max(Number(match[1]), 1), lines.length) - 1;
+            column = Number(match[2]) - 1;
+            message = match[3];
+        } else if ((match = whole.exec(trimmed)) !== null) {
+            message = match[1];
+        } else {
+            continue;
+        }
+        const bytes = Buffer.from(lines[line], "utf8");
+        const start = bytes.toString("utf8", 0, Math.min(column, bytes.length)).length;
+        const word = /^\w+/.exec(lines[line].slice(start));
+        const end = Math.min(start + (word === null ? 1 : word[0].length), lines[line].length);
+        diagnostics.push({
+            range: {
+                start: { line, character: start },
+                end: { line, character: Math.max(end, start) },
+            },
+            severity: 1, // Error
+            source: "mialuc",
+            message,
+        });
+    }
+    return diagnostics;
+}
+
+/**
+ * Checks `text` with the compiler. Resolves to the diagnostics, an empty list when the text is
+ * accepted, or to null when the compiler cannot be run or does not answer in time.
+ */
+function diagnosticsCompute(text) {
+    return new Promise((resolve) => {
+        let directory;
+        let file;
+        try {
+            directory = fs.mkdtempSync(path.join(os.tmpdir(), "mialu-lsp-"));
+            file = path.join(directory, "document.mu");
+            fs.writeFileSync(file, text, "utf8");
+        } catch (error) {
+            resolve(null);
+            return;
+        }
+        childProcess.execFile(state.compilerPath, ["dump-types", file],
+            { timeout: 10000, windowsHide: true }, (error, stdout, stderr) => {
+                fs.rmSync(directory, { recursive: true, force: true });
+                if (!error) {
+                    resolve([]);
+                } else if (error.code === 1) {
+                    resolve(diagnosticsFromErrors(stderr, file, text));
+                } else {
+                    resolve(null);
+                }
+            });
+    });
+}
+
+/** How long after the last change the document is checked, so that typing does not run it often. */
+const DIAGNOSTICS_DELAY_MS = 300;
+
+/**
+ * Checks a document and publishes what is wrong with it, which replaces what was published before.
+ * A check for a text that is not the text any more is dropped, since a newer one follows it.
+ */
+async function diagnosticsPublish(uri) {
+    const document = documents.get(uri);
+    if (document === undefined) {
+        return;
+    }
+    const text = document.text;
+    const diagnostics = await diagnosticsCompute(text);
+    if (diagnostics !== null && documents.get(uri) === document && document.text === text) {
+        send({ method: "textDocument/publishDiagnostics", params: { uri, diagnostics } });
+    }
+}
+
+/** Checks a document after `delay` milliseconds, or later when it changes again before that. */
+function diagnosticsSchedule(uri, delay = DIAGNOSTICS_DELAY_MS) {
+    const document = documents.get(uri);
+    if (document === undefined) {
+        return;
+    }
+    clearTimeout(document.timer);
+    document.timer = setTimeout(() => {
+        diagnosticsPublish(uri).catch(() => {});
+    }, delay);
+}
+
+/**
  * Asks the compiler for the sizes of the structs of `text`. Resolves to the lenses, or to null
  * when the compiler does not accept the text.
  */
@@ -341,10 +452,11 @@ async function documentSymbol(uri) {
 function documentSet(uri, text) {
     const document = documents.get(uri);
     if (document === undefined) {
-        documents.set(uri, { text, lenses: [], names: [], symbols: [] });
+        documents.set(uri, { text, lenses: [], names: [], symbols: [], timer: undefined });
     } else {
         document.text = text;
     }
+    diagnosticsSchedule(uri);
 }
 
 /**
@@ -395,9 +507,14 @@ async function handle(message) {
         documentSet(params.textDocument.uri, changes[changes.length - 1].text);
         break;
     }
-    case "textDocument/didClose":
-        documents.delete(params.textDocument.uri);
+    case "textDocument/didClose": {
+        const uri = params.textDocument.uri;
+        clearTimeout(documents.get(uri)?.timer);
+        documents.delete(uri);
+        // What was published for a document that is closed is taken away.
+        send({ method: "textDocument/publishDiagnostics", params: { uri, diagnostics: [] } });
         break;
+    }
     case "textDocument/codeLens":
         reply(id, await codeLens(params.textDocument.uri));
         break;

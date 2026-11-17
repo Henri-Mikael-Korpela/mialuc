@@ -39,6 +39,7 @@ async function withServer(script) {
         stdio: ["pipe", "pipe", "inherit"],
     });
     const waiting = new Map();
+    const notifications = [];
     let pending = Buffer.alloc(0);
     server.stdout.on("data", (chunk) => {
         pending = Buffer.concat([pending, chunk]);
@@ -54,6 +55,9 @@ async function withServer(script) {
             const message = JSON.parse(pending.toString("utf8", headerEnd + 4, headerEnd + 4 + length));
             pending = pending.subarray(headerEnd + 4 + length);
             waiting.get(message.id)?.(message);
+            if (message.method !== undefined) {
+                notifications.push(message);
+            }
         }
     });
 
@@ -70,7 +74,7 @@ async function withServer(script) {
     const notify = (method, params) => write({ method, params });
 
     try {
-        await script(request, notify);
+        await script(request, notify, notifications);
     } finally {
         server.kill();
     }
@@ -354,6 +358,43 @@ test("a name that stores the result of a cast shows the type that the cast names
         assert.match((await hover(5, 9)).contents.value, /b: Byte/);
         assert.match((await hover(5, 4)).contents.value, /c: Byte/);
         assert.match((await hover(6, 4)).contents.value, /q: \[4\]Byte/);
+        assert.strictEqual((await request("shutdown", null)).result, null);
+    });
+});
+
+test("publishes the error of a document that does not compile and clears it when it is fixed", async () => {
+    await withServer(async (request, notify, notifications) => {
+        await request("initialize", {
+            processId: null, rootUri: null, capabilities: {},
+            initializationOptions: { compilerPath: COMPILER },
+        });
+        notify("initialized", {});
+
+        const uri = "file:///broken.mu";
+        const good = ["package broken", "", "main :: proc() Int ->", "    return 0", ""].join("\n");
+        const bad = ["package broken", "", "main :: proc() Int ->", "    return missing", ""]
+            .join("\n");
+        const published = async (count) => {
+            for (let i = 0; i < 100 && notifications.length < count; i += 1) {
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            return notifications[count - 1].params;
+        };
+
+        notify("textDocument/didOpen", {
+            textDocument: { uri, languageId: "mialu", version: 1, text: bad },
+        });
+        const first = await published(1);
+        assert.strictEqual(first.uri, uri);
+        assert.strictEqual(first.diagnostics.length, 1);
+        assert.strictEqual(first.diagnostics[0].range.start.line, 3);
+        assert.strictEqual(first.diagnostics[0].range.start.character, 11);
+        assert.strictEqual(first.diagnostics[0].range.end.character, 18);
+
+        notify("textDocument/didChange", {
+            textDocument: { uri, version: 2 }, contentChanges: [{ text: good }],
+        });
+        assert.deepStrictEqual((await published(2)).diagnostics, []);
         assert.strictEqual((await request("shutdown", null)).result, null);
     });
 });
