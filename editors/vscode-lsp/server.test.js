@@ -86,6 +86,16 @@ const TYPES_SOURCE = [
     "    total := a + LIMIT",
     "    return total",
     "",
+    "Color :: enum Int ->",
+    "    RED",
+    "    GREEN",
+    "",
+    "paint :: proc(color: Color) Color ->",
+    "    chosen := Color.RED",
+    "    if color == .GREEN ->",
+    "        return chosen",
+    "    return .RED",
+    "",
 ].join("\n");
 
 test("a name shows its type when the pointer rests on it", async () => {
@@ -122,6 +132,11 @@ test("a name shows its type when the pointer rests on it", async () => {
         assert.match((await hover(5, 0)).contents.value, /add: proc\(a: Int, b: \^Int\) Int/);
         assert.match((await hover(5, 20)).contents.value, /b: \^Int/);
         assert.match((await hover(3, 1)).contents.value, /NAME: Str/);
+
+        // A member of an enum has the enum as its type, written with the enum or without.
+        assert.match((await hover(10, 5)).contents.value, /RED: Color/);
+        assert.match((await hover(14, 21)).contents.value, /RED: Color/);
+        assert.match((await hover(15, 18)).contents.value, /GREEN: Color/);
 
         // Nothing is shown on a keyword or on a space.
         assert.strictEqual(await hover(6, 12), null);

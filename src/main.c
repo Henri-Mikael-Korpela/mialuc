@@ -116,7 +116,14 @@ static bool         main_definition_type_write             (Ast_Node const *node
                                                             Ast_Node_Index target, char *text,
                                                             size_t text_size_bytes);
 static bool         main_constant_type_is_untyped          (Constant_Type type);
-static bool         main_node_type_is_arithmetic           (Ast_Node_Type node_type);
+static Ast_Node_Index main_enum_of_access              (Ast_Node const *nodes,
+                                                            Semantic_Binding const *bindings,
+                                                            Ast_Node_Index access);
+static Ast_Node_Index main_enum_of_member              (Ast_Node const *nodes, size_t node_count,
+                                                            Ast_Node_Index member);
+static Ast_Node_Index main_enum_of_member_name         (Ast_Node const *nodes, size_t node_count,
+                                                            Str name);
+static bool         main_node_type_is_arithmetic          (Ast_Node_Type node_type);
 static bool         main_node_type_is_type                 (Ast_Node_Type node_type);
 static bool         main_procedure_text_write              (Ast_Node const *nodes,
                                                             Ast_Node_Index procedure, char *text,
@@ -557,6 +564,77 @@ static bool main_node_type_is_type(Ast_Node_Type node_type) {
 }
 
 /**
+ * Returns the constant definition of the enum that has the member `member`, an
+ * `AST_NODE_TYPE_ENUM_MEMBER`, or `AST_NODE_INDEX_NONE`. An enum is always the value of a constant
+ * of the module, so the search goes over the definitions.
+ */
+static Ast_Node_Index main_enum_of_member(Ast_Node const *nodes, size_t node_count,
+                                          Ast_Node_Index member) {
+    assert(member < node_count);
+
+    for (Ast_Node_Index index = 0; index < node_count; index += 1) {
+        if (nodes[index].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
+            nodes[nodes[index].first_child].node_type != AST_NODE_TYPE_ENUM_TYPE) {
+            continue;
+        }
+        for (Ast_Node_Index child = nodes[nodes[index].first_child].first_child;
+             child != AST_NODE_INDEX_NONE; child = nodes[child].next_sibling) {
+            if (child == member) {
+                return index;
+            }
+        }
+    }
+    return AST_NODE_INDEX_NONE;
+}
+
+/**
+ * Returns the constant definition of the only enum that has a member called `name`, for the
+ * literal `.RED` whose enum is not written and depends on the place it is given to, which this
+ * does not know. Returns `AST_NODE_INDEX_NONE` when no enum has such a member or more than one has,
+ * since the literal could be any of them.
+ */
+static Ast_Node_Index main_enum_of_member_name(Ast_Node const *nodes, size_t node_count,
+                                               Str name) {
+    Ast_Node_Index found = AST_NODE_INDEX_NONE;
+    for (Ast_Node_Index index = 0; index < node_count; index += 1) {
+        if (nodes[index].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
+            nodes[nodes[index].first_child].node_type != AST_NODE_TYPE_ENUM_TYPE) {
+            continue;
+        }
+        for (Ast_Node_Index child = nodes[nodes[index].first_child].first_child;
+             child != AST_NODE_INDEX_NONE; child = nodes[child].next_sibling) {
+            if (str_equals(nodes[child].payload.enum_member.name, name)) {
+                if (found != AST_NODE_INDEX_NONE) {
+                    return AST_NODE_INDEX_NONE;
+                }
+                found = index;
+            }
+        }
+    }
+    return found;
+}
+
+/**
+ * Returns the constant definition of the enum that `access`, an `AST_NODE_TYPE_FIELD_ACCESS`, is a
+ * member of, as in `Color.RED`, or `AST_NODE_INDEX_NONE` when it is not the member of an enum.
+ */
+static Ast_Node_Index main_enum_of_access(Ast_Node const *nodes, Semantic_Binding const *bindings,
+                                          Ast_Node_Index access) {
+    assert(nodes[access].node_type == AST_NODE_TYPE_FIELD_ACCESS);
+
+    Ast_Node_Index base = nodes[access].first_child;
+    if (nodes[base].node_type != AST_NODE_TYPE_IDENTIFIER ||
+        bindings[base].kind != SEMANTIC_BINDING_KIND_CONSTANT) {
+        return AST_NODE_INDEX_NONE;
+    }
+    Ast_Node_Index definition = bindings[base].target;
+    if (nodes[nodes[definition].first_child].node_type != AST_NODE_TYPE_ENUM_TYPE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return definition;
+}
+
+/**
  * Returns whether `node_type` is an operator of arithmetic, whose type is that of its operands.
  */
 static bool main_node_type_is_arithmetic(Ast_Node_Type node_type) {
@@ -804,6 +882,15 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
             return main_text_write(text, text_size_bytes, STR("Bool"));
         }
 
+        if (nodes[value].node_type == AST_NODE_TYPE_FIELD_ACCESS) {
+            // A member of an enum, such as `Color.RED`, has the enum as its type.
+            Ast_Node_Index enum_definition = main_enum_of_access(nodes, bindings, value);
+            if (enum_definition != AST_NODE_INDEX_NONE) {
+                return main_text_write(text, text_size_bytes,
+                                       nodes[enum_definition].payload.constant_definition.name);
+            }
+        }
+
         Constant_Value known = constants[value];
         if (known.status == CONSTANT_STATUS_OK) {
             int written = snprintf(text, text_size_bytes, "%s",
@@ -857,6 +944,8 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
         Ast_Node const *node = &nodes[index];
         Str name = STR_EMPTY;
         Ast_Node_Index target = AST_NODE_INDEX_NONE;
+        // The enum that a member belongs to, for the names whose type is that.
+        Ast_Node_Index enum_definition = AST_NODE_INDEX_NONE;
         switch (node->node_type) {
         case AST_NODE_TYPE_CONSTANT_DEFINITION:
             name = node->payload.constant_definition.name;
@@ -884,21 +973,44 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
                 target = bindings[index].target;
             }
             break;
+        case AST_NODE_TYPE_ENUM_MEMBER:
+            // The type of a member is its enum. It has no definition to take it from, so the
+            // enum is the one that is the target.
+            name = node->payload.enum_member.name;
+            enum_definition = main_enum_of_member(nodes, parse_result.nodes.length, index);
+            break;
+        case AST_NODE_TYPE_ENUM_LITERAL:
+            name = node->payload.enum_literal.name;
+            enum_definition = main_enum_of_member_name(nodes, parse_result.nodes.length, name);
+            break;
+        case AST_NODE_TYPE_FIELD_ACCESS:
+            name = node->payload.field_access.name;
+            enum_definition = main_enum_of_access(nodes, bindings, index);
+            break;
         default:
             break;
         }
         // The name `_` takes the place of a value that is not wanted, and is no variable.
-        if (target == AST_NODE_INDEX_NONE || name.bytes == NULL ||
-            (name.length == 1 && name.bytes[0] == '_')) {
+        if (name.bytes == NULL || (name.length == 1 && name.bytes[0] == '_')) {
             continue;
         }
 
         char text[256] = "";
-        if (not main_definition_type_write(nodes, bindings, constants, parse_result.nodes.length,
-                                           target, text, sizeof(text))) {
+        if (enum_definition != AST_NODE_INDEX_NONE) {
+            if (not main_text_write(text, sizeof(text),
+                                    nodes[enum_definition].payload.constant_definition.name)) {
+                continue;
+            }
+        } else if (target == AST_NODE_INDEX_NONE ||
+                   not main_definition_type_write(nodes, bindings, constants,
+                                                  parse_result.nodes.length, target, text,
+                                                  sizeof(text))) {
             continue;
         }
-        Str_Position position = str_position_at(source, node->source_offset);
+        // The names are views of the source, so the offset of a name is where its bytes are. A
+        // member after a dot is not where the node starts, which is why the node is not used.
+        size_t name_offset = (size_t)(name.bytes - source.bytes);
+        Str_Position position = str_position_at(source, name_offset);
         printf("%zu\t%zu\t%zu\t%.*s\t%s\n", position.line, position.column, name.length,
                (int)name.length, (char const *)name.bytes, text);
     }
