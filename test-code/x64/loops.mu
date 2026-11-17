@@ -66,7 +66,7 @@ add_eleven :: proc(x: Int) Int ->
 break_early_with_label :: proc() Int ->
     x := 1
     ->
-        @my_block ->
+        :my_block ->
             if x > 10 ->
                 x += 1
             else ->
@@ -77,7 +77,7 @@ break_early_with_label :: proc() Int ->
 
 classify :: proc(n: Int) Int ->
     x := 0
-    @check if n > 5 ->
+    :check if n > 5 ->
         x += 1
         if n > 10 ->
             break check
@@ -91,7 +91,7 @@ classify :: proc(n: Int) Int ->
 
 count_triangle :: proc(n: Int) Int ->
     total := 0
-    @rows for row in 0..<n ->
+    :rows for row in 0..<n ->
         for column in 0..<n ->
             if column > row ->
                 continue rows

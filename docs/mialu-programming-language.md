@@ -1078,12 +1078,12 @@ add_eleven :: proc(x: Int) Int ->
 
 A scope statement is a scope like the block of an `if`, see [Scope resolution](#scope-resolution): `extra` is in scope in the rest of the block and not after it, so two scopes one after another can each define a variable of the same name. Its use is to leave it early with a [`break`](#break-and-continue), and to limit where its variables can be used.
 
-A scope can have a label, which is written before the `->`. A label is the character `@` directly followed by a name, with no space in between, such as `@outer`:
+A scope can have a label, which is written before the `->`. A label is the character `:` directly followed by a name, with no space in between, such as `:outer`:
 
 ```
 find_first :: proc(limit: Int) Int ->
     found := 0
-    @search ->
+    :search ->
         for i in 1..<=limit ->
             if i * i > 50 ->
                 found += i
@@ -1091,24 +1091,24 @@ find_first :: proc(limit: Int) Int ->
     return found
 ```
 
-The name of a label follows the rules of an [identifier](#identifiers), so a keyword or a literal word cannot be one, and `@ outer` with a space is an error. Labels are a kind of name of their own: they cannot be used as variables, and a variable or a procedure with the same name does not clash with them. A statement cannot have the label of a statement that it is inside of, so a label has one meaning wherever it can be used, but statements that are not inside each other can have the same label.
+The name of a label follows the rules of an [identifier](#identifiers), so a keyword or a literal word cannot be one, and `: outer` with a space is an error. Labels are a kind of name of their own: they cannot be used as variables, and a variable or a procedure with the same name does not clash with them. A statement cannot have the label of a statement that it is inside of, so a label has one meaning wherever it can be used, but statements that are not inside each other can have the same label.
 
 An if statement, a for statement and a [infinite loop](#infinite-loops) can have a label as well. It is written before the `if` or the `for` on the same line, with a space after it:
 
 ```
-@check if n > 5 ->
+:check if n > 5 ->
     ...
 else ->
     ...
 
-@rows for row in 0..<n ->
+:rows for row in 0..<n ->
     ...
 
-@again for ->
+:again for ->
     ...
 ```
 
-The label belongs to the whole statement. For an if statement that is the `if` with all of its `else if` and `else` branches, and only the first line has the label: `@check else ->` is an error. A label does not change what the statement does. It lets a [`break` or a `continue`](#break-and-continue) name it.
+The label belongs to the whole statement. For an if statement that is the `if` with all of its `else if` and `else` branches, and only the first line has the label: `:check else ->` is an error. A label does not change what the statement does. It lets a [`break` or a `continue`](#break-and-continue) name it.
 
 ### Break and continue
 
@@ -1159,13 +1159,13 @@ break_early :: proc() Int ->
     return x
 ```
 
-`break_early()` returns 4. A `break` can name a statement to leave by the name of its label, written after `break` without the `@`. It leaves that scope, loop or if statement, and everything in between, so it can leave several at once:
+`break_early()` returns 4. A `break` can name a statement to leave by the name of its label, written after `break` without the `:`. It leaves that scope, loop or if statement, and everything in between, so it can leave several at once:
 
 ```
 break_early_with_label :: proc() Int ->
     x := 1
     ->
-        @my_block ->
+        :my_block ->
             if x > 10 ->
                 x += 1
             else ->
@@ -1175,14 +1175,14 @@ break_early_with_label :: proc() Int ->
     return x
 ```
 
-`break_early_with_label()` returns 6: `break my_block` leaves the labeled scope, and `x += 5` runs next. A `break` writes the label without the `@`, which is for the line that declares it only, and `break @my_block` is an error. The label must be one of a statement that the `break` is inside of.
+`break_early_with_label()` returns 6: `break my_block` leaves the labeled scope, and `x += 5` runs next. A `break` writes the label without the `:`, which is for the line that declares it only, and `break :my_block` is an error. The label must be one of a statement that the `break` is inside of.
 
 A `break` with a label can leave a [labeled if statement](#scopes) from any of its branches, also from a loop inside it, and then the statement after the if statement runs next. A `break` without a label passes an if statement, labeled or not, and leaves the loop or scope around it, because the block of an `if` is not a scope:
 
 ```
 classify :: proc(n: Int) Int ->
     x := 0
-    @check if n > 5 ->
+    :check if n > 5 ->
         x += 1
         if n > 10 ->
             break check
@@ -1202,7 +1202,7 @@ A labeled loop is left with `break` and its label from anywhere inside it, also 
 ```
 count_triangle :: proc(n: Int) Int ->
     total := 0
-    @rows for row in 0..<n ->
+    :rows for row in 0..<n ->
         for column in 0..<n ->
             if column > row ->
                 continue rows

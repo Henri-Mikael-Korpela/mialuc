@@ -129,7 +129,7 @@ return_runs_every_defer :: proc(n: Int) Int ->
 
 /// A `break` with a label leaves several scopes at once, and runs the deferred statements of each.
 break_by_label_runs_defers :: proc() ->
-    @outer ->
+    :outer ->
         defer note(3)
         ->
             defer note(2)
@@ -166,7 +166,7 @@ defer_for_statement :: proc() ->
 /// A deferred scope can have a label, and a `break` inside it leaves it. A jump in a deferred
 /// statement stays inside it, because the block around it is being left already.
 break_inside_deferred_scope :: proc(n: Int) ->
-    defer @cleanup ->
+    defer :cleanup ->
         note(1)
         if n > 0 ->
             break cleanup

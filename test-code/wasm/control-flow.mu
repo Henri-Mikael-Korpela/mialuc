@@ -14,11 +14,11 @@ break_early :: proc() Int ->
         x += 2
     return x
 
-/// A scope can have a label, as in `@my_block ->`, and `break my_block` leaves it.
+/// A scope can have a label, as in `:my_block ->`, and `break my_block` leaves it.
 break_early_with_label :: proc() Int ->
     x := 1
     ->
-        @my_block ->
+        :my_block ->
             if x > 10 ->
                 x += 1
             else ->
@@ -59,9 +59,9 @@ break_leaves_innermost_scope :: proc(n: Int) Int ->
 /// A label leaves a scope that is not the innermost one.
 break_outer_scope_by_label :: proc(n: Int) Int ->
     x := 0
-    @outer ->
+    :outer ->
         x += 1
-        @inner ->
+        :inner ->
             x += 10
             if n > 0 ->
                 break outer
@@ -72,9 +72,9 @@ break_outer_scope_by_label :: proc(n: Int) Int ->
 
 break_inner_scope_by_label :: proc(n: Int) Int ->
     x := 0
-    @outer ->
+    :outer ->
         x += 1
-        @inner ->
+        :inner ->
             x += 10
             if n > 0 ->
                 break inner
@@ -86,12 +86,12 @@ break_inner_scope_by_label :: proc(n: Int) Int ->
 /// Scopes one after the other can each have a label, and `break first` leaves only `first`.
 label_by_the_innermost_name_only :: proc(n: Int) Int ->
     x := 0
-    @first ->
+    :first ->
         x += 1
         if n > 0 ->
             break first
         x += 10
-    @second ->
+    :second ->
         x += 100
         if n > 0 ->
             break second
@@ -111,7 +111,7 @@ break_from_loop_leaves_scope_only :: proc(n: Int) Int ->
 break_scope_label_inside_loop :: proc(n: Int) Int ->
     total := 0
     for i in 0..<n ->
-        @skip ->
+        :skip ->
             if i / 2 * 2 == i ->
                 break skip
             total += 1
@@ -120,7 +120,7 @@ break_scope_label_inside_loop :: proc(n: Int) Int ->
 
 break_loop_by_label :: proc(n: Int) Int ->
     total := 0
-    @search ->
+    :search ->
         for i in 0..<n ->
             for j in 0..<n ->
                 total += 1
@@ -144,7 +144,7 @@ continue_after_scope_in_endless_loop :: proc(n: Int) Int ->
     total := 0
     for ->
         count += 1
-        @check ->
+        :check ->
             if count > n ->
                 break
             if count / 2 * 2 == count ->
@@ -158,7 +158,7 @@ continue_after_scope_in_endless_loop :: proc(n: Int) Int ->
 scope_in_branch_of_if :: proc(n: Int) Int ->
     x := 0
     if n > 0 ->
-        @positive ->
+        :positive ->
             x += 1
             if n > 5 ->
                 break positive
@@ -172,7 +172,7 @@ scope_in_branch_of_if :: proc(n: Int) Int ->
 /// An if statement can have a label too, and `break check` leaves all of its branches.
 break_labeled_if :: proc(n: Int) Int ->
     x := 0
-    @check if n > 5 ->
+    :check if n > 5 ->
         x += 1
         if n > 10 ->
             break check
@@ -188,7 +188,7 @@ break_labeled_if :: proc(n: Int) Int ->
 
 break_labeled_if_from_loop :: proc(n: Int) Int ->
     total := 0
-    @guard if n > 0 ->
+    :guard if n > 0 ->
         for i in 0..<n ->
             if i == 3 ->
                 break guard
@@ -199,9 +199,9 @@ break_labeled_if_from_loop :: proc(n: Int) Int ->
 
 labeled_ifs_inside_each_other :: proc(a: Int, b: Int) Int ->
     x := 0
-    @outer if a > 0 ->
+    :outer if a > 0 ->
         x += 1
-        @inner if b > 0 ->
+        :inner if b > 0 ->
             x += 10
             if a > 5 ->
                 break outer
@@ -213,7 +213,7 @@ labeled_ifs_inside_each_other :: proc(a: Int, b: Int) Int ->
 plain_break_passes_labeled_if :: proc(n: Int) Int ->
     total := 0
     for i in 0..<n ->
-        @pick if i > 1 ->
+        :pick if i > 1 ->
             total += 100
             break
         total += 1
@@ -222,7 +222,7 @@ plain_break_passes_labeled_if :: proc(n: Int) Int ->
 /// `continue` with a label goes on with the next pass of that loop.
 continue_labeled_for :: proc(n: Int) Int ->
     total := 0
-    @rows for row in 0..<n ->
+    :rows for row in 0..<n ->
         for column in 0..<n ->
             if column > row ->
                 continue rows
@@ -232,7 +232,7 @@ continue_labeled_for :: proc(n: Int) Int ->
 
 break_labeled_for :: proc(n: Int) Int ->
     total := 0
-    @rows for row in 0..<n ->
+    :rows for row in 0..<n ->
         for column in 0..<n ->
             if row + column > 3 ->
                 break rows
@@ -243,7 +243,7 @@ break_labeled_for :: proc(n: Int) Int ->
 /// A loop without a range can be left by its label.
 break_labeled_endless_loop :: proc(target: Int) Int ->
     i := 0
-    @outer for ->
+    :outer for ->
         i += 1
         for j in 1..<=i ->
             if i + j == target ->
@@ -255,7 +255,7 @@ break_labeled_endless_loop :: proc(target: Int) Int ->
 continue_labeled_endless_loop :: proc(n: Int) Int ->
     count := 0
     total := 0
-    @again for ->
+    :again for ->
         count += 1
         for k in 0..<3 ->
             if count / 2 * 2 == count ->

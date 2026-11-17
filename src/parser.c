@@ -1294,7 +1294,7 @@ static bool parse_line_has_range(Parser const *parser) {
 }
 
 /**
- * Parses the header line of a scope statement, `->` or `@label ->`, and appends the statement that
+ * Parses the header line of a scope statement, `->` or `:label ->`, and appends the statement that
  * it starts to `parent`. The statement gets the label, if there is one, and an empty block, which
  * is returned so that the caller can fill it with the lines that follow. A label that is followed
  * by `if` or `for` instead of `->` is the label of that statement: it gets a labeled statement node
@@ -1498,7 +1498,7 @@ static Ast_Node_Index parse_defer_statement(Parser *parser, Ast_Node_Index paren
 
 /**
  * Parses `break` or `continue` and the end of the line. A `break` may name the scope to leave
- * with the name of its label, without the `@`, which becomes its child. The node keeps the word so
+ * with the name of its label, without the `:`, which becomes its child. The node keeps the word so
  * that the analysis can point at it. Whether the jump is inside a loop or a scope, and whether the
  * label exists, is for the analysis.
  */
@@ -1531,7 +1531,7 @@ static Ast_Node_Index parse_jump_statement(Parser *parser) {
         parse_token_advance(parser);
     } else if (name->kind == TOKEN_KIND_LABEL) {
         // The prefix is only for declaring a label.
-        return parse_fail(parser, STR("the name of a label without '@'"));
+        return parse_fail(parser, STR("the name of a label without ':'"));
     }
 
     if (not parse_line_end_expect(parser)) {

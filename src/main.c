@@ -1824,7 +1824,7 @@ static void main_run_command_report_tokenize_error(char const *path, Str source,
                 "9223372036854775807.\n", path, line, column);
         break;
     case TOKENIZE_STATUS_LABEL_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: a label is '@' directly followed by a name that is not a "
+        fprintf(stderr, "%s:%zu:%zu: a label is ':' directly followed by a name that is not a "
                 "reserved word.\n", path, line, column);
         break;
     case TOKENIZE_STATUS_RUNE_LITERAL_EMPTY:

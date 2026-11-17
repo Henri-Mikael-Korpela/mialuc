@@ -517,6 +517,29 @@ static Tokenize_Float_Literal tokenizer_float_literal(Str source, size_t offset)
 }
 
 /**
+ * Tells whether the `:` at `offset` starts a label: a name follows it directly, and it is the first
+ * thing on its line, or it comes right after `defer`. Any other `:` separates a name from its type.
+ */
+static bool tokenizer_is_label_start(Str source, Token const *tokens, size_t token_count,
+                                     size_t offset) {
+    size_t after = offset + 1;
+    if (after >= source.length ||
+        not (char_is_letter(source.bytes[after]) || source.bytes[after] == '_')) {
+        return false;
+    }
+
+    size_t before = offset;
+    while (before > 0 && (source.bytes[before - 1] == ' ' || source.bytes[before - 1] == '\t')) {
+        before -= 1;
+    }
+    if (before == 0 || source.bytes[before - 1] == '\n' || source.bytes[before - 1] == '\r') {
+        return true;
+    }
+    return before < offset && token_count > 0 &&
+           tokens[token_count - 1].kind == TOKEN_KIND_KEYWORD_DEFER;
+}
+
+/**
  * Reads the integer literal that starts at `offset` in `source`, where there is a digit. It is
  * decimal, or binary when it starts with `0b`, or hexadecimal when it starts with `0x`. An
  * underscore is a digit separator, which only makes the number easier to read, and it must be
@@ -949,17 +972,12 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset = end;
         }
-        // A label is an `@` directly followed by a name: no space may be in between. A reserved
-        // word is not a name, as it is not for a variable.
-        else if (character == '@') {
+        // A label is a `:` directly followed by a name: no space may be in between. It is only
+        // a label where a statement can start, at the start of a line or after `defer`, because
+        // elsewhere a `:` separates a name from its type. A reserved word is not a name, as it is
+        // not for a variable.
+        else if (character == ':' && tokenizer_is_label_start(source, token_elements, result.tokens.length, offset)) {
             size_t end = offset + 1;
-            bool is_name_start = end < source.length &&
-                                 (char_is_letter(source.bytes[end]) || source.bytes[end] == '_');
-            if (not is_name_start) {
-                result.status = TOKENIZE_STATUS_LABEL_INVALID;
-                result.error_offset = offset;
-                return result;
-            }
             while (end < source.length && (char_is_letter(source.bytes[end]) ||
                                            char_is_digit(source.bytes[end]) ||
                                            source.bytes[end] == '_')) {

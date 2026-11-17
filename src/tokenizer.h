@@ -90,7 +90,7 @@ typedef enum {
     TOKEN_KIND_KEYWORD_TRUE,
     TOKEN_KIND_KEYWORD_TYPE_INFO_OF,
     TOKEN_KIND_KEYWORD_UNION,
-    // `@` and a name with nothing in between, such as `@outer`. The name without the `@` is in the
+    // `:` and a name with nothing in between, such as `:outer`. The name without the `:` is in the
     // `identifier` payload.
     TOKEN_KIND_LABEL,
     TOKEN_KIND_LESS_EQUALS,
@@ -195,7 +195,7 @@ typedef enum {
     // The value of an integer literal is above the largest `Int`. `error_offset` is where the
     // literal starts.
     TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE,
-    // An `@` that is not directly followed by a name, or whose name is a reserved word.
+    // A label, a `:` and a name at the start of a statement, whose name is a reserved word.
     TOKENIZE_STATUS_LABEL_INVALID,
     // A backslash in a string. It is kept for escape sequences, which the language does not have
     // yet, so that strings written today keep their meaning when it gets them.

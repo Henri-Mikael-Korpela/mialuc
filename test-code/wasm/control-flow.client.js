@@ -2,8 +2,8 @@
 // statement after the scope runs next. The `break` of an if statement leaves the scope around it,
 // because the block of an if is not a scope to leave.
 console.log("Break in a scope, skips x += 2:", break_early());
-// A scope can have a label, which is written `@name`, with no space after the `@`. A `break` names
-// the label without the `@`, to leave that scope.
+// A scope can have a label, which is written `:name`, with no space after the `:`. A `break` names
+// the label without the `:`, to leave that scope.
 console.log("Break with a label:", break_early_with_label());
 console.log("A scope without a break runs once:", scope_without_break());
 // A variable of a scope is gone after it, so two scopes can define one name.
@@ -35,7 +35,7 @@ console.log("Continue and break in an endless loop, for 1, 3 and 7:",
 // A scope can be in the block of an if statement.
 console.log("Scopes in the branches of an if, for 0, 1 and 7:", scope_in_branch_of_if(0n),
     scope_in_branch_of_if(1n), scope_in_branch_of_if(7n));
-// A label can also be given to an if statement, `@name if condition ->`, and a `break` with the
+// A label can also be given to an if statement, `:name if condition ->`, and a `break` with the
 // label leaves the whole statement, with its `else if` and `else` branches. The label is on the `if`
 // line only. A `break` without a label passes a labeled if statement, as it passes any other.
 console.log("Break a labeled if, for 11, 7, 3 and 0:", break_labeled_if(11n), break_labeled_if(7n),
@@ -47,8 +47,8 @@ console.log("Labeled ifs inside each other, for (0, 0), (1, 0), (1, 1) and (6, 1
     labeled_ifs_inside_each_other(1n, 1n), labeled_ifs_inside_each_other(6n, 1n));
 console.log("Plain break passes a labeled if, for 0, 1 and 5:", plain_break_passes_labeled_if(0n),
     plain_break_passes_labeled_if(1n), plain_break_passes_labeled_if(5n));
-// A for statement or a loop without a range can have a label too, `@name for ...` and
-// `@name for ->`. A `break` leaves the labeled loop, also from an inner loop, and a `continue`
+// A for statement or a loop without a range can have a label too, `:name for ...` and
+// `:name for ->`. A `break` leaves the labeled loop, also from an inner loop, and a `continue`
 // goes on with its next pass. Only a loop can be named by a `continue`.
 console.log("Continue the outer loop from the inner one, for 0, 1 and 3:", continue_labeled_for(0n),
     continue_labeled_for(1n), continue_labeled_for(3n));

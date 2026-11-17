@@ -495,11 +495,11 @@ pattern = range | expression ;
 
 (* A scope statement is a block that runs once, in a scope of its own: a `->` alone on a line, with
    the block indented one level deeper. A `break` inside it leaves it. It can have a label, which
-   is written `@` and a name with no space in between, such as `@outer ->`. An if statement, a
+   is written `:` and a name with no space in between, such as `:outer ->`. An if statement, a
    for statement and a loop statement can have a label before the `if` or the `for`, such as
-   `@outer if x > 1 ->` or `@outer for ->`, which is separated from it by a space. A `break` or a
-   `continue` names the label with the name only, without the `@`. *)
-label = "@" , name ;
+   `:outer if x > 1 ->` or `:outer for ->`, which is separated from it by a space. A `break` or a
+   `continue` names the label with the name only, without the `:`. *)
+label = ":" , name ;
 
 (* `defer` and a statement after it on the same line, which does not run there but when the block
    that the `defer` is in is left: at its end, or by a `break`, a `continue` or a `return`. The

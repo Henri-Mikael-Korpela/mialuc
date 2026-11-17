@@ -276,13 +276,13 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   `if` and for every `else if`, and then, when `has_else` is set in the payload, the last child
  *   is the `AST_NODE_TYPE_BLOCK` of the `else`.
  * - `AST_NODE_TYPE_INTEGER_LITERAL`: no children.
- * - `AST_NODE_TYPE_LABEL`: no children. The name of a label, without the `@` that it is written
+ * - `AST_NODE_TYPE_LABEL`: no children. The name of a label, without the `:` that it is written
  *   with, in the payload. It is the first child of an `AST_NODE_TYPE_SCOPE_STATEMENT` that has a
  *   label, which declares it, and the only child of an `AST_NODE_TYPE_BREAK_STATEMENT` that names
  *   one, which uses it. Labels are not names of variables, so the analysis does not bind them.
  * - `AST_NODE_TYPE_LABELED_STATEMENT`: one child, the `AST_NODE_TYPE_IF_STATEMENT`,
  *   `AST_NODE_TYPE_FOR_STATEMENT` or `AST_NODE_TYPE_LOOP_STATEMENT` that the label in the payload
- *   is given to, written `@name if ...` or `@name for ...`. It takes the place of that statement in
+ *   is given to, written `:name if ...` or `:name for ...`. It takes the place of that statement in
  *   its block, and the node of the statement comes right after it. A label of a scope statement is
  *   its child instead. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_LOOP_STATEMENT`: an infinite loop, written `for ->`. It has one child, the
@@ -563,7 +563,7 @@ typedef struct {
             uint32_t value;
         } rune_literal;
         struct {
-            // Views the source text, like the other names. Without the `@`.
+            // Views the source text, like the other names. Without the `:`.
             Str name;
         } label;
         struct {

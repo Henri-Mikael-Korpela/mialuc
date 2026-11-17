@@ -195,11 +195,11 @@
             "patterns": [
                 {
                     "name": "entity.name.label.mialu",
-                    "comment": "The label of a statement: an @ directly followed by a name, as in @outer -> or @outer for.",
-                    "match": "@[A-Za-z_][A-Za-z0-9_]*"
+                    "comment": "The label of a statement: a colon directly followed by a name, which is the first thing on a line or comes after defer, as in :outer -> or :outer for.",
+                    "match": "(?<=^|\bdefer[ \t])[ \t]*:[A-Za-z_][A-Za-z0-9_]*"
                 },
                 {
-                    "comment": "A break or a continue that names a statement, which is written without the @, as in break outer.",
+                    "comment": "A break or a continue that names a statement, which is written without the colon, as in break outer.",
                     "match": "\\b(break|continue)[ \\t]+([A-Za-z_][A-Za-z0-9_]*)",
                     "captures": {
                         "1": {
