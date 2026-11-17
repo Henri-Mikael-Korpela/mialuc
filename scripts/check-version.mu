@@ -13,13 +13,16 @@ package mialuc
 import foreign libc
 
 /// The procedures of the C library are declared with the types that C has: `puts`, `fgetc` and
-/// `fclose` give an `int`, which is an `I32`. An `fgetc` that was declared to give an `Int` would be
-/// read as 64 bits, and the -1 that it gives at the end of the file would arrive with the upper half
-/// of the register not set.
+/// `fclose` give an `int`, which is an `I32`, and `fread` takes and gives a `size_t`, which is an
+/// `I64`. An `fgetc` that was declared to give an `Int` would be read as 64 bits, and the -1 that it
+/// gives at the end of the file would arrive with the upper half of the register not set. A number
+/// of bytes that is a literal fits in an `I64`, so it is compared with the result of `fread` as it
+/// is.
 foreign libc ->
     puts :: proc(content: C_Str) I32 -> ...
     fopen :: proc(path: C_Str, mode: C_Str) ^Byte -> ...
     fgetc :: proc(file: ^Byte) I32 -> ...
+    fread :: proc(buffer: ^Byte, size: I64, count: I64, file: ^Byte) I64 -> ...
     fclose :: proc(file: ^Byte) I32 -> ...
 
 /// The version, written once, as the text of each number. `++` joins strings, so VERSION_STRING is
@@ -113,50 +116,43 @@ skip_line :: proc(file: ^Byte, last: I32) Bool ->
             return false
         c = fgetc(file)
 
-/// Whether the byte `c` is the character at `index` of `name`, which is false when `name` has no
-/// character there. The subscript of a string is by the character, and the name is ASCII.
-is_name_byte :: proc(name: Str, index: Int, c: I32) Bool ->
-    if index >= length_of(name) ->
-        return false
-    return code(name[index]) == c
-
 /// Reads the name of a macro, up to the space after it, and gives which of the three names it is:
 /// 1 for MAJOR, 2 for MINOR and 3 for PATCH, and 0 for any other, such as STRING and
-/// STRING_HELPER. The last byte that was read is given as well. Each byte is compared with the
-/// character at its place in all three names, and a name is the one that all of its bytes matched
-/// and that has no more.
+/// STRING_HELPER. The last byte that was read is given as well.
+///
+/// The three names have 5 bytes, so 5 bytes are read into an array, and an array of bytes is
+/// compared with another with `==`, so the name is the one that its bytes are the same as. A name
+/// that has more than 5 bytes, such as STRING_HELPER, has its first 5 the same as nothing, and one
+/// that starts with a name, such as MAJORS, has a byte after it that is not the space.
 read_name :: proc(file: ^Byte) (Int, I32) ->
-    major := "MAJOR"
-    minor := "MINOR"
-    patch := "PATCH"
-    is_major := true
-    is_minor := true
-    is_patch := true
-    index := 0
-    for ->
-        c := fgetc(file)
-        if c == code(' ') ->
-            which := 0
-            if is_major and index == length_of(major) ->
-                which = 1
-            else if is_minor and index == length_of(minor) ->
-                which = 2
-            else if is_patch and index == length_of(patch) ->
-                which = 3
-            return which, c
-        if c == NEW_LINE or is_end_of_file(c) ->
-            return 0, c
-        is_major = is_major and is_name_byte(major, index, c)
-        is_minor = is_minor and is_name_byte(minor, index, c)
-        is_patch = is_patch and is_name_byte(patch, index, c)
-        index += 1
+    name := [const]Byte { 0, 0, 0, 0, 0 }
+    if fread(%name[0], 1, 5, file) not= 5 ->
+        return 0, END_OF_FILE
+
+    // The codes of the letters, which are written as numbers, since a character is not a `Byte`.
+    major := [const]Byte { 77, 65, 74, 79, 82 }
+    minor := [const]Byte { 77, 73, 78, 79, 82 }
+    patch := [const]Byte { 80, 65, 84, 67, 72 }
+    which := 0
+    if name == major ->
+        which = 1
+    else if name == minor ->
+        which = 2
+    else if name == patch ->
+        which = 3
+
+    c := fgetc(file)
+    if c not= code(' ') ->
+        return 0, c
+    return which, c
 
 /// Reads the rest of a `#define MIALU_VERSION_` line, which is a name and a number, and stores the
 /// number in the field of `version` that the name is of. Gives the last byte that was read.
 //
-// MISSING FEATURE: a `Str` made of bytes that are read, see `read_number`. The name is read from the
-// file as bytes too, so it cannot be compared with "MAJOR" and the others with `==`, which is why
-// `read_name` compares it byte by byte.
+// MISSING FEATURE: a `Str` converted to bytes, such as `cast([]Byte)"MAJOR"`, see
+// "Converting a string to bytes" in the language specification. The name is read as bytes, and
+// compared with bytes, which are the codes of the letters here and not the text "MAJOR", since there
+// is no way to make the bytes of a string, and a `Str` is not made of the bytes that are read.
 read_define :: proc(file: ^Byte, version: ^Version) I32 ->
     which, last := read_name(file)
     if which == 0 ->
