@@ -28,12 +28,6 @@ Add `--check` to only test whether it is up to date. The script uses only the Py
 
 [editors/vscode-debug](../editors/vscode-debug) is a second VS Code extension, next to the first, that debugs Mialu programs with gdb: it builds a `.mu` file with `mialuc build --target x64-win32 --debug` and starts the debug adapter of gdb, so that breakpoints can be set in `.mu` files and the variables can be looked at. See its [README](../editors/vscode-debug/README.md). [editors/vscode-lsp](../editors/vscode-lsp) is a third VS Code extension, with a language server for Mialu, `server.js`, which speaks the Language Server Protocol over the standard input and output. It shows the size and the alignment of a struct above its definition, which it gets from `mialuc dump-struct-sizes`, and the type of a name when the pointer rests on it, which it gets from `mialuc dump-types`. See its [README](../editors/vscode-lsp/README.md). `node --test editors/vscode-lsp/server.test.js` tests the server and needs [Node.js](https://nodejs.org/) 18 or newer. One script installs all three extensions.
 
-## Versioning
+## Releasing
 
-`scripts/bump-version.ps1 <version>` sets the version of the compiler, a semantic version such as `0.2.0`, in [src/version.h](../src/version.h) and in the language specification. It uses PowerShell, so it needs nothing to install on Windows.
-
-```
-powershell -File scripts/bump-version.ps1 0.2.0
-```
-
-After the version is bumped and committed, `scripts/deploy-release.ps1` tags the commit of main as `v<version>` and pushes it, which starts the release workflow. It refuses to run with uncommitted changes, off main, behind `origin/main`, or when the tag exists, and asks before pushing unless it is given `-Yes`.
+Setting the version and releasing it are described in [Releasing](releasing.md).

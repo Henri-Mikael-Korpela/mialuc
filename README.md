@@ -12,6 +12,7 @@ Mialu is a procedural language with manual memory management. It is influenced b
 - [Playground](docs/playground.md): compile Mialu to WebAssembly in the browser, and run it.
 - [Tooling](docs/tooling.md): the grammar check, the table of contents of the specification, and editor support.
 - [Editor support](editors/vscode/README.md): the VS Code extension.
+- [Releasing](docs/releasing.md): setting the version of the compiler and releasing it.
 
 ### Language
 

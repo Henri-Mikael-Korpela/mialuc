@@ -1,5 +1,5 @@
 # Sets the version of the compiler everywhere it is written down: the macros and the example in
-# src/version.h, and the example output of `mialuc --version` in the language specification.
+# src/version.h, and the example output of `mialuc --version` in docs/mialu-cli.md.
 # The version is a semantic version of the form MAJOR.MINOR.PATCH, such as 0.2.0.
 #
 #   powershell -File scripts/bump-version.ps1 0.2.0
@@ -40,6 +40,6 @@ Update-File 'src/version.h' '^#define MIALU_VERSION_MAJOR \d+' "#define MIALU_VE
 Update-File 'src/version.h' '^#define MIALU_VERSION_MINOR \d+' "#define MIALU_VERSION_MINOR $minor"
 Update-File 'src/version.h' '^#define MIALU_VERSION_PATCH \d+' "#define MIALU_VERSION_PATCH $patch"
 Update-File 'src/version.h' '^// "\d+\.\d+\.\d+"' "// `"$Version`""
-Update-File 'docs/mialu-programming-language.md' '(?<=such as `mialuc )\d+\.\d+\.\d+(?=`)' $Version
+Update-File 'docs/mialu-cli.md' '^mialuc \d+\.\d+\.\d+\s*$' "mialuc $Version"
 
 Write-Host "Version is now $Version. Commit the change and push the tag v$Version to release it."

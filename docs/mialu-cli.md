@@ -181,10 +181,10 @@ mialuc --version
 Prints the name of the compiler and its version, which is a semantic version, such as:
 
 ```
-mialuc 0.2.0
+mialuc 0.3.0
 ```
 
-The flag works only on its own. The version is defined in `src/version.h`, and `scripts/bump-version.ps1` sets it, see [Tooling](tooling.md#versioning).
+The flag works only on its own. The version is defined in `src/version.h`, and `scripts/bump-version.ps1` sets it, see [Releasing](releasing.md#versioning).
 
 ## Targets
 
