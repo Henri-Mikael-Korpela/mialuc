@@ -63,6 +63,10 @@ typedef enum {
     SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR,
     // The name that is called is not a procedure: a variable, a parameter or a constant string.
     SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE,
+    // An operand of `++` that is not known when the program is compiled, such as a variable or a
+    // call, because the text of the result is made then. The subject is the first name or string
+    // of the expression.
+    SEMANTIC_STATUS_CONCATENATION_NOT_CONSTANT,
     // A constant that is defined in terms of itself. The subject is the name where the circle
     // closes.
     SEMANTIC_STATUS_CONSTANT_CYCLE,
@@ -79,6 +83,10 @@ typedef enum {
     // A constant expression whose value does not fit in an `Int`. The subject is its first name, or
     // the definition that it is in.
     SEMANTIC_STATUS_CONSTANT_OVERFLOW,
+    // The strings that `++` joins in the constants of the program have more bytes together than
+    // the text buffer has room for. The subject is its first name or string, or the definition that
+    // it is in.
+    SEMANTIC_STATUS_CONSTANT_TEXT_TOO_LONG,
     // A constant expression that is nested deeper than `CONSTANT_EXPRESSION_DEPTH_MAX`, with the
     // constants that it goes through. The subject is the name or the definition where it was.
     SEMANTIC_STATUS_CONSTANT_TOO_DEEP,
@@ -167,7 +175,9 @@ typedef struct {
  * node of a successful `parse`, and works out the values that are known when the program is
  * compiled. `nodes` holds `Ast_Node` elements. The bindings are written to `binding_buffer`, which
  * holds `Semantic_Binding` elements, and the values to `constant_buffer`, which holds
- * `Constant_Value` elements, and both must have room for one per node.
+ * `Constant_Value` elements, and both must have room for one per node. `text_buffer` holds bytes:
+ * the text of the strings that `++` makes is written there, and the string literal after each `++`
+ * views it, see `AST_NODE_TYPE_CONCATENATION`, so it must live as long as the syntax tree is used.
  *
  * There are two scopes. The module scope has the name of every constant definition and of every
  * global variable, and a definition can be used anywhere in the module, also above where it is
@@ -260,7 +270,8 @@ typedef struct {
  * check, and so is whether a constant fits in the type that its place wants.
  */
 Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
-                                 Array_Slice binding_buffer, Array_Slice constant_buffer);
+                                 Array_Slice binding_buffer, Array_Slice constant_buffer,
+                                 Array_Slice text_buffer);
 
 /**
  * Returns whether `name` is the name of a built-in procedure, which is called like any procedure

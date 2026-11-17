@@ -54,6 +54,10 @@
        arithmetic, comparison and logical operators of them. A constant cannot be defined in terms
        of itself, a constant expression cannot divide by zero, and its value must fit in an `Int`
        at every step, because a constant does not wrap around.
+     - `++` joins two strings, or a string and a rune, into one string, and both operands must be
+       constants, so that the text is joined when the program is compiled. A rune is joined as its
+       UTF-8 bytes. The result is untyped unless an operand is a `Str`, which makes it one. Two
+       runes are not joined, and neither is a number.
      - `str_to_c_str` is a built-in procedure like `length_of`. It takes a `Str` and gives a
        `C_Str`. The target decides what it supports, for example where the string may come from.
        A `C_Str` is given the result of `str_to_c_str`, another `C_Str` or an untyped string, and
@@ -597,10 +601,11 @@ negation = { "not" , required_space } , comparison ;
    is not. A comparison has the type `Bool`. *)
 comparison = sum , [ ws , comparison_operator , ws , sum ] ;
 
-(* Terms joined by `+` or `-`, which have the same precedence. The compiler reads `a - b + c` as
-   `(a - b) + c`, which a grammar that only accepts or rejects text does not show. Spaces around
-   the operator are optional. *)
-sum = term , { ws , ( "+" | "-" ) , ws , term } ;
+(* Terms joined by `+`, `-` or `++`, which have the same precedence. The compiler reads `a - b + c`
+   as `(a - b) + c`, which a grammar that only accepts or rejects text does not show. Spaces around
+   the operator are optional. `++` joins strings and runes into one string, and takes constants
+   only, which the grammar cannot tell. *)
+sum = term , { ws , ( "++" | "+" | "-" ) , ws , term } ;
 
 (* Operands joined by `*` or `/`, which have the same precedence and bind tighter than `+` and `-`:
    the compiler reads `a + b * c` as `a + (b * c)`, which the grammar does not show either. *)

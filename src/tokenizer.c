@@ -1016,6 +1016,16 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             result.tokens.length += 1;
             offset = literal.end;
         }
+        // `++` is one token, which joins the text of two constants.
+        else if (character == (char)TOKEN_KIND_PLUS && offset + 1 < source.length &&
+                 source.bytes[offset + 1] == '+') {
+            token_elements[result.tokens.length] = (Token){
+                .kind = TOKEN_KIND_PLUS_PLUS,
+                .source_offset = (uint32_t)offset,
+            };
+            result.tokens.length += 1;
+            offset += 2;
+        }
         // An operator that is a single character, or that character with an `=` directly after it,
         // which is one token: `=` and `==`, `<` and `<=`, `>` and `>=`, `*` and `*=`, `+` and `+=`,
         // `/` and `/=`.

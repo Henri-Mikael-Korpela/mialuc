@@ -35,6 +35,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_CALL_STATEMENT:
     case AST_NODE_TYPE_CAST:
     case AST_NODE_TYPE_COMPARISON:
+    case AST_NODE_TYPE_CONCATENATION:
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
     case AST_NODE_TYPE_CONTINUE_STATEMENT:
     case AST_NODE_TYPE_DEFER_STATEMENT:
@@ -387,6 +388,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
         case AST_NODE_TYPE_COMPARISON:
             printf("COMPARISON %s\n",
                    ast_comparison_operator_name(node.payload.comparison.operator));
+            break;
+        case AST_NODE_TYPE_CONCATENATION:
+            printf("CONCATENATION\n");
             break;
         case AST_NODE_TYPE_CONSTANT_DEFINITION:
             printf("CONSTANT_DEFINITION %.*s\n", (int)node.payload.constant_definition.name.length,

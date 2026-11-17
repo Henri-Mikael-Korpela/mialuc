@@ -4103,6 +4103,7 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
         }
         return wasm_signature_return_type(builder, callee, 0);
     }
+    case AST_NODE_TYPE_CONCATENATION:
     case AST_NODE_TYPE_STRING_LITERAL:
         return wasm_type_make(WASM_VALUE_TYPE_STR);
     case AST_NODE_TYPE_NIL_LITERAL:
@@ -4970,6 +4971,10 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
     case AST_NODE_TYPE_RUNE_LITERAL:
     case AST_NODE_TYPE_STRING_LITERAL:
         // A literal is a constant, which is written by `wasm_constant_write`.
+        assert(false);
+        break;
+    case AST_NODE_TYPE_CONCATENATION:
+        // The analysis made sure that it is a constant too, so it is written like a literal.
         assert(false);
         break;
     case AST_NODE_TYPE_COMPARISON:
@@ -6413,6 +6418,7 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
     case AST_NODE_TYPE_RETURN_STATEMENT:
     case AST_NODE_TYPE_RUNE_LITERAL:
     case AST_NODE_TYPE_SCOPE_STATEMENT:
+    case AST_NODE_TYPE_CONCATENATION:
     case AST_NODE_TYPE_SLICE:
     case AST_NODE_TYPE_STRING_LITERAL:
     case AST_NODE_TYPE_STRUCT_LITERAL:

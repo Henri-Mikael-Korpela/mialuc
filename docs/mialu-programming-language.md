@@ -441,6 +441,17 @@ main :: proc() Int ->
 
 See [Compilation targets](#compilation-targets) for which targets have it, and what they allow as the argument.
 
+Strings are joined with `++`, which has the same precedence as `+` and `-` and is left associative. It takes two strings, or a string and a rune on either side, and a rune is joined as its UTF-8 bytes, so `"Hello" ++ ' ' ++ "world" ++ '🚀'` is the string `"Hello world🚀"`. Both operands must be constants, see [Constants](#constants), because the joining is done when the program is compiled: the program has the joined text as one string, like a string literal, and nothing is joined when it runs. `++` does not allocate, and an operand that is known only when the program runs, such as a variable or the result of a call, is an error. Two runes are not joined, and neither is a number, so `'a' ++ 'b'` and `"count: " ++ 3` are errors. The result is an untyped string, so it can be given to a `C_Str` too, unless an operand is a constant that was given the type `Str`, and then the result is a `Str`. The joined text of all the constants of a program is limited in size, and a program that has more is rejected.
+
+```
+GREETING :: "Hello"
+SEPARATOR :: ','
+TITLE : Str : '«' ++ GREETING ++ SEPARATOR ++ " world" ++ '»'
+
+main :: proc() Str ->
+    return "<" ++ TITLE ++ '>'
+```
+
 ## Operators
 
 Mialu supports the following operators. A higher precedence binds tighter:
@@ -458,6 +469,7 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `>=`     | Greater than or equal to. A comparison. | 4 | `x >= 3` |
 | `+`      | Addition. | 5 | `x := 1 + 2` makes `x` 3 |
 | `-`      | Subtraction. | 5 | `x := 5 - 1` makes `x` 4 |
+| `++`     | Joins strings. It joins two strings, or a string and a rune, into one string when the program is compiled. See [Joining strings](#strings). | 5 | `"Hello" ++ '!'` is `"Hello!"` |
 | `*`      | Multiplication. | 6 | `x := 2 + 3 * 4` makes `x` 14 |
 | `/`      | Division. The result is truncated toward zero. | 6 | `x := 20 - 12 / 4` makes `x` 17 |
 | `%`      | Address of. It is written before its operand. See [Address of and dereference operators](#address-of-and-dereference-operators). | 7 | `%x` is a pointer to `x` |
@@ -718,7 +730,7 @@ GREETING :: "Hello, world"
 DEBUG :: true
 ```
 
-The value of such a constant is a constant expression: a literal, the name of another constant, or the arithmetic, comparison and logical operators applied to them, such as `DOUBLE_LIMIT :: LIMIT * 2` or `VERBOSE :: DEBUG and LIMIT > 50`. The compiler works the value out, so a constant costs nothing when the program runs: a use of its name is its value, as if the literal were written there. A constant can be used above the line where it is defined, like any constant, and it can be defined in terms of constants below it, but not in terms of itself, so `A :: B` together with `B :: A + 1` is an error. A call, a variable, a parameter and a global variable have a value only when the program runs, so `START :: clock()` is an error.
+The value of such a constant is a constant expression: a literal, the name of another constant, or the arithmetic, comparison and logical operators applied to them, such as `DOUBLE_LIMIT :: LIMIT * 2` or `VERBOSE :: DEBUG and LIMIT > 50`, and `++` applied to strings and runes, such as `HELLO :: "Hello" ++ ' ' ++ NAME`, see [Strings](#strings). The compiler works the value out, so a constant costs nothing when the program runs: a use of its name is its value, as if the literal were written there. A constant can be used above the line where it is defined, like any constant, and it can be defined in terms of constants below it, but not in terms of itself, so `A :: B` together with `B :: A + 1` is an error. A call, a variable, a parameter and a global variable have a value only when the program runs, so `START :: clock()` is an error.
 
 Arithmetic in a constant expression is exact. A step whose result does not fit in an `Int`, such as `0x7FFF_FFFF_FFFF_FFFF + 1`, is an error, and so is a division by zero, such as `1 / 0`, where the same operation on variables would wrap around or trap when the program runs. That goes for the parts of any expression that are constants, so `x + 1 / 0` is an error as well.
 

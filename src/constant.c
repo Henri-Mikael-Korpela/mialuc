@@ -17,6 +17,7 @@
 #include <iso646.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <mialu/constant.h>
 
@@ -34,9 +35,12 @@ typedef struct {
  * about each node so far.
  */
 typedef struct {
-    Ast_Node const *nodes;
+    // Not constant, because a concatenation writes the text of its result to the string literal
+    // after it.
+    Ast_Node *nodes;
     Semantic_Binding const *bindings;
     Constant_Value const *values;
+    Constant_Text *text;
     size_t node_count;
 } Constant_Evaluation;
 
@@ -45,6 +49,9 @@ static Constant_Value constant_add             (Constant_Value left, Constant_Va
 static Constant_Value constant_arithmetic      (Ast_Node const *nodes, Ast_Node_Index operation,
                                                 Constant_Value left, Constant_Value right);
 static Constant_Value constant_comparison      (Ast_Node const *nodes, Ast_Node_Index comparison,
+                                                Constant_Value left, Constant_Value right);
+static Constant_Value constant_concatenate     (Constant_Evaluation const *evaluation,
+                                                Ast_Node_Index concatenation,
                                                 Constant_Value left, Constant_Value right);
 static Constant_Value constant_convert         (Ast_Node const *nodes, Ast_Node_Index definition,
                                                 Constant_Value value);
@@ -67,19 +74,24 @@ static Constant_Step  constant_step            (Constant_Evaluation const *evalu
                                                 Ast_Node_Index node);
 static Constant_Step  constant_step_done       (Constant_Value value);
 static Constant_Step  constant_step_down       (Ast_Node_Index child);
+static size_t         constant_rune_encode     (uint32_t code_point, char *bytes);
 static Constant_Value constant_subtract        (Constant_Value left, Constant_Value right,
                                                 Ast_Node_Index operation);
 static bool           constant_type_is_bool    (Constant_Type type);
 static bool           constant_type_is_float   (Constant_Type type);
 static bool           constant_type_is_integer (Constant_Type type);
+static bool           constant_type_is_string  (Constant_Type type);
 static bool           constant_type_is_untyped (Constant_Type type);
 
-Constant_Value constant_evaluate(Ast_Node const *nodes, size_t node_count,
+Constant_Value constant_evaluate(Ast_Node *nodes, size_t node_count,
                                  Semantic_Binding const *bindings, Constant_Value *values,
-                                 Ast_Node_Index expression) {
+                                 Constant_Text *text, Ast_Node_Index expression) {
     assert(nodes != NULL);
     assert(bindings != NULL);
     assert(values != NULL);
+    assert(text != NULL);
+    assert(text->bytes != NULL);
+    assert(text->length <= text->size_bytes);
     assert(expression < node_count);
 
     if (values[expression].status != CONSTANT_STATUS_UNKNOWN) {
@@ -90,6 +102,7 @@ Constant_Value constant_evaluate(Ast_Node const *nodes, size_t node_count,
         .nodes = nodes,
         .bindings = bindings,
         .values = values,
+        .text = text,
         .node_count = node_count,
     };
 
@@ -218,7 +231,8 @@ Constant_Type constant_type_default(Constant_Type type) {
 /**
  * Works on `node` once: either asks for the entry of a child that is not known yet, or finishes the
  * node from the entries of its children, which are known by then. It only reads the table, so the
- * order in which the nodes are finished is up to `constant_evaluate`.
+ * order in which the nodes are finished is up to `constant_evaluate`. It writes nothing but the text
+ * of a concatenation.
  */
 static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_Node_Index node) {
     assert(node < evaluation->node_count);
@@ -294,6 +308,7 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_AND:
     case AST_NODE_TYPE_COMPARISON:
+    case AST_NODE_TYPE_CONCATENATION:
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_MULTIPLICATION:
     case AST_NODE_TYPE_OR:
@@ -320,6 +335,10 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
         if (current->node_type == AST_NODE_TYPE_COMPARISON) {
             return constant_step_done(
                 constant_comparison(nodes, node, values[left], values[right]));
+        }
+        if (current->node_type == AST_NODE_TYPE_CONCATENATION) {
+            return constant_step_done(
+                constant_concatenate(evaluation, node, values[left], values[right]));
         }
         if (current->node_type == AST_NODE_TYPE_AND || current->node_type == AST_NODE_TYPE_OR) {
             return constant_step_done(constant_logical(nodes, node, values[left], values[right]));
@@ -459,6 +478,110 @@ static Constant_Value constant_convert(Ast_Node const *nodes, Ast_Node_Index def
         value.floating = (double)(float)value.floating;
     }
     value.type = target;
+    return value;
+}
+
+/**
+ * Returns the number of bytes, from 1 to 4, that the UTF-8 encoding of `code_point` takes, and
+ * writes them to `bytes`, which has room for four. The code point is a Unicode character, as a rune
+ * is, so it is at most 0x10FFFF.
+ */
+static size_t constant_rune_encode(uint32_t code_point, char *bytes) {
+    assert(code_point <= 0x10FFFF);
+
+    if (code_point < 0x80) {
+        bytes[0] = (char)code_point;
+        return 1;
+    }
+    if (code_point < 0x800) {
+        bytes[0] = (char)(0xC0 | (code_point >> 6));
+        bytes[1] = (char)(0x80 | (code_point & 0x3F));
+        return 2;
+    }
+    if (code_point < 0x10000) {
+        bytes[0] = (char)(0xE0 | (code_point >> 12));
+        bytes[1] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+        bytes[2] = (char)(0x80 | (code_point & 0x3F));
+        return 3;
+    }
+    bytes[0] = (char)(0xF0 | (code_point >> 18));
+    bytes[1] = (char)(0x80 | ((code_point >> 12) & 0x3F));
+    bytes[2] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+    bytes[3] = (char)(0x80 | (code_point & 0x3F));
+    return 4;
+}
+
+/**
+ * Returns the string that `++` makes of two constants, which is the text of the left operand and
+ * then that of the right one. One operand is a string and the other is a string or a rune, which
+ * is its UTF-8 bytes. The result is a `Str` when an operand is one, and an untyped string
+ * otherwise. The text is written to the memory of `evaluation`, and the string literal after
+ * `concatenation` is given it, so that the result is a literal like any other string that is
+ * known when the program is compiled.
+ */
+static Constant_Value constant_concatenate(Constant_Evaluation const *evaluation,
+                                           Ast_Node_Index concatenation, Constant_Value left,
+                                           Constant_Value right) {
+    assert(evaluation->nodes[concatenation].node_type == AST_NODE_TYPE_CONCATENATION);
+    assert(left.status == CONSTANT_STATUS_OK);
+    assert(right.status == CONSTANT_STATUS_OK);
+
+    bool is_left_string = constant_type_is_string(left.type);
+    bool is_right_string = constant_type_is_string(right.type);
+    bool is_left_rune = left.type == CONSTANT_TYPE_RUNE;
+    bool is_right_rune = right.type == CONSTANT_TYPE_RUNE;
+    if (not ((is_left_string and (is_right_string or is_right_rune)) or
+             (is_left_rune and is_right_string))) {
+        return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, concatenation);
+    }
+
+    // The bytes of a rune are at hand, and those of a string are in its literal.
+    char left_rune_bytes[4] = {0};
+    char right_rune_bytes[4] = {0};
+    Str left_text = STR("");
+    Str right_text = STR("");
+    if (is_left_string) {
+        left_text = evaluation->nodes[left.string].payload.string_literal.text;
+    } else {
+        left_text = str_make(left_rune_bytes,
+                             constant_rune_encode((uint32_t)left.integer, left_rune_bytes));
+    }
+    if (is_right_string) {
+        right_text = evaluation->nodes[right.string].payload.string_literal.text;
+    } else {
+        right_text = str_make(right_rune_bytes,
+                              constant_rune_encode((uint32_t)right.integer, right_rune_bytes));
+    }
+
+    Constant_Text *text = evaluation->text;
+    size_t available = text->size_bytes - text->length;
+    if (left_text.length > available || right_text.length > available - left_text.length) {
+        return constant_fail(CONSTANT_STATUS_TEXT_TOO_LONG, concatenation);
+    }
+
+    // The literal right after the node, which the parser made for the result.
+    Ast_Node_Index result = concatenation + 1;
+    assert(result < evaluation->node_count);
+    assert(evaluation->nodes[result].node_type == AST_NODE_TYPE_STRING_LITERAL);
+
+    char *bytes = text->bytes + text->length;
+    // A string can be empty, and `memcpy` takes no bytes from nothing.
+    if (left_text.length > 0) {
+        memcpy(bytes, left_text.bytes, left_text.length);
+    }
+    if (right_text.length > 0) {
+        memcpy(bytes + left_text.length, right_text.bytes, right_text.length);
+    }
+    size_t length = left_text.length + right_text.length;
+    text->length += length;
+    evaluation->nodes[result].payload.string_literal.text = str_make(bytes, length);
+
+    Constant_Type type = CONSTANT_TYPE_UNTYPED_STRING;
+    if (left.type == CONSTANT_TYPE_STR || right.type == CONSTANT_TYPE_STR) {
+        type = CONSTANT_TYPE_STR;
+    }
+    Constant_Value value = constant_make(type, 0);
+    value.string = result;
     return value;
 }
 
@@ -837,6 +960,10 @@ static bool constant_type_is_float(Constant_Type type) {
 static bool constant_type_is_integer(Constant_Type type) {
     return type == CONSTANT_TYPE_INT || type == CONSTANT_TYPE_BYTE ||
            type == CONSTANT_TYPE_UNTYPED_INTEGER;
+}
+
+static bool constant_type_is_string(Constant_Type type) {
+    return type == CONSTANT_TYPE_STR || type == CONSTANT_TYPE_UNTYPED_STRING;
 }
 
 static bool constant_type_is_untyped(Constant_Type type) {

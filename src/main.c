@@ -34,6 +34,10 @@ enum {
     // is mostly a few bytes per token, so this is far more than a source of the maximum size is
     // likely to need.
     OUTPUT_SIZE_BYTES_MAX = 1024 * 1024,
+    // Bounds the text of the strings that `++` makes when the program is compiled, which is
+    // allocated once at startup. The text is part of the program, so it is never larger than the
+    // module that the build mode writes.
+    CONSTANT_TEXT_SIZE_BYTES_MAX = OUTPUT_SIZE_BYTES_MAX,
     // Bounds the text that the `wat` target writes. The text is allocated once at startup. The
     // largest growth is `i64.add`, one byte of the module that becomes 12 bytes of text, so 16
     // bytes of text per byte of the module is enough.
@@ -92,6 +96,8 @@ typedef struct {
     Array_Slice nodes;
     Array_Slice bindings;
     Array_Slice constants;
+    // The text of the strings that `++` makes, which the syntax tree views.
+    Array_Slice text;
     Array_Slice output;
     Array_Slice output_text;
     // The places of the code of the x64 target that a jump goes to, one byte for each byte of the
@@ -237,7 +243,9 @@ int main(int argc, char *argv[]) {
                                    SOURCE_SIZE_BYTES_MAX),
         .tokens = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Token)), TOKEN_COUNT_MAX),
         .code_tokens = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Token)), TOKEN_COUNT_MAX),
-        // A node needs at least one token, so as many nodes as tokens always suffice.
+        // A node needs at least one token, so as many nodes as tokens suffice, except that `++`
+        // makes two, which a source that is made of little else can run out of, and the parser then
+        // reports the limit.
         .nodes = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Ast_Node)), TOKEN_COUNT_MAX),
         // The analysis has one binding for each node.
         .bindings = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Semantic_Binding)),
@@ -245,6 +253,8 @@ int main(int argc, char *argv[]) {
         // And one value that is known when the program is compiled for each node.
         .constants = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Constant_Value)),
                                       TOKEN_COUNT_MAX),
+        .text = array_slice_make(malloc(CONSTANT_TEXT_SIZE_BYTES_MAX * sizeof(char)),
+                                 CONSTANT_TEXT_SIZE_BYTES_MAX),
         .output = array_slice_make(malloc(OUTPUT_SIZE_BYTES_MAX * sizeof(byte)),
                                    OUTPUT_SIZE_BYTES_MAX),
         .output_text = array_slice_make(malloc(OUTPUT_TEXT_SIZE_BYTES_MAX * sizeof(byte)),
@@ -269,6 +279,7 @@ int main(int argc, char *argv[]) {
     if (buffers.source.elements == NULL || buffers.tokens.elements == NULL ||
         buffers.code_tokens.elements == NULL || buffers.nodes.elements == NULL ||
         buffers.bindings.elements == NULL || buffers.constants.elements == NULL ||
+        buffers.text.elements == NULL ||
         buffers.output.elements == NULL || buffers.output_text.elements == NULL ||
         buffers.labels.elements == NULL ||
         buffers.layouts.elements == NULL || buffers.symbols.elements == NULL ||
@@ -286,6 +297,7 @@ int main(int argc, char *argv[]) {
     free(buffers.labels.elements);
     free(buffers.output_text.elements);
     free(buffers.output.elements);
+    free(buffers.text.elements);
     free(buffers.constants.elements);
     free(buffers.bindings.elements);
     free(buffers.nodes.elements);
@@ -525,7 +537,8 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     }
 
     Semantic_Result semantic_result = semantic_analyze(parse_result.nodes, parse_result.root,
-                                                       buffers->bindings, buffers->constants);
+                                                       buffers->bindings, buffers->constants,
+                                                       buffers->text);
     if (semantic_result.status != SEMANTIC_STATUS_OK) {
         main_run_command_report_semantic_error(path, source, semantic_result);
         return 1;
@@ -1826,6 +1839,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_KIND_PLUS_EQUALS:
             printf("PLUS_EQUALS\n");
             break;
+        case TOKEN_KIND_PLUS_PLUS:
+            printf("PLUS_PLUS\n");
+            break;
         case TOKEN_KIND_RANGE_EXCLUSIVE:
             printf("RANGE_EXCLUSIVE\n");
             break;
@@ -2663,15 +2679,27 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: an operator of the constant expression at '%.*s' is given "
                 "operands that it does not take: arithmetic takes integers that are untyped or "
                 "Int, or floats, but not both, 'and', 'or' and 'not' take truth values, a Byte is "
-                "compared with a Byte or a number from 0 to 255, a Rune with a Rune, and "
-                "strings are not compared.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
+                "compared with a Byte or a number from 0 to 255, a Rune with a Rune, strings are "
+                "not compared, and '++' takes a string and a string or a rune.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_CONSTANT_OVERFLOW:
         fprintf(stderr, "%s:%zu:%zu: the constant expression at '%.*s' has a value that does not "
                 "fit in an Int, which goes from -9223372036854775808 to 9223372036854775807, or "
                 "in a float, which is finite.\n",
                 path, position.line, position.column, subject_length, result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_CONCATENATION_NOT_CONSTANT:
+        fprintf(stderr, "%s:%zu:%zu: the operands of '++' at '%.*s' must be known when the "
+                "program is compiled: strings, runes, or constants of them, because the text is "
+                "joined then.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_CONSTANT_TEXT_TOO_LONG:
+        fprintf(stderr, "%s:%zu:%zu: the strings that '++' joins in the constants of the program, "
+                "at '%.*s', have more than %d bytes together.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes,
+                CONSTANT_TEXT_SIZE_BYTES_MAX);
         break;
     case SEMANTIC_STATUS_CONSTANT_TOO_DEEP:
         fprintf(stderr, "%s:%zu:%zu: the constant expression at '%.*s' has more than %d nested "

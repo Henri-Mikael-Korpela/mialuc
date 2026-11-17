@@ -240,6 +240,7 @@ The compiler allocates what it needs once, when it starts, so that its use of me
 source file                    1 MiB
 tokens                         65536
 syntax tree nodes              65536
+joined strings (++)            1 MiB
 program                        1 MiB
 assembly or WebAssembly text   16 MiB
 procedures (x64-win32)         1024

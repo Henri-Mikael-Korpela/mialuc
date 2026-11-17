@@ -2,6 +2,7 @@
 #define MIALU_CONSTANT_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include <mialu/ast.h>
@@ -15,6 +16,19 @@ enum {
     // could write the same expression.
     CONSTANT_EXPRESSION_DEPTH_MAX = 1024,
 };
+
+/**
+ * The memory that the text of the strings that are made when the program is compiled is written to,
+ * which is the result of every `++`. `bytes` has `size_bytes` bytes, and `length` is how many of
+ * them are used, which the caller sets to zero before the first evaluation. The text of a result
+ * stays there as long as the syntax tree is used, because the string literal that holds it views
+ * it.
+ */
+typedef struct {
+    char *bytes;
+    size_t size_bytes;
+    size_t length;
+} Constant_Text;
 
 /**
  * The type of a value that is known when the program is compiled. A literal has an untyped type: it
@@ -67,13 +81,16 @@ typedef enum {
     CONSTANT_STATUS_NOT_CONSTANT,
     CONSTANT_STATUS_OK,
     // An operator is given operands that it does not take, such as `true + 1`, a typed `Byte` in
-    // arithmetic, an `Int` and a `Byte` together or two strings in a comparison. `error` is the
-    // operator.
+    // arithmetic, an `Int` and a `Byte` together, two strings in a comparison, or a number for
+    // `++`. `error` is the operator.
     CONSTANT_STATUS_OPERAND_TYPE_INVALID,
     // A result that does not fit in a 64-bit `Int`, or a float result that is infinite. Constant
     // arithmetic does not wrap around as the arithmetic of a running program does, because the
     // number is wrong as soon as it would. `error` is the operator.
     CONSTANT_STATUS_OVERFLOW,
+    // The text of the strings that `++` joins does not fit in the `Constant_Text` any more.
+    // `error` is the operator.
+    CONSTANT_STATUS_TEXT_TOO_LONG,
     // A typed constant whose type is not `Int`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`,
     // which are the types that a constant can have. `error` is the definition.
     CONSTANT_STATUS_TYPE_INVALID,
@@ -93,7 +110,8 @@ typedef enum {
  * What the evaluation found out about one node. On `CONSTANT_STATUS_OK`, `type` is the type of the
  * value, `integer` is the number of an integer and 1 or 0 for `true` or `false`, and `string` is
  * the string literal of a string, whose bytes the targets already have, or `AST_NODE_INDEX_NONE`
- * when the value is not a string. On an error `error` is the node that the error is about, see
+ * when the value is not a string. The string literal of the result of a `++` is the one that comes
+ * right after it, see `AST_NODE_TYPE_CONCATENATION`. On an error `error` is the node that the error is about, see
  * `Constant_Status`, and is `AST_NODE_INDEX_NONE` otherwise. `floating` is the number of a float,
  * which is the value that an `F32` holds when the type is `CONSTANT_TYPE_F32`, and is zero for
  * the types that are not floats.
@@ -111,14 +129,16 @@ typedef struct {
  * Works out whether `expression`, a node of the syntax tree in `nodes`, is a constant, and its
  * value, and writes that to `values`, which has one `Constant_Value` for each node, together with
  * what it found out about every node below it and every constant that it uses. `bindings` resolves
- * the names, one element per node, as `semantic_analyze` gives them. Every entry of `values` must
+ * the names, one element per node, as `semantic_analyze` gives them. `text` is where the strings
+ * that `++` makes are written, and the string literal after each `++` is given its text, which is
+ * why `nodes` is not constant. Every entry of `values` must
  * start as `CONSTANT_STATUS_UNKNOWN`, and an entry that is filled is not worked out again, so that
  * each node is evaluated once however many times it is used: the value of `B :: A + A` does not
  * work out `A` twice. Returns the entry of `expression`.
  *
  * An expression is a constant when it is a literal, the name of a constant whose value is one, or
  * an operator whose operands are constants: arithmetic of integers or of floats, a comparison, and
- * `and`, `or` and `not` of truth values. Anything else, such as a variable, a call or `nil`, is
+ * `and`, `or` and `not` of truth values, and `++` of strings and runes. Anything else, such as a variable, a call or `nil`, is
  * `CONSTANT_STATUS_NOT_CONSTANT`. The definition of a constant, an
  * `AST_NODE_TYPE_CONSTANT_DEFINITION`, can be evaluated too, and its entry is the value that a use
  * of its name has, which is its value converted to its type when it has one.
@@ -132,15 +152,20 @@ typedef struct {
  * untyped operands give an untyped result. A comparison gives an untyped truth value, so that it
  * can be used wherever a `Bool` is.
  *
+ * `++` joins strings: a string with a string, or with a rune, which is written as its UTF-8 bytes,
+ * on either side. The result is an untyped string unless an operand is a `Str`, and then it is a
+ * `Str`. A rune with a rune is not joined, and neither is a number. The result is one string, so it
+ * can be an operand of `++` again.
+ *
  * The operands are worked out from left to right, and an operator is not a constant as soon as an
  * operand is not, so an error in an operand of an expression that is not a constant, such as the
  * `1 / 0` of `x + 1 / 0`, is in the entry of that operand only. The analysis evaluates every
  * operator of a program for that reason, so that a target that builds a program which passed it
  * finds only `CONSTANT_STATUS_OK` or `CONSTANT_STATUS_NOT_CONSTANT` in the entries that it reads.
  */
-Constant_Value constant_evaluate(Ast_Node const *nodes, size_t node_count,
+Constant_Value constant_evaluate(Ast_Node *nodes, size_t node_count,
                                  Semantic_Binding const *bindings, Constant_Value *values,
-                                 Ast_Node_Index expression);
+                                 Constant_Text *text, Ast_Node_Index expression);
 
 /**
  * Returns whether the value of `definition`, an `AST_NODE_TYPE_CONSTANT_DEFINITION`, is an

@@ -2097,8 +2097,9 @@ static bool parse_line_end_expect(Parser *parser) {
 }
 
 /**
- * Parses terms separated by `+` or `-`, which have the same precedence. They are left associative,
- * so `a - b + c` is `(a - b) + c`: each operator makes a node that takes the expression so far as
+ * Parses terms separated by `+`, `-` or `++`, which have the same precedence. They are left
+ * associative, so `a - b + c` is `(a - b) + c`: each operator makes a node that takes the expression
+ * so far as
  * its left operand. The operands of these operators are terms, see `parse_term`, so the operators
  * of a term bind tighter: `a + b * c` is `a + (b * c)`. The parser does not call itself, because
  * there are no parentheses yet.
@@ -2116,7 +2117,8 @@ static Ast_Node_Index parse_sum(Parser *parser) {
     // the loop.
     for (size_t i = 0; i < parser->token_count; i += 1) {
         Token_Kind operator = parse_token_current(parser)->kind;
-        if (operator != TOKEN_KIND_PLUS && operator != TOKEN_KIND_MINUS) {
+        if (operator != TOKEN_KIND_PLUS && operator != TOKEN_KIND_MINUS &&
+            operator != TOKEN_KIND_PLUS_PLUS) {
             break;
         }
         parse_token_advance(parser);
@@ -2129,10 +2131,22 @@ static Ast_Node_Index parse_sum(Parser *parser) {
         Ast_Node_Type node_type = AST_NODE_TYPE_ADDITION;
         if (operator == TOKEN_KIND_MINUS) {
             node_type = AST_NODE_TYPE_SUBTRACTION;
+        } else if (operator == TOKEN_KIND_PLUS_PLUS) {
+            node_type = AST_NODE_TYPE_CONCATENATION;
         }
         Ast_Node_Index arithmetic = parse_node_make(parser, node_type);
         if (arithmetic == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
+        }
+        if (node_type == AST_NODE_TYPE_CONCATENATION) {
+            // The string literal that the analysis gives the text of the result, right after the
+            // node, see `AST_NODE_TYPE_CONCATENATION`.
+            Ast_Node_Index result = parse_node_make(parser, AST_NODE_TYPE_STRING_LITERAL);
+            if (result == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            assert(result == arithmetic + 1);
+            parser->nodes[result].payload.string_literal.text = STR("");
         }
         parse_node_append_child(parser, arithmetic, left);
         parse_node_append_child(parser, arithmetic, right);

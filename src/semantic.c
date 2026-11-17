@@ -12,11 +12,14 @@
  * more. So only the first error is kept.
  */
 typedef struct {
-    Ast_Node const *nodes;
+    // Not constant, because the text of a `++` is written to the string literal after it.
+    Ast_Node *nodes;
     Semantic_Binding *bindings;
     // What is known about each node when the program is compiled, one entry per node, see
     // `semantic_constants_check`.
     Constant_Value *constants;
+    // Where the text of the strings that `++` makes is written, see `Constant_Text`.
+    Constant_Text text;
     Str subject;
     size_t node_count;
     Ast_Node_Index module;
@@ -98,15 +101,17 @@ static Semantic_Binding semantic_variable_find      (Semantic_Analyzer const *an
                                                      Ast_Node_Index excluded, Str name);
 
 Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
-                                 Array_Slice binding_buffer, Array_Slice constant_buffer) {
+                                 Array_Slice binding_buffer, Array_Slice constant_buffer,
+                                 Array_Slice text_buffer) {
     assert(nodes.elements != NULL);
     assert(binding_buffer.elements != NULL);
     assert(binding_buffer.length >= nodes.length);
     assert(constant_buffer.elements != NULL);
     assert(constant_buffer.length >= nodes.length);
+    assert(text_buffer.elements != NULL);
     assert(root < nodes.length);
 
-    Ast_Node const *node_elements = nodes.elements;
+    Ast_Node *node_elements = nodes.elements;
     assert(node_elements[root].node_type == AST_NODE_TYPE_MODULE);
 
     // Every node starts as not being a use of a name, so that the table can be read at any index.
@@ -136,6 +141,7 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
         .nodes = node_elements,
         .bindings = binding_elements,
         .constants = constant_elements,
+        .text = {.bytes = text_buffer.elements, .size_bytes = text_buffer.length, .length = 0},
         .subject = STR_EMPTY,
         .node_count = nodes.length,
         .module = root,
@@ -378,9 +384,9 @@ static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
         Ast_Node_Type definition_type = nodes[definition].node_type;
         if (definition_type == AST_NODE_TYPE_CONSTANT_DEFINITION &&
             constant_definition_is_value(nodes, definition)) {
-            Constant_Value value = constant_evaluate(nodes, analyzer->node_count,
+            Constant_Value value = constant_evaluate(analyzer->nodes, analyzer->node_count,
                                                      analyzer->bindings, analyzer->constants,
-                                                     definition);
+                                                     &analyzer->text, definition);
             if (value.status != CONSTANT_STATUS_OK) {
                 return semantic_constant_fail(analyzer, value, definition);
             }
@@ -393,9 +399,9 @@ static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
                 (nodes[value_node].node_type == AST_NODE_TYPE_FIELD_ACCESS &&
                  nodes[nodes[value_node].first_child].node_type == AST_NODE_TYPE_TYPE_INFO_OF);
             if (not is_type_info) {
-                Constant_Value value = constant_evaluate(nodes, analyzer->node_count,
+                Constant_Value value = constant_evaluate(analyzer->nodes, analyzer->node_count,
                                                          analyzer->bindings, analyzer->constants,
-                                                         value_node);
+                                                         &analyzer->text, value_node);
                 if (value.status != CONSTANT_STATUS_OK) {
                     return semantic_constant_fail(analyzer, value, definition);
                 }
@@ -413,6 +419,7 @@ static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
                                     node_type == AST_NODE_TYPE_AND ||
                                     node_type == AST_NODE_TYPE_BOOL_LITERAL ||
                                     node_type == AST_NODE_TYPE_COMPARISON ||
+                                    node_type == AST_NODE_TYPE_CONCATENATION ||
                                     node_type == AST_NODE_TYPE_DIVISION ||
                                     node_type == AST_NODE_TYPE_FLOAT_LITERAL ||
                                     node_type == AST_NODE_TYPE_IDENTIFIER ||
@@ -427,10 +434,17 @@ static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
                     continue;
                 }
                 // A node that an operator above it evaluated already is not worked out again.
-                Constant_Value value = constant_evaluate(nodes, analyzer->node_count,
+                Constant_Value value = constant_evaluate(analyzer->nodes, analyzer->node_count,
                                                          analyzer->bindings, analyzer->constants,
-                                                         current);
-                // Most expressions of a procedure are not constants, which is fine there.
+                                                         &analyzer->text, current);
+                // Most expressions of a procedure are not constants, which is fine there, but the
+                // text of a `++` is made when the program is compiled, so it has to be one.
+                if (value.status == CONSTANT_STATUS_NOT_CONSTANT &&
+                    node_type == AST_NODE_TYPE_CONCATENATION) {
+                    return semantic_fail(
+                        analyzer, SEMANTIC_STATUS_CONCATENATION_NOT_CONSTANT,
+                        semantic_constant_subject(analyzer, current, definition));
+                }
                 if (value.status != CONSTANT_STATUS_OK &&
                     value.status != CONSTANT_STATUS_NOT_CONSTANT) {
                     return semantic_constant_fail(analyzer, value, definition);
@@ -470,6 +484,8 @@ static bool semantic_constant_fail(Semantic_Analyzer *analyzer, Constant_Value v
         return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_OPERAND_TYPE_INVALID, subject);
     case CONSTANT_STATUS_OVERFLOW:
         return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_OVERFLOW, subject);
+    case CONSTANT_STATUS_TEXT_TOO_LONG:
+        return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_TEXT_TOO_LONG, subject);
     case CONSTANT_STATUS_TYPE_INVALID:
         return semantic_fail(analyzer, SEMANTIC_STATUS_CONSTANT_TYPE_INVALID, subject);
     case CONSTANT_STATUS_TYPE_MISMATCH:

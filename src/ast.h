@@ -25,6 +25,7 @@ typedef enum {
     AST_NODE_TYPE_CALL_STATEMENT,
     AST_NODE_TYPE_CAST,
     AST_NODE_TYPE_COMPARISON,
+    AST_NODE_TYPE_CONCATENATION,
     AST_NODE_TYPE_CONSTANT_DEFINITION,
     AST_NODE_TYPE_CONTINUE_STATEMENT,
     AST_NODE_TYPE_DEFER_STATEMENT,
@@ -186,6 +187,13 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  * - `AST_NODE_TYPE_COMPARISON`: two children, the left and the right operand, in that order. It is
  *   an expression of type `Bool` with the lowest precedence of the operators, so its operands are
  *   not comparisons. The operator is in the payload.
+ * - `AST_NODE_TYPE_CONCATENATION`: two children, the left and the right operand, in that order, of
+ *   `++`, which joins two texts into one string. One operand is a string and the other is a string
+ *   or a rune, and both must be constants, so it is an expression whose value is known when the
+ *   program is compiled. The node that comes right after it in the node buffer is an
+ *   `AST_NODE_TYPE_STRING_LITERAL` that is not the child of any node: it is where the text of the
+ *   result is, which the analysis writes there, so that the result is a string literal to the
+ *   targets, as any other string that is a constant is. It is empty until then.
  * - `AST_NODE_TYPE_CONSTANT_DEFINITION`: the value that is bound to the name is the first child.
  *   It is an `AST_NODE_TYPE_PROCEDURE`, an `AST_NODE_TYPE_STRUCT_TYPE`, an
  *   `AST_NODE_TYPE_ENUM_TYPE`, the member of an enum, which is an `AST_NODE_TYPE_FIELD_ACCESS` of
