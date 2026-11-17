@@ -15,7 +15,7 @@ import foreign libc
 foreign libc ->
     puts :: proc(content: C_Str) Int -> ...
     fopen :: proc(path: C_Str, mode: C_Str) ^Byte -> ...
-    fgetc :: proc(file: ^Byte) Int -> ...
+    fread :: proc(buffer: ^Byte, size: Int, count: Int, file: ^Byte) Int -> ...
     fclose :: proc(file: ^Byte) Int -> ...
 
 /// The version, written once, as the text of each number. `++` joins strings, so VERSION_STRING is
@@ -40,24 +40,30 @@ VERSION_STRING :: VERSION_MAJOR ++ '.' ++ VERSION_MINOR ++ '.' ++ VERSION_PATCH
 // somewhere else than the root of the project.
 HEADER_PATH :: "src/version.h"
 
-/// The bytes of the text that is read, which are the ASCII codes of what the C library gives.
+/// The bytes of the text that is read, which are the ASCII codes of its characters.
 //
 // MISSING FEATURE: the escape sequences of strings and runes, which a backslash would start, so that
 // the new line is written `'\n'` and not as its number, since there is no way to write one. Also a
 // constant that is the number of a rune, such as `NEW_LINE :: cast(Int)'\n'`, which a cast is not,
 // so that the other bytes could be constants too, and not `cast(Int)'#'` where they are used.
-LAST_BYTE :: 255
+END_OF_FILE :: -1
 NEW_LINE :: 10
 
-/// Whether what `fgetc` gave is the end of the file, which is -1 in C, and not a byte.
-//
-// MISSING FEATURE: the type `int` of C for a foreign procedure, which is the reserved `I32`. `fgetc`
-// returns an `int` of 32 bits, and a procedure that returns an `Int` is read as 64 bits, so the -1 of
-// the end of the file arrives as 4294967295, the upper half of the register being not set by C. The
-// test is made for a number that is not a byte, which is true for both, and is a guess about what
-// the upper half holds.
+/// Reads the next byte of the file, and gives END_OF_FILE when there is none.
+///
+/// It is `fread` of one byte into a `Byte` and not `fgetc`, because `fgetc` returns a C `int` of 32
+/// bits, which is not an `Int` of 64, so that its -1 for the end of the file would arrive with the
+/// upper half of the register not set. `fread` returns a `size_t`, which is, and it is 0 at the end.
+/// The `Byte` is a variable whose address is taken, which is what the foreign procedure fills.
+read_byte :: proc(file: ^Byte) Int ->
+    byte : Byte
+    if fread(%byte, 1, 1, file) == 0 ->
+        return END_OF_FILE
+    return cast(Int)byte
+
+/// Whether what `read_byte` gave is the end of the file.
 is_end_of_file :: proc(c: Int) Bool ->
-    return c < 0 or c > LAST_BYTE
+    return c == END_OF_FILE
 
 /// What was found in the header. `found` counts the `#define` lines that were read, one for each
 /// of the three numbers.
@@ -74,7 +80,7 @@ Version :: struct ->
 read_text :: proc(file: ^Byte, text: Str) (Bool, Int) ->
     last := 0
     for expected in text ->
-        last = fgetc(file)
+        last = read_byte(file)
         if last not= cast(Int)expected ->
             return false, last
     return true, last
@@ -90,7 +96,7 @@ read_number :: proc(file: ^Byte) (Int, Bool, Int) ->
     number := 0
     has_digits := false
     for ->
-        c := fgetc(file)
+        c := read_byte(file)
         if c < cast(Int)'0' or c > cast(Int)'9' ->
             return number, has_digits, c
         number = number * 10 + c - cast(Int)'0'
@@ -105,7 +111,7 @@ skip_line :: proc(file: ^Byte, last: Int) Bool ->
             return true
         if is_end_of_file(c) ->
             return false
-        c = fgetc(file)
+        c = read_byte(file)
 
 /// Whether the byte `c` is the character at `index` of `name`, which is false when `name` has no
 /// character there. The subscript of a string is by the character, and the name is ASCII.
@@ -128,7 +134,7 @@ read_name :: proc(file: ^Byte) (Int, Int) ->
     is_patch := true
     index := 0
     for ->
-        c := fgetc(file)
+        c := read_byte(file)
         if c == cast(Int)' ' ->
             which := 0
             if is_major and index == length_of(major) ->
@@ -172,7 +178,7 @@ read_define :: proc(file: ^Byte, version: ^Version) Int ->
 /// Reads one line of the header, and gives false at the end of the file. A line that starts with
 /// `#define MIALU_VERSION_` is read as a definition of the version, and the others are skipped.
 read_line :: proc(file: ^Byte, version: ^Version) Bool ->
-    first := fgetc(file)
+    first := read_byte(file)
     if is_end_of_file(first) ->
         return false
     last := first
