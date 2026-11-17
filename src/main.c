@@ -2315,8 +2315,14 @@ static void main_run_command_report_x64_error(char const *path, Str source,
         break;
     case X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' is declared in a 'foreign js' "
-                "block, and the x64 target imports from 'foreign libc'.\n", path, position.line,
+                "block, and the x64 target imports from 'foreign libc' and from the libraries of "
+                "the system that an 'import foreign' names.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
+        break;
+    case X64_BUILD_STATUS_LIBRARY_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the library of the foreign procedure '%.*s' must be written "
+                "as \"system:Name.lib\" in its import, and there is room for a few.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_IDENTIFIER_NOT_VALUE:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' is a type and not a value.\n", path, position.line,
@@ -2567,8 +2573,8 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         break;
     case WASM_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED:
         fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' is declared in a 'foreign "
-                "libc' block, which the wasm target cannot import from. It imports from "
-                "'foreign js'.\n", path, position.line, position.column, subject_length,
+                "libc' block or in one of a library of the system, which the wasm target cannot "
+                "import from. It imports from 'foreign js'.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_STRUCT_EXPECTED:

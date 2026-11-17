@@ -71,6 +71,9 @@ typedef enum {
     // subject is the first name of the place.
     X64_BUILD_STATUS_FIELD_TARGET_READ_ONLY,
     X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED,
+    // A foreign procedure whose library is not given as `system:Name.lib`, or that makes more
+    // libraries than the build has room for. The subject is the name of the procedure.
+    X64_BUILD_STATUS_LIBRARY_INVALID,
     // A name of a struct or an enum where a value is wanted, which is a type and not a value. The
     // subject is the name.
     X64_BUILD_STATUS_IDENTIFIER_NOT_VALUE,

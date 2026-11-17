@@ -37,6 +37,9 @@ enum {
     // An entry of the table of imports is the 64-bit address of the name of an import, and the
     // table ends with a zero entry.
     X64_IMPORT_ENTRY_SIZE_BYTES = 8,
+    // The most libraries that a program imports from: the C library, and the libraries of the
+    // system that it names, which the parser limits to fewer.
+    X64_LIBRARY_COUNT_MAX = 32,
 
     // The registers are numbered like the processor does, and `r8` to `r15` need the extra bit of
     // an instruction prefix. The code uses only the registers that the calling convention of
@@ -326,6 +329,10 @@ typedef struct {
     // The place of the import of a foreign procedure in the table of imports, see
     // `x64_layout_make`. Not set for any other constant.
     uint32_t import_slot;
+    // Which library a foreign procedure is imported from, the place of its name among the
+    // libraries of the build, see `X64_Builder.library_stems`. Zero, which is the C library, for
+    // any other constant.
+    uint32_t library;
     X64_Constant_Kind kind;
 } X64_Constant;
 
@@ -517,9 +524,21 @@ typedef struct {
     // Whether the procedure that is being written makes temporary strings, which it gives back
     // when it returns.
     bool is_temporary_used;
+    // The libraries that the program imports from, by the name of the file without `.dll`. The first
+    // is the C library, which the program ends with `exit` of. The others are the libraries of the
+    // system that foreign procedures are declared in, in the order of the first of them. They view
+    // the source text.
+    Str library_stems[X64_LIBRARY_COUNT_MAX];
+    size_t library_count;
     X64_Constant constants[X64_CONSTANT_COUNT_MAX];
 } X64_Builder;
 
+static int          x64_ascii_compare            (char const *left, char const *right,
+                                                  size_t length);
+static size_t       x64_import_name_offset       (X64_Builder const *builder, size_t position);
+static bool         x64_library_find             (X64_Builder *builder, Str text,
+                                                  uint32_t *library);
+static size_t       x64_library_entry_count      (X64_Builder const *builder, size_t library);
 static bool         x64_address_write            (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static size_t       x64_align_up                 (size_t value, size_t alignment);
@@ -921,10 +940,11 @@ static byte const X64_ARGUMENT_REGISTERS[X64_ARGUMENT_REGISTER_COUNT] = {
 // linkers use for a program for x64, and it is far above the 4 GiB that a 32-bit program has.
 static uint64_t const X64_IMAGE_BASE = 0x140000000ull;
 
-// The library that the C library is imported from. It is part of every installation of Windows, and
-// it exports `printf` and `exit` by name, unlike the universal C runtime that the headers of the
-// compilers redirect to.
-static char const X64_LIBRARY_NAME[] = "msvcrt.dll";
+// The C library is imported from `msvcrt.dll`, see `X64_Builder.library_stems`. It is part of every
+// installation of Windows, and it exports `printf` and `exit` by name, unlike the universal C
+// runtime that the headers of the compilers redirect to. The name of the file of any library is its
+// name and this, with the zero that ends it.
+static char const X64_LIBRARY_EXTENSION[] = ".dll";
 
 // The sections of a build with debug information, in the order of the file. The first is the table
 // of unwinding that Windows describes for x64, and the others are the DWARF of gdb, which finds
@@ -1117,6 +1137,8 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
         .definition = AST_NODE_INDEX_NONE,
         .status = X64_BUILD_STATUS_OK,
         .is_temporary_used = false,
+        .library_stems = {{0}},
+        .library_count = 0,
         .constants = {{0}},
     };
 
@@ -1210,8 +1232,10 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
 static bool x64_constants_collect(X64_Builder *builder) {
     assert(builder->constant_count == 0);
 
-    // The first place of the table of imports is for `exit`.
-    uint32_t import_slot = 1;
+    // The first library is the C library, which `exit` and the procedures of `foreign libc ->` are
+    // in. The libraries of the system come after it, as the procedures need them.
+    builder->library_stems[0] = STR("msvcrt");
+    builder->library_count = 1;
     Ast_Node_Index definition = builder->nodes[builder->module].first_child;
     // Every definition is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < builder->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
@@ -1292,9 +1316,18 @@ static bool x64_constants_collect(X64_Builder *builder) {
         assert(value_type == AST_NODE_TYPE_PROCEDURE);
 
         bool is_foreign = ast_procedure_is_foreign(builder->nodes, procedure);
-        if (is_foreign &&
-            ast_procedure_foreign_target(builder->nodes, procedure) != AST_FOREIGN_TARGET_LIBC) {
-            return x64_fail(builder, X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED, name);
+        uint32_t library = 0;
+        if (is_foreign) {
+            Ast_Foreign_Target target = ast_procedure_foreign_target(builder->nodes, procedure);
+            if (target == AST_FOREIGN_TARGET_JS) {
+                return x64_fail(builder, X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED, name);
+            }
+            if (target == AST_FOREIGN_TARGET_SYSTEM &&
+                not x64_library_find(builder, ast_procedure_foreign_library(builder->nodes,
+                                                                            procedure),
+                                     &library)) {
+                return x64_fail(builder, X64_BUILD_STATUS_LIBRARY_INVALID, name);
+            }
         }
 
         size_t parameter_count = x64_parameter_count(builder, procedure);
@@ -1339,19 +1372,124 @@ static bool x64_constants_collect(X64_Builder *builder) {
             .definition = definition,
             .offset = 0,
             .import_slot = 0,
+            .library = library,
             .kind = X64_CONSTANT_KIND_PROCEDURE,
         };
         if (is_foreign) {
             builder->constants[builder->constant_count].kind = X64_CONSTANT_KIND_FOREIGN;
-            builder->constants[builder->constant_count].import_slot = import_slot;
-            import_slot += 1;
         }
         builder->constant_count += 1;
         definition = definition_node->next_sibling;
     }
 
+    // Each library has its own run of the table of imports, which ends with a zero entry, so the
+    // places are known when all the libraries are. The first place is for `exit`.
+    uint32_t import_slot = 0;
+    for (uint32_t library = 0; library < builder->library_count; library += 1) {
+        if (library == 0) {
+            import_slot += 1;
+        }
+        for (size_t i = 0; i < builder->constant_count; i += 1) {
+            if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN &&
+                builder->constants[i].library == library) {
+                builder->constants[i].import_slot = import_slot;
+                import_slot += 1;
+            }
+        }
+        import_slot += 1;
+    }
+
     builder->definition = AST_NODE_INDEX_NONE;
     return true;
+}
+
+/**
+ * Finds the library that the text of an import, such as `system:Kernel32.lib`, names among the
+ * libraries of the build, and adds it when it is not there. The file of the library is the name
+ * with `.dll` after it. Names of files are not case sensitive on Windows, so `Kernel32` is the same
+ * library as `kernel32`. Returns false when the text is not `system:` and a name and `.lib`, or when
+ * there is no room for one more library.
+ */
+static bool x64_library_find(X64_Builder *builder, Str text, uint32_t *library) {
+    Str prefix = STR("system:");
+    Str suffix = STR(".lib");
+    if (text.length <= prefix.length + suffix.length ||
+        memcmp(text.bytes, prefix.bytes, prefix.length) != 0 ||
+        x64_ascii_compare(text.bytes + text.length - suffix.length, suffix.bytes,
+                          suffix.length) != 0) {
+        return false;
+    }
+
+    Str stem = str_make(text.bytes + prefix.length, text.length - prefix.length - suffix.length);
+    for (size_t i = 0; i < builder->library_count; i += 1) {
+        if (builder->library_stems[i].length == stem.length &&
+            x64_ascii_compare(builder->library_stems[i].bytes, stem.bytes, stem.length) == 0) {
+            *library = (uint32_t)i;
+            return true;
+        }
+    }
+    if (builder->library_count == X64_LIBRARY_COUNT_MAX) {
+        return false;
+    }
+    builder->library_stems[builder->library_count] = stem;
+    *library = (uint32_t)builder->library_count;
+    builder->library_count += 1;
+    return true;
+}
+
+/**
+ * Compares `length` bytes of two texts without telling the upper case letters of ASCII from the
+ * lower case ones. Gives zero when they are the same.
+ */
+static int x64_ascii_compare(char const *left, char const *right, size_t length) {
+    for (size_t i = 0; i < length; i += 1) {
+        int a = (unsigned char)left[i];
+        int b = (unsigned char)right[i];
+        if (a >= 'A' && a <= 'Z') {
+            a += 'a' - 'A';
+        }
+        if (b >= 'A' && b <= 'Z') {
+            b += 'a' - 'A';
+        }
+        if (a != b) {
+            return a - b;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Returns how many entries the run of `library` has in each table of imports: one for each foreign
+ * procedure in it, one for `exit` when it is the C library, and the zero entry that ends it.
+ */
+static size_t x64_library_entry_count(X64_Builder const *builder, size_t library) {
+    size_t count = 1;
+    if (library == 0) {
+        count += 1;
+    }
+    for (size_t i = 0; i < builder->constant_count; i += 1) {
+        if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN &&
+            builder->constants[i].library == library) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+/**
+ * Returns where the name of the import of the foreign constant at `position` is, counted from the
+ * start of `.rdata`. The names are in the order of the constants, after the name of `exit`.
+ */
+static size_t x64_import_name_offset(X64_Builder const *builder, size_t position) {
+    size_t offset = builder->layout.names_offset + x64_align_up(2 + sizeof(X64_EXIT_NAME), 2);
+    for (size_t i = 0; i < position; i += 1) {
+        if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN) {
+            Str name = builder->nodes[builder->constants[i].definition]
+                           .payload.constant_definition.name;
+            offset += x64_align_up(2 + name.length + 1, 2);
+        }
+    }
+    return offset;
 }
 
 /**
@@ -1389,20 +1527,18 @@ static bool x64_main_check(X64_Builder *builder) {
 static X64_Layout x64_layout_make(X64_Builder const *builder) {
     X64_Layout layout = {0};
 
-    layout.import_count = 1;
-    for (size_t i = 0; i < builder->constant_count; i += 1) {
-        if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN) {
-            layout.import_count += 1;
-        }
+    // The entries of the runs of the libraries, which each end with a zero entry.
+    for (size_t library = 0; library < builder->library_count; library += 1) {
+        layout.import_count += x64_library_entry_count(builder, library);
     }
 
+    // The descriptors are one for each library, and one that ends the list.
     layout.import_table_offset = 0;
-    layout.lookup_table_offset = 2 * X64_IMPORT_DESCRIPTOR_SIZE_BYTES;
-    // Each table ends with a zero entry.
+    layout.lookup_table_offset = (builder->library_count + 1) * X64_IMPORT_DESCRIPTOR_SIZE_BYTES;
     layout.address_table_offset =
-        layout.lookup_table_offset + (layout.import_count + 1) * X64_IMPORT_ENTRY_SIZE_BYTES;
+        layout.lookup_table_offset + layout.import_count * X64_IMPORT_ENTRY_SIZE_BYTES;
     layout.names_offset =
-        layout.address_table_offset + (layout.import_count + 1) * X64_IMPORT_ENTRY_SIZE_BYTES;
+        layout.address_table_offset + layout.import_count * X64_IMPORT_ENTRY_SIZE_BYTES;
 
     // A name is preceded by a hint of two bytes, which the loader uses to search faster, and ends
     // with a zero. It starts at an even address, so the size is made even.
@@ -1415,7 +1551,11 @@ static X64_Layout x64_layout_make(X64_Builder const *builder) {
         }
     }
     layout.library_name_offset = layout.names_offset + names_bytes;
-    layout.strings_offset = layout.library_name_offset + sizeof(X64_LIBRARY_NAME);
+    size_t library_names_bytes = 0;
+    for (size_t i = 0; i < builder->library_count; i += 1) {
+        library_names_bytes += builder->library_stems[i].length + sizeof(X64_LIBRARY_EXTENSION);
+    }
+    layout.strings_offset = layout.library_name_offset + library_names_bytes;
 
     size_t strings_bytes = 0;
     for (size_t i = 0; i < builder->node_count; i += 1) {
@@ -1688,30 +1828,40 @@ static void x64_rdata_write(X64_Builder *builder) {
     X64_Layout const *layout = &builder->layout;
     X64_Writer *writer = &builder->writer;
 
-    // The descriptor of the library: where its lookup table and its address table are, and its
-    // name. The date and the forwarder are not used. A zero descriptor ends the list.
-    x64_write_u32(writer, (uint32_t)(X64_RDATA_RVA + layout->lookup_table_offset));
-    x64_write_u32(writer, 0);
-    x64_write_u32(writer, 0);
-    x64_write_u32(writer, (uint32_t)(X64_RDATA_RVA + layout->library_name_offset));
-    x64_write_u32(writer, (uint32_t)(X64_RDATA_RVA + layout->address_table_offset));
+    // The descriptor of each library: where its run of the lookup table and of the address table
+    // are, and its name. The date and the forwarder are not used. A zero descriptor ends the list.
+    size_t first_entry = 0;
+    size_t library_name_offset = layout->library_name_offset;
+    for (size_t library = 0; library < builder->library_count; library += 1) {
+        x64_write_u32(writer, (uint32_t)(X64_RDATA_RVA + layout->lookup_table_offset +
+                                         first_entry * X64_IMPORT_ENTRY_SIZE_BYTES));
+        x64_write_u32(writer, 0);
+        x64_write_u32(writer, 0);
+        x64_write_u32(writer, (uint32_t)(X64_RDATA_RVA + library_name_offset));
+        x64_write_u32(writer, (uint32_t)(X64_RDATA_RVA + layout->address_table_offset +
+                                         first_entry * X64_IMPORT_ENTRY_SIZE_BYTES));
+        first_entry += x64_library_entry_count(builder, library);
+        library_name_offset +=
+            builder->library_stems[library].length + sizeof(X64_LIBRARY_EXTENSION);
+    }
     x64_write_zeros(writer, X64_IMPORT_DESCRIPTOR_SIZE_BYTES);
 
     // The two tables are the same until the program is loaded: the address of the name of each
-    // import. The loader replaces the second with the addresses of the imports.
+    // import, in the run of its library. The loader replaces the second with the addresses of the
+    // imports.
     for (size_t table = 0; table < 2; table += 1) {
-        size_t name_offset = layout->names_offset;
-        x64_write_u64(writer, X64_RDATA_RVA + name_offset);
-        name_offset += x64_align_up(2 + sizeof(X64_EXIT_NAME), 2);
-        for (size_t i = 0; i < builder->constant_count; i += 1) {
-            if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN) {
-                Str name = builder->nodes[builder->constants[i].definition]
-                               .payload.constant_definition.name;
-                x64_write_u64(writer, X64_RDATA_RVA + name_offset);
-                name_offset += x64_align_up(2 + name.length + 1, 2);
+        for (size_t library = 0; library < builder->library_count; library += 1) {
+            if (library == 0) {
+                x64_write_u64(writer, X64_RDATA_RVA + layout->names_offset);
             }
+            for (size_t i = 0; i < builder->constant_count; i += 1) {
+                if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN &&
+                    builder->constants[i].library == library) {
+                    x64_write_u64(writer, X64_RDATA_RVA + x64_import_name_offset(builder, i));
+                }
+            }
+            x64_write_u64(writer, 0);
         }
-        x64_write_u64(writer, 0);
     }
 
     x64_write_u16(writer, 0);
@@ -1732,7 +1882,12 @@ static void x64_rdata_write(X64_Builder *builder) {
         }
     }
 
-    x64_write_bytes(writer, (byte const *)X64_LIBRARY_NAME, sizeof(X64_LIBRARY_NAME));
+    for (size_t library = 0; library < builder->library_count; library += 1) {
+        Str stem = builder->library_stems[library];
+        x64_write_bytes(writer, (byte const *)stem.bytes, stem.length);
+        x64_write_bytes(writer, (byte const *)X64_LIBRARY_EXTENSION,
+                        sizeof(X64_LIBRARY_EXTENSION));
+    }
 
     for (size_t i = 0; i < builder->node_count; i += 1) {
         if (builder->nodes[i].node_type == AST_NODE_TYPE_STRING_LITERAL) {
@@ -8394,11 +8549,12 @@ static void x64_headers_write(X64_Builder *builder, size_t text_size_bytes) {
     byte *directories = optional + 112;
     x64_store_u32(directories + 1 * 8,
                   (uint32_t)(X64_RDATA_RVA + builder->layout.import_table_offset));
-    x64_store_u32(directories + 1 * 8 + 4, 2 * X64_IMPORT_DESCRIPTOR_SIZE_BYTES);
+    x64_store_u32(directories + 1 * 8 + 4,
+                  (uint32_t)((builder->library_count + 1) * X64_IMPORT_DESCRIPTOR_SIZE_BYTES));
     x64_store_u32(directories + 12 * 8,
                   (uint32_t)(X64_RDATA_RVA + builder->layout.address_table_offset));
     x64_store_u32(directories + 12 * 8 + 4,
-                  (uint32_t)((builder->layout.import_count + 1) * X64_IMPORT_ENTRY_SIZE_BYTES));
+                  (uint32_t)(builder->layout.import_count * X64_IMPORT_ENTRY_SIZE_BYTES));
 
     // The headers of the sections: the name, the size in memory, where it is in memory, the size
     // in the file, where it is in the file, the four fields for relocations and line numbers that

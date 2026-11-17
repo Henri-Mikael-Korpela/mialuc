@@ -66,6 +66,7 @@
 - [Attributes](#attributes)
 - [Foreign procedures](#foreign-procedures)
   - [Foreign procedures in WebAssembly](#foreign-procedures-in-webassembly)
+  - [Foreign procedures in the libraries of the system](#foreign-procedures-in-the-libraries-of-the-system)
   - [Foreign procedures in the C library](#foreign-procedures-in-the-c-library)
 - [Compilation targets](#compilation-targets)
   - [WebAssembly](#webassembly)
@@ -2334,7 +2335,7 @@ The attributes are built into the language. Mialu has two so far: `static`, whic
 
 ## Foreign procedures
 
-A program can call procedures that are not written in Mialu but in another language, which is JavaScript or the C library. They are called foreign procedures, and the language that they are in is the foreign target. Two things are needed: an import, which says where the procedures come from, and a foreign block, which lists the ones that the program uses, with their parameters and return types:
+A program can call procedures that are not written in Mialu but in another language, which is JavaScript, the C library or a library of the system. They are called foreign procedures, and the language that they are in is the foreign target. Two things are needed: an import, which says where the procedures come from, and a foreign block, which lists the ones that the program uses, with their parameters and return types:
 
 ```
 package alert_hello
@@ -2348,7 +2349,7 @@ print_hello :: proc() ->
     alert("Hello, world!")
 ```
 
-`import foreign js "functions"` is written in the first column, like a definition, below the [package definition](#packages). `foreign` and `import` are [keywords](#keywords). `js` is the foreign target, JavaScript, and the other is `libc`, the C library of the platform, which is imported with `import foreign libc` and needs no name, because there is one C library. `js` and `libc` are not keywords. The text in quotes is the name of the object that the procedures of `js` are properties of. It is a name and not a path, and Mialu does not check that it exists, because that is only known when the program runs. A program imports once for each target, above the first foreign block of that target, and a second `import foreign` of one target is an error, as is a block without the import of its target.
+`import foreign js "functions"` is written in the first column, like a definition, below the [package definition](#packages). `foreign` and `import` are [keywords](#keywords). `js` is the foreign target, JavaScript, and the other is `libc`, the C library of the platform, which is imported with `import foreign libc` and needs no name, because there is one C library. `js` and `libc` are not keywords. The text in quotes is the name of the object that the procedures of `js` are properties of. It is a name and not a path, and Mialu does not check that it exists, because that is only known when the program runs. A program imports once for each target, above the first foreign block of that target, and a second `import foreign` of one target is an error, as is a block without the import of its target. A library of the system, which is the third kind, has a name that the program gives it, see [Foreign procedures in the libraries of the system](#foreign-procedures-in-the-libraries-of-the-system).
 
 A foreign block is `foreign js ->` or `foreign libc ->` in the first column, and below it, indented one level, the procedures, one on each line. A program can have any number of blocks. A foreign procedure is written like a procedure, but where its body would be it has `...`, which stands for the code that is somewhere else:
 
@@ -2365,6 +2366,24 @@ The compiler cannot know what the other language does, so it trusts the declarat
 ### Foreign procedures in WebAssembly
 
 The target makes a foreign procedure an imported function of the module. See [WebAssembly](build-target-wasm.md#foreign-procedures). An `I32` arrives in JavaScript as a plain number and is returned as one, where an `I64` and an `Int` are a `BigInt`.
+
+### Foreign procedures in the libraries of the system
+
+A library of the system, such as `Kernel32` of Windows, is imported with a name that the program chooses and the library in quotes, and its procedures are declared in a block that has the name:
+
+```
+import foreign kernel32 "system:Kernel32.lib"
+
+foreign kernel32 #(default_calling_convention("system")) ->
+    GetCurrentProcessId :: proc() U32 -> ...
+    CloseHandle :: proc(handle: Int) I32 -> ...
+```
+
+The text in quotes is `system:`, the name of the library and `.lib`, as it is given to a linker, but nothing is linked statically: `User32.lib` is the import library of `User32.dll`, which says what the DLL exports and holds none of its code, and Mialu has no such file to read, since the name is only turned into the name of the DLL. The program carries the names of the DLL and of its procedures, and the loader of Windows finds them when the program starts, as for any program that uses the library. The program imports from the file that has the name and `.dll`, which is `Kernel32.dll` here, and calls the procedures by the name that they have in the library, as it does those of the C library. The name that the import gives, `kernel32`, is not a keyword, and only the blocks use it: a block must come below the import of its name, and a name is given once, so a second `import foreign kernel32` is an error. A program can import any number of libraries, and any number of blocks can name one.
+
+The attribute `#(default_calling_convention("system"))` after the name of the block says how its procedures are called, `"system"` for the convention that the libraries of the system have, and `"c"` for the one of C. It may be left out. The targets have one convention, which is the one of Windows on x64, where they are the same, so it changes nothing in the code of the program: it says what the programmer means. Any other convention is an error.
+
+The types are the ones that the procedure has in the library, as for the C library: a `DWORD` is a `U32`, a `BOOL` is an `I32`, a `HANDLE` or any other address is a `^Byte` or, when it is to be compared with a number such as `INVALID_HANDLE_VALUE`, an `Int`, and a `LPCWSTR` is a `^Byte` that points at UTF-16 text, which the program makes in a buffer that it owns. Only the x64-win32 target imports from a library of the system, and the wasm target does not accept the block, as it does not accept `foreign libc ->`.
 
 ### Foreign procedures in the C library
 

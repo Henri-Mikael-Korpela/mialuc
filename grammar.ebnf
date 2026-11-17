@@ -38,7 +38,9 @@
        scope resolution, which the compiler does after parsing.
      - A program that has a foreign block must have one `import foreign` of the target of the
        block above the first block of that target, and no more than one for each target. The
-       targets are `js` and `libc`. A foreign procedure takes and gives `Int`, `Bool`, `Byte`,
+       targets are `js`, `libc`, and the libraries of the system that an `import foreign name
+       "system:Library.lib"` gives a name to, which a block names with that name and which must be
+       imported above it, once. A foreign procedure takes and gives `Int`, `Bool`, `Byte`,
        `Str`, `C_Str` or a struct, as any other procedure does, and an array only as a slice. The name
        of the object of `js` is not checked, because it is not known until the program runs.
      - A literal is untyped: it becomes the type that its place wants, when its value fits in it,
@@ -211,19 +213,30 @@ definition = constant_definition | global_variable_definition ;
    JavaScript object that has the name between the quotes, which the program that runs the module
    passes to it when it instantiates it: the object `functions` in `{ functions: { ... } }`.
    `import foreign libc` says that the procedures of the `foreign libc` blocks come from the C
-   library of the platform, which needs no name. Like a definition it starts in the first
-   column. *)
+   library of the platform, which needs no name. `import foreign kernel32 "system:Kernel32.lib"`
+   gives the name `kernel32` to a library of the system, which the procedures of the `foreign
+   kernel32` blocks come from: the text in quotes is `system:`, the name of the library and
+   `.lib`, and the file that is imported from is the name with `.dll`. Like a definition it starts
+   in the first column. *)
 foreign_import =
     "import" , required_space , "foreign" , required_space ,
-    ( "js" , ws , string_literal | "libc" ) , ws , line_end ;
+    ( "js" , ws , string_literal | "libc" | library_name , ws , string_literal ) , ws , line_end ;
 
 (* A foreign block lists procedures which are not in the program but in JavaScript or in the C
-   library: `foreign js ->` or `foreign libc ->`, and below it, one level deeper, one line for
-   each. Such a procedure has `...` where the body of
+   library: `foreign js ->`, `foreign libc ->` or `foreign kernel32 ->`, and below it, one level
+   deeper, one line for each. The name of a library of the system may be followed by the attribute
+   `#(default_calling_convention("system"))`, which says how the procedures are called, `"system"`
+   or `"c"`, which are the same on Windows for x64. Such a procedure has `...` where the body of
    a procedure would be, and it is called like any other. Its parameters and its return type are
    the ones that JavaScript receives and has to give back. Like a definition it starts in the
    first column, and the program may have any number of blocks. *)
-foreign_block = "foreign" , required_space , ( "js" | "libc" ) , branch_end , foreign_body ;
+foreign_block = "foreign" , required_space , ( "js" | "libc" | library_name ) , ws ,
+    [ calling_convention , ws ] , branch_end , foreign_body ;
+
+library_name = name ;
+
+calling_convention =
+    "#" , "(" , "default_calling_convention" , "(" , string_literal , ")" , ")" ;
 
 foreign_body = { blank_line } , foreign_procedure , { blank_line | foreign_procedure } ;
 

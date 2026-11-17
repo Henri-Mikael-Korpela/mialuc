@@ -54,6 +54,11 @@ enum {
     PARSE_RESULT_COUNT_MAX = 8,
 };
 
+enum {
+    // The most libraries of the system that a program can import, each with its own name.
+    PARSE_SYSTEM_LIBRARY_MAX = 16,
+};
+
 /**
  * The state shared by the parsing functions. A parsing function returns the index of the node it
  * made, or `AST_NODE_INDEX_NONE` after it recorded an error here, and its caller then returns
@@ -70,6 +75,12 @@ typedef struct {
     // Whether `type_info_of` was parsed, which makes the module get the types of the information,
     // see `parse_reflection_types_append`.
     bool has_type_info;
+    // The libraries of the system that `import foreign name "text"` gave a name to so far: the
+    // names, and the texts between the quotes, which the procedures of a `foreign name ->` block
+    // take. They view the source text.
+    Str system_aliases[PARSE_SYSTEM_LIBRARY_MAX];
+    Str system_libraries[PARSE_SYSTEM_LIBRARY_MAX];
+    size_t system_library_count;
     size_t token_count;
     size_t token_index;
     size_t node_count;
@@ -88,8 +99,9 @@ static Ast_Node_Index parse_defer_statement     (Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_definition          (Parser *parser);
 static Ast_Node_Index parse_enum_type           (Parser *parser, uint32_t indentation_level);
 static bool           parse_foreign_block       (Parser *parser, Ast_Node_Index module);
+static bool           parse_foreign_calling_convention(Parser *parser);
 static Ast_Node_Index parse_foreign_import      (Parser *parser);
-static Ast_Foreign_Target parse_foreign_target_expect(Parser *parser);
+static Ast_Foreign_Target parse_foreign_target_expect(Parser *parser, Str *name);
 static Ast_Node_Index parse_else_branch         (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_if_statement        (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_bool_literal        (Parser *parser);
@@ -125,8 +137,9 @@ static void           parse_node_append_child   (Parser *parser, Ast_Node_Index 
 static Ast_Node_Index parse_node_make           (Parser *parser, Ast_Node_Type node_type);
 static Ast_Node_Index parse_parameter           (Parser *parser);
 static Ast_Node_Index parse_procedure           (Parser *parser, uint32_t indentation_level,
-                                                 bool is_foreign, Ast_Foreign_Target target);
-static bool           parse_procedure_body      (Parser *parser, Ast_Node_Index procedure,
+                                                 bool is_foreign, Ast_Foreign_Target target,
+                                                 Str library);
+static bool           parse_procedure_body     (Parser *parser, Ast_Node_Index procedure,
                                                  uint32_t indentation_level);
 static bool           parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure);
 static bool           parse_procedure_parameters(Parser *parser, Ast_Node_Index procedure);
@@ -171,6 +184,9 @@ Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
         .expected = STR(""),
         .literal_depth = 0,
         .has_type_info = false,
+        .system_aliases = {{0}},
+        .system_libraries = {{0}},
+        .system_library_count = 0,
         .token_count = tokens.length,
         .token_index = 0,
         .node_count = 0,
@@ -397,7 +413,8 @@ static Ast_Node_Index parse_definition(Parser *parser) {
         // An enum ends with its members.
         value = parse_enum_type(parser, INDENTATION_LEVEL_TOP);
     } else if (not is_typed_constant && next == TOKEN_KIND_KEYWORD_PROC) {
-        value = parse_procedure(parser, INDENTATION_LEVEL_TOP, false, AST_FOREIGN_TARGET_JS);
+        value = parse_procedure(parser, INDENTATION_LEVEL_TOP, false, AST_FOREIGN_TARGET_JS,
+                                STR_EMPTY);
     } else {
         value = parse_expression(parser);
         // A procedure ends with its body, but an expression is one line, so its end is checked
@@ -512,7 +529,9 @@ static bool parse_package_definition(Parser *parser, Ast_Node_Index module) {
 }
 
 /**
- * Parses `import foreign js "name"` or `import foreign libc`. The current token is `import`. The
+ * Parses `import foreign js "name"`, `import foreign libc` or `import foreign name "library"`, the
+ * last of which gives a name to a library of the system, such as `system:Kernel32.lib`. The current
+ * token is `import`. The
  * node has the target in its payload, and the name between the quotes for `js`. `libc` is the C
  * library of the platform, so it has no name to give, and the node keeps the word itself.
  */
@@ -530,7 +549,8 @@ static Ast_Node_Index parse_foreign_import(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
     Token const *target_token = parse_token_current(parser);
-    Ast_Foreign_Target target = parse_foreign_target_expect(parser);
+    Str alias = STR_EMPTY;
+    Ast_Foreign_Target target = parse_foreign_target_expect(parser, &alias);
     if (parser->status != PARSE_STATUS_OK) {
         return AST_NODE_INDEX_NONE;
     }
@@ -557,6 +577,31 @@ static Ast_Node_Index parse_foreign_import(Parser *parser) {
         parser->nodes[import].payload.foreign_import.name_length = (uint32_t)text.length;
         break;
     }
+    case AST_FOREIGN_TARGET_SYSTEM: {
+        Token const *library = parse_token_current(parser);
+        if (library->kind != TOKEN_KIND_STRING_LITERAL) {
+            return parse_fail(parser,
+                              STR("the library to import, in quotes, such as \"system:Kernel32.lib\""));
+        }
+        // A name is given to a library once, because a block finds its library by the name.
+        for (size_t i = 0; i < parser->system_library_count; i += 1) {
+            if (str_equals(parser->system_aliases[i], alias)) {
+                return parse_fail(parser, STR("a name that no import has given to a library yet"));
+            }
+        }
+        if (parser->system_library_count == PARSE_SYSTEM_LIBRARY_MAX) {
+            return parse_fail(parser, STR("fewer imports of libraries"));
+        }
+        Str text = library->payload.string_literal.text;
+        assert(text.length <= UINT32_MAX);
+        parser->system_aliases[parser->system_library_count] = alias;
+        parser->system_libraries[parser->system_library_count] = text;
+        parser->system_library_count += 1;
+        parser->nodes[import].payload.foreign_import.name_bytes = text.bytes;
+        parser->nodes[import].payload.foreign_import.name_length = (uint32_t)text.length;
+        parse_token_advance(parser);
+        break;
+    }
     }
 
     if (not parse_line_end_expect(parser)) {
@@ -566,37 +611,77 @@ static Ast_Node_Index parse_foreign_import(Parser *parser) {
 }
 
 /**
- * Consumes the name of the target of a foreign import or block, which is `js` or `libc`. They are
- * ordinary names and not keywords, so that programs can have a variable called `js`. After an
- * error is recorded, which is when the name is neither, the parser status is not
- * `PARSE_STATUS_OK` and the target returned is meaningless.
+ * Consumes the name of the target of a foreign import or block, which is `js`, `libc` or the name
+ * of a library of the system, which `import foreign name "system:Library.lib"` gives. They are
+ * ordinary names and not keywords, so that programs can have a variable called `js`. `name` gets
+ * the name that was consumed. After an error is recorded, which is when there is no name, the
+ * parser status is not `PARSE_STATUS_OK` and the target returned is meaningless.
  */
-static Ast_Foreign_Target parse_foreign_target_expect(Parser *parser) {
+static Ast_Foreign_Target parse_foreign_target_expect(Parser *parser, Str *name) {
     assert(parser->status == PARSE_STATUS_OK);
 
     Token const *target = parse_token_current(parser);
-    if (target->kind == TOKEN_KIND_IDENTIFIER) {
-        Ast_Foreign_Target result = AST_FOREIGN_TARGET_JS;
-        bool is_target = false;
-        if (str_equals(target->payload.identifier.text, STR("js"))) {
-            is_target = true;
-        } else if (str_equals(target->payload.identifier.text, STR("libc"))) {
-            result = AST_FOREIGN_TARGET_LIBC;
-            is_target = true;
-        }
-        if (is_target) {
-            parse_token_advance(parser);
-            return result;
-        }
+    if (target->kind != TOKEN_KIND_IDENTIFIER) {
+        // The status reports the failure, so the node index is not needed.
+        (void)parse_fail(parser, STR("'js', 'libc' or the name of a library, the foreign targets"));
+        return AST_FOREIGN_TARGET_JS;
     }
 
-    // The status reports the failure, so the node index is not needed.
-    (void)parse_fail(parser, STR("'js' or 'libc', the foreign targets"));
-    return AST_FOREIGN_TARGET_JS;
+    *name = target->payload.identifier.text;
+    Ast_Foreign_Target result = AST_FOREIGN_TARGET_SYSTEM;
+    if (str_equals(*name, STR("js"))) {
+        result = AST_FOREIGN_TARGET_JS;
+    } else if (str_equals(*name, STR("libc"))) {
+        result = AST_FOREIGN_TARGET_LIBC;
+    }
+    parse_token_advance(parser);
+    return result;
 }
 
 /**
- * Parses `foreign js ->` or `foreign libc ->` and the procedures below it, one on each line,
+ * Parses the attribute of a foreign block that says how its procedures are called:
+ * `#(default_calling_convention("system"))`, between the name of the block and the arrow. The
+ * convention is `"system"`, which is the one that the system libraries of the platform use, or
+ * `"c"`. The targets have one convention for the procedures that they import, which is the one of
+ * Windows on x64, where the two are the same, so the attribute says what the programmer means and
+ * changes nothing in the code. The current token is the `#`. Returns false after it recorded an
+ * error.
+ */
+static bool parse_foreign_calling_convention(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->kind == TOKEN_KIND_HASH);
+
+    parse_token_advance(parser);
+    if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'(' after '#'"))) {
+        return false;
+    }
+    Token const *name = parse_token_current(parser);
+    if (name->kind != TOKEN_KIND_IDENTIFIER ||
+        not str_equals(name->payload.identifier.text, STR("default_calling_convention"))) {
+        // The false return value reports the failure, so the node index is not needed.
+        (void)parse_fail(parser, STR("'default_calling_convention', the attribute of a foreign block"));
+        return false;
+    }
+    parse_token_advance(parser);
+    if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('"))) {
+        return false;
+    }
+    Token const *convention = parse_token_current(parser);
+    if (convention->kind != TOKEN_KIND_STRING_LITERAL ||
+        (not str_equals(convention->payload.string_literal.text, STR("system")) &&
+         not str_equals(convention->payload.string_literal.text, STR("c")))) {
+        // The false return value reports the failure, so the node index is not needed.
+        (void)parse_fail(parser, STR("\"system\" or \"c\", the calling conventions"));
+        return false;
+    }
+    parse_token_advance(parser);
+    return parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'")) &&
+           parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("')'"));
+}
+
+/**
+ * Parses `foreign js ->`, `foreign libc ->` or `foreign name ->` of an imported library, and the
+ * procedures below it, one on each line,
  * indented one level:
  * `name :: proc(parameters) Type -> ...`. Each becomes a constant definition that is appended to
  * `module`, like any other, so the block has no node of its own. The current token is the
@@ -615,8 +700,30 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
 
     assert(parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_FOREIGN);
     parse_token_advance(parser);
-    Ast_Foreign_Target target = parse_foreign_target_expect(parser);
+    Str alias = STR_EMPTY;
+    Ast_Foreign_Target target = parse_foreign_target_expect(parser, &alias);
     if (parser->status != PARSE_STATUS_OK) {
+        return false;
+    }
+    // The procedures of a block of a library of the system are in the library that the import with
+    // the name of the block gave.
+    Str library = STR_EMPTY;
+    if (target == AST_FOREIGN_TARGET_SYSTEM) {
+        bool is_imported = false;
+        for (size_t i = 0; i < parser->system_library_count; i += 1) {
+            if (str_equals(parser->system_aliases[i], alias)) {
+                library = parser->system_libraries[i];
+                is_imported = true;
+            }
+        }
+        if (not is_imported) {
+            // The false return value reports the failure, so the node index is not needed.
+            (void)parse_fail(parser, STR("'import foreign' of the library before its block"));
+            return false;
+        }
+    }
+    if (parse_token_current(parser)->kind == TOKEN_KIND_HASH &&
+        not parse_foreign_calling_convention(parser)) {
         return false;
     }
     if (not parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'"))) {
@@ -666,7 +773,7 @@ static bool parse_foreign_block(Parser *parser, Ast_Node_Index module) {
         }
 
         Ast_Node_Index procedure =
-            parse_procedure(parser, INDENTATION_LEVEL_TOP + 1, true, target);
+            parse_procedure(parser, INDENTATION_LEVEL_TOP + 1, true, target, library);
         if (procedure == AST_NODE_INDEX_NONE) {
             return false;
         }
@@ -788,11 +895,13 @@ static bool parse_attributes(Parser *parser, Ast_Node_Index definition) {
 /**
  * Parses a procedure: `proc(parameters) Type ->` and its body. With `is_foreign` the body is the
  * `...` that stands for code which is not in the program, and nothing else is on the line, as in a
- * `foreign js ->` block, whose target is `target`. Without it the body is the indented statements
- * below, and `target` is not used.
+ * `foreign js ->` block, whose target is `target`, and `library` is the text that the import of a
+ * library of the system has, which is empty for the other targets. Without `is_foreign` the body is
+ * the indented statements below, and `target` and `library` are not used.
  */
 static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level,
-                                      bool is_foreign, Ast_Foreign_Target target) {
+                                      bool is_foreign, Ast_Foreign_Target target,
+                                      Str library) {
     assert(indentation_level < UINT32_MAX);
     assert(parser->status == PARSE_STATUS_OK);
 
@@ -830,7 +939,10 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
         if (not parse_token_expect(parser, TOKEN_KIND_ELLIPSIS, STR("'...'"))) {
             return AST_NODE_INDEX_NONE;
         }
+        assert(library.length <= UINT32_MAX);
         parser->nodes[body].payload.foreign_body.target = target;
+        parser->nodes[body].payload.foreign_body.library_bytes = library.bytes;
+        parser->nodes[body].payload.foreign_body.library_length = (uint32_t)library.length;
         parse_node_append_child(parser, procedure, body);
         if (not parse_line_end_expect(parser)) {
             return AST_NODE_INDEX_NONE;

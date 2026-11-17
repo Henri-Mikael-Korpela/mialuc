@@ -96,6 +96,9 @@ typedef enum {
     AST_FOREIGN_TARGET_JS,
     // The C library of the platform, for the native targets: `foreign libc ->`.
     AST_FOREIGN_TARGET_LIBC,
+    // A library of the system, which a program names itself, for the native targets:
+    // `import foreign kernel32 "system:Kernel32.lib"` and `foreign kernel32 ->`.
+    AST_FOREIGN_TARGET_SYSTEM,
 } Ast_Foreign_Target;
 
 // How the length of an array type is given. Alphabetical, because nothing depends on the order.
@@ -264,15 +267,21 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   of the range come before the block, so the iterator is not in scope in the range. It is a
  *   statement of a procedure body.
  * - `AST_NODE_TYPE_FOREIGN_BODY`: no children. The `...` that takes the place of the statements of
- *   a procedure that is declared in a `foreign js ->` or `foreign libc ->` block: its code is not
- *   in the program but is provided from outside. The target of the block is in the payload. It is
+ *   a procedure that is declared in a `foreign js ->`, `foreign libc ->` or `foreign name ->`
+ *   block: its code is not in the program but is provided from outside. The target of the block is
+ *   in the payload, and for a library of the system its text, such as `system:Kernel32.lib`, see
+ *   `ast_procedure_foreign_library`. It is
  *   the only child after the parameters of such an `AST_NODE_TYPE_PROCEDURE`, see
  *   `ast_procedure_is_foreign`.
  * - `AST_NODE_TYPE_FOREIGN_IMPORT`: no children. `import foreign js "functions"`: the program
  *   gets the foreign procedures that its `foreign js ->` blocks declare from the JavaScript object
  *   that has the name between the quotes. `import foreign libc` is the same for the `foreign libc
  *   ->` blocks, which get theirs from the C library of the platform, so it names no object. The
- *   target and the name are in the payload, see `ast_foreign_import_name`. It is a child of the
+ *   target and the name are in the payload, see `ast_foreign_import_name`.
+ *   `import foreign kernel32 "system:Kernel32.lib"` gives a name to a library of the system, which
+ *   the `foreign kernel32 ->` blocks declare their procedures from: the name is only known to the
+ *   parser, which gives the text between the quotes to the node and to the procedures of the
+ *   blocks, and it is the name that `ast_foreign_import_name` gives. It is a child of the
  *   `AST_NODE_TYPE_MODULE`, and not a definition: it has no name.
  * - `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`: a global variable, which is defined at file scope.
  *   Its children are one `AST_NODE_TYPE_ATTRIBUTE` for each attribute of its attribute list, in the
@@ -521,6 +530,11 @@ typedef struct {
             Str name;
         } for_statement;
         struct {
+            // Only for the target `AST_FOREIGN_TARGET_SYSTEM`: the text that the import of the
+            // library has between the quotes, as a view of the source text, taken apart so that the
+            // target fits next to it. Use `ast_procedure_foreign_library` to get it as a `Str`.
+            char const *library_bytes;
+            uint32_t library_length;
             Ast_Foreign_Target target;
         } foreign_body;
         struct {
@@ -681,6 +695,13 @@ bool ast_procedure_is_foreign(Ast_Node const *nodes, Ast_Node_Index procedure);
  * for which `ast_procedure_is_foreign` holds.
  */
 Ast_Foreign_Target ast_procedure_foreign_target(Ast_Node const *nodes, Ast_Node_Index procedure);
+
+/**
+ * Returns the text of the library that the foreign procedure `procedure` is in, such as
+ * `system:Kernel32.lib`, for a procedure whose target is `AST_FOREIGN_TARGET_SYSTEM`. It is empty
+ * for the other targets.
+ */
+Str ast_procedure_foreign_library(Ast_Node const *nodes, Ast_Node_Index procedure);
 
 /**
  * Returns the text that the `AST_NODE_TYPE_FOREIGN_IMPORT` node `import` names, see the payload.

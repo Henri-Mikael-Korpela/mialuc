@@ -213,6 +213,12 @@ static bool semantic_definitions_check(Semantic_Analyzer *analyzer) {
         // before the foreign procedures that it is for.
         if (analyzer->nodes[definition].node_type == AST_NODE_TYPE_FOREIGN_IMPORT) {
             Ast_Foreign_Target target = analyzer->nodes[definition].payload.foreign_import.target;
+            // A library of the system has a name of its own, which the parser resolved, so there
+            // is no more to check about it here.
+            if (target == AST_FOREIGN_TARGET_SYSTEM) {
+                definition = analyzer->nodes[definition].next_sibling;
+                continue;
+            }
             assert((size_t)target < 2);
 
             if (has_foreign_import[target]) {
@@ -229,6 +235,7 @@ static bool semantic_definitions_check(Semantic_Analyzer *analyzer) {
             Ast_Node_Index value = analyzer->nodes[definition].first_child;
             if (analyzer->nodes[value].node_type == AST_NODE_TYPE_PROCEDURE &&
                 ast_procedure_is_foreign(analyzer->nodes, value) &&
+                ast_procedure_foreign_target(analyzer->nodes, value) != AST_FOREIGN_TARGET_SYSTEM &&
                 not has_foreign_import[ast_procedure_foreign_target(analyzer->nodes, value)]) {
                 return semantic_fail(analyzer, SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING, name);
             }

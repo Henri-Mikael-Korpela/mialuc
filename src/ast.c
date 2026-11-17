@@ -252,6 +252,18 @@ Ast_Foreign_Target ast_procedure_foreign_target(Ast_Node const *nodes, Ast_Node_
     return nodes[nodes[procedure].last_child].payload.foreign_body.target;
 }
 
+Str ast_procedure_foreign_library(Ast_Node const *nodes, Ast_Node_Index procedure) {
+    assert(nodes != NULL);
+    assert(ast_procedure_is_foreign(nodes, procedure));
+
+    Ast_Node const *body = &nodes[nodes[procedure].last_child];
+    if (body->payload.foreign_body.target != AST_FOREIGN_TARGET_SYSTEM) {
+        return STR_EMPTY;
+    }
+    return str_make(body->payload.foreign_body.library_bytes,
+                    body->payload.foreign_body.library_length);
+}
+
 Str ast_foreign_import_name(Ast_Node const *import) {
     assert(import != NULL);
     assert(import->node_type == AST_NODE_TYPE_FOREIGN_IMPORT);
@@ -272,7 +284,7 @@ Str ast_definition_name(Ast_Node const *definition) {
 }
 
 /**
- * Returns the word that names `target` in a program: `js` or `libc`.
+ * Returns the word that names `target` in a program: `js`, `libc` or `system`.
  */
 static char const *ast_foreign_target_name(Ast_Foreign_Target target) {
     switch (target) {
@@ -280,6 +292,8 @@ static char const *ast_foreign_target_name(Ast_Foreign_Target target) {
         return "js";
     case AST_FOREIGN_TARGET_LIBC:
         return "libc";
+    case AST_FOREIGN_TARGET_SYSTEM:
+        return "system";
     }
 
     // Unreachable: every target is handled above.
@@ -450,8 +464,10 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             printf("FOREIGN_BODY %s\n", ast_foreign_target_name(node.payload.foreign_body.target));
             break;
         case AST_NODE_TYPE_FOREIGN_IMPORT:
-            if (node.payload.foreign_import.target == AST_FOREIGN_TARGET_JS) {
-                printf("FOREIGN_IMPORT js \"%.*s\"\n", (int)node.payload.foreign_import.name_length,
+            if (node.payload.foreign_import.target != AST_FOREIGN_TARGET_LIBC) {
+                printf("FOREIGN_IMPORT %s \"%.*s\"\n",
+                       ast_foreign_target_name(node.payload.foreign_import.target),
+                       (int)node.payload.foreign_import.name_length,
                        node.payload.foreign_import.name_bytes);
             } else {
                 printf("FOREIGN_IMPORT libc\n");

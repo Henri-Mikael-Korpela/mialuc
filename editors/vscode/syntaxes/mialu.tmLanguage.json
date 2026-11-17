@@ -129,6 +129,30 @@
                             "name": "punctuation.definition.attribute.end.mialu"
                         }
                     }
+                },
+                {
+                    "comment": "An attribute that has a value in quotes, as in #(default_calling_convention(\"system\")) after the name of a foreign block.",
+                    "match": "(\\()[ \\t]*([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(\\()[ \\t]*(\"[^\"\\n]*\")[ \\t]*(\\))[ \\t]*(\\))",
+                    "captures": {
+                        "1": {
+                            "name": "punctuation.definition.attribute.begin.mialu"
+                        },
+                        "2": {
+                            "name": "entity.other.attribute-name.mialu"
+                        },
+                        "3": {
+                            "name": "punctuation.definition.attribute.begin.mialu"
+                        },
+                        "4": {
+                            "name": "string.quoted.double.mialu"
+                        },
+                        "5": {
+                            "name": "punctuation.definition.attribute.end.mialu"
+                        },
+                        "6": {
+                            "name": "punctuation.definition.attribute.end.mialu"
+                        }
+                    }
                 }
             ]
         },
@@ -296,7 +320,7 @@
                 },
                 {
                     "name": "keyword.control.import.mialu",
-                    "comment": "The words of import foreign js \"name\", import foreign libc and of foreign js -> and foreign libc ->, which declare the procedures that come from JavaScript or the C library.",
+                    "comment": "The words of import foreign js \"name\", import foreign libc, import foreign name \"system:Library.lib\" and of foreign js ->, foreign libc -> and foreign name ->, which declare the procedures that come from JavaScript, the C library or a library of the system.",
                     "match": "\\b(foreign|import)\\b"
                 },
                 {
