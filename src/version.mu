@@ -40,18 +40,14 @@ VERSION_STRING :: VERSION_MAJOR ++ '.' ++ VERSION_MINOR ++ '.' ++ VERSION_PATCH
 // somewhere else than the root of the project.
 HEADER_PATH :: "src/version.h"
 
-/// The characters of the text that is read, which are the ASCII codes of what the C library gives.
+/// The bytes of the text that is read, which are the ASCII codes of what the C library gives.
 //
-// MISSING FEATURE: a constant of a rune that can be compared with an `Int`, or the conversion of a
-// rune to an `Int` in a constant expression, so that these are written `'\n'`. Also the escape
-// sequences of strings and runes, which a backslash would start, since there is no way to write a
-// new line.
+// MISSING FEATURE: the escape sequences of strings and runes, which a backslash would start, so that
+// the new line is written `'\n'` and not as its number, since there is no way to write one. Also a
+// constant that is the number of a rune, such as `NEW_LINE :: cast(Int)'\n'`, which a cast is not,
+// so that the other bytes could be constants too, and not `cast(Int)'#'` where they are used.
 LAST_BYTE :: 255
 NEW_LINE :: 10
-SPACE :: 32
-HASH :: 35
-DIGIT_0 :: 48
-DIGIT_9 :: 57
 
 /// Whether what `fgetc` gave is the end of the file, which is -1 in C, and not a byte.
 //
@@ -71,30 +67,33 @@ Version :: struct ->
     patch: Int
     found: Int
 
-/// Reads from the file the bytes of `text`, one each, and gives whether they were all there, and
-/// the last byte that was read, which is the first one that was not when they were not.
-//
-// MISSING FEATURE: a `Str` cannot be subscripted or gone through by a for statement, so the text
-// that is expected cannot be given as `"#define MIALU_VERSION_"` and read byte by byte. It is an
-// array of the codes of its characters instead, and the caller has to write each of them.
-read_text :: proc(file: ^Byte, text: []Int) (Bool, Int) ->
+/// Reads from the file one byte for each character of `text`, and gives whether they were all
+/// there, and the last byte that was read, which is the first one that was not when they were not.
+/// The text is ASCII, so a character and a byte are the same, and the characters of a string are
+/// gone through by the for statement.
+read_text :: proc(file: ^Byte, text: Str) (Bool, Int) ->
     last := 0
     for expected in text ->
         last = fgetc(file)
-        if last not= expected ->
+        if last not= cast(Int)expected ->
             return false, last
     return true, last
 
 /// Reads the digits of a number, up to the first byte that is not a digit, and gives the number,
 /// whether there were digits, and that byte.
+//
+// MISSING FEATURE: a `Str` made of bytes that are read, such as `str_from_bytes(bytes)`, which
+// would let `try_str_to_int` do this, and with its check for a number that is too large. The digits
+// are read from the file as bytes, and bytes cannot be made into a `Str`, nor can a `C_Str` be
+// converted, so the number is made of them here, one digit at a time.
 read_number :: proc(file: ^Byte) (Int, Bool, Int) ->
     number := 0
     has_digits := false
     for ->
         c := fgetc(file)
-        if c < DIGIT_0 or c > DIGIT_9 ->
+        if c < cast(Int)'0' or c > cast(Int)'9' ->
             return number, has_digits, c
-        number = number * 10 + c - DIGIT_0
+        number = number * 10 + c - cast(Int)'0'
         has_digits = true
 
 /// Reads up to the end of the line, given the last byte that was read from it. Gives false at the
@@ -108,45 +107,58 @@ skip_line :: proc(file: ^Byte, last: Int) Bool ->
             return false
         c = fgetc(file)
 
+/// Whether the byte `c` is the character at `index` of `name`, which is false when `name` has no
+/// character there. The subscript of a string is by the character, and the name is ASCII.
+is_name_byte :: proc(name: Str, index: Int, c: Int) Bool ->
+    if index >= length_of(name) ->
+        return false
+    return cast(Int)name[index] == c
+
+/// Reads the name of a macro, up to the space after it, and gives which of the three names it is:
+/// 1 for MAJOR, 2 for MINOR and 3 for PATCH, and 0 for any other, such as STRING and
+/// STRING_HELPER. The last byte that was read is given as well. Each byte is compared with the
+/// character at its place in all three names, and a name is the one that all of its bytes matched
+/// and that has no more.
+read_name :: proc(file: ^Byte) (Int, Int) ->
+    major := "MAJOR"
+    minor := "MINOR"
+    patch := "PATCH"
+    is_major := true
+    is_minor := true
+    is_patch := true
+    index := 0
+    for ->
+        c := fgetc(file)
+        if c == cast(Int)' ' ->
+            which := 0
+            if is_major and index == length_of(major) ->
+                which = 1
+            else if is_minor and index == length_of(minor) ->
+                which = 2
+            else if is_patch and index == length_of(patch) ->
+                which = 3
+            return which, c
+        if c == NEW_LINE or is_end_of_file(c) ->
+            return 0, c
+        is_major = is_major and is_name_byte(major, index, c)
+        is_minor = is_minor and is_name_byte(minor, index, c)
+        is_patch = is_patch and is_name_byte(patch, index, c)
+        index += 1
+
 /// Reads the rest of a `#define MIALU_VERSION_` line, which is a name and a number, and stores the
 /// number in the field of `version` that the name is of. Gives the last byte that was read.
-///
-/// The name is told by its first letters, which are M and A for MAJOR, M and I for MINOR and P for
-/// PATCH, and every other name, such as STRING and STRING_HELPER, is skipped.
 //
-// MISSING FEATURE: a `Str` made of bytes that are read, such as `str_from_bytes(bytes)`. Strings can
-// be compared with `==` now, and `try_str_to_int` makes the numbers of a `Str`, but the name and the
-// number are read from the file as bytes, and bytes cannot be made into a `Str`, nor can a `C_Str`
-// be compared or converted. So the name cannot be compared with "MAJOR", "MINOR" and "PATCH", and
-// the first letters have to stand for the names, and a new name that begins with the same letters
-// would be taken for one of them. The number is made of the digits by `read_number`, which does
-// what `try_str_to_int` does, without its check for a number that is too large.
+// MISSING FEATURE: a `Str` made of bytes that are read, see `read_number`. The name is read from the
+// file as bytes too, so it cannot be compared with "MAJOR" and the others with `==`, which is why
+// `read_name` compares it byte by byte.
 read_define :: proc(file: ^Byte, version: ^Version) Int ->
-    first := fgetc(file)
-    which := 0
-    if first == cast(Int)'P' ->
-        which = 3
-    else if first == cast(Int)'M' ->
-        second := fgetc(file)
-        if second == cast(Int)'A' ->
-            which = 1
-        else if second == cast(Int)'I' ->
-            which = 2
+    which, last := read_name(file)
     if which == 0 ->
-        return first
-
-    // The rest of the name, up to the space before the number.
-    c := first
-    for ->
-        if c == SPACE ->
-            break
-        if c == NEW_LINE or is_end_of_file(c) ->
-            return c
-        c = fgetc(file)
-
-    number, has_digits, last := read_number(file)
-    if not has_digits ->
         return last
+
+    number, has_digits, after := read_number(file)
+    if not has_digits ->
+        return after
     match which ->
         case 1 ->
             version.major = number
@@ -155,7 +167,7 @@ read_define :: proc(file: ^Byte, version: ^Version) Int ->
         case 3 ->
             version.patch = number
     version.found += 1
-    return last
+    return after
 
 /// Reads one line of the header, and gives false at the end of the file. A line that starts with
 /// `#define MIALU_VERSION_` is read as a definition of the version, and the others are skipped.
@@ -164,16 +176,8 @@ read_line :: proc(file: ^Byte, version: ^Version) Bool ->
     if is_end_of_file(first) ->
         return false
     last := first
-    if first == HASH ->
-        // "define MIALU_VERSION_", which comes after the # of the line.
-        prefix := [const]Int {
-            cast(Int)'d', cast(Int)'e', cast(Int)'f', cast(Int)'i', cast(Int)'n', cast(Int)'e',
-            SPACE,
-            cast(Int)'M', cast(Int)'I', cast(Int)'A', cast(Int)'L', cast(Int)'U', cast(Int)'_',
-            cast(Int)'V', cast(Int)'E', cast(Int)'R', cast(Int)'S', cast(Int)'I', cast(Int)'O',
-            cast(Int)'N', cast(Int)'_',
-        }
-        is_define, after := read_text(file, prefix)
+    if first == cast(Int)'#' ->
+        is_define, after := read_text(file, "define MIALU_VERSION_")
         last = after
         if is_define ->
             last = read_define(file, version)
