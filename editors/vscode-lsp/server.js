@@ -5,7 +5,8 @@
 //     Size: 24 bytes | Alignment: 8 bytes
 //
 // The second is a hover: resting the pointer on the name of a constant, a global variable, a
-// parameter or a variable shows its type, such as `LIMIT: untyped Int`.
+// parameter or a variable shows its type, such as `LIMIT: untyped Int`. A constant that is a string
+// that `++` joined when the program was compiled shows the text it was joined to as well.
 //
 // A third feature is the outline of a document, the definitions with the fields and the members
 // below them, from `mialuc dump-outline`.
@@ -96,13 +97,14 @@ function lensesFromOutput(output) {
 /**
  * Turns the output of `mialuc dump-types` into the names with their types. A line of the output is
  * the line and the column of a name, both counted from 1 in bytes, the length of the name in bytes,
- * the name and the type, and a note that some lines have, separated by tabs. A line that is not
+ * the name and the type, a note that some lines have, and after it the value of a constant that is
+ * a string that `++` joined, as a string in double quotes, separated by tabs. A line that is not
  * like that is skipped.
  */
 function namesFromOutput(output) {
     const names = [];
     for (const row of output.split("\n")) {
-        const [lineText, columnText, lengthText, name, type, note] =
+        const [lineText, columnText, lengthText, name, type, note, value] =
             row.replace(/\r$/, "").split("\t");
         const line = Number(lineText);
         const column = Number(columnText);
@@ -111,7 +113,15 @@ function namesFromOutput(output) {
             !Number.isInteger(length) || length < 1 || !name || !type) {
             continue;
         }
-        names.push({ line: line - 1, column: column - 1, length, name, type, note: note ?? "" });
+        names.push({
+            line: line - 1,
+            column: column - 1,
+            length,
+            name,
+            type,
+            note: note ?? "",
+            value: value ?? "",
+        });
     }
     return names;
 }
@@ -225,6 +235,16 @@ async function lensesCompute(text) {
 }
 
 /**
+ * Returns `code` as a fenced block of code that is highlighted as Mialu. The fence is longer than
+ * any run of backticks in the code, so that a string of backticks cannot end the block early.
+ */
+function codeBlock(code) {
+    const runs = code.match(/`+/g) ?? [];
+    const fence = "`".repeat(Math.max(3, ...runs.map((run) => run.length + 1)));
+    return `${fence}mialu\n${code}\n${fence}`;
+}
+
+/**
  * Asks the compiler for the types of the names of `text`. Resolves to the names, or to null when
  * the compiler does not accept the text.
  */
@@ -265,11 +285,15 @@ async function hover(uri, position) {
             continue;
         }
         const start = bytes.toString("utf8", 0, entry.column).length;
-        let value = "```mialu\n" + `${entry.name}: ${entry.type}` + "\n```";
+        let value = codeBlock(`${entry.name}: ${entry.type}`);
         if (entry.note !== "") {
             // The note is the array or slice that the name is an element of, declared like any
             // other name, so it is code too, and is highlighted as such.
-            value += "\nelement of\n```mialu\n" + entry.note + "\n```";
+            value += "\nelement of\n" + codeBlock(entry.note);
+        }
+        if (entry.value !== "") {
+            // The text that the constant was joined to, as a string literal, so it is code too.
+            value += "\nvalue\n" + codeBlock(entry.value);
         }
         return {
             contents: { kind: "markdown", value },

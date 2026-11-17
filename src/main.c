@@ -38,6 +38,10 @@ enum {
     // allocated once at startup. The text is part of the program, so it is never larger than the
     // module that the build mode writes.
     CONSTANT_TEXT_SIZE_BYTES_MAX = OUTPUT_SIZE_BYTES_MAX,
+    // Bounds the text of a string that `dump-types` prints as the value of a constant, in bytes.
+    // The rest is left out, so that an editor is not given the whole of a long string for each use
+    // of the constant.
+    MAIN_VALUE_BYTES_MAX = 400,
     // Bounds the text that the `wat` target writes. The text is allocated once at startup. The
     // largest growth is `i64.add`, one byte of the module that becomes 12 bytes of text, so 16
     // bytes of text per byte of the module is enough.
@@ -142,7 +146,12 @@ static void         main_struct_literal_rows_print         (Str source, Ast_Node
 static Ast_Node_Index main_struct_of_name              (Ast_Node const *nodes, size_t node_count,
                                                             Str name);
 static void         main_type_row_print                    (Str source, Str name,
-                                                            char const *text, char const *note);
+                                                            char const *text, char const *note,
+                                                            Str value);
+static Str          main_concatenated_value                (Ast_Node const *nodes,
+                                                            Constant_Value const *constants,
+                                                            size_t node_count,
+                                                            Ast_Node_Index target);
 static void         main_iterator_note_write               (Ast_Node const *nodes,
                                                             Semantic_Binding const *bindings,
                                                             Constant_Value const *constants,
@@ -1239,10 +1248,85 @@ static bool main_expression_type_write(Ast_Node const *nodes, Semantic_Binding c
 }
 
 /**
- * Prints the line of `dump-types` for the name `name`, a view of the source, with `text` as the
- * type, see `main_run_command_print_types`. A `note` that is not empty is a sixth field.
+ * Returns the text of the constant that `target` defines when its value is a string that `++`
+ * joined, so that an editor can show what the constants are joined to, or `STR_EMPTY` when it is
+ * not one, also when the target is not a constant. The string of a `++` is the literal that comes
+ * right after it in the tree, which is how it is told from a string that is written out, so a
+ * constant that is given another constant that is joined has it as well.
  */
-static void main_type_row_print(Str source, Str name, char const *text, char const *note) {
+static Str main_concatenated_value(Ast_Node const *nodes, Constant_Value const *constants,
+                                   size_t node_count, Ast_Node_Index target) {
+    if (target >= node_count || nodes[target].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
+        constants[target].status != CONSTANT_STATUS_OK) {
+        return STR_EMPTY;
+    }
+    Ast_Node_Index literal = constants[target].string;
+    if (literal == AST_NODE_INDEX_NONE || literal == 0 || literal >= node_count ||
+        nodes[literal - 1].node_type != AST_NODE_TYPE_CONCATENATION) {
+        return STR_EMPTY;
+    }
+    assert(nodes[literal].node_type == AST_NODE_TYPE_STRING_LITERAL);
+    return nodes[literal].payload.string_literal.text;
+}
+
+/**
+ * Prints `value` as a string in double quotes on one line, which is the seventh field of a line of
+ * `dump-types`: a backslash, a double quote and the control characters, a tab and a line break
+ * among them, are written with a backslash, as `\t` and `\n`, and the rest as it is, since
+ * it is UTF-8. A value of more than `MAIN_VALUE_BYTES_MAX` bytes is cut before a character, and
+ * three dots follow the closing quote.
+ */
+static void main_value_print(Str value) {
+    size_t length = value.length;
+    if (length > MAIN_VALUE_BYTES_MAX) {
+        length = MAIN_VALUE_BYTES_MAX;
+        // A byte that is `10` in its high bits goes on a character that started before it.
+        while (length > 0 && ((unsigned char)value.bytes[length] & 0xC0u) == 0x80u) {
+            length -= 1;
+        }
+    }
+
+    putchar('"');
+    for (size_t i = 0; i < length; i += 1) {
+        unsigned char byte = (unsigned char)value.bytes[i];
+        switch (byte) {
+        case '\\':
+            fputs("\\\\", stdout);
+            break;
+        case '"':
+            fputs("\\\"", stdout);
+            break;
+        case '\n':
+            fputs("\\n", stdout);
+            break;
+        case '\r':
+            fputs("\\r", stdout);
+            break;
+        case '\t':
+            fputs("\\t", stdout);
+            break;
+        default:
+            if (byte < 0x20 || byte == 0x7F) {
+                printf("\\x%02X", (unsigned)byte);
+            } else {
+                putchar(byte);
+            }
+            break;
+        }
+    }
+    putchar('"');
+    if (length < value.length) {
+        fputs("...", stdout);
+    }
+}
+
+/**
+ * Prints the line of `dump-types` for the name `name`, a view of the source, with `text` as the
+ * type, see `main_run_command_print_types`. A `note` that is not empty is a sixth field, and a
+ * `value` that is not empty is a seventh, after a sixth that is then empty when there is no note.
+ */
+static void main_type_row_print(Str source, Str name, char const *text, char const *note,
+                                Str value) {
     // The names are views of the source, so the offset of a name is where its bytes are. A member
     // after a dot is not where its node starts, which is why the node is not used.
     // A name that the compiler made up and that is not in the source has no place to show.
@@ -1253,8 +1337,12 @@ static void main_type_row_print(Str source, Str name, char const *text, char con
     Str_Position position = str_position_at(source, name_offset);
     printf("%zu\t%zu\t%zu\t%.*s\t%s", position.line, position.column, name.length,
            (int)name.length, (char const *)name.bytes, text);
-    if (note[0] != '\0') {
+    if (note[0] != '\0' || value.bytes != NULL) {
         printf("\t%s", note);
+    }
+    if (value.bytes != NULL) {
+        printf("\t");
+        main_value_print(value);
     }
     printf("\n");
 }
@@ -1320,7 +1408,7 @@ static void main_struct_literal_rows_print(Str source, Ast_Node const *nodes, si
         char text[256] = "";
         if (field != AST_NODE_INDEX_NONE &&
             main_type_text_write(nodes, nodes[field].first_child, text, sizeof(text))) {
-            main_type_row_print(source, name, text, "");
+            main_type_row_print(source, name, text, "", STR_EMPTY);
         }
     }
 }
@@ -1329,8 +1417,10 @@ static void main_struct_literal_rows_print(Str source, Ast_Node const *nodes, si
  * Prints a line for each place where a constant, a global variable, a parameter or a variable is
  * defined or used, and whose type is known: the line and the column of its name, both counted from
  * 1, the length of the name in bytes, the name, and the type as it is written in the source,
- * separated by tabs. The columns count bytes, as the other tools of the compiler do. This is what
- * an editor shows when the cursor rests on a name.
+ * separated by tabs. The columns count bytes, as the other tools of the compiler do. A for
+ * statement's iterator has the array or slice that it is an element of as a sixth field, and a
+ * constant that is a string that `++` joined has the joined text as a seventh, see
+ * `main_type_row_print`. This is what an editor shows when the cursor rests on a name.
  */
 static void main_run_command_print_types(Str source, Parse_Result parse_result,
                                          Semantic_Result semantic_result) {
@@ -1447,7 +1537,9 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
             main_iterator_note_write(nodes, bindings, constants, parse_result.nodes.length, target,
                                      note, sizeof(note));
         }
-        main_type_row_print(source, name, text, note);
+        // A constant that is a string that `++` joined shows the text that it joined.
+        Str value = main_concatenated_value(nodes, constants, parse_result.nodes.length, target);
+        main_type_row_print(source, name, text, note, value);
     }
 }
 

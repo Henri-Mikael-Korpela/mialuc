@@ -125,6 +125,12 @@ const TYPES_SOURCE = [
     "        best = person.age",
     "    return best",
     "",
+    "SEPARATOR :: ','",
+    "GREETING :: \"Hello\"",
+    "TITLE :: GREETING ++ SEPARATOR ++ \" \" ++ \"é\"",
+    "FRAMED : Str : '«' ++ TITLE ++ '»'",
+    "LINES :: \"a\" ++ '\\n' ++ \"b\"",
+    "",
 ].join("\n");
 
 test("a name shows its type when the pointer rests on it", async () => {
@@ -194,6 +200,26 @@ test("a name shows its type when the pointer rests on it", async () => {
         assert.strictEqual((await hover(44, 9)).contents.value, iterator);
         assert.strictEqual((await hover(45, 16)).contents.value, iterator);
         assert.match((await hover(45, 23)).contents.value, /age: Int/);
+
+        // A constant that is a string that `++` joined shows the text that it was joined to, as a
+        // string literal, where it is defined and where it is used, also when it has a type, and
+        // a line break is written out. A string that is written out shows no value.
+        const sourceLines = TYPES_SOURCE.split("\n");
+        const lineOf = (text) => sourceLines.findIndex((line) => line.startsWith(text));
+        const title = "```mialu\nTITLE: untyped Str\n```\nvalue\n```mialu\n\"Hello, é\"\n```";
+        assert.strictEqual((await hover(lineOf("TITLE"), 1)).contents.value, title);
+        const framedLine = lineOf("FRAMED");
+        assert.strictEqual(
+            (await hover(framedLine, sourceLines[framedLine].indexOf("TITLE") + 1)).contents.value,
+            title);
+        assert.strictEqual(
+            (await hover(framedLine, 1)).contents.value,
+            "```mialu\nFRAMED: Str\n```\nvalue\n```mialu\n\"«Hello, é»\"\n```");
+        assert.strictEqual(
+            (await hover(lineOf("LINES"), 1)).contents.value,
+            "```mialu\nLINES: untyped Str\n```\nvalue\n```mialu\n\"a\\nb\"\n```");
+        assert.strictEqual((await hover(lineOf("GREETING"), 1)).contents.value,
+                           "```mialu\nGREETING: untyped Str\n```");
 
         // Nothing is shown on a keyword or on a space.
         assert.strictEqual(await hover(6, 12), null);
