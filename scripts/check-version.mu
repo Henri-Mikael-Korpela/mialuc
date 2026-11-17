@@ -207,8 +207,31 @@ is_same_number :: proc(text: Str, number: I32) Bool ->
     value, is_ok := try_str_to_int(text)
     return is_ok and value == cast(Int)number
 
+/// Whether `text` is a version written as MAJOR.MINOR.PATCH, of the three numbers that are given.
+/// The characters of the text are gone through, and a `.` ends a number, which is made of the digits
+/// before it. A text that has anything else, such as a space or a minus, or a number too many, such
+/// as `1.2.3.4`, or too few, is not one. There are three numbers, and `part` says which is made, so
+/// the digits are put in the `part`th of an array.
+is_version_string :: proc(text: Str, major: I32, minor: I32, patch: I32) Bool ->
+    numbers := [const]I32 { 0, 0, 0 }
+    part := 0
+    for character in text ->
+        if character == '.' ->
+            part += 1
+            if part > 2 ->
+                return false
+        else if character >= '0' and character <= '9' ->
+            numbers[part] = numbers[part] * 10 + code(character) - code('0')
+        else ->
+            return false
+    if part not= 2 ->
+        return false
+    is_same_major_and_minor := numbers[0] == major and numbers[1] == minor
+    return is_same_major_and_minor and numbers[2] == patch
+
 /// Whether the version of this file is the one of the C header, which is when the header has all
-/// three numbers, and the text of each number of this file is the number of the header.
+/// three numbers, the text of each number of this file is the number of the header, and so is
+/// VERSION_STRING, which is the three joined with dots.
 matches_version_info_in_c :: proc() Bool ->
     version := Version {}
     if not parse_header(%version) ->
@@ -218,14 +241,11 @@ matches_version_info_in_c :: proc() Bool ->
     is_same_major := is_same_number(VERSION_MAJOR, version.major)
     is_same_minor := is_same_number(VERSION_MINOR, version.minor)
     is_same_patch := is_same_number(VERSION_PATCH, version.patch)
-    return is_same_major and is_same_minor and is_same_patch
+    is_same_text := is_version_string(VERSION_STRING, version.major, version.minor, version.patch)
+    return is_same_major and is_same_minor and is_same_patch and is_same_text
 
-// MISSING FEATURE: comparing VERSION_STRING with the `// "0.3.0"` line of the header. The strings
-// can be compared, but the line would have to be read into a `Str`, and a `Str` is made of
-// constants only, since an array of bytes cannot be made into one, and an array cannot be made
-// without writing every element, so there is no buffer to read a line into, either. There would
-// also need to be a way to run the check when the program is compiled, as the C header is checked
-// by the C compiler, so that a version that does not match is an error of the build and not of a
+// MISSING FEATURE: a check that is made when the program is compiled, as the C header is checked by
+// the C compiler, so that a version that does not match is an error of the build and not of a
 // program that somebody runs.
 
 main :: proc() Int ->
