@@ -89,6 +89,9 @@
      - `try_str_to_int` is a built-in procedure like `length_of`. It takes a `Str` and gives two
        values, an `Int` and a `Bool`, so it is a call that is only accepted as the value of the
        definition of two names, `number, is_ok := try_str_to_int(text)`.
+     - `utf8_decode` is a built-in procedure like `length_of`. It takes an array or an array slice of
+       `Byte` and gives two values, a `Str` and a `Bool`, so it is a call that is only accepted as
+       the value of the definition of two names, `text, is_ok := utf8_decode(bytes)`.
      - `cast(Type)` converts between the types that have a conversion: the type is `Int` and the
        value a `Byte`, a `Bool`, an `Int`, a `Rune` or a float, or the type is a float and the value
        a `Byte`, an `Int` or a float, or the type is `Rune` and the value a `Byte` or a `Rune`, or

@@ -530,6 +530,11 @@ static bool         x64_call_is_built_in         (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
 static bool         x64_call_is_try_str_to_int   (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
+static bool         x64_call_is_utf8_decode      (X64_Builder const *builder,
+                                                  Ast_Node_Index expression);
+static void         x64_utf8_decode_bytes_write  (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame,
+                                                  X64_Type type, int32_t place);
 static void         x64_try_str_to_int_write     (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame,
                                                   int32_t place);
@@ -3148,7 +3153,8 @@ static bool x64_results_definition_write(X64_Builder *builder, Ast_Node_Index le
     // The call must be of a procedure that returns as many values as there are names, or of the
     // built-in procedure `try_str_to_int`, which returns two.
     Ast_Node_Index procedure = AST_NODE_INDEX_NONE;
-    bool is_try_str_to_int = x64_call_is_try_str_to_int(builder, call);
+    bool is_try_str_to_int = x64_call_is_try_str_to_int(builder, call) ||
+                             x64_call_is_utf8_decode(builder, call);
     if (builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
         not x64_call_is_built_in(builder, call)) {
         procedure = x64_call_procedure(builder, call);
@@ -4664,6 +4670,15 @@ static bool x64_built_in_write(X64_Builder *builder, X64_Expression_Frame const 
     int32_t place = x64_stack_displacement(builder, frame->stack_start,
                                            builder->stack_words - frame->stack_start);
 
+    if (str_equals(name, STR("utf8_decode"))) {
+        // An array or an array slice of bytes, whose length is the number of bytes.
+        if ((type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) ||
+            x64_type_element(type).kind != X64_TYPE_KIND_BYTE) {
+            return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        }
+        x64_utf8_decode_bytes_write(builder, frame, type, place);
+        return true;
+    }
     if (str_equals(name, STR("try_str_to_int"))) {
         if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_STR), argument)) {
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
@@ -4695,6 +4710,136 @@ static bool x64_built_in_write(X64_Builder *builder, X64_Expression_Frame const 
     int32_t target = x64_stack_push(builder, 1);
     x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
     return true;
+}
+
+/**
+ * Writes the built-in procedure `utf8_decode`, whose argument, an array or an array slice of bytes
+ * of `type`, is on the stack of values at `place`. It gives three words in place of it: the `Str`
+ * of the same bytes, an address and a length, which is not a copy, and a `Bool` that says whether
+ * the bytes are valid UTF-8, as [RFC 3629](https://www.rfc-editor.org/rfc/rfc3629) defines it.
+ * When they are not, the string is empty and the `Bool` is false.
+ *
+ * A character is one byte below 0x80, and otherwise a first byte that says how many bytes continue
+ * it: one for 0xC2 to 0xDF, two for 0xE0 to 0xEF and three for 0xF0 to 0xF4, and no other first byte
+ * is valid, which leaves out 0xC0 and 0xC1, that could only make a character that has a shorter
+ * form, and everything above 0xF4, that is above the last code point. The bytes that continue it
+ * have the bits 10 at the top, and the first of them has a smaller range after four of the first
+ * bytes: 0xA0 or more after 0xE0 and 0x9F or less after 0xED, which would be a character that has a
+ * shorter form and a surrogate, and 0x90 or more after 0xF0 and 0x8F or less after 0xF4, which are
+ * the same for the characters of four bytes. A character that is cut off by the end is not valid.
+ * The registers are `r10`, the address of the next byte, `r11`, the address after the last one,
+ * `r9`, the address of the first, `rax`, the first byte of a character, `r8`, the number of bytes
+ * that are left of it, and `rcx` and `rdx`.
+ */
+static void x64_utf8_decode_bytes_write(X64_Builder *builder, X64_Expression_Frame const *frame,
+                                        X64_Type type, int32_t place) {
+    uint32_t failed_jumps = X64_JUMP_NONE;
+    uint32_t finished_jumps = X64_JUMP_NONE;
+    uint32_t done_jumps = X64_JUMP_NONE;
+    uint32_t multi_jumps = X64_JUMP_NONE;
+
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, place);
+    x64_sequence_length_load(builder, type, X64_REGISTER_R11, place);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_R10, X64_REGISTER_R9);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_R10, X64_REGISTER_R11);
+
+    uint32_t loop = (uint32_t)(builder->writer.length - builder->text_start);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_R11, X64_REGISTER_R10);
+    x64_jump_write(builder, X64_CONDITION_ABOVE_EQUAL, &finished_jumps);
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RAX,
+                              X64_REGISTER_R10, 0);
+    x64_write_load_integer(builder, X64_REGISTER_RCX, 0x80);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_jump_write(builder, X64_CONDITION_ABOVE_EQUAL, &multi_jumps);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    x64_jump_back_write(builder, loop);
+
+    // The number of bytes that continue the character is 1, 2 or 3 for the first bytes that are
+    // in a range, and 0 for the others, which are not valid.
+    x64_jumps_resolve(builder, multi_jumps);
+    x64_write_load_integer(builder, X64_REGISTER_R8, 0);
+    int64_t bases[3] = {0xC2, 0xE0, 0xF0};
+    int64_t spans[3] = {0x1D, 0x0F, 0x04};
+    for (size_t i = 0; i < 3; i += 1) {
+        uint32_t outside_jumps = X64_JUMP_NONE;
+        x64_write_load_integer(builder, X64_REGISTER_RDX, bases[i]);
+        x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RCX);
+        x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_RDX, X64_REGISTER_RCX);
+        x64_write_load_integer(builder, X64_REGISTER_RDX, spans[i]);
+        x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RCX);
+        x64_jump_write(builder, X64_CONDITION_ABOVE, &outside_jumps);
+        x64_write_load_integer(builder, X64_REGISTER_R8, (int64_t)(i + 1));
+        x64_jumps_resolve(builder, outside_jumps);
+    }
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_R8, X64_REGISTER_R8);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &failed_jumps);
+
+    // The bytes that continue it must all be there.
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_R10, X64_REGISTER_RCX);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_R8, X64_REGISTER_RCX);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_R11, X64_REGISTER_RCX);
+    x64_jump_write(builder, X64_CONDITION_ABOVE, &failed_jumps);
+
+    // The range of the first byte that continues it, after 0xE0, 0xED, 0xF0 and 0xF4.
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RCX,
+                              X64_REGISTER_R10, 0);
+    int64_t leads[4] = {0xE0, 0xED, 0xF0, 0xF4};
+    int64_t limits[4] = {0xA0, 0x9F, 0x90, 0x8F};
+    for (size_t i = 0; i < 4; i += 1) {
+        uint32_t other_jumps = X64_JUMP_NONE;
+        x64_write_load_integer(builder, X64_REGISTER_RDX, leads[i]);
+        x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RAX);
+        x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &other_jumps);
+        x64_write_load_integer(builder, X64_REGISTER_RDX, limits[i]);
+        x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RCX);
+        // The two that have a lower limit need the byte to be at least that, and the other two at
+        // most that.
+        x64_jump_write(builder, (i % 2 == 0) ? X64_CONDITION_BELOW : X64_CONDITION_ABOVE,
+                       &failed_jumps);
+        x64_jumps_resolve(builder, other_jumps);
+    }
+
+    // Each byte that continues it has the bits 10 at the top.
+    uint32_t continued = (uint32_t)(builder->writer.length - builder->text_start);
+    uint32_t next_jumps = X64_JUMP_NONE;
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_R8, X64_REGISTER_R8);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &next_jumps);
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RCX,
+                              X64_REGISTER_R10, 0);
+    x64_write_and_immediate(builder, X64_REGISTER_RCX, (int8_t)0xC0);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, 0x80);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RCX);
+    x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &failed_jumps);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    x64_write_add_immediate(builder, X64_REGISTER_R8, -1);
+    x64_jump_back_write(builder, continued);
+    x64_jumps_resolve(builder, next_jumps);
+    x64_jump_back_write(builder, loop);
+
+    // Valid: the string is the bytes, and the `Bool` is true.
+    x64_jumps_resolve(builder, finished_jumps);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_R9, X64_REGISTER_RAX);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_R11, X64_REGISTER_RCX);
+    x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_R9, X64_REGISTER_RCX);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, 1);
+    x64_jump_write(builder, X64_CONDITION_ALWAYS, &done_jumps);
+
+    x64_jumps_resolve(builder, failed_jumps);
+    x64_write_load_integer(builder, X64_REGISTER_RAX, 0);
+    x64_write_load_integer(builder, X64_REGISTER_RCX, 0);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, 0);
+    x64_jumps_resolve(builder, done_jumps);
+
+    // The values are one after the other, and the stack grows down, so the first one is at the
+    // higher address: the address and the length of the string, and the `Bool` below them.
+    x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+    int32_t target = x64_stack_push(builder, 3);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                     target + X64_WORD_SIZE_BYTES);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RCX, X64_REGISTER_RBP,
+                     target + 2 * X64_WORD_SIZE_BYTES);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RDX, X64_REGISTER_RBP, target);
 }
 
 /**
@@ -5485,6 +5630,15 @@ static bool x64_call_is_try_str_to_int(X64_Builder const *builder, Ast_Node_Inde
 }
 
 /**
+ * Returns whether `expression` is a call of the built-in procedure `utf8_decode`.
+ */
+static bool x64_call_is_utf8_decode(X64_Builder const *builder, Ast_Node_Index expression) {
+    return builder->nodes[expression].node_type == AST_NODE_TYPE_CALL &&
+           x64_call_is_built_in(builder, expression) &&
+           str_equals(builder->nodes[expression].payload.call.name, STR("utf8_decode"));
+}
+
+/**
  * Returns whether `expression` is a call of the built-in procedure `str_to_c_str`.
  */
 static bool x64_call_is_str_to_c_str(X64_Builder const *builder, Ast_Node_Index expression) {
@@ -5801,10 +5955,13 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
             if (str_equals(name, STR("int_to_byte"))) {
                 return x64_type_make(X64_TYPE_KIND_BYTE);
             }
-            if (str_equals(name, STR("try_str_to_int"))) {
-                // An `Int` and a `Bool`, which no procedure returns, so it has none to say so.
+            if (str_equals(name, STR("try_str_to_int")) ||
+                str_equals(name, STR("utf8_decode"))) {
+                // Two values that no procedure returns, so there is no procedure to say so: an
+                // `Int` and a `Bool`, which are 2 words, or a `Str` and a `Bool`, which are 3.
                 X64_Type tuple = x64_type_make(X64_TYPE_KIND_TUPLE);
                 tuple.definition = AST_NODE_INDEX_NONE;
+                tuple.length = str_equals(name, STR("utf8_decode")) ? 3 : 2;
                 return tuple;
             }
             return x64_type_make(X64_TYPE_KIND_INT);
@@ -5944,10 +6101,11 @@ static X64_Type x64_result_variable_type(X64_Builder const *builder, Ast_Node_In
     }
     Ast_Node_Index call = builder->nodes[leader].last_child;
     size_t index = builder->nodes[variable].result_index;
-    if (x64_call_is_try_str_to_int(builder, call)) {
-        // The number, and whether the text was one.
+    if (x64_call_is_try_str_to_int(builder, call) || x64_call_is_utf8_decode(builder, call)) {
+        // The number or the string, and whether it was made.
         if (index == 0) {
-            return x64_type_make(X64_TYPE_KIND_INT);
+            return x64_call_is_utf8_decode(builder, call) ? x64_type_make(X64_TYPE_KIND_STR)
+                                                          : x64_type_make(X64_TYPE_KIND_INT);
         }
         return index == 1 ? x64_type_make(X64_TYPE_KIND_BOOL) : x64_type_make(X64_TYPE_KIND_NONE);
     }
@@ -6751,9 +6909,10 @@ static size_t x64_type_word_count(X64_Builder const *builder, X64_Type type) {
     }
     case X64_TYPE_KIND_TUPLE: {
         // The words of the values that a procedure returns, one after the other. The values of
-        // `try_str_to_int`, which has no procedure, are an `Int` and a `Bool`.
+        // `try_str_to_int` and `utf8_decode`, which have no procedure, say how many in `length`.
         if (type.definition == AST_NODE_INDEX_NONE) {
-            return 2;
+            assert(type.length == 2 || type.length == 3);
+            return (size_t)type.length;
         }
         size_t word_count = 0;
         size_t count = ast_procedure_return_count(&builder->nodes[type.definition]);

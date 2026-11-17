@@ -58,6 +58,7 @@
   - [int_to_byte](#int_to_byte)
   - [str_to_c_str](#str_to_c_str)
   - [try_str_to_int](#try_str_to_int)
+  - [utf8_decode](#utf8_decode)
 - [Scope resolution](#scope-resolution)
 - [Attributes](#attributes)
 - [Foreign procedures](#foreign-procedures)
@@ -2025,6 +2026,7 @@ A built-in procedure is a procedure that the language has, and that is called li
 | [`int_to_byte`](#int_to_byte) | an `Int` | a `Byte` of it, and stops the program when it is not from 0 to 255 |
 | [`str_to_c_str`](#str_to_c_str) | a `Str` | a `C_Str`, a copy of it that ends with a zero |
 | [`try_str_to_int`](#try_str_to_int) | a `Str` | two values: the `Int` that it is, and whether it is one |
+| [`utf8_decode`](#utf8_decode) | an array or an array slice of `Byte` | two values: the `Str` of the bytes, and whether they are valid UTF-8 |
 
 ### length_of
 
@@ -2109,6 +2111,28 @@ is_number :: proc(text: Str) Bool ->
 When the string is not a number, the first value is 0 and the second is `false`, so a program that does not look at the second value cannot tell `"0"` from `"zero"`. The first value can be left out with the name `_`, as above. A call that is given one name, as in `n := try_str_to_int(text)`, is an error, since it gives two values, and so is a call that is given another number of names.
 
 The string is converted when the program runs, also when it is a literal, so the result is not a constant, and cannot be the length of an array or the pattern of a [match statement](#match-statements). A `C_Str` is not converted, because it has no length that the language knows, see [C strings](#c-strings).
+
+### utf8_decode
+
+`utf8_decode` makes a `Str` of bytes, which is how a program that has bytes, from a file or from the C library, gets text that the string operations work on: the subscript, the range, `length_of` and the for statement of a [string](#strings). It takes one array or array slice of `Byte`, and it gives two values, which is why the call is written as the definition of two names, see [Multiple return values](#multiple-return-values): the first is the `Str`, and the second is a `Bool` that says whether the bytes were valid UTF-8. A `Str` is always valid UTF-8, so a conversion that cannot be sure of that has to say so, and it is the only way to a `Str` that is not a constant:
+
+```
+text_of :: proc(bytes: []Byte) Str ->
+    text, is_ok := utf8_decode(bytes)
+    if not is_ok ->
+        return "?"
+    return text
+
+is_text :: proc(bytes: []Byte) Bool ->
+    _, is_ok := utf8_decode(bytes)
+    return is_ok
+```
+
+The bytes are valid when they are UTF-8 as [RFC 3629](https://www.rfc-editor.org/rfc/rfc3629) defines it. A byte below 0x80 is a character. Any other character starts with a byte that says how many bytes continue it, and each of them has the bits 10 at the top, so they are from 0x80 to 0xBF. The first byte of a character that has one continuing byte is 0xC2 to 0xDF, of one that has two is 0xE0 to 0xEF, and of one that has three is 0xF0 to 0xF4. Any other first byte, which includes a continuing byte that comes alone, 0xC0 and 0xC1, and 0xF5 and above, is not valid. A character must also be written in as few bytes as it can be, so the byte after 0xE0 is 0xA0 or more and after 0xF0 it is 0x90 or more, a surrogate, which is U+D800 to U+DFFF and is the bytes 0xED 0xA0 0x80 to 0xED 0xBF 0xBF, is not valid, so the byte after 0xED is 0x9F or less, and nothing above U+10FFFF is, so the byte after 0xF4 is 0x8F or less. A character that is cut off by the end of the bytes is not valid either. No bytes at all are valid, and make the empty string.
+
+When the bytes are not valid, the first value is the empty string and the second is `false`, so a program that does not look at the second value gets a string with no characters, and not part of the bytes. The first value can be left out with the name `_`, as above. A call that is given one name, as in `text := utf8_decode(bytes)`, is an error, since it gives two values, and so is a call that is given another number of names. An argument that is not an array or an array slice of `Byte`, such as an array of `Int` or a `Str`, is an error.
+
+The `Str` is a view of the bytes that are given, and not a copy, like a [slice of a string](#strings): nothing is allocated, and the string is good as long as the bytes are, which for an array is until the procedure that has it returns. A string that is returned from a procedure that made it from the array of that procedure points at bytes that are gone. The bytes are not changed by it, and a change to them afterwards is seen by the string, so bytes that are decoded should not be changed while the string is used. The bytes are checked once, when the program runs, which takes as long as there are bytes.
 
 ## Scope resolution
 
@@ -2230,7 +2254,7 @@ main :: proc() ->
 
 The recommendation of [Strings](#strings), to go through a `Str` by byte and to measure it in bytes by converting it to a `[]Byte`, needs a conversion that the language does not have yet. Today a program has no way to read the bytes of a `Str`: it can go through the characters with a for statement, take one with a subscript, take a part with a range and count them with `length_of`, and it can hand the bytes to the C library with `str_to_c_str`, but it cannot see a byte, or count them.
 
-The conversion would give a `[]Byte` that has the address and the length in bytes of the string, which are the two words that a `Str` is already, so there is nothing to compute and nothing to copy. How it is written is not decided: it could be a [cast](#casts), such as `cast([]Byte)text`, or a [built-in procedure](#built-in-procedures). The `[]Byte` that it gives is read only, since a string is immutable.
+The other direction is the built-in procedure [`utf8_decode`](#utf8_decode), which makes a `Str` of bytes and says whether they are valid UTF-8. The conversion that this section describes would give a `[]Byte` that has the address and the length in bytes of the string, which are the two words that a `Str` is already, so there is nothing to compute and nothing to copy. How it is written is not decided: it could be a [cast](#casts), such as `cast([]Byte)text`, or a [built-in procedure](#built-in-procedures). The `[]Byte` that it gives is read only, since a string is immutable.
 
 ```
 byte_count :: proc(text: Str) Int ->

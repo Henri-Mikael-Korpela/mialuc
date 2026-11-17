@@ -147,7 +147,7 @@ typedef struct {
 
 // The locals that a procedure with arrays has after its parameters and variables, for the code that
 // is written for subscripts, slices and the like to hold values in. The order is the order of the
-// locals: the first three are 64-bit, then six are 32-bit, and the last two are a 32-bit float and
+// locals: the first three are 64-bit, then seven are 32-bit, and the last two are a 32-bit float and
 // a 64-bit float. A scratch local is only used between
 // two instructions that follow each other, never while an expression is evaluated in between, so
 // that one is enough for any nesting of expressions. The exception is the address of the element
@@ -168,6 +168,9 @@ typedef enum {
     // `WASM_SCRATCH_SECOND` and `WASM_SCRATCH_TEMPORARY_32`, see
     // `wasm_build_code_section_body_string_comparison`.
     WASM_SCRATCH_STRING,
+    // The address of the first byte that `utf8_decode` checks, see
+    // `wasm_build_code_section_body_utf8_decode`.
+    WASM_SCRATCH_BYTES,
     // The only scratch locals that are not integers: they hold an `F32` and an `F64` between
     // instructions.
     WASM_SCRATCH_TEMPORARY_F32,
@@ -785,6 +788,13 @@ static Ast_Node_Index  wasm_parent_find                       (Wasm_Builder cons
                                                                 Ast_Node_Index child);
 static bool            wasm_call_is_try_str_to_int            (Wasm_Builder const *builder,
                                                                Ast_Node_Index call);
+static bool            wasm_call_is_utf8_decode               (Wasm_Builder const *builder,
+                                                               Ast_Node_Index call);
+static void            wasm_utf8_decode_fail_write            (Wasm_Builder *builder, size_t next,
+                                                               size_t depth);
+static void            wasm_build_code_section_body_utf8_decode
+                                                              (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
 static void            wasm_build_code_section_body_try_str_to_int
                                                               (Wasm_Builder *builder,
                                                                Ast_Node_Index procedure);
@@ -3115,6 +3125,9 @@ static bool wasm_build_code_section_body_call_statement(Wasm_Builder *builder,
         slot_count = wasm_type_slot_count(builder, value_type);
     } else if (wasm_call_is_try_str_to_int(builder, call)) {
         slot_count = 2;
+    } else if (wasm_call_is_utf8_decode(builder, call)) {
+        // The address and the length of the string, and the `Bool`.
+        slot_count = 3;
     } else if (not wasm_call_is_built_in(builder, call)) {
         Ast_Node_Index callee = wasm_call_signature(builder, call);
         if (callee != AST_NODE_INDEX_NONE) {
@@ -3158,6 +3171,11 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
         } else if (str_equals(name, STR("str_to_c_str")) ||
                    str_equals(name, STR("try_str_to_int"))) {
             is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_STR;
+        }
+        // `utf8_decode` takes an array or an array slice of bytes.
+        if (str_equals(name, STR("utf8_decode"))) {
+            is_argument_valid = wasm_type_is_sequence(argument_type) &&
+                                wasm_type_element(argument_type).kind == WASM_VALUE_TYPE_BYTE;
         }
         if (not is_argument_valid) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
@@ -3680,7 +3698,8 @@ static bool wasm_build_code_section_body_results(Wasm_Builder *builder, Ast_Node
     // built-in procedure `try_str_to_int`, which returns two.
     Ast_Node_Index callee = AST_NODE_INDEX_NONE;
     bool is_try_str_to_int = builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
-                             wasm_call_is_try_str_to_int(builder, call);
+                             (wasm_call_is_try_str_to_int(builder, call) ||
+                              wasm_call_is_utf8_decode(builder, call));
     if (builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
         not wasm_call_is_built_in(builder, call)) {
         callee = wasm_call_signature(builder, call);
@@ -3781,7 +3800,8 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
                 // A call that returns several values needs a name for each of them.
                 if (statement_node->result_count == 0 &&
                     builder->nodes[value].node_type == AST_NODE_TYPE_CALL &&
-                    wasm_call_is_try_str_to_int(builder, value)) {
+                    (wasm_call_is_try_str_to_int(builder, value) ||
+                     wasm_call_is_utf8_decode(builder, value))) {
                     return wasm_fail(builder, WASM_BUILD_STATUS_RESULT_COUNT_MISMATCH,
                                      statement_node->payload.variable_definition.name);
                 }
@@ -3978,12 +3998,12 @@ static void wasm_variables_write_locals(Wasm_Builder *builder, Ast_Node_Index pr
         }
     }
 
-    // The order of `Wasm_Scratch`: three 64-bit locals, six 32-bit ones, a 32-bit float and a
+    // The order of `Wasm_Scratch`: three 64-bit locals, seven 32-bit ones, a 32-bit float and a
     // 64-bit float.
     if (uses_arrays) {
         wasm_write_unsigned(&builder->writer, 3);
         wasm_write_byte(&builder->writer, WASM_TYPE_I64);
-        wasm_write_unsigned(&builder->writer, 6);
+        wasm_write_unsigned(&builder->writer, 7);
         wasm_write_byte(&builder->writer, WASM_TYPE_I32);
         wasm_write_unsigned(&builder->writer, 1);
         wasm_write_byte(&builder->writer, WASM_TYPE_F32);
@@ -4138,7 +4158,8 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
             // `try_str_to_int` gives two values, so it is not a value of one type, as a procedure
             // that returns two is not, and the definition of two names reads its types, see
             // `wasm_call_result_type`.
-            if (wasm_call_is_try_str_to_int(builder, expression)) {
+            if (wasm_call_is_try_str_to_int(builder, expression) ||
+                wasm_call_is_utf8_decode(builder, expression)) {
                 return wasm_type_make(WASM_VALUE_TYPE_NONE);
             }
             return wasm_type_make(WASM_VALUE_TYPE_INT);
@@ -5092,6 +5113,11 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
         if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
             str_equals(node->payload.call.name, STR("str_to_c_str"))) {
             // The address of the literal is on the stack already, see the string literal.
+            break;
+        }
+        if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
+            str_equals(node->payload.call.name, STR("utf8_decode"))) {
+            wasm_build_code_section_body_utf8_decode(builder, procedure);
             break;
         }
         if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
@@ -8432,6 +8458,14 @@ static Wasm_Type wasm_call_result_type(Wasm_Builder const *builder, Ast_Node_Ind
                                        size_t index) {
     assert(call < builder->node_count);
 
+    // The string that `utf8_decode` makes of bytes, and whether they were valid.
+    if (builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
+        wasm_call_is_utf8_decode(builder, call)) {
+        if (index == 0) {
+            return wasm_type_make(WASM_VALUE_TYPE_STR);
+        }
+        return wasm_type_make(index == 1 ? WASM_VALUE_TYPE_BOOL : WASM_VALUE_TYPE_NONE);
+    }
     // The number that `try_str_to_int` makes of a string, and whether it was one.
     if (builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
         wasm_call_is_try_str_to_int(builder, call)) {
@@ -9259,6 +9293,197 @@ static void wasm_type_info_region_write(Wasm_Builder *builder, Ast_Node_Index in
         wasm_write_byte(&builder->writer, 0);
     }
     assert(written_bytes == wasm_type_info_region_bytes(builder, info));
+}
+
+/**
+ * Returns whether the call `call` is a call of the built-in procedure `utf8_decode`.
+ */
+static bool wasm_call_is_utf8_decode(Wasm_Builder const *builder, Ast_Node_Index call) {
+    return wasm_call_is_built_in(builder, call) &&
+           str_equals(builder->nodes[call].payload.call.name, STR("utf8_decode"));
+}
+
+/**
+ * Writes the instructions that leave the program out of the loops of `utf8_decode` as not valid:
+ * the address of the next byte is made one that is never the end, which the last test sees, and
+ * `br` goes to the `block` that is `depth` structured instructions out.
+ */
+static void wasm_utf8_decode_fail_write(Wasm_Builder *builder, size_t next, size_t depth) {
+    wasm_write_i32_const(&builder->writer, -1);
+    wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_byte(&builder->writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(&builder->writer, depth);
+}
+
+/**
+ * Writes the instructions of the built-in procedure `utf8_decode`, whose argument, the address and
+ * the length of an array or an array slice of bytes, is on the stack, and which leaves three values:
+ * the string of the same bytes, an address and a length that are not a copy, and an `i32` that is 1
+ * when the bytes are valid UTF-8, as [RFC 3629](https://www.rfc-editor.org/rfc/rfc3629) defines it,
+ * and 0 when they are not. Then the string is empty, which is the address 0 and the length 0.
+ *
+ * A character is one byte below 0x80, and otherwise a first byte that says how many bytes continue
+ * it: one for 0xC2 to 0xDF, two for 0xE0 to 0xEF and three for 0xF0 to 0xF4, and no other first byte
+ * is valid, which leaves out 0xC0 and 0xC1, that could only make a character that has a shorter
+ * form, and everything above 0xF4, that is above the last code point. The bytes that continue it
+ * have the bits 10 at the top, and the first of them has a smaller range after four of the first
+ * bytes: 0xA0 or more after 0xE0 and 0x9F or less after 0xED, which would be a character that has a
+ * shorter form and a surrogate, and 0x90 or more after 0xF0 and 0x8F or less after 0xF4, which are
+ * the same for the characters of four bytes. A character that is cut off by the end is not valid.
+ * The scratch locals are the address of the next byte and the address after the last one, the first
+ * byte of a character, the number of bytes that are left of it, and the address of the first byte.
+ * The bytes are valid when the next address ends up at the end, and a failure moves it to an address
+ * that is not.
+ */
+static void wasm_build_code_section_body_utf8_decode(Wasm_Builder *builder,
+                                                     Ast_Node_Index procedure) {
+    Wasm_Writer *writer = &builder->writer;
+    size_t next = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+    size_t end = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_SECOND);
+    size_t lead = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_TEMPORARY_32);
+    size_t left = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_STRING);
+    size_t start = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_BYTES);
+
+    // The address and the length are taken off the stack.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, start);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, start);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+
+    // Label 0 is the loop and label 1 the block around it, which is left at the end and at a
+    // failure.
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GE_U);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, lead);
+
+    // A byte below 0x80 is a character. The `if` is label 0, the loop 1 and the block 2.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, lead);
+    wasm_write_i32_const(writer, 0x80);
+    wasm_write_byte(writer, WASM_OPCODE_I32_LT_U);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    // The number of bytes that continue the character is 1, 2 or 3 for the first bytes that are in
+    // a range, which is one comparison of the byte less the start of it as an unsigned number, and
+    // 0 for the others, which are not valid.
+    wasm_write_i32_const(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, left);
+    int64_t bases[3] = {0xC2, 0xE0, 0xF0};
+    int64_t spans[3] = {0x1D, 0x0F, 0x04};
+    for (size_t i = 0; i < 3; i += 1) {
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, lead);
+        wasm_write_i32_const(writer, bases[i]);
+        wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+        wasm_write_i32_const(writer, spans[i]);
+        wasm_write_byte(writer, WASM_OPCODE_I32_LE_U);
+        wasm_structured_begin(builder, WASM_OPCODE_IF);
+        wasm_write_i32_const(writer, (int64_t)(i + 1));
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, left);
+        wasm_write_byte(writer, WASM_OPCODE_END);
+    }
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, left);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_utf8_decode_fail_write(builder, next, 2);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    // The bytes that continue it must all be there, which is when the address after the first byte
+    // plus their number is not above the end.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, left);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GT_U);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_utf8_decode_fail_write(builder, next, 2);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    // The range of the first byte that continues it, after 0xE0, 0xED, 0xF0 and 0xF4.
+    int64_t leads[4] = {0xE0, 0xED, 0xF0, 0xF4};
+    int64_t limits[4] = {0xA0, 0x9F, 0x90, 0x8F};
+    for (size_t i = 0; i < 4; i += 1) {
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, lead);
+        wasm_write_i32_const(writer, leads[i]);
+        wasm_write_byte(writer, WASM_OPCODE_I32_EQ);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+        wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+        wasm_write_i32_const(writer, limits[i]);
+        wasm_write_byte(writer, (i % 2 == 0) ? WASM_OPCODE_I32_LT_U : WASM_OPCODE_I32_GT_U);
+        wasm_write_byte(writer, WASM_OPCODE_I32_AND);
+        wasm_structured_begin(builder, WASM_OPCODE_IF);
+        wasm_utf8_decode_fail_write(builder, next, 2);
+        wasm_write_byte(writer, WASM_OPCODE_END);
+    }
+
+    // Each byte that continues it has the bits 10 at the top. The inner loop is label 0 and its
+    // block 1, and the `if` in it is label 0 too, so the failure is 4 structured instructions out.
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, left);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_i32_const(writer, 0xC0);
+    wasm_write_byte(writer, WASM_OPCODE_I32_AND);
+    wasm_write_i32_const(writer, 0x80);
+    wasm_write_byte(writer, WASM_OPCODE_I32_NE);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_utf8_decode_fail_write(builder, next, 4);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, left);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, left);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 0);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 0);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    // The bytes are valid when the next address is the end, and then the string is the bytes. The
+    // `i32` is multiplied into the address and the length, so that they are 0 when it is 0.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQ);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, left);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, start);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, left);
+    wasm_write_byte(writer, WASM_OPCODE_I32_MUL);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, start);
+    wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, left);
+    wasm_write_byte(writer, WASM_OPCODE_I32_MUL);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, left);
 }
 
 /**
