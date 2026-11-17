@@ -3732,6 +3732,7 @@ static bool x64_child_done(X64_Builder *builder, X64_Expression_Frame const *par
     X64_Type field_type = x64_type_make(X64_TYPE_KIND_NONE);
     bool is_found = x64_struct_field_find(builder, type.definition, name, &offset, &field_type);
     assert(is_found);
+    (void)is_found;
     bool is_nested_literal = builder->nodes[value].node_type == AST_NODE_TYPE_STRUCT_LITERAL &&
                              builder->nodes[value].payload.struct_literal.name.bytes == NULL;
     if (not is_nested_literal && not x64_type_accepts(builder, field_type, value)) {
@@ -5558,6 +5559,7 @@ static bool x64_call_write(X64_Builder *builder, X64_Expression_Frame const *fra
         hidden_words = 1;
     }
     assert(builder->stack_words - arguments_start + hidden_words == word_count);
+    (void)hidden_words;
     if (word_count > X64_ARGUMENT_REGISTER_COUNT &&
         word_count - X64_ARGUMENT_REGISTER_COUNT > builder->outgoing_words_max) {
         builder->outgoing_words_max = word_count - X64_ARGUMENT_REGISTER_COUNT;

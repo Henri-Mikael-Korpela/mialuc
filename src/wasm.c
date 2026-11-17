@@ -2120,6 +2120,8 @@ static void wasm_frame_push(Wasm_Builder const *builder, Wasm_Statement_Frame *f
  */
 static void wasm_frame_push_exit(Wasm_Builder const *builder, Wasm_Statement_Frame *frames,
                                  size_t *frame_count, Ast_Node_Index jump) {
+    // The builder is only read by the assertion, which a release build leaves out.
+    (void)builder;
     assert(*frame_count > 0);
     assert(*frame_count < WASM_STATEMENT_DEPTH_MAX);
     assert(wasm_node_type_is_exit(builder->nodes[jump].node_type));

@@ -1719,6 +1719,7 @@ static void wasm_text_write_float(Wasm_Text_Writer *writer, double number, int d
     for (int digits = 1; digits <= digits_max; digits += 1) {
         int length = snprintf(text, sizeof(text), "%.*g", digits, number);
         assert(length > 0 && (size_t)length < sizeof(text));
+        (void)length;
         double read_back = strtod(text, NULL);
         bool is_same = read_back == number;
         if (digits_max == WASM_TEXT_DIGITS_F32) {
