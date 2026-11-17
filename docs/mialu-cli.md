@@ -16,6 +16,7 @@ dump-asm    compile a source file and print the assembly of the program
 dump-ast    print the tokens and the syntax tree of a source file
 dump-struct-sizes
             print the size and the alignment of each struct of a source file
+dump-types  print the type of each constant, variable and parameter of a source file
 run         compile a source file and run the program
 ```
 
@@ -108,6 +109,24 @@ Dump-struct-sizes reads the source file, checks it up to the names, as dump-ast 
 ```
 
 The sizes are those of the `x64-win32` target, see [Structs](build-target-x64-win32.md#structs): every field is made of whole words of 8 bytes, a `Str` is two words, and a struct has no padding, so the alignment is always 8. A struct that is defined where a field is has no name, and is not printed, but it is part of the size of the struct that has it. The command does not build the program, so it also shows programs that the target cannot build. It is what the [language server](../editors/vscode-lsp/README.md) shows above the structs in an editor.
+
+## Print the types of the names
+
+Usage:
+
+```
+mialuc dump-types <source file>
+```
+
+Dump-types reads the source file, checks it up to the names, as dump-ast does, and prints a line for each place where a constant, a global variable, a parameter or a variable is defined or used, in the order of the nodes of the syntax tree. A line has five fields separated by tabs: the line and the column of the name, both counted from 1 with columns that count bytes, the length of the name in bytes, the name, and its type. For a few lines of `test-code/x64/conditions.mu`:
+
+```
+14	1	5	LIMIT	untyped Int
+22	1	4	sign	proc(n: Int) Int
+31	5	6	result	Int
+```
+
+The type is written as it is in the source when the definition gives one, as for a parameter or `LIMIT : Byte : 100`. Otherwise it is the type of the value: a constant that is known when the program is compiled, such as `LIMIT :: 100`, which is `untyped Int` for a constant and `Int` for a variable that is given it, a struct literal, another name, arithmetic of them, or a call of a procedure that returns one value. A procedure shows its signature. A place whose type is not known this way, and the structs and enums, which are types and not values, are left out. The command does not build the program, so it also shows programs that the target cannot build. It is what the [language server](../editors/vscode-lsp/README.md) shows when the pointer rests on a name in an editor.
 
 ## Compile a program and run it
 

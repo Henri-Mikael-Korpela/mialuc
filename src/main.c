@@ -50,6 +50,7 @@ typedef enum {
     COMMAND_MODE_DUMP_ASM,
     COMMAND_MODE_DUMP_AST,
     COMMAND_MODE_DUMP_STRUCT_SIZES,
+    COMMAND_MODE_DUMP_TYPES,
     COMMAND_MODE_INVALID,
     COMMAND_MODE_RUN,
 } Command_Mode;
@@ -107,6 +108,28 @@ typedef struct {
 
 static Command      main_command_parse                     (Array_Slice args);
 static Command_Target main_command_target_parse            (char const *name);
+static char const  *main_constant_type_text                (Constant_Type type, bool is_constant);
+static bool         main_definition_type_write             (Ast_Node const *nodes,
+                                                            Semantic_Binding const *bindings,
+                                                            Constant_Value const *constants,
+                                                            size_t node_count,
+                                                            Ast_Node_Index target, char *text,
+                                                            size_t text_size_bytes);
+static bool         main_constant_type_is_untyped          (Constant_Type type);
+static bool         main_node_type_is_arithmetic           (Ast_Node_Type node_type);
+static bool         main_node_type_is_type                 (Ast_Node_Type node_type);
+static bool         main_procedure_text_write              (Ast_Node const *nodes,
+                                                            Ast_Node_Index procedure, char *text,
+                                                            size_t text_size_bytes);
+static bool         main_result_type_write                 (Ast_Node const *nodes,
+                                                            Semantic_Binding const *bindings,
+                                                            Ast_Node_Index definition, char *text,
+                                                            size_t text_size_bytes);
+static bool         main_text_write                        (char *text, size_t text_size_bytes,
+                                                            Str part);
+static bool         main_type_text_write                   (Ast_Node const *nodes,
+                                                            Ast_Node_Index type_node, char *text,
+                                                            size_t text_size_bytes);
 static int32_t      main_run_command                       (Command command,
                                                             Buffers const *buffers);
 static int32_t      main_run_command_build                 (Command command, Buffers const *buffers,
@@ -117,6 +140,8 @@ static int32_t      main_run_command_build_x64             (Command command, Buf
                                                             Semantic_Result semantic_result);
 static void         main_run_command_print_struct_sizes    (Str source, Parse_Result parse_result);
 static void         main_run_command_print_tokens          (Array_Slice tokens);
+static void         main_run_command_print_types           (Str source, Parse_Result parse_result,
+                                                            Semantic_Result semantic_result);
 static Str          main_run_command_read_file             (char const *path, Array_Slice buffer);
 static void         main_run_command_report_parse_error    (char const *path, Str source,
                                                             Array_Slice tokens,
@@ -159,11 +184,13 @@ int main(int argc, char *argv[]) {
                 "       %s dump-ast <source file>\n"
                 "       %s dump-asm --target x64-win32 <source file>\n"
                 "       %s dump-struct-sizes <source file>\n"
+                "       %s dump-types <source file>\n"
                 "       %s build --target wasm -o <output file> <source file>\n"
                 "       %s build --target wat -o <output file> <source file>\n"
                 "       %s build --target x64-win32 [--debug] -o <output file> <source file>\n"
                 "       %s --version\n",
-                argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0]);
+                argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0],
+                argv[0]);
         return 2;
     }
 
@@ -238,6 +265,7 @@ int main(int argc, char *argv[]) {
  *     mialuc dump-ast <source file>
  *     mialuc dump-asm --target x64-win32 <source file>
  *     mialuc dump-struct-sizes <source file>
+ *     mialuc dump-types <source file>
  *     mialuc build --target wasm -o <output file> <source file>
  *     mialuc build --target wat -o <output file> <source file>
  *     mialuc build --target x64-win32 [--debug] -o <output file> <source file>
@@ -303,6 +331,19 @@ static Command main_command_parse(Array_Slice args) {
             .source_path = argv[2],
             .output_path = NULL,
             .mode = COMMAND_MODE_DUMP_STRUCT_SIZES,
+            .target = COMMAND_TARGET_NONE,
+            .is_debug = false,
+        };
+    }
+
+    if (strcmp(argv[1], "dump-types") == 0) {
+        if (args.length != 3) {
+            return invalid;
+        }
+        return (Command){
+            .source_path = argv[2],
+            .output_path = NULL,
+            .mode = COMMAND_MODE_DUMP_TYPES,
             .target = COMMAND_TARGET_NONE,
             .is_debug = false,
         };
@@ -450,6 +491,9 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     case COMMAND_MODE_DUMP_STRUCT_SIZES:
         main_run_command_print_struct_sizes(source, parse_result);
         return 0;
+    case COMMAND_MODE_DUMP_TYPES:
+        main_run_command_print_types(source, parse_result, semantic_result);
+        return 0;
     case COMMAND_MODE_INVALID:
         assert(false);
         return 1;
@@ -491,6 +535,372 @@ static void main_run_command_print_struct_sizes(Str source, Parse_Result parse_r
         Str_Position position = str_position_at(source, node->source_offset);
         printf("%zu\t%.*s\t%zu\t%d\n", position.line, (int)name.length, name.bytes, size_bytes,
                (int)X64_STRUCT_ALIGNMENT_BYTES);
+    }
+}
+
+/**
+ * Writes `part`, a view of the source, to `text` as a zero-terminated string. Returns false when
+ * they do not fit in `text_size_bytes`.
+ */
+static bool main_text_write(char *text, size_t text_size_bytes, Str part) {
+    int written = snprintf(text, text_size_bytes, "%.*s", (int)part.length,
+                           (char const *)part.bytes);
+    return written >= 0 && (size_t)written < text_size_bytes;
+}
+
+/**
+ * Returns whether `node_type` is a type that `main_type_text_write` writes.
+ */
+static bool main_node_type_is_type(Ast_Node_Type node_type) {
+    return node_type == AST_NODE_TYPE_TYPE_NAME || node_type == AST_NODE_TYPE_POINTER_TYPE ||
+           node_type == AST_NODE_TYPE_ARRAY_TYPE;
+}
+
+/**
+ * Returns whether `node_type` is an operator of arithmetic, whose type is that of its operands.
+ */
+static bool main_node_type_is_arithmetic(Ast_Node_Type node_type) {
+    return node_type == AST_NODE_TYPE_ADDITION || node_type == AST_NODE_TYPE_SUBTRACTION ||
+           node_type == AST_NODE_TYPE_MULTIPLICATION || node_type == AST_NODE_TYPE_DIVISION;
+}
+
+/**
+ * Returns whether `type` is one of a literal, which becomes the type of the place that uses it.
+ */
+static bool main_constant_type_is_untyped(Constant_Type type) {
+    return type == CONSTANT_TYPE_UNTYPED_BOOL || type == CONSTANT_TYPE_UNTYPED_FLOAT ||
+           type == CONSTANT_TYPE_UNTYPED_INTEGER || type == CONSTANT_TYPE_UNTYPED_STRING;
+}
+
+/**
+ * Writes the type of the variable `definition`, a name of the values of a call that is not the
+ * first, to `text`: the one that the procedure returns at its place. Such a definition has no
+ * children, and its leader has the call. Returns false when the call is not one of a procedure of
+ * the program, or does not fit.
+ */
+static bool main_result_type_write(Ast_Node const *nodes, Semantic_Binding const *bindings,
+                                   Ast_Node_Index definition, char *text, size_t text_size_bytes) {
+    Ast_Node const *node = &nodes[definition];
+    if (node->node_type != AST_NODE_TYPE_VARIABLE_DEFINITION || node->result_index == 0) {
+        return false;
+    }
+    Ast_Node_Index call = nodes[ast_variable_leader(nodes, definition)].first_child;
+    Semantic_Binding binding = bindings[call];
+    if (nodes[call].node_type != AST_NODE_TYPE_CALL ||
+        binding.kind != SEMANTIC_BINDING_KIND_CONSTANT) {
+        return false;
+    }
+    Ast_Node const *procedure = &nodes[nodes[binding.target].first_child];
+    if (procedure->node_type != AST_NODE_TYPE_PROCEDURE ||
+        ast_procedure_return_count(procedure) <= node->result_index) {
+        return false;
+    }
+    return main_text_write(text, text_size_bytes,
+                           ast_procedure_return_type_at(procedure, node->result_index));
+}
+
+/**
+ * Writes the text of the type `type_node`, an `AST_NODE_TYPE_TYPE_NAME`, a pointer type or an array
+ * type, to `text` as it is in the source, such as `^Int` or `[3]Int`. Returns false when it is
+ * another node, or the text does not fit in `text_size_bytes`, which includes the terminating zero.
+ */
+static bool main_type_text_write(Ast_Node const *nodes, Ast_Node_Index type_node, char *text,
+                                 size_t text_size_bytes) {
+    assert(nodes != NULL);
+    assert(text != NULL);
+    assert(text_size_bytes > 0);
+
+    size_t length = 0;
+    // A pointer type and an array type have the type that they are made of as their only child, so
+    // the prefixes are written one after the other down to the name, without calling itself. A
+    // type that is deeper than the blocks can be inside each other is not worth showing.
+    for (size_t depth = 0; depth < AST_BLOCK_DEPTH_MAX; depth += 1) {
+        Ast_Node const *node = &nodes[type_node];
+        int written = 0;
+        if (node->node_type == AST_NODE_TYPE_POINTER_TYPE) {
+            written = snprintf(text + length, text_size_bytes - length, "^");
+        } else if (node->node_type == AST_NODE_TYPE_ARRAY_TYPE) {
+            if (node->payload.array_type.length_kind == AST_ARRAY_LENGTH_FIXED) {
+                written = snprintf(text + length, text_size_bytes - length, "[%lld]",
+                                   (long long)node->payload.array_type.length);
+            } else if (node->payload.array_type.length_kind == AST_ARRAY_LENGTH_INFERRED) {
+                written = snprintf(text + length, text_size_bytes - length, "[const]");
+            } else {
+                written = snprintf(text + length, text_size_bytes - length, "[]");
+            }
+        } else if (node->node_type == AST_NODE_TYPE_TYPE_NAME) {
+            return main_text_write(text + length, text_size_bytes - length,
+                                   node->payload.type_name.name);
+        } else {
+            return false;
+        }
+        if (written < 0 || length + (size_t)written >= text_size_bytes ||
+            node->first_child == AST_NODE_INDEX_NONE) {
+            return false;
+        }
+        length += (size_t)written;
+        type_node = node->first_child;
+    }
+    return false;
+}
+
+/**
+ * Returns the name of the type of a value that is known when the program is compiled. A literal
+ * has no type of its own, so a variable that is given one deduces the usual type, and a constant
+ * says that it is untyped, because the place that uses it can want another size.
+ */
+static char const *main_constant_type_text(Constant_Type type, bool is_constant) {
+    switch (type) {
+    case CONSTANT_TYPE_BOOL:
+        return "Bool";
+    case CONSTANT_TYPE_BYTE:
+        return "Byte";
+    case CONSTANT_TYPE_F32:
+        return "F32";
+    case CONSTANT_TYPE_F64:
+        return "F64";
+    case CONSTANT_TYPE_INT:
+        return "Int";
+    case CONSTANT_TYPE_RUNE:
+        return "Rune";
+    case CONSTANT_TYPE_STR:
+        return "Str";
+    case CONSTANT_TYPE_UNTYPED_BOOL:
+        return is_constant ? "untyped Bool" : "Bool";
+    case CONSTANT_TYPE_UNTYPED_FLOAT:
+        return is_constant ? "untyped float" : "F64";
+    case CONSTANT_TYPE_UNTYPED_INTEGER:
+        return is_constant ? "untyped Int" : "Int";
+    case CONSTANT_TYPE_UNTYPED_STRING:
+        return is_constant ? "untyped Str" : "Str";
+    }
+    assert(false);
+    return "";
+}
+
+/**
+ * Writes the signature of `procedure`, an `AST_NODE_TYPE_PROCEDURE`, to `text`, such as
+ * `proc(a: Int, b: ^Int) Int`. Returns false when it does not fit.
+ */
+static bool main_procedure_text_write(Ast_Node const *nodes, Ast_Node_Index procedure, char *text,
+                                      size_t text_size_bytes) {
+    assert(nodes != NULL);
+    assert(nodes[procedure].node_type == AST_NODE_TYPE_PROCEDURE);
+
+    int written = snprintf(text, text_size_bytes, "proc(");
+    if (written < 0 || (size_t)written >= text_size_bytes) {
+        return false;
+    }
+    size_t length = (size_t)written;
+
+    bool is_first = true;
+    for (Ast_Node_Index child = nodes[procedure].first_child; child != AST_NODE_INDEX_NONE;
+         child = nodes[child].next_sibling) {
+        // The parameters are the first children, and the statements of the body follow them.
+        if (nodes[child].node_type != AST_NODE_TYPE_PARAMETER) {
+            break;
+        }
+        Str name = nodes[child].payload.parameter.name;
+        written = snprintf(text + length, text_size_bytes - length, "%s%.*s: ",
+                           is_first ? "" : ", ", (int)name.length, (char const *)name.bytes);
+        if (written < 0 || length + (size_t)written >= text_size_bytes) {
+            return false;
+        }
+        length += (size_t)written;
+        if (not main_type_text_write(nodes, nodes[child].first_child, text + length,
+                                     text_size_bytes - length)) {
+            return false;
+        }
+        length += strlen(text + length);
+        is_first = false;
+    }
+
+    Str return_type = nodes[procedure].payload.procedure.return_type;
+    if (return_type.bytes == NULL) {
+        written = snprintf(text + length, text_size_bytes - length, ")");
+    } else {
+        written = snprintf(text + length, text_size_bytes - length, ") %.*s",
+                           (int)return_type.length, (char const *)return_type.bytes);
+    }
+    return written >= 0 && length + (size_t)written < text_size_bytes;
+}
+
+/**
+ * Writes the type of what the definition `target` declares to `text`: the type that the
+ * definition gives, otherwise the type that its value has. For a value, the names that it is made
+ * of are followed, and so are the operands of arithmetic and a call of a procedure that returns one
+ * value, and a value of any other shape has no type here. Returns false when the type is not known
+ * or does not fit. A struct and an enum are types and not values, so they have none.
+ */
+static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding const *bindings,
+                                       Constant_Value const *constants, size_t node_count,
+                                       Ast_Node_Index target, char *text, size_t text_size_bytes) {
+    assert(nodes != NULL);
+    assert(bindings != NULL);
+    assert(constants != NULL);
+    assert(target < node_count);
+
+    // A variable that is given another name is followed to its definition. That definition is
+    // always above, since a variable cannot be used before it is defined, so the chain is shorter
+    // than the number of nodes.
+    for (size_t step = 0; step < node_count; step += 1) {
+        Ast_Node const *node = &nodes[target];
+        // The expression that gives the value, and whether the name that is defined is a constant.
+        Ast_Node_Index value = AST_NODE_INDEX_NONE;
+        bool is_constant = false;
+
+        if (node->node_type == AST_NODE_TYPE_PARAMETER) {
+            return main_type_text_write(nodes, node->first_child, text, text_size_bytes);
+        } else if (node->node_type == AST_NODE_TYPE_CONSTANT_DEFINITION) {
+            value = node->first_child;
+            if (nodes[value].node_type == AST_NODE_TYPE_PROCEDURE) {
+                return main_procedure_text_write(nodes, value, text, text_size_bytes);
+            }
+            if (nodes[value].node_type == AST_NODE_TYPE_STRUCT_TYPE ||
+                nodes[value].node_type == AST_NODE_TYPE_ENUM_TYPE) {
+                return false;
+            }
+            // The type of a typed constant comes after the value.
+            if (nodes[value].next_sibling != AST_NODE_INDEX_NONE) {
+                return main_type_text_write(nodes, nodes[value].next_sibling, text,
+                                            text_size_bytes);
+            }
+            is_constant = true;
+        } else if (node->node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION ||
+                   node->node_type == AST_NODE_TYPE_VARIABLE_DEFINITION) {
+            value = node->first_child;
+            // The attributes of a global variable come before its type.
+            while (value != AST_NODE_INDEX_NONE &&
+                   nodes[value].node_type == AST_NODE_TYPE_ATTRIBUTE) {
+                value = nodes[value].next_sibling;
+            }
+            if (value == AST_NODE_INDEX_NONE) {
+                return main_result_type_write(nodes, bindings, target, text, text_size_bytes);
+            }
+            if (main_node_type_is_type(nodes[value].node_type)) {
+                return main_type_text_write(nodes, value, text, text_size_bytes);
+            }
+        } else {
+            return false;
+        }
+
+        // Arithmetic has the type of its operands, which agree, so the left one tells it, unless
+        // that is a literal, which takes the type of the other. The depth is bounded as the
+        // evaluation of constants is, since the expression is nested that deep at the most.
+        for (size_t depth = 0; depth < CONSTANT_EXPRESSION_DEPTH_MAX &&
+                               constants[value].status != CONSTANT_STATUS_OK &&
+                               main_node_type_is_arithmetic(nodes[value].node_type);
+             depth += 1) {
+            Ast_Node_Index left = nodes[value].first_child;
+            Ast_Node_Index right = nodes[left].next_sibling;
+            bool is_left_literal = constants[left].status == CONSTANT_STATUS_OK &&
+                                   main_constant_type_is_untyped(constants[left].type);
+            value = is_left_literal ? right : left;
+        }
+        if (nodes[value].node_type == AST_NODE_TYPE_COMPARISON ||
+            nodes[value].node_type == AST_NODE_TYPE_AND ||
+            nodes[value].node_type == AST_NODE_TYPE_OR ||
+            nodes[value].node_type == AST_NODE_TYPE_NOT) {
+            return main_text_write(text, text_size_bytes, STR("Bool"));
+        }
+
+        Constant_Value known = constants[value];
+        if (known.status == CONSTANT_STATUS_OK) {
+            int written = snprintf(text, text_size_bytes, "%s",
+                                   main_constant_type_text(known.type, is_constant));
+            return written >= 0 && (size_t)written < text_size_bytes;
+        }
+
+        Ast_Node const *value_node = &nodes[value];
+        Semantic_Binding binding = bindings[value];
+        if (value_node->node_type == AST_NODE_TYPE_STRUCT_LITERAL &&
+            value_node->payload.struct_literal.name.bytes != NULL) {
+            return main_text_write(text, text_size_bytes, value_node->payload.struct_literal.name);
+        }
+        if (value_node->node_type == AST_NODE_TYPE_IDENTIFIER &&
+            binding.kind != SEMANTIC_BINDING_KIND_NONE &&
+            binding.kind != SEMANTIC_BINDING_KIND_JUMP_TARGET && binding.target != target) {
+            target = binding.target;
+            continue;
+        }
+        if (value_node->node_type == AST_NODE_TYPE_CALL &&
+            binding.kind == SEMANTIC_BINDING_KIND_CONSTANT) {
+            Ast_Node const *procedure = &nodes[nodes[binding.target].first_child];
+            if (procedure->node_type != AST_NODE_TYPE_PROCEDURE ||
+                ast_procedure_return_count(procedure) != 1) {
+                return false;
+            }
+            return main_text_write(text, text_size_bytes,
+                                   ast_procedure_return_type_at(procedure, 0));
+        }
+        return false;
+    }
+    return false;
+}
+
+/**
+ * Prints a line for each place where a constant, a global variable, a parameter or a variable is
+ * defined or used, and whose type is known: the line and the column of its name, both counted from
+ * 1, the length of the name in bytes, the name, and the type as it is written in the source,
+ * separated by tabs. The columns count bytes, as the other tools of the compiler do. This is what
+ * an editor shows when the cursor rests on a name.
+ */
+static void main_run_command_print_types(Str source, Parse_Result parse_result,
+                                         Semantic_Result semantic_result) {
+    assert(parse_result.status == PARSE_STATUS_OK);
+    assert(semantic_result.status == SEMANTIC_STATUS_OK);
+
+    Ast_Node const *nodes = parse_result.nodes.elements;
+    Semantic_Binding const *bindings = semantic_result.bindings.elements;
+    Constant_Value const *constants = semantic_result.constants.elements;
+    for (Ast_Node_Index index = 0; index < parse_result.nodes.length; index += 1) {
+        Ast_Node const *node = &nodes[index];
+        Str name = STR_EMPTY;
+        Ast_Node_Index target = AST_NODE_INDEX_NONE;
+        switch (node->node_type) {
+        case AST_NODE_TYPE_CONSTANT_DEFINITION:
+            name = node->payload.constant_definition.name;
+            target = index;
+            break;
+        case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
+            name = node->payload.global_variable_definition.name;
+            target = index;
+            break;
+        case AST_NODE_TYPE_PARAMETER:
+            name = node->payload.parameter.name;
+            target = index;
+            break;
+        case AST_NODE_TYPE_VARIABLE_DEFINITION:
+            name = node->payload.variable_definition.name;
+            target = index;
+            break;
+        case AST_NODE_TYPE_IDENTIFIER:
+        case AST_NODE_TYPE_CALL:
+            name = node->node_type == AST_NODE_TYPE_IDENTIFIER ? node->payload.identifier.name
+                                                               : node->payload.call.name;
+            // A built-in procedure and a jump have no definition to take the type from.
+            if (bindings[index].kind != SEMANTIC_BINDING_KIND_NONE &&
+                bindings[index].kind != SEMANTIC_BINDING_KIND_JUMP_TARGET) {
+                target = bindings[index].target;
+            }
+            break;
+        default:
+            break;
+        }
+        // The name `_` takes the place of a value that is not wanted, and is no variable.
+        if (target == AST_NODE_INDEX_NONE || name.bytes == NULL ||
+            (name.length == 1 && name.bytes[0] == '_')) {
+            continue;
+        }
+
+        char text[256] = "";
+        if (not main_definition_type_write(nodes, bindings, constants, parse_result.nodes.length,
+                                           target, text, sizeof(text))) {
+            continue;
+        }
+        Str_Position position = str_position_at(source, node->source_offset);
+        printf("%zu\t%zu\t%zu\t%.*s\t%s\n", position.line, position.column, name.length,
+               (int)name.length, (char const *)name.bytes, text);
     }
 }
 
