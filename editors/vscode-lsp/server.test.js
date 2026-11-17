@@ -233,6 +233,9 @@ test("a name shows its type when the pointer rests on it", async () => {
         const measured = lineOf("measure");
         assert.match((await hover(measured + 1, 25)).contents.value,
                      /try_str_to_int: proc\(text: Str\) \(Int, Bool\)/);
+        // The names that are given its values have the types that it gives, `Int` and `Bool`.
+        assert.match((await hover(measured + 1, 6)).contents.value, /number: Int/);
+        assert.match((await hover(measured + 1, 14)).contents.value, /is_number: Bool/);
         assert.match((await hover(measured + 2, 12)).contents.value,
                      /length_of: proc\(elements: \[N\]T \| \[\]T \| Str\) Int/);
 

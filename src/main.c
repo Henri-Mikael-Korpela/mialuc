@@ -171,6 +171,8 @@ static bool         main_node_type_is_type                 (Ast_Node_Type node_t
 static bool         main_procedure_text_write              (Ast_Node const *nodes,
                                                             Ast_Node_Index procedure, char *text,
                                                             size_t text_size_bytes);
+static bool         main_built_in_result_write             (Str name, size_t result_index,
+                                                            char *text, size_t text_size_bytes);
 static bool         main_result_type_write                 (Ast_Node const *nodes,
                                                             Semantic_Binding const *bindings,
                                                             Ast_Node_Index definition, char *text,
@@ -786,6 +788,39 @@ static bool main_constant_type_is_untyped(Constant_Type type) {
 }
 
 /**
+ * Writes the type of the value at `result_index` that the built-in procedure `name` gives, to
+ * `text`: `Int` for the first value of `try_str_to_int` and `Bool` for the second, `Str` and `Bool`
+ * for `utf8_decode`, and the one type of the others, which have one value. Returns false when
+ * `name` is not a built-in procedure, or it has no value at `result_index`, or the text does not
+ * fit.
+ */
+static bool main_built_in_result_write(Str name, size_t result_index, char *text,
+                                       size_t text_size_bytes) {
+    char const *type = NULL;
+    if (str_equals(name, STR("try_str_to_int")) && result_index < 2) {
+        type = result_index == 0 ? "Int" : "Bool";
+    } else if (str_equals(name, STR("utf8_decode")) && result_index < 2) {
+        type = result_index == 0 ? "Str" : "Bool";
+    } else if (result_index == 0) {
+        if (str_equals(name, STR("length_of"))) {
+            type = "Int";
+        } else if (str_equals(name, STR("int_to_byte"))) {
+            type = "Byte";
+        } else if (str_equals(name, STR("int_to_i32"))) {
+            type = "I32";
+        } else if (str_equals(name, STR("int_to_str"))) {
+            type = "Str";
+        } else if (str_equals(name, STR("str_to_c_str"))) {
+            type = "C_Str";
+        }
+    }
+    if (type == NULL) {
+        return false;
+    }
+    return main_text_write(text, text_size_bytes, str_make(type, strlen(type)));
+}
+
+/**
  * Writes the type of the variable `definition`, a name of the values of a call that is not the
  * first, to `text`: the one that the procedure returns at its place. Such a definition has no
  * children, and its leader has the call. Returns false when the call is not one of a procedure of
@@ -799,6 +834,11 @@ static bool main_result_type_write(Ast_Node const *nodes, Semantic_Binding const
     }
     Ast_Node_Index call = nodes[ast_variable_leader(nodes, definition)].first_child;
     Semantic_Binding binding = bindings[call];
+    if (nodes[call].node_type == AST_NODE_TYPE_CALL && binding.kind == SEMANTIC_BINDING_KIND_NONE) {
+        // A built-in procedure has no definition, so the types of its values are known by name.
+        return main_built_in_result_write(nodes[call].payload.call.name, node->result_index, text,
+                                          text_size_bytes);
+    }
     if (nodes[call].node_type != AST_NODE_TYPE_CALL ||
         binding.kind != SEMANTIC_BINDING_KIND_CONSTANT) {
         return false;
@@ -1089,6 +1129,12 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
             binding.kind != SEMANTIC_BINDING_KIND_JUMP_TARGET && binding.target != target) {
             target = binding.target;
             continue;
+        }
+        if (value_node->node_type == AST_NODE_TYPE_CALL &&
+            binding.kind == SEMANTIC_BINDING_KIND_NONE) {
+            // The first value of a built-in procedure.
+            return main_built_in_result_write(value_node->payload.call.name, 0, text,
+                                              text_size_bytes);
         }
         if (value_node->node_type == AST_NODE_TYPE_CALL &&
             binding.kind == SEMANTIC_BINDING_KIND_CONSTANT) {
