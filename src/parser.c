@@ -2220,6 +2220,17 @@ static Ast_Node_Index parse_call(Parser *parser) {
     parser->nodes[call].payload.call.name = name->payload.identifier.text;
     parse_token_advance(parser);
 
+    if (str_equals(name->payload.identifier.text, STR("int_to_str"))) {
+        // The string literal that the analysis gives the text of the number, right after the node,
+        // see `AST_NODE_TYPE_CALL`.
+        Ast_Node_Index result = parse_node_make(parser, AST_NODE_TYPE_STRING_LITERAL);
+        if (result == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        assert(result == call + 1);
+        parser->nodes[result].payload.string_literal.text = STR("");
+    }
+
     if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_LEFT, STR("'('"))) {
         return AST_NODE_INDEX_NONE;
     }

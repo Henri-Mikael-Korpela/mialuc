@@ -53,6 +53,8 @@ static Constant_Value constant_comparison      (Ast_Node const *nodes, Ast_Node_
 static Constant_Value constant_concatenate     (Constant_Evaluation const *evaluation,
                                                 Ast_Node_Index concatenation,
                                                 Constant_Value left, Constant_Value right);
+static Constant_Value constant_int_to_str      (Constant_Evaluation const *evaluation,
+                                                Ast_Node_Index call, Constant_Value number);
 static Constant_Value constant_convert         (Ast_Node const *nodes, Ast_Node_Index definition,
                                                 Constant_Value value);
 static Ast_Node_Index constant_definition_type (Ast_Node const *nodes,
@@ -354,9 +356,29 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
         }
         return constant_step_done(constant_arithmetic(nodes, node, values[left], values[right]));
     }
+    case AST_NODE_TYPE_CALL: {
+        // Only the built-in `int_to_str` is a constant, when its argument is. Any other call
+        // needs the program to run.
+        if (evaluation->bindings[node].kind != SEMANTIC_BINDING_KIND_NONE ||
+            not str_equals(current->payload.call.name, STR("int_to_str"))) {
+            return constant_step_done(constant_fail(CONSTANT_STATUS_NOT_CONSTANT,
+                                                    AST_NODE_INDEX_NONE));
+        }
+        Ast_Node_Index argument = current->first_child;
+        // One argument, and no other.
+        if (argument == AST_NODE_INDEX_NONE || nodes[argument].next_sibling != AST_NODE_INDEX_NONE) {
+            return constant_step_done(constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, node));
+        }
+        if (values[argument].status == CONSTANT_STATUS_UNKNOWN) {
+            return constant_step_down(argument);
+        }
+        if (values[argument].status != CONSTANT_STATUS_OK) {
+            return constant_step_done(constant_operand_failure(values[argument]));
+        }
+        return constant_step_done(constant_int_to_str(evaluation, node, values[argument]));
+    }
     case AST_NODE_TYPE_ADDRESS_OF:
     case AST_NODE_TYPE_ARRAY_LITERAL:
-    case AST_NODE_TYPE_CALL:
     case AST_NODE_TYPE_CAST:
     case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_ENUM_LITERAL:
@@ -600,6 +622,61 @@ static Constant_Value constant_concatenate(Constant_Evaluation const *evaluation
         type = CONSTANT_TYPE_STR;
     }
     Constant_Value value = constant_make(type, 0);
+    value.string = result;
+    return value;
+}
+
+/**
+ * Returns the value of the call `call` of `int_to_str`, which is the decimal text of `number`, an
+ * integer: untyped or an `Int`, `I32` or `I64`, but not a `Byte`, a `Rune` or a truth value. The
+ * text is a minus sign for a negative number and the digits. It is an untyped string, like a string
+ * literal, and is written to the memory of `evaluation`, and the string literal after `call` is
+ * given it, see `AST_NODE_TYPE_CALL`.
+ */
+static Constant_Value constant_int_to_str(Constant_Evaluation const *evaluation,
+                                          Ast_Node_Index call, Constant_Value number) {
+    assert(evaluation->nodes[call].node_type == AST_NODE_TYPE_CALL);
+    assert(number.status == CONSTANT_STATUS_OK);
+
+    if (not constant_type_is_integer(number.type) || number.type == CONSTANT_TYPE_BYTE) {
+        return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, call);
+    }
+
+    // The digits from the end, of the magnitude, which is unsigned so that the smallest number has
+    // one too.
+    char digits[24] = {0};
+    size_t start = sizeof digits;
+    uint64_t magnitude = (uint64_t)number.integer;
+    if (number.integer < 0) {
+        magnitude = 0 - magnitude;
+    }
+    do {
+        start -= 1;
+        digits[start] = (char)('0' + magnitude % 10);
+        magnitude /= 10;
+    } while (magnitude > 0);
+    if (number.integer < 0) {
+        start -= 1;
+        digits[start] = '-';
+    }
+    size_t length = sizeof digits - start;
+
+    Constant_Text *text = evaluation->text;
+    if (length > text->size_bytes - text->length) {
+        return constant_fail(CONSTANT_STATUS_TEXT_TOO_LONG, call);
+    }
+
+    // The literal right after the node, which the parser made for the result.
+    Ast_Node_Index result = call + 1;
+    assert(result < evaluation->node_count);
+    assert(evaluation->nodes[result].node_type == AST_NODE_TYPE_STRING_LITERAL);
+
+    char *bytes = text->bytes + text->length;
+    memcpy(bytes, digits + start, length);
+    text->length += length;
+    evaluation->nodes[result].payload.string_literal.text = str_make(bytes, length);
+
+    Constant_Value value = constant_make(CONSTANT_TYPE_UNTYPED_STRING, 0);
     value.string = result;
     return value;
 }

@@ -412,6 +412,12 @@ static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
             Ast_Node_Index end = ast_procedure_end(nodes, analyzer->node_count, procedure);
             for (Ast_Node_Index current = procedure + 1; current < end; current += 1) {
                 Ast_Node_Type node_type = nodes[current].node_type;
+                // The built-in `int_to_str` is the one call that is a constant.
+                bool is_int_to_str = node_type == AST_NODE_TYPE_CALL &&
+                                     analyzer->bindings[current].kind ==
+                                         SEMANTIC_BINDING_KIND_NONE &&
+                                     str_equals(nodes[current].payload.call.name,
+                                                STR("int_to_str"));
                 // The expressions that can be constants. The others are statements, or expressions
                 // that never are, such as a call, which a target finds out from the entry that
                 // stays unknown.
@@ -419,6 +425,7 @@ static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
                                     node_type == AST_NODE_TYPE_AND ||
                                     node_type == AST_NODE_TYPE_BOOL_LITERAL ||
                                     node_type == AST_NODE_TYPE_COMPARISON ||
+                                    is_int_to_str ||
                                     node_type == AST_NODE_TYPE_CONCATENATION ||
                                     node_type == AST_NODE_TYPE_DIVISION ||
                                     node_type == AST_NODE_TYPE_FLOAT_LITERAL ||
@@ -443,6 +450,11 @@ static bool semantic_constants_check(Semantic_Analyzer *analyzer) {
                     node_type == AST_NODE_TYPE_CONCATENATION) {
                     return semantic_fail(
                         analyzer, SEMANTIC_STATUS_CONCATENATION_NOT_CONSTANT,
+                        semantic_constant_subject(analyzer, current, definition));
+                }
+                if (value.status == CONSTANT_STATUS_NOT_CONSTANT && is_int_to_str) {
+                    return semantic_fail(
+                        analyzer, SEMANTIC_STATUS_INT_TO_STR_NOT_CONSTANT,
                         semantic_constant_subject(analyzer, current, definition));
                 }
                 if (value.status != CONSTANT_STATUS_OK &&
@@ -1259,6 +1271,7 @@ bool semantic_is_built_in_procedure(Str name) {
 
     return str_equals(name, STR("int_to_byte")) || str_equals(name, STR("length_of")) ||
            str_equals(name, STR("str_to_c_str")) || str_equals(name, STR("try_str_to_int")) ||
-           str_equals(name, STR("utf8_decode")) || str_equals(name, STR("int_to_i32"));
+           str_equals(name, STR("utf8_decode")) || str_equals(name, STR("int_to_i32")) ||
+           str_equals(name, STR("int_to_str"));
 }
 

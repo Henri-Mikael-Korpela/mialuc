@@ -1,13 +1,11 @@
-/// Contains version information
-/// for the current compiler implementation.
-///
-/// The version is written down in src/version.h, which is the source of truth. This file has to say
-/// the same, and `main` checks that it does, by reading src/version.h line by line and parsing the
-/// three numbers out of its `#define MIALU_VERSION_MAJOR`, `MINOR` and `PATCH` lines. Run it from
-/// the root of the project: `mialuc run scripts/check-version.mu`.
-///
-/// Not everything that the check should do can be written in Mialu yet. The features that are
-/// missing are marked with MISSING FEATURE below, and nothing is implemented past them.
+/// Contains version information for the current compiler implementation.
+/// The version is also written down in src/version.h, which is the source of truth.
+/// The version info in this file has to say the same, and `main` checks that it does,
+/// by reading src/version.h line by line and parsing the three numbers out of its
+/// `#define MIALU_VERSION_MAJOR`, `MINOR` and `PATCH` lines.
+/// 
+/// Run this from the root of the project: `mialuc run scripts/check-version.mu`.
+
 package mialuc
 
 import foreign libc
@@ -17,25 +15,22 @@ import foreign libc
 /// as an `Int`. `fgets` and `strlen` take the buffer as a `^Byte`, the address of its first byte.
 foreign libc ->
     fclose :: proc(file: ^Byte) I32 -> ...
-    fgets :: proc(buffer: ^Byte, size: I32, file: ^Byte) ^Byte -> ...
-    fopen :: proc(path: C_Str, mode: C_Str) ^Byte -> ...
-    puts :: proc(content: C_Str) I32 -> ...
+    fgets  :: proc(buffer: ^Byte, size: I32, file: ^Byte) ^Byte -> ...
+    fopen  :: proc(path: C_Str, mode: C_Str) ^Byte -> ...
+    puts   :: proc(content: C_Str) I32 -> ...
     strlen :: proc(buffer: ^Byte) Int -> ...
 
-/// The version, written once, as the text of each number. `++` joins strings, so VERSION_STRING is
-/// joined from them when the program is compiled, and the numbers are made of the text by
-/// `try_str_to_int` when the program runs, see `matches_version_info_in_c`.
+/// The version, written once, as the three numbers. `int_to_str` makes the text of a constant number
+/// and `++` joins strings, so VERSION_STRING is made of the numbers when the program is compiled.
 //
-// MISSING FEATURE: a constant expression that makes a number of text, or text of a number, when the
-// program is compiled, such as `str_to_int(VERSION_MAJOR)`. `try_str_to_int` works when the program
-// runs, so the numbers are not constants, and cannot be the length of an array or the pattern of a
-// `match`, nor can a version that is not valid be an error of the build. C has the numbers, and
-// makes the text of them with `#`, so there it is the other way around.
-VERSION_MAJOR :: "0"
-VERSION_MINOR :: "3"
-VERSION_PATCH :: "0"
+// MISSING FEATURE: a constant expression that makes a number of text, such as
+// `str_to_int("0")`, which would let a version that is not valid be an error of the build. The
+// text is made of the numbers, as C makes it with `#`, and not the other way around.
+VERSION_MAJOR :: 0
+VERSION_MINOR :: 3
+VERSION_PATCH :: 0
 
-VERSION_STRING :: VERSION_MAJOR ++ '.' ++ VERSION_MINOR ++ '.' ++ VERSION_PATCH
+VERSION_STRING :: int_to_str(VERSION_MAJOR) ++ '.' ++ int_to_str(VERSION_MINOR) ++ '.' ++ int_to_str(VERSION_PATCH)
 
 /// The path of the header, relative to the root of the project.
 //
@@ -97,8 +92,7 @@ read_definition :: proc(line: Str, version: ^Version) Bool ->
     number, is_ok := try_str_to_int(line[name_end + 1:length_of(line)])
     if not is_ok ->
         return false
-    name := line[DEFINE_PREFIX_LENGTH:name_end]
-    match name ->
+    match line[DEFINE_PREFIX_LENGTH:name_end] ->
         case "MAJOR" ->
             version.major = number
         case "MINOR" ->
@@ -125,12 +119,6 @@ parse_header :: proc(version: ^Version) Bool ->
             break
         read_definition(line, version)
     return true
-
-/// Whether a number of the version of this file, which is text, is the number that the header says:
-/// the text must be a number, and the same one.
-is_same_number :: proc(text: Str, number: Int) Bool ->
-    value, is_ok := try_str_to_int(text)
-    return is_ok and value == number
 
 /// Whether `text` is a version written as MAJOR.MINOR.PATCH, of the three numbers that are given.
 /// The characters of the text are gone through, and a `.` ends a number, which is the text from the
@@ -160,17 +148,17 @@ is_version_string :: proc(text: Str, major: Int, minor: Int, patch: Int) Bool ->
     return is_same_major_and_minor and numbers[2] == patch
 
 /// Whether the version of this file is the one of the C header, which is when the header has all
-/// three numbers, the text of each number of this file is the number of the header, and so is
-/// VERSION_STRING, which is the three joined with dots.
+/// three numbers, each number of this file is the number of the header, and so is VERSION_STRING,
+/// which is the three joined with dots.
 matches_version_info_in_c :: proc() Bool ->
     version := Version {}
     if not parse_header(%version) ->
         return false
     if version.found not= 3 ->
         return false
-    is_same_major := is_same_number(VERSION_MAJOR, version.major)
-    is_same_minor := is_same_number(VERSION_MINOR, version.minor)
-    is_same_patch := is_same_number(VERSION_PATCH, version.patch)
+    is_same_major := VERSION_MAJOR == version.major
+    is_same_minor := VERSION_MINOR == version.minor
+    is_same_patch := VERSION_PATCH == version.patch
     is_same_text := is_version_string(VERSION_STRING, version.major, version.minor, version.patch)
     return is_same_major and is_same_minor and is_same_patch and is_same_text
 

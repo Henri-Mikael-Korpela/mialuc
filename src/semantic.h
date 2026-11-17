@@ -67,6 +67,10 @@ typedef enum {
     // call, because the text of the result is made then. The subject is the first name or string
     // of the expression.
     SEMANTIC_STATUS_CONCATENATION_NOT_CONSTANT,
+    // The argument of `int_to_str` that is not known when the program is compiled, such as a
+    // variable, because the text of the number is made then. The subject is the first name or
+    // number of the expression.
+    SEMANTIC_STATUS_INT_TO_STR_NOT_CONSTANT,
     // A constant that is defined in terms of itself. The subject is the name where the circle
     // closes.
     SEMANTIC_STATUS_CONSTANT_CYCLE,

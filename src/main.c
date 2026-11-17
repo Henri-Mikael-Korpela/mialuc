@@ -1266,7 +1266,8 @@ static Str main_concatenated_value(Ast_Node const *nodes, Constant_Value const *
     }
     Ast_Node_Index literal = constants[target].string;
     if (literal == AST_NODE_INDEX_NONE || literal == 0 || literal >= node_count ||
-        nodes[literal - 1].node_type != AST_NODE_TYPE_CONCATENATION) {
+        (nodes[literal - 1].node_type != AST_NODE_TYPE_CONCATENATION &&
+         nodes[literal - 1].node_type != AST_NODE_TYPE_CALL)) {
         return STR_EMPTY;
     }
     assert(nodes[literal].node_type == AST_NODE_TYPE_STRING_LITERAL);
@@ -2784,7 +2785,7 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
                 "Int, I32 or I64, or floats, but not both, 'and', 'or' and 'not' take truth values, a Byte is "
                 "compared with a Byte or a number from 0 to 255, a Rune with a Rune, strings are "
                 "compared with '==' and 'not=' only, and '++' takes a string and a string or a "
-                "rune.\n", path,
+                "rune, and 'int_to_str' takes one integer.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
         break;
     case SEMANTIC_STATUS_CONSTANT_OVERFLOW:
@@ -2797,6 +2798,12 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: the operands of '++' at '%.*s' must be known when the "
                 "program is compiled: strings, runes, or constants of them, because the text is "
                 "joined then.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_INT_TO_STR_NOT_CONSTANT:
+        fprintf(stderr, "%s:%zu:%zu: the argument of 'int_to_str' at '%.*s' must be known when "
+                "the program is compiled: an integer, or a constant of one, because the text is "
+                "made then.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
     case SEMANTIC_STATUS_CONSTANT_TEXT_TOO_LONG:

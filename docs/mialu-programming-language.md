@@ -60,6 +60,7 @@
   - [length_of](#length_of)
   - [int_to_byte](#int_to_byte)
   - [int_to_i32](#int_to_i32)
+  - [int_to_str](#int_to_str)
   - [str_to_c_str](#str_to_c_str)
   - [try_str_to_int](#try_str_to_int)
   - [utf8_decode](#utf8_decode)
@@ -2114,6 +2115,7 @@ A built-in procedure is a procedure that the language has, and that is called li
 | [`length_of`](#length_of) | an array, an array slice or a `Str` | the number of its elements or characters, an `Int` |
 | [`int_to_byte`](#int_to_byte) | an `Int` | a `Byte` of it, and stops the program when it is not from 0 to 255 |
 | [`int_to_i32`](#int_to_i32) | an `Int` or an `I64` | an `I32` of it, and stops the program when it is not from -2147483648 to 2147483647 |
+| [`int_to_str`](#int_to_str) | an integer that is known when the program is compiled | its decimal text, a string that is a constant |
 | [`str_to_c_str`](#str_to_c_str) | a `Str` | a `C_Str`, a copy of it that ends with a zero |
 | [`try_str_to_int`](#try_str_to_int) | a `Str` | two values: the `Int` that it is, and whether it is one |
 | [`utf8_decode`](#utf8_decode) | an array or an array slice of `Byte` | two values: the `Str` of the bytes, and whether they are valid UTF-8 |
@@ -2164,6 +2166,19 @@ to_i32 :: proc(n: Int) I32 ->
 ```
 
 `to_i32(123456)` and `to_i32(0 - 5)` are the `I32` values 123456 and -5, and `to_i32(2147483648)` and `to_i32(0 - 2147483649)` stop the program. A number that is known when the program is compiled needs no conversion: an untyped integer that fits in 32 bits is an `I32` where one is wanted. The other direction, from an `I32` to an `Int`, never loses anything, so it is a [cast](#casts), `cast(Int)n`.
+
+### int_to_str
+
+`int_to_str` makes the decimal text of an integer, a string. It is the only built-in procedure that is a [constant](#constants): its argument must be known when the program is compiled, so a literal, a constant or a constant expression, whose type is untyped, `Int`, `I32` or `I64`, and the text is made then. The result is one string, like a string literal, so nothing is made when the program runs, and it can be joined with `++`, compared, measured, given to a constant, or given to a `C_Str`, as any other constant string. A negative number has a minus sign before its digits, and there are no other characters: no plus sign, no leading zeros and no separators.
+
+```
+MAJOR :: 1
+MINOR :: 20
+
+VERSION :: int_to_str(MAJOR) ++ '.' ++ int_to_str(MINOR)
+```
+
+`VERSION` is the string `"1.20"`, and `int_to_str(0 - 7)` is `"-7"`. A `Byte`, a `Rune`, a truth value, a float or a string is not an integer, so `int_to_str(B)` for a `Byte` constant `B` is an error, and so is an argument that is known only when the program runs, such as a variable or a parameter, because the text is made when the program is compiled. The other way round, making a number of text, is `try_str_to_int`, which works when the program runs.
 
 ### str_to_c_str
 

@@ -178,7 +178,11 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   expression. It is a call of the procedure that the name in the payload stands for, which is a
  *   procedure, or a variable, a parameter or a global variable that holds a pointer to one, and an
  *   expression like the others. The node is made before its arguments. Whether it has a value
- *   depends on the procedure, which is for the target to tell.
+ *   depends on the procedure, which is for the target to tell. A call of the built-in `int_to_str`
+ *   is the exception: the node that comes right after it in the node buffer, before its argument,
+ *   is an `AST_NODE_TYPE_STRING_LITERAL` that is not the child of any node, where the analysis
+ *   writes the text of the number, as it does for `AST_NODE_TYPE_CONCATENATION`, because the
+ *   argument must be a constant and the call is a constant string.
  * - `AST_NODE_TYPE_CALL_STATEMENT`: one child, an `AST_NODE_TYPE_CALL` whose value, if it has
  *   one, is dropped. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_CAST`: one child, the operand, as `b` in `cast(Int)b`. The name of the type that
