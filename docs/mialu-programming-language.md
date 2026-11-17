@@ -68,6 +68,7 @@
   - [x64 for Windows](#x64-for-windows)
 - [Possible future features](#possible-future-features)
   - [Parametric polymorphism](#parametric-polymorphism)
+  - [Converting a string to bytes](#converting-a-string-to-bytes)
 - [Rejected ideas](#rejected-ideas)
   - [Interfaces](#interfaces)
 
@@ -455,6 +456,8 @@ for character in "Héllo" ->
 ```
 
 Characters are found by walking over the string from its start, because the bytes of the characters before one say how far it is, so `s[i]` and `s[low:high]` take as long as the index is large, and not the same time for every index as the subscript of an array does. The characters are code points: a character that a person sees can be more than one of them, such as an `e` with an accent that is written as two code points, and a string is never normalized, so `"é"` of one code point and of two are different strings, with different lengths.
+
+A program that needs the bytes of a string, and not its characters, should convert the `Str` to a `[]Byte`, and work on that. This is the recommendation whenever one wants to go through a string by byte, or to know how many bytes it has: `length_of` of the `[]Byte` is the length in bytes, a for statement over it gives each `Byte`, and a subscript of it takes the same time for every index and is the byte at that place. That is what the bytes are for, such as a size that is written to a file or sent over a network, a checksum, a parser of a format that is made of bytes and not of text, or a test for one ASCII character, and it is not what the operations of the string do, which go by the character. The `[]Byte` is a view of the bytes of the string, and not a copy, as an [array slice](#array-slices) is a view of the elements of an array, so the conversion allocates nothing and costs nothing, and the `[]Byte` cannot be used to change a string, which is immutable. Counting the bytes by `length_of` of the string, which counts characters, or going through a string by `s[i]` to get at its bytes, takes more time and gives the wrong answer for a string that is not ASCII, so it is not the way. See [Converting a string to bytes](#converting-a-string-to-bytes), which says that the language does not have this conversion yet.
 
 Strings are joined with `++`, which has the same precedence as `+` and `-` and is left associative. It takes two strings, or a string and a rune on either side, and a rune is joined as its UTF-8 bytes, so `"Hello" ++ ' ' ++ "world" ++ '🚀'` is the string `"Hello world🚀"`. Both operands must be constants, see [Constants](#constants), because the joining is done when the program is compiled: the program has the joined text as one string, like a string literal, and nothing is joined when it runs. `++` does not allocate, and an operand that is known only when the program runs, such as a variable or the result of a call, is an error. Two runes are not joined, and neither is a number, so `'a' ++ 'b'` and `"count: " ++ 3` are errors. The result is an untyped string, so it can be given to a `C_Str` too, unless an operand is a constant that was given the type `Str`, and then the result is a `Str`. The joined text of all the constants of a program is limited in size, and a program that has more is rejected.
 
@@ -2222,6 +2225,26 @@ main :: proc() ->
     y := sum(1.0, 2.0)
     ...
 ```
+
+### Converting a string to bytes
+
+The recommendation of [Strings](#strings), to go through a `Str` by byte and to measure it in bytes by converting it to a `[]Byte`, needs a conversion that the language does not have yet. Today a program has no way to read the bytes of a `Str`: it can go through the characters with a for statement, take one with a subscript, take a part with a range and count them with `length_of`, and it can hand the bytes to the C library with `str_to_c_str`, but it cannot see a byte, or count them.
+
+The conversion would give a `[]Byte` that has the address and the length in bytes of the string, which are the two words that a `Str` is already, so there is nothing to compute and nothing to copy. How it is written is not decided: it could be a [cast](#casts), such as `cast([]Byte)text`, or a [built-in procedure](#built-in-procedures). The `[]Byte` that it gives is read only, since a string is immutable.
+
+```
+byte_count :: proc(text: Str) Int ->
+    bytes := cast([]Byte)text
+    return length_of(bytes)
+
+sum_of_bytes :: proc(text: Str) Int ->
+    total := 0
+    for b in cast([]Byte)text ->
+        total += cast(Int)b
+    return total
+```
+
+`byte_count("äiti")` would be 5, where `length_of("äiti")` is 4.
 
 ## Rejected ideas
 
