@@ -409,6 +409,8 @@ static void            wasm_string_subscript_write            (Wasm_Builder *bui
                                                                Ast_Node_Index procedure);
 static void            wasm_string_length_write               (Wasm_Builder *builder,
                                                                Ast_Node_Index procedure);
+static void            wasm_string_slice_write                (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
 static bool            wasm_comparison_is_of_strings          (Wasm_Builder const *builder,
                                                                Ast_Node_Index comparison);
 static void            wasm_build_code_section_body_string_comparison
@@ -4185,6 +4187,10 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
         return wasm_type_make(WASM_VALUE_TYPE_ENUM_LITERAL);
     case AST_NODE_TYPE_SLICE: {
         Wasm_Type slice = wasm_expression_type(builder, node->first_child);
+        // A slice of a string is a string.
+        if (slice.kind == WASM_VALUE_TYPE_STR) {
+            return slice;
+        }
         if (not wasm_type_is_sequence(slice)) {
             return wasm_type_make(WASM_VALUE_TYPE_NONE);
         }
@@ -6341,6 +6347,56 @@ static void wasm_string_subscript_write(Wasm_Builder *builder, Ast_Node_Index pr
 }
 
 /**
+ * Writes the instructions for the slice `s[low:high]` of a string, whose address, length and bounds
+ * are on the stack, and leave the string of the characters from `low` up to, and not including,
+ * `high`, which count characters and not bytes: the address of the character at `low` and the number
+ * of bytes up to the one at `high`. The string is not copied, it views bytes of the string that it
+ * is a slice of. The bounds are walked to from the start like the index of a subscript, see
+ * `wasm_utf8_skip_write`, and it traps unless `low` is not above `high`, which is an unsigned
+ * comparison, so that a negative bound traps too, and `high` is not above the number of characters.
+ */
+static void wasm_string_slice_write(Wasm_Builder *builder, Ast_Node_Index procedure) {
+    Wasm_Writer *writer = &builder->writer;
+    size_t next = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+    size_t end = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_SECOND);
+    size_t start = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_TEMPORARY_32);
+    size_t low = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_LOW);
+    size_t high = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_HIGH);
+    size_t count = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_TEMPORARY_64);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, high);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, low);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, low);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, high);
+    wasm_write_byte(writer, WASM_OPCODE_I64_GT_U);
+    wasm_structured_trap(builder);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, low);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, count);
+    wasm_utf8_skip_write(builder, next, end, count);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, start);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, high);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, low);
+    wasm_write_byte(writer, WASM_OPCODE_I64_SUB);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, count);
+    wasm_utf8_skip_write(builder, next, end, count);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, start);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, start);
+    wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+}
+
+/**
  * Writes the instructions that count the characters of the string whose address and length are on
  * the stack, and leave the count as an `Int`: the bytes that are not the continuation of another,
  * which have the bits 10 at the top, are the first byte of a character.
@@ -6879,7 +6935,7 @@ static bool wasm_build_code_section_body_slice(Wasm_Builder *builder, Ast_Node_I
     assert(first != end);
 
     Wasm_Type base_type = wasm_expression_type(builder, base);
-    if (not wasm_type_is_sequence(base_type)) {
+    if (base_type.kind != WASM_VALUE_TYPE_STR && not wasm_type_is_sequence(base_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, base));
     }
@@ -6891,6 +6947,10 @@ static bool wasm_build_code_section_body_slice(Wasm_Builder *builder, Ast_Node_I
         }
     }
 
+    if (base_type.kind == WASM_VALUE_TYPE_STR) {
+        wasm_string_slice_write(builder, procedure);
+        return true;
+    }
     wasm_slice_write(builder, procedure,
                      wasm_type_stride_bytes(builder, wasm_type_element(base_type)));
     return true;

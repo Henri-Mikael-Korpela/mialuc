@@ -80,7 +80,9 @@
      - `length_of` is a built-in procedure, so it is a call of a name that nothing in the program
        defines. It takes one array, array slice or `Str`.
      - A `Str` can be subscripted, `s[i]`, which is the `Rune` of the character at the index, and
-       the grammar cannot tell it from the subscript of an array.
+       the grammar cannot tell it from the subscript of an array. It can be sliced as well,
+       `s[low:high]`, which is a `Str` of the characters from `low` up to `high`, and both bounds
+       must be written.
      - `int_to_byte` is a built-in procedure like `length_of`. It takes an `Int` and gives a
        `Byte`.
      - `try_str_to_int` is a built-in procedure like `length_of`. It takes a `Str` and gives two

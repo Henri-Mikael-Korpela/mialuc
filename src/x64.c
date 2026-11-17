@@ -727,6 +727,8 @@ static void         x64_utf8_decode_write        (X64_Builder *builder);
 static bool         x64_string_subscript_write   (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static void         x64_string_length_write      (X64_Builder *builder, int32_t place);
+static bool         x64_string_slice_write       (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame);
 static bool         x64_slice_write              (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static int32_t      x64_stack_displacement       (X64_Builder const *builder, size_t start,
@@ -4407,6 +4409,59 @@ static void x64_string_length_write(X64_Builder *builder, int32_t place) {
 }
 
 /**
+ * Writes the slice `s[low:high]` of a string, whose string and bounds are on the stack of values,
+ * and leaves the string of the characters from `low` up to, and not including, `high`, which count
+ * characters and not bytes: the address of the character at `low` and the number of bytes up to the
+ * one at `high`. The string is not copied, it views bytes of the string that it is a slice of. The
+ * bounds are walked to from the start like the index of a subscript, see `x64_utf8_skip_write`,
+ * and it traps unless `low` is not above `high`, which is an unsigned comparison, so that a negative
+ * bound traps too, and `high` is not above the number of characters. Returns false after it
+ * recorded an error.
+ */
+static bool x64_string_slice_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
+    Ast_Node_Index node = frame->node;
+    Ast_Node_Index sequence = builder->nodes[node].first_child;
+    X64_Type int_type = x64_type_make(X64_TYPE_KIND_INT);
+    for (Ast_Node_Index bound = builder->nodes[sequence].next_sibling;
+         bound != AST_NODE_INDEX_NONE; bound = builder->nodes[bound].next_sibling) {
+        if (not x64_type_accepts(builder, int_type, bound)) {
+            return x64_fail(builder, X64_BUILD_STATUS_INDEX_TYPE_INVALID,
+                            x64_expression_subject(builder, bound));
+        }
+    }
+
+    int32_t string = x64_stack_displacement(builder, frame->stack_start, 2);
+    int32_t low = x64_stack_displacement(builder, frame->stack_start + 2, 1);
+    int32_t high = x64_stack_displacement(builder, frame->stack_start + 3, 1);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, low);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, high);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_write_trap_unless(builder, X64_CONDITION_BELOW_EQUAL);
+
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, string);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R11, X64_REGISTER_RBP,
+                     string + X64_WORD_SIZE_BYTES);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_R10, X64_REGISTER_R11);
+    // The first walk goes to the character at `low`, which is kept in `r9`, and the second one
+    // from there over the characters up to `high`.
+    x64_utf8_skip_write(builder);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_R10, X64_REGISTER_R9);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, high);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, low);
+    x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_utf8_skip_write(builder);
+    // The number of bytes is the distance from the first character to the end of the last one.
+    x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_R9, X64_REGISTER_R10);
+
+    x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+    int32_t target = x64_stack_push(builder, 2);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_R9, X64_REGISTER_RBP, target);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_R10, X64_REGISTER_RBP,
+                     target + X64_WORD_SIZE_BYTES);
+    return true;
+}
+
+/**
  * Writes the slice `a[low:high]` of `frame`, whose array or array slice and bounds are on the
  * stack of values, and leaves the slice: the address of the element at `low` and the number of
  * elements up to `high`. It traps unless `low` is not above `high` and `high` is not above the
@@ -4417,6 +4472,9 @@ static bool x64_slice_write(X64_Builder *builder, X64_Expression_Frame const *fr
     Ast_Node_Index node = frame->node;
     Ast_Node_Index sequence = builder->nodes[node].first_child;
     X64_Type type = x64_expression_type(builder, sequence);
+    if (type.kind == X64_TYPE_KIND_STR) {
+        return x64_string_slice_write(builder, frame);
+    }
     if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
         return x64_fail(builder, X64_BUILD_STATUS_ARRAY_EXPECTED,
                         x64_expression_subject(builder, node));
