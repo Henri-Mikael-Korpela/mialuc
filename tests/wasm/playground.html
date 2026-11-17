@@ -345,6 +345,7 @@
             floats: "floats",
             "foreign functions": "foreign-functions",
             "32-bit integers": "i32",
+            "64-bit integers": "i64",
             "global variables": "global-variables",
             "integer literals": "integer-literals",
             loops: "loops",
@@ -376,7 +377,7 @@
          * foreign-functions.imports.js. The other examples have no such file, and the section
          * stays empty for them.
          */
-        const EXAMPLES_WITH_IMPORTS = new Set(["c-strings", "constants", "foreign-functions", "i32"]);
+        const EXAMPLES_WITH_IMPORTS = new Set(["c-strings", "constants", "foreign-functions", "i32", "i64"]);
 
         // Waits this long after the last key press before compiling, so that typing does not send
         // a request per key.

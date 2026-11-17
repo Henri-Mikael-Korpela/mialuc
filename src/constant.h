@@ -48,6 +48,9 @@ typedef enum {
     // A constant that is defined with the type `I32`, or arithmetic of one with an untyped integer.
     // Its value is a number from -2147483648 to 2147483647.
     CONSTANT_TYPE_I32,
+    // A constant that is defined with the type `I64`, or arithmetic of one with an untyped integer.
+    // Its value is any number that an `Int` holds.
+    CONSTANT_TYPE_I64,
     CONSTANT_TYPE_INT,
     // A rune literal, such as `'A'`, whose code point is in `integer`, and a constant that is
     // defined with the type `Rune`. A rune has no arithmetic, and no untyped integer is one.
@@ -94,7 +97,7 @@ typedef enum {
     // The text of the strings that `++` joins does not fit in the `Constant_Text` any more.
     // `error` is the operator.
     CONSTANT_STATUS_TEXT_TOO_LONG,
-    // A typed constant whose type is not `Int`, `I32`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`,
+    // A typed constant whose type is not `Int`, `I32`, `I64`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`,
     // which are the types that a constant can have. `error` is the definition.
     CONSTANT_STATUS_TYPE_INVALID,
     // A value that is not of the type that it is given, such as a string for a constant of type

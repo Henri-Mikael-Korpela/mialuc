@@ -217,6 +217,7 @@ Constant_Type constant_type_default(Constant_Type type) {
     case CONSTANT_TYPE_F32:
     case CONSTANT_TYPE_F64:
     case CONSTANT_TYPE_I32:
+    case CONSTANT_TYPE_I64:
     case CONSTANT_TYPE_INT:
     case CONSTANT_TYPE_RUNE:
     case CONSTANT_TYPE_STR:
@@ -452,6 +453,10 @@ static Constant_Value constant_convert(Ast_Node const *nodes, Ast_Node_Index def
     } else if (str_equals(name, STR("I32"))) {
         target = CONSTANT_TYPE_I32;
         untyped = CONSTANT_TYPE_UNTYPED_INTEGER;
+    } else if (str_equals(name, STR("I64"))) {
+        // Every untyped integer fits, because it is a number of 64 bits already.
+        target = CONSTANT_TYPE_I64;
+        untyped = CONSTANT_TYPE_UNTYPED_INTEGER;
     } else if (str_equals(name, STR("F32"))) {
         target = CONSTANT_TYPE_F32;
         untyped = CONSTANT_TYPE_UNTYPED_FLOAT;
@@ -622,10 +627,13 @@ static Constant_Value constant_arithmetic(Ast_Node const *nodes, Ast_Node_Index 
     // An `I32` is worked with another `I32`, or an untyped integer that fits in it, and not with
     // an `Int`, because nothing is converted.
     bool is_i32 = left.type == CONSTANT_TYPE_I32 || right.type == CONSTANT_TYPE_I32;
+    bool is_i64 = left.type == CONSTANT_TYPE_I64 || right.type == CONSTANT_TYPE_I64;
+    // The sized types are not worked with each other, or with an `Int`.
+    if ((is_i32 && is_i64) ||
+        ((is_i32 || is_i64) && (left.type == CONSTANT_TYPE_INT || right.type == CONSTANT_TYPE_INT))) {
+        return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, operation);
+    }
     if (is_i32) {
-        if (left.type == CONSTANT_TYPE_INT || right.type == CONSTANT_TYPE_INT) {
-            return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, operation);
-        }
         if (left.type == CONSTANT_TYPE_UNTYPED_INTEGER && not constant_is_i32(left)) {
             return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, operation);
         }
@@ -661,6 +669,9 @@ static Constant_Value constant_arithmetic(Ast_Node const *nodes, Ast_Node_Index 
             return constant_fail(CONSTANT_STATUS_OVERFLOW, operation);
         }
         result.type = CONSTANT_TYPE_I32;
+    }
+    if (is_i64) {
+        result.type = CONSTANT_TYPE_I64;
     }
     return result;
 }
@@ -1011,7 +1022,8 @@ static bool constant_type_is_float(Constant_Type type) {
 
 static bool constant_type_is_integer(Constant_Type type) {
     return type == CONSTANT_TYPE_INT || type == CONSTANT_TYPE_BYTE ||
-           type == CONSTANT_TYPE_I32 || type == CONSTANT_TYPE_UNTYPED_INTEGER;
+           type == CONSTANT_TYPE_I32 || type == CONSTANT_TYPE_I64 ||
+           type == CONSTANT_TYPE_UNTYPED_INTEGER;
 }
 
 static bool constant_type_is_string(Constant_Type type) {

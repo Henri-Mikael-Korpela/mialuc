@@ -101,6 +101,7 @@ typedef enum {
     WASM_VALUE_TYPE_F32,
     WASM_VALUE_TYPE_F64,
     WASM_VALUE_TYPE_I32,
+    WASM_VALUE_TYPE_I64,
     WASM_VALUE_TYPE_INT,
     WASM_VALUE_TYPE_NIL,
     WASM_VALUE_TYPE_NONE,
@@ -1561,7 +1562,8 @@ static void wasm_build_global_section(Wasm_Builder *builder) {
                         wasm_write_signed(&builder->writer, parts[slot]);
                         wasm_write_byte(&builder->writer, WASM_OPCODE_END);
                     }
-                } else if (value_type.kind == WASM_VALUE_TYPE_INT) {
+                } else if (value_type.kind == WASM_VALUE_TYPE_INT ||
+                           value_type.kind == WASM_VALUE_TYPE_I64) {
                     wasm_write_byte(&builder->writer, WASM_TYPE_I64);
                     wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
                     wasm_write_byte(&builder->writer, WASM_OPCODE_I64_CONST);
@@ -3171,7 +3173,9 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
                                  (argument_type.kind == WASM_VALUE_TYPE_STR &&
                                   str_equals(name, STR("length_of")));
         if (str_equals(name, STR("int_to_byte")) || str_equals(name, STR("int_to_i32"))) {
-            is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_INT;
+            is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_INT ||
+                                (argument_type.kind == WASM_VALUE_TYPE_I64 &&
+                                 str_equals(name, STR("int_to_i32")));
         } else if (str_equals(name, STR("str_to_c_str")) ||
                    str_equals(name, STR("try_str_to_int"))) {
             is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_STR;
@@ -3374,7 +3378,7 @@ static bool wasm_build_code_section_body_variable_assignment(Wasm_Builder *build
     }
 
     if (variable_type.kind != WASM_VALUE_TYPE_INT && variable_type.kind != WASM_VALUE_TYPE_I32 &&
-        not wasm_type_is_float(variable_type)) {
+        variable_type.kind != WASM_VALUE_TYPE_I64 && not wasm_type_is_float(variable_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, target_name);
     }
 
@@ -3487,7 +3491,7 @@ static bool wasm_build_code_section_body_field_assignment(Wasm_Builder *builder,
         }
 
         if (path.type.kind != WASM_VALUE_TYPE_INT && path.type.kind != WASM_VALUE_TYPE_I32 &&
-            not wasm_type_is_float(path.type)) {
+            path.type.kind != WASM_VALUE_TYPE_I64 && not wasm_type_is_float(path.type)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
                              field_name);
         }
@@ -3581,7 +3585,7 @@ static bool wasm_build_code_section_body_place_store(Wasm_Builder *builder,
     }
 
     if (type.kind != WASM_VALUE_TYPE_INT && type.kind != WASM_VALUE_TYPE_I32 &&
-        not wasm_type_is_float(type)) {
+        type.kind != WASM_VALUE_TYPE_I64 && not wasm_type_is_float(type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
                          wasm_expression_subject(builder, definition, target));
     }
@@ -4315,12 +4319,14 @@ static Wasm_Type wasm_arithmetic_type(Wasm_Builder const *builder, Ast_Node_Inde
     Ast_Node_Index right = builder->nodes[operation].last_child;
     if (wasm_is_constant(builder, left) && not wasm_is_constant(builder, right)) {
         Wasm_Type right_type = wasm_expression_type(builder, right);
-        if (wasm_type_is_float(right_type) || right_type.kind == WASM_VALUE_TYPE_I32) {
+        if (wasm_type_is_float(right_type) || right_type.kind == WASM_VALUE_TYPE_I32 ||
+            right_type.kind == WASM_VALUE_TYPE_I64) {
             return right_type;
         }
     }
     Wasm_Type left_type = wasm_expression_type(builder, left);
-    if (wasm_type_is_float(left_type) || left_type.kind == WASM_VALUE_TYPE_I32) {
+    if (wasm_type_is_float(left_type) || left_type.kind == WASM_VALUE_TYPE_I32 ||
+        left_type.kind == WASM_VALUE_TYPE_I64) {
         return left_type;
     }
     return wasm_type_make(WASM_VALUE_TYPE_INT);
@@ -4415,10 +4421,13 @@ static Str wasm_expression_subject(Wasm_Builder const *builder, Ast_Node_Index d
  * of an `F64` that has more digits than an `F32` has.
  */
 static bool wasm_cast_is_valid(Wasm_Type target, Wasm_Type source) {
-    if (target.kind == WASM_VALUE_TYPE_INT) {
+    // An `I64` is the same number as an `Int`, so each is cast to the other, and every integer, a
+    // `Rune` and a float are cast to either.
+    if (target.kind == WASM_VALUE_TYPE_INT || target.kind == WASM_VALUE_TYPE_I64) {
         return source.kind == WASM_VALUE_TYPE_BYTE || source.kind == WASM_VALUE_TYPE_BOOL ||
-               source.kind == WASM_VALUE_TYPE_I32 || source.kind == WASM_VALUE_TYPE_INT ||
-               source.kind == WASM_VALUE_TYPE_RUNE || wasm_type_is_float(source);
+               source.kind == WASM_VALUE_TYPE_I32 || source.kind == WASM_VALUE_TYPE_I64 ||
+               source.kind == WASM_VALUE_TYPE_INT || source.kind == WASM_VALUE_TYPE_RUNE ||
+               wasm_type_is_float(source);
     }
     // An `I32` holds every `Byte`, `Bool` and `Rune`, and itself. An `Int` is not cast to one,
     // because it may not fit, see `int_to_i32`.
@@ -4436,7 +4445,8 @@ static bool wasm_cast_is_valid(Wasm_Type target, Wasm_Type source) {
     }
     return wasm_type_is_float(target) &&
            (source.kind == WASM_VALUE_TYPE_BYTE || source.kind == WASM_VALUE_TYPE_I32 ||
-            source.kind == WASM_VALUE_TYPE_INT || wasm_type_is_float(source));
+            source.kind == WASM_VALUE_TYPE_I64 || source.kind == WASM_VALUE_TYPE_INT ||
+            wasm_type_is_float(source));
 }
 
 /**
@@ -4530,6 +4540,21 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
                              wasm_expression_subject(builder, definition, left));
         }
         if (not wasm_value_is_accepted(builder, rune_type, right)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, right));
+        }
+        return true;
+    }
+
+    // An `I64` has an order, like an `Int`. The other operand is an `I64` too, or an untyped integer,
+    // which is one there.
+    if (left_type.kind == WASM_VALUE_TYPE_I64 || right_type.kind == WASM_VALUE_TYPE_I64) {
+        Wasm_Type i64_type = wasm_type_make(WASM_VALUE_TYPE_I64);
+        if (not wasm_value_is_accepted(builder, i64_type, left)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, left));
+        }
+        if (not wasm_value_is_accepted(builder, i64_type, right)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                              wasm_expression_subject(builder, definition, right));
         }
@@ -4964,14 +4989,14 @@ static void wasm_cast_write(Wasm_Builder *builder, Ast_Node_Index cast) {
         // is the same in an `I32`, as in a `Rune`.
         return;
     }
-    if (target.kind == WASM_VALUE_TYPE_INT) {
+    if (target.kind == WASM_VALUE_TYPE_INT || target.kind == WASM_VALUE_TYPE_I64) {
         if (source.kind == WASM_VALUE_TYPE_I32) {
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_S);
         } else if (source.kind == WASM_VALUE_TYPE_F32) {
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_TRUNC_F32_S);
         } else if (source.kind == WASM_VALUE_TYPE_F64) {
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_TRUNC_F64_S);
-        } else if (source.kind != WASM_VALUE_TYPE_INT) {
+        } else if (source.kind != WASM_VALUE_TYPE_INT && source.kind != WASM_VALUE_TYPE_I64) {
             // A `Byte`, a `Bool` and a `Rune` are 32-bit integers that are not negative.
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_U);
         }
@@ -4980,7 +5005,7 @@ static void wasm_cast_write(Wasm_Builder *builder, Ast_Node_Index cast) {
 
     assert(wasm_type_is_float(target));
     bool is_double = target.kind == WASM_VALUE_TYPE_F64;
-    if (source.kind == WASM_VALUE_TYPE_INT) {
+    if (source.kind == WASM_VALUE_TYPE_INT || source.kind == WASM_VALUE_TYPE_I64) {
         wasm_write_byte(&builder->writer,
                         is_double ? WASM_OPCODE_F64_CONVERT_I64_S : WASM_OPCODE_F32_CONVERT_I64_S);
     } else if (source.kind == WASM_VALUE_TYPE_I32) {
@@ -5805,7 +5830,7 @@ static bool wasm_for_is_each(Wasm_Builder const *builder, Ast_Node_Index stateme
 static byte wasm_assignment_opcode(Ast_Node_Type node_type, Wasm_Type type) {
     assert(node_type != AST_NODE_TYPE_ASSIGNMENT);
     assert(type.kind == WASM_VALUE_TYPE_INT || type.kind == WASM_VALUE_TYPE_I32 ||
-           wasm_type_is_float(type));
+           type.kind == WASM_VALUE_TYPE_I64 || wasm_type_is_float(type));
 
     if (wasm_type_is_float(type)) {
         return wasm_float_operation_opcode(node_type, type);
@@ -7308,6 +7333,7 @@ static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
     case WASM_VALUE_TYPE_F32:
     case WASM_VALUE_TYPE_F64:
     case WASM_VALUE_TYPE_I32:
+    case WASM_VALUE_TYPE_I64:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_PROCEDURE:
     case WASM_VALUE_TYPE_RUNE:
@@ -7742,6 +7768,9 @@ static Wasm_Type wasm_type_of_plain_name(Wasm_Builder const *builder, Str type_n
     if (str_equals(type_name, STR("I32"))) {
         return wasm_type_make(WASM_VALUE_TYPE_I32);
     }
+    if (str_equals(type_name, STR("I64"))) {
+        return wasm_type_make(WASM_VALUE_TYPE_I64);
+    }
     if (str_equals(type_name, STR("Int"))) {
         return wasm_type_make(WASM_VALUE_TYPE_INT);
     }
@@ -7921,7 +7950,7 @@ static size_t wasm_struct_slots(Wasm_Builder const *builder, Ast_Node_Index stru
             nested = type_node;
         } else if (builder->nodes[type_node].node_type == AST_NODE_TYPE_TYPE_NAME) {
             Str name = builder->nodes[type_node].payload.type_name.name;
-            if (str_equals(name, STR("Int"))) {
+            if (str_equals(name, STR("Int")) || str_equals(name, STR("I64"))) {
                 leaf = WASM_VALUE_TYPE_INT;
             } else if (str_equals(name, STR("F32"))) {
                 leaf = WASM_VALUE_TYPE_F32;
@@ -7991,6 +8020,7 @@ static size_t wasm_type_slot_count(Wasm_Builder const *builder, Wasm_Type type) 
     case WASM_VALUE_TYPE_F32:
     case WASM_VALUE_TYPE_F64:
     case WASM_VALUE_TYPE_I32:
+    case WASM_VALUE_TYPE_I64:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_ENUM:
     case WASM_VALUE_TYPE_ENUM_LITERAL:
@@ -8031,6 +8061,7 @@ static byte wasm_type_slot_kind(Wasm_Builder const *builder, Wasm_Type type, siz
         return WASM_TYPE_F64;
     case WASM_VALUE_TYPE_ENUM:
     case WASM_VALUE_TYPE_ENUM_LITERAL:
+    case WASM_VALUE_TYPE_I64:
     case WASM_VALUE_TYPE_INT:
         return WASM_TYPE_I64;
     case WASM_VALUE_TYPE_ARRAY:
@@ -8171,6 +8202,7 @@ static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
     case WASM_VALUE_TYPE_F32:
     case WASM_VALUE_TYPE_F64:
     case WASM_VALUE_TYPE_I32:
+    case WASM_VALUE_TYPE_I64:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_NONE:
@@ -8247,6 +8279,8 @@ static Wasm_Type wasm_constant_type(Constant_Type type) {
         return wasm_type_make(WASM_VALUE_TYPE_F64);
     case CONSTANT_TYPE_I32:
         return wasm_type_make(WASM_VALUE_TYPE_I32);
+    case CONSTANT_TYPE_I64:
+        return wasm_type_make(WASM_VALUE_TYPE_I64);
     case CONSTANT_TYPE_INT:
         return wasm_type_make(WASM_VALUE_TYPE_INT);
     case CONSTANT_TYPE_RUNE:
@@ -8281,6 +8315,7 @@ static bool wasm_constant_is_accepted(Wasm_Type target, Constant_Value value) {
     case CONSTANT_TYPE_F32:
     case CONSTANT_TYPE_F64:
     case CONSTANT_TYPE_I32:
+    case CONSTANT_TYPE_I64:
     case CONSTANT_TYPE_INT:
     case CONSTANT_TYPE_RUNE:
     case CONSTANT_TYPE_STR:
@@ -8291,7 +8326,7 @@ static bool wasm_constant_is_accepted(Wasm_Type target, Constant_Value value) {
         return (target.kind == WASM_VALUE_TYPE_F32 && constant_is_f32(value)) ||
                target.kind == WASM_VALUE_TYPE_F64;
     case CONSTANT_TYPE_UNTYPED_INTEGER:
-        return target.kind == WASM_VALUE_TYPE_INT ||
+        return target.kind == WASM_VALUE_TYPE_INT || target.kind == WASM_VALUE_TYPE_I64 ||
                (target.kind == WASM_VALUE_TYPE_BYTE && constant_is_byte(value)) ||
                (target.kind == WASM_VALUE_TYPE_I32 && constant_is_i32(value));
     case CONSTANT_TYPE_UNTYPED_STRING:
@@ -8335,7 +8370,7 @@ static void wasm_constant_write(Wasm_Builder *builder, Constant_Value value, Was
         wasm_build_code_section_body_string(builder, value.string, false);
         break;
     default:
-        assert(type.kind == WASM_VALUE_TYPE_INT);
+        assert(type.kind == WASM_VALUE_TYPE_INT || type.kind == WASM_VALUE_TYPE_I64);
         wasm_write_byte(&builder->writer, WASM_OPCODE_I64_CONST);
         wasm_write_signed(&builder->writer, value.integer);
         break;
