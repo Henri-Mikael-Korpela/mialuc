@@ -880,8 +880,12 @@ static X64_Type     x64_arithmetic_type          (X64_Builder const *builder,
                                                   Ast_Node_Index operation);
 static X64_Type_Kind x64_parameter_float_at       (X64_Builder const *builder,
                                                   Ast_Node_Index procedure, size_t word);
-static void         x64_string_comparison_write  (X64_Builder *builder,
+static bool         x64_type_is_byte_sequence    (X64_Type type);
+static void         x64_bytes_length_load        (X64_Builder *builder, X64_Type type,
+                                                  byte register_number, int32_t place);
+static void         x64_bytes_comparison_write   (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame,
+                                                  X64_Type left_type, X64_Type right_type,
                                                   bool is_equal);
 static bool         x64_float_comparison_write   (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame,
@@ -5247,6 +5251,21 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     Ast_Node_Index right = builder->nodes[left].next_sibling;
     Ast_Comparison_Operator operator = builder->nodes[node].payload.comparison.operator;
 
+    // Two arrays or array slices of bytes, in any mix, are the same when they have the same number
+    // of bytes and the same bytes, and have no order.
+    X64_Type left_type = x64_expression_type(builder, left);
+    X64_Type right_type = x64_expression_type(builder, right);
+    if (x64_type_is_byte_sequence(left_type) && x64_type_is_byte_sequence(right_type)) {
+        if (operator != AST_COMPARISON_OPERATOR_EQUAL &&
+            operator != AST_COMPARISON_OPERATOR_NOT_EQUAL) {
+            return x64_fail(builder, X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                            x64_expression_subject(builder, node));
+        }
+        x64_bytes_comparison_write(builder, frame, left_type, right_type,
+                                   operator == AST_COMPARISON_OPERATOR_EQUAL);
+        return true;
+    }
+
     // An untyped operand and `nil` take the type of the other one, so the type of the comparison
     // is the type of the operand that has one.
     X64_Type type = x64_expression_type(builder, left);
@@ -5275,7 +5294,8 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
         return x64_float_comparison_write(builder, frame, type.kind);
     }
     if (type.kind == X64_TYPE_KIND_STR) {
-        x64_string_comparison_write(builder, frame, operator == AST_COMPARISON_OPERATOR_EQUAL);
+        x64_bytes_comparison_write(builder, frame, type, type,
+                                   operator == AST_COMPARISON_OPERATOR_EQUAL);
         return true;
     }
 
@@ -5317,24 +5337,51 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
 }
 
 /**
- * Writes the comparison of two strings with `==`, or with `not=` when `is_equal` is false, whose
- * operands are on the stack of values, each an address and a length. The lengths are compared
- * first, and when they are the same a loop compares the bytes one at a time, with the addresses
- * in `r10` and `r11` and the number of bytes that are left in `rax`, and leaves at the first one
- * that differs. The result is a `Bool` in `rax`, which is put on the stack in place of the operands.
+ * Returns whether `type` is an array or an array slice of bytes, which are compared by their bytes.
  */
-static void x64_string_comparison_write(X64_Builder *builder, X64_Expression_Frame const *frame,
-                                        bool is_equal) {
-    int32_t first = x64_stack_displacement(builder, frame->stack_start, 2);
-    int32_t second = x64_stack_displacement(builder, frame->stack_start + 2, 2);
+static bool x64_type_is_byte_sequence(X64_Type type) {
+    return (type.kind == X64_TYPE_KIND_ARRAY || type.kind == X64_TYPE_KIND_SLICE) &&
+           x64_type_element(type).kind == X64_TYPE_KIND_BYTE;
+}
+
+/**
+ * Writes the load of the number of bytes of the value at `rbp + place` to `register_number`, which
+ * is a string, an array or an array slice of bytes: the length of an array is part of its type, and
+ * the length of a string and of a slice is its second word.
+ */
+static void x64_bytes_length_load(X64_Builder *builder, X64_Type type, byte register_number,
+                                  int32_t place) {
+    if (type.kind == X64_TYPE_KIND_ARRAY) {
+        assert(type.length >= 0);
+        x64_write_load_integer(builder, register_number, type.length);
+        return;
+    }
+    x64_write_memory(builder, X64_OPCODE_LOAD, register_number, X64_REGISTER_RBP,
+                     place + X64_WORD_SIZE_BYTES);
+}
+
+/**
+ * Writes the comparison of two strings, two arrays or array slices of bytes, with `==`, or with
+ * `not=` when `is_equal` is false, whose operands, of the types `left_type` and `right_type`, are
+ * on the stack of values: an address and a length for a string and a slice, and the address for an
+ * array, whose length is part of its type. The lengths are compared first, and when they are the
+ * same a loop compares the bytes one at a time, with the addresses in `r10` and `r11` and the
+ * number of bytes that are left in `rax`, and leaves at the first one that differs. The result is a
+ * `Bool` in `rax`, which is put on the stack in place of the operands.
+ */
+static void x64_bytes_comparison_write(X64_Builder *builder, X64_Expression_Frame const *frame,
+                                       X64_Type left_type, X64_Type right_type, bool is_equal) {
+    size_t left_words = x64_type_word_count(builder, left_type);
+    size_t right_words = x64_type_word_count(builder, right_type);
+    int32_t first = x64_stack_displacement(builder, frame->stack_start, left_words);
+    int32_t second =
+        x64_stack_displacement(builder, frame->stack_start + left_words, right_words);
     uint32_t different_jumps = X64_JUMP_NONE;
     uint32_t same_jumps = X64_JUMP_NONE;
     uint32_t done_jumps = X64_JUMP_NONE;
 
-    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
-                     first + X64_WORD_SIZE_BYTES);
-    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP,
-                     second + X64_WORD_SIZE_BYTES);
+    x64_bytes_length_load(builder, left_type, X64_REGISTER_RAX, first);
+    x64_bytes_length_load(builder, right_type, X64_REGISTER_RCX, second);
     x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
     x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &different_jumps);
     x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, first);

@@ -37,6 +37,7 @@
 - [Arrays](#arrays)
   - [Array literals](#array-literals)
   - [Elements](#elements)
+  - [Comparing bytes](#comparing-bytes)
   - [Array slices](#array-slices)
 - [Custom data types](#custom-data-types)
   - [Enumerations](#enumerations)
@@ -671,7 +672,7 @@ is_even :: proc(n: Int) Bool ->
     return n / 2 * 2 == n
 ```
 
-Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. Two [`Rune`](#characters) values can be compared with all six operators too, and the comparison is of their code points. Two [floats](#floating-point-numbers) of one type can be compared with all six operators too, and an untyped float is of that type there, so `x < 0.5` is allowed whether `x` is an `F32` or an `F64`. A comparison with not a number is false, except `not=`, which is true. `Int`, `Byte`, `Rune` and the floats are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an untyped integer from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Two [strings](#strings) can be compared with `==` and `not=`: they are the same when they have the same length and the same bytes, so `"go"` is not the same as `"gone"` or `"Go"`, and `""` is the same as the empty string only. A string has no order, so `<`, `<=`, `>` and `>=` are errors for strings, and so is the comparison of a [`C_Str`](#c-strings), which has no length that is known, with anything. An operand is a `Str` or an untyped string, such as a literal, which is a `Str` there. The comparison of two constants is a constant, which is worked out when the program is compiled, so `SAME :: "a" == "b"` is the untyped truth value `false`. Strings that are known only when the program runs are compared then, byte by byte, and the comparison stops at the first byte that differs. Example:
+Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. Two [`Rune`](#characters) values can be compared with all six operators too, and the comparison is of their code points. Two [floats](#floating-point-numbers) of one type can be compared with all six operators too, and an untyped float is of that type there, so `x < 0.5` is allowed whether `x` is an `F32` or an `F64`. A comparison with not a number is false, except `not=`, which is true. `Int`, `Byte`, `Rune` and the floats are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an untyped integer from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Two [strings](#strings) can be compared with `==` and `not=`: they are the same when they have the same length and the same bytes, so `"go"` is not the same as `"gone"` or `"Go"`, and `""` is the same as the empty string only. A string has no order, so `<`, `<=`, `>` and `>=` are errors for strings, and so is the comparison of a [`C_Str`](#c-strings), which has no length that is known, with anything. An operand is a `Str` or an untyped string, such as a literal, which is a `Str` there. The comparison of two constants is a constant, which is worked out when the program is compiled, so `SAME :: "a" == "b"` is the untyped truth value `false`. Strings that are known only when the program runs are compared then, byte by byte, and the comparison stops at the first byte that differs. Two arrays or array slices of `Byte` can be compared with `==` and `not=` too, see [Comparing bytes](#comparing-bytes). Example:
 
 ```
 is_help :: proc(command: Str) Bool ->
@@ -1479,6 +1480,24 @@ array_element_assignment :: proc() Int ->
 ```
 
 `array_element_assignment` returns 17. The index and the array are evaluated before the value, and the value must be of the type of the elements.
+
+### Comparing bytes
+
+Two arrays or array slices of [`Byte`](#bytes) can be compared with `==` and `not=`: they are the same when they have the same number of bytes and the same bytes, in the same order. Each can be an array or a slice, in any mix, so an array is compared with a slice, and two arrays of different lengths are compared too, and are not the same:
+
+```
+is_header :: proc(bytes: []Byte) Bool ->
+    magic := [const]Byte { 0x7F, 0x45, 0x4C, 0x46 }
+    if length_of(bytes) < 4 ->
+        return false
+    return bytes[0:4] == magic
+
+is_empty :: proc(bytes: []Byte) Bool ->
+    nothing := [const]Byte { }
+    return bytes == nothing
+```
+
+The comparison is of the bytes as the numbers from 0 to 255 that they are, and a byte that differs, or a different number of them, is enough to say that they are not the same. It stops at the first byte that differs, so it takes as long as the bytes that are the same at the start of the two. A `Byte` has an order, but a sequence of them has none here, so `<`, `<=`, `>` and `>=` are errors, and so is comparing arrays or slices of any other element type, such as `Int`, or a sequence of bytes with a [string](#strings), whose bytes are text. Two views of the same bytes are the same, and the bytes are read when the comparison runs, so a change that was made before it is seen.
 
 ### Array slices
 

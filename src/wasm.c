@@ -417,6 +417,8 @@ static void            wasm_string_length_write               (Wasm_Builder *bui
                                                                Ast_Node_Index procedure);
 static void            wasm_string_slice_write                (Wasm_Builder *builder,
                                                                Ast_Node_Index procedure);
+static bool            wasm_comparison_is_of_bytes            (Wasm_Builder const *builder,
+                                                               Ast_Node_Index comparison);
 static bool            wasm_comparison_is_of_strings          (Wasm_Builder const *builder,
                                                                Ast_Node_Index comparison);
 static void            wasm_build_code_section_body_string_comparison
@@ -4596,6 +4598,16 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     bool is_equality = operator == AST_COMPARISON_OPERATOR_EQUAL ||
                        operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
 
+    // Two arrays or array slices of bytes, in any mix, are the same when they have the same number
+    // of bytes and the same bytes, so they are compared with `==` and `not=`, and have no order.
+    if (wasm_comparison_is_of_bytes(builder, operation)) {
+        if (not is_equality) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, left));
+        }
+        return true;
+    }
+
     // Strings are the same when they have the same bytes, so they are compared with `==` and
     // `not=`, and have no order. The other operand is a `Str` too, or an untyped string, which is
     // one there. A `C_Str` has no length, so it is not compared.
@@ -4650,6 +4662,18 @@ static bool wasm_comparison_is_of_strings(Wasm_Builder const *builder, Ast_Node_
                WASM_VALUE_TYPE_STR ||
            wasm_expression_type(builder, builder->nodes[comparison].last_child).kind ==
                WASM_VALUE_TYPE_STR;
+}
+
+/**
+ * Returns whether the comparison `comparison` is of two arrays or array slices of bytes, in any mix.
+ */
+static bool wasm_comparison_is_of_bytes(Wasm_Builder const *builder, Ast_Node_Index comparison) {
+    assert(builder->nodes[comparison].node_type == AST_NODE_TYPE_COMPARISON);
+
+    Wasm_Type left = wasm_expression_type(builder, builder->nodes[comparison].first_child);
+    Wasm_Type right = wasm_expression_type(builder, builder->nodes[comparison].last_child);
+    return wasm_type_is_sequence(left) && wasm_type_element(left).kind == WASM_VALUE_TYPE_BYTE &&
+           wasm_type_is_sequence(right) && wasm_type_element(right).kind == WASM_VALUE_TYPE_BYTE;
 }
 
 /**
@@ -5299,7 +5323,8 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
     case AST_NODE_TYPE_COMPARISON:
         // Strings are compared by their bytes, with the operands on the stack as their addresses
         // and lengths.
-        if (wasm_comparison_is_of_strings(builder, current)) {
+        if (wasm_comparison_is_of_strings(builder, current) ||
+            wasm_comparison_is_of_bytes(builder, current)) {
             wasm_build_code_section_body_string_comparison(
                 builder, procedure, node->payload.comparison.operator);
             break;
@@ -6000,7 +6025,8 @@ static bool wasm_procedure_uses_arrays(Wasm_Builder const *builder, Ast_Node_Ind
         }
         // The comparison of two strings keeps where it is in them in scratch locals.
         if (node_type == AST_NODE_TYPE_COMPARISON &&
-            wasm_comparison_is_of_strings(builder, node)) {
+            (wasm_comparison_is_of_strings(builder, node) ||
+             wasm_comparison_is_of_bytes(builder, node))) {
             return true;
         }
         // A field of a pointer to a struct is in memory, though no `^` is written.
@@ -6758,8 +6784,9 @@ static bool wasm_build_code_section_body_child(Wasm_Builder *builder, Ast_Node_I
         return true;
     }
 
+    // An array that is compared is made an array slice too, so that the length is on the stack.
     if (parent_type == AST_NODE_TYPE_CALL || parent_type == AST_NODE_TYPE_SLICE ||
-        parent_type == AST_NODE_TYPE_SUBSCRIPT) {
+        parent_type == AST_NODE_TYPE_SUBSCRIPT || parent_type == AST_NODE_TYPE_COMPARISON) {
         wasm_array_decay(builder, child);
     }
     return true;
