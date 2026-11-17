@@ -1031,6 +1031,11 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
             }
         }
 
+        if (nodes[value].node_type == AST_NODE_TYPE_CAST) {
+            // A cast has the type that it names, also when its operand is a constant.
+            return main_text_write(text, text_size_bytes, nodes[value].payload.cast.type_name);
+        }
+
         if (nodes[value].node_type == AST_NODE_TYPE_ARRAY_LITERAL ||
             nodes[value].node_type == AST_NODE_TYPE_FIELD_ACCESS ||
             nodes[value].node_type == AST_NODE_TYPE_DEREFERENCE ||
@@ -1168,6 +1173,8 @@ static bool main_expression_type_write(Ast_Node const *nodes, Semantic_Binding c
         }
         return main_definition_type_write(nodes, bindings, constants, node_count, binding.target,
                                           depth + 1, text, text_size_bytes);
+    case AST_NODE_TYPE_CAST:
+        return main_text_write(text, text_size_bytes, node->payload.cast.type_name);
     case AST_NODE_TYPE_STRUCT_LITERAL:
         return node->payload.struct_literal.name.bytes != NULL &&
                main_text_write(text, text_size_bytes, node->payload.struct_literal.name);

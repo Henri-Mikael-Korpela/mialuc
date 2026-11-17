@@ -295,3 +295,39 @@ test("a document has an outline of its definitions", async () => {
         assert.strictEqual((await request("shutdown", null)).result, null);
     });
 });
+
+test("a name that stores the result of a cast shows the type that the cast names", async () => {
+    await withServer(async (request, notify) => {
+        await request("initialize", {
+            processId: null,
+            rootUri: null,
+            capabilities: {},
+            initializationOptions: { compilerPath: COMPILER },
+        });
+        notify("initialized", {});
+
+        const uri = "file:///casts.mu";
+        const text = [
+            "package casts",
+            "",
+            "main :: proc() Int ->",
+            "    a := 5",
+            "    b := cast(Byte)a",
+            "    c := b + 1",
+            "    q := cast([4]Byte)'x'",
+            "    return cast(Int)b",
+            "",
+        ].join("\n");
+        notify("textDocument/didOpen", {
+            textDocument: { uri, languageId: "mialu", version: 1, text },
+        });
+        const hover = (line, character) =>
+            request("textDocument/hover", { textDocument: { uri }, position: { line, character } })
+                .then((message) => message.result);
+        assert.match((await hover(4, 4)).contents.value, /b: Byte/);
+        assert.match((await hover(5, 9)).contents.value, /b: Byte/);
+        assert.match((await hover(5, 4)).contents.value, /c: Byte/);
+        assert.match((await hover(6, 4)).contents.value, /q: \[4\]Byte/);
+        assert.strictEqual((await request("shutdown", null)).result, null);
+    });
+});
