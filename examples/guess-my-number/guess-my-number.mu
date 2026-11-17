@@ -57,9 +57,7 @@ read_guess :: proc(input: ^Byte) Int ->
 
     // The end of the line is a line feed, with a carriage return before it on Windows.
     length := strlen(%buffer[0])
-    for ->
-        if length == 0 ->
-            break
+    for length > 0 ->
         last := buffer[length - 1]
         if last not= '\n' and last not= '\r' ->
             break
@@ -73,40 +71,46 @@ read_guess :: proc(input: ^Byte) Int ->
         return NOT_A_NUMBER
     return number
 
-/// Plays rounds until the input ends. Each round is a number to guess, and it is over when the guess
-/// is right.
-play :: proc(input: ^Byte) ->
-    secret := think_of_number()
-    puts("")
-    puts("I am thinking of a number from 0 to 10.")
-    for ->
-        puts("Your guess?")
-        fflush(nil)
-        guess := read_guess(input)
-        if guess == END_OF_INPUT ->
-            puts("")
-            puts("Bye!")
-            break
-        if guess == NOT_A_NUMBER or guess < LOWEST or guess > HIGHEST ->
-            puts("That is not a number from 0 to 10.")
-            continue
-        if guess < secret ->
-            puts("Too low.")
-            continue
-        if guess > secret ->
-            puts("Too high.")
-            continue
+/// Tells what the guess is: not a guess at all, too low, too high, or right. Gives whether it is right.
+respond_to :: proc(guess: Int, secret: Int) Bool ->
+    if guess == NOT_A_NUMBER or guess < LOWEST or guess > HIGHEST ->
+        puts("That is not a number from 0 to 10.")
+        return false
+    if guess < secret ->
+        puts("Too low.")
+        return false
+    if guess > secret ->
+        puts("Too high.")
+        return false
 
-        // The format has no line feed, because a string has no escape sequences, so `puts` of
-        // nothing ends the line.
-        printf("Yes, it was %lld!", secret)
-        puts("")
-        secret = think_of_number()
-        puts("")
-        puts("I am thinking of another number from 0 to 10.")
+    // The format has no line feed, because a string has no escape sequences, so `puts` of nothing
+    // ends the line.
+    printf("Yes, it was %lld!", secret)
+    puts("")
+    return true
+
+/// Asks for a guess, and reads it. The prompt is written out before the program waits for the line.
+ask_for_guess :: proc(input: ^Byte) Int ->
+    puts("Your guess?")
+    fflush(nil)
+    return read_guess(input)
 
 main :: proc() Int ->
     seed_random()
     puts("Guess my number")
-    play(_fdopen(0, "r"))
+
+    input := _fdopen(0, "r")
+    secret := think_of_number()
+    puts("")
+    puts("I am thinking of a number from 0 to 10.")
+    guess := ask_for_guess(input)
+    for guess not= END_OF_INPUT ->
+        if respond_to(guess, secret) ->
+            secret = think_of_number()
+            puts("")
+            puts("I am thinking of another number from 0 to 10.")
+        guess = ask_for_guess(input)
+    puts("")
+    puts("Bye!")
+
     return 0
