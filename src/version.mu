@@ -18,22 +18,20 @@ foreign libc ->
     fgetc :: proc(file: ^Byte) Int -> ...
     fclose :: proc(file: ^Byte) Int -> ...
 
-VERSION_MAJOR :: 0
-VERSION_MINOR :: 3
-VERSION_PATCH :: 0
+/// The version, written once, as the text of each number. `++` joins strings, so VERSION_STRING is
+/// joined from them when the program is compiled, and the numbers are made of the text by
+/// `try_str_to_int` when the program runs, see `matches_version_info_in_c`.
+//
+// MISSING FEATURE: a constant expression that makes a number of text, or text of a number, when the
+// program is compiled, such as `str_to_int(VERSION_MAJOR)`. `try_str_to_int` works when the program
+// runs, so the numbers are not constants, and cannot be the length of an array or the pattern of a
+// `match`, nor can a version that is not valid be an error of the build. C has the numbers, and
+// makes the text of them with `#`, so there it is the other way around.
+VERSION_MAJOR :: "0"
+VERSION_MINOR :: "3"
+VERSION_PATCH :: "0"
 
-// MISSING FEATURE: a constant expression that makes text of a number, such as a built-in
-// `int_to_str(VERSION_MAJOR)`. `++` joins only strings and runes, so the numbers cannot be spelled
-// out as text at compile time, as `MIALU_VERSION_STRING_HELPER(major)` does in C with `#`. The three
-// numbers are therefore written a second time as text here. `matches_version_info_in_c` checks
-// when the program runs that the text says what the header does, by comparing it with `==`, but
-// that is a check and not a definition, and a mismatch is found only by running it. Once there is
-// such a feature, these three go away and VERSION_STRING is joined from the numbers.
-VERSION_MAJOR_TEXT :: "0"
-VERSION_MINOR_TEXT :: "3"
-VERSION_PATCH_TEXT :: "0"
-
-VERSION_STRING :: VERSION_MAJOR_TEXT ++ '.' ++ VERSION_MINOR_TEXT ++ '.' ++ VERSION_PATCH_TEXT
+VERSION_STRING :: VERSION_MAJOR ++ '.' ++ VERSION_MINOR ++ '.' ++ VERSION_PATCH
 
 /// The path of the header, relative to the root of the project.
 //
@@ -117,10 +115,12 @@ skip_line :: proc(file: ^Byte, last: Int) Bool ->
 /// PATCH, and every other name, such as STRING and STRING_HELPER, is skipped.
 //
 // MISSING FEATURE: a `Str` made of bytes that are read, such as `str_from_bytes(bytes)`. Strings can
-// be compared with `==` now, but the name is read from the file as bytes, and bytes cannot be made
-// into a `Str`, nor can a `C_Str` be compared, so the name cannot be compared with "MAJOR", "MINOR"
-// and "PATCH". A `match` of a `Str` takes constants only. So the first letters have to stand for
-// the names, and a new name that begins with the same letters would be taken for one of them.
+// be compared with `==` now, and `try_str_to_int` makes the numbers of a `Str`, but the name and the
+// number are read from the file as bytes, and bytes cannot be made into a `Str`, nor can a `C_Str`
+// be compared or converted. So the name cannot be compared with "MAJOR", "MINOR" and "PATCH", and
+// the first letters have to stand for the names, and a new name that begins with the same letters
+// would be taken for one of them. The number is made of the digits by `read_number`, which does
+// what `try_str_to_int` does, without its check for a number that is too large.
 read_define :: proc(file: ^Byte, version: ^Version) Int ->
     first := fgetc(file)
     which := 0
@@ -185,60 +185,32 @@ parse_header :: proc(version: ^Version) Bool ->
     file := fopen(HEADER_PATH, "rb")
     if file == nil ->
         return false
+    defer fclose(file)
+
     for ->
         if not read_line(file, version) ->
             break
-    fclose(file)
+
     return true
 
-/// The text of a number from 0 to 9, and the empty string, which no number is written as, for any
-/// other.
-//
-// MISSING FEATURE: the text of any number when the program runs, such as a built-in
-// `int_to_str(number)`. There is no way to make a `Str` of digits, so only the numbers that have a
-// string of their own here can be told, and a version number of 10 or more is never the same as
-// its text, though it is right.
-digit_text :: proc(number: Int) Str ->
-    match number ->
-        case 0 ->
-            return "0"
-        case 1 ->
-            return "1"
-        case 2 ->
-            return "2"
-        case 3 ->
-            return "3"
-        case 4 ->
-            return "4"
-        case 5 ->
-            return "5"
-        case 6 ->
-            return "6"
-        case 7 ->
-            return "7"
-        case 8 ->
-            return "8"
-        case 9 ->
-            return "9"
-        case ->
-            return ""
+/// Whether a number of the version of this file, which is text, is the number that the header says:
+/// the text must be a number, and the same one.
+is_same_number :: proc(text: Str, number: Int) Bool ->
+    value, is_ok := try_str_to_int(text)
+    return is_ok and value == number
 
 /// Whether the version of this file is the one of the C header, which is when the header has all
-/// three numbers, they are the numbers of the constants above, and the text of the numbers, which
-/// VERSION_STRING is joined from, is what the numbers of the header are written as.
+/// three numbers, and the text of each number of this file is the number of the header.
 matches_version_info_in_c :: proc() Bool ->
     version := Version {}
     if not parse_header(%version) ->
         return false
     if version.found not= 3 ->
         return false
-    is_same_major_and_minor := version.major == VERSION_MAJOR and version.minor == VERSION_MINOR
-    is_same_number := is_same_major_and_minor and version.patch == VERSION_PATCH
-    is_same_major_text := digit_text(version.major) == VERSION_MAJOR_TEXT
-    is_same_minor_text := digit_text(version.minor) == VERSION_MINOR_TEXT
-    is_same_patch_text := digit_text(version.patch) == VERSION_PATCH_TEXT
-    is_same_text := is_same_major_text and is_same_minor_text and is_same_patch_text
-    return is_same_number and is_same_text
+    is_same_major := is_same_number(VERSION_MAJOR, version.major)
+    is_same_minor := is_same_number(VERSION_MINOR, version.minor)
+    is_same_patch := is_same_number(VERSION_PATCH, version.patch)
+    return is_same_major and is_same_minor and is_same_patch
 
 // MISSING FEATURE: comparing VERSION_STRING with the `// "0.3.0"` line of the header. The strings
 // can be compared, but the line would have to be read into a `Str`, and a `Str` is made of

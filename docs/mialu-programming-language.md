@@ -36,7 +36,6 @@
   - [Array literals](#array-literals)
   - [Elements](#elements)
   - [Array slices](#array-slices)
-  - [Length of an array](#length-of-an-array)
 - [Custom data types](#custom-data-types)
   - [Enumerations](#enumerations)
   - [Structs](#structs)
@@ -54,6 +53,11 @@
   - [Calling procedures](#calling-procedures)
   - [Multiple return values](#multiple-return-values)
   - [Pointers to procedures](#pointers-to-procedures)
+- [Built-in procedures](#built-in-procedures)
+  - [length_of](#length_of)
+  - [int_to_byte](#int_to_byte)
+  - [str_to_c_str](#str_to_c_str)
+  - [try_str_to_int](#try_str_to_int)
 - [Scope resolution](#scope-resolution)
 - [Attributes](#attributes)
 - [Foreign procedures](#foreign-procedures)
@@ -356,7 +360,7 @@ An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an err
 
 A `Byte` is an unsigned 8-bit integer: it holds the numbers from 0 to 255. It can be used to represent individual bytes of memory. The default value for `Byte` is `0`.
 
-A `Byte` is made an `Int` with a [cast](#casts), `cast(Int)b`, which never loses anything, and the built-in procedure `int_to_byte` makes a `Byte` of an `Int`, and stops the program when the number is not from 0 to 255.
+A `Byte` is made an `Int` with a [cast](#casts), `cast(Int)b`, which never loses anything, and the built-in procedure [`int_to_byte`](#int_to_byte) makes a `Byte` of an `Int`.
 
 An untyped integer from 0 to 255, which is a literal, a constant without a type or a constant expression of them, is a `Byte` where a `Byte` is wanted, so `b : Byte = 200`, `b >= 65` and `[3]Byte { 1, 2, 3 }` need no conversion, and `b : Byte = 300` is an error, see [Untyped constants](#untyped-constants). An `Int` is never a `Byte`, whatever its value, because its value is known only when the program runs.
 
@@ -417,29 +421,7 @@ A `C_Str` (short for "C string") represents a null-terminated string. Unlike `St
 
 A `C_Str` is for interoperating with existing C code, as in [foreign procedures](#foreign-procedures), the equivalent type in C being `char*` or `char const*` Nothing can be done with a `C_Str` but to keep it in a variable or a parameter, pass it on, return it, and hand it to a foreign procedure.
 
-A `Str` value is never converted to a `C_Str` implicitly. A string literal, and a constant that is an untyped string, is not a `Str` yet: it is a `C_Str` where one is wanted, which is the same as `str_to_c_str` of it, see [Untyped constants](#untyped-constants). The built-in procedure `str_to_c_str` makes a `C_Str` of a `Str` explicitly, and the `C_Str` it gives can be kept in a variable, passed on or returned. Example:
-
-```
-package greetings
-
-import foreign libc
-
-foreign libc ->
-    puts :: proc(content: C_Str) -> ...
-
-greet :: proc() ->
-    text : C_Str = "Hello, world!"
-    puts(text)
-
-main :: proc() Int ->
-    puts("Hello, world!")
-    puts(str_to_c_str("The same, written out."))
-    return 0
-```
-
-`str_to_c_str`, and an untyped string that is a `C_Str`, copies the bytes of the string and a zero after them to temporary storage, and gives the address of the copy. Temporary storage is a stack of strings that belongs to the program: a copy is made on top of it, and all the copies that a procedure made are given back when that procedure returns. So the `C_Str` that `str_to_c_str` gives is good until the procedure that called it returns, and it must not be returned from that procedure or kept anywhere that outlives it. Temporary storage has a fixed size, and a program that makes more copies than fit in it is stopped.
-
-See [Compilation targets](#compilation-targets) for which targets have it, and what they allow as the argument.
+A `Str` value is never converted to a `C_Str` implicitly. A string literal, and a constant that is an untyped string, is not a `Str` yet: it is a `C_Str` where one is wanted, which is the same as `str_to_c_str` of it, see [Untyped constants](#untyped-constants). The built-in procedure [`str_to_c_str`](#str_to_c_str) makes a `C_Str` of a `Str` explicitly, and how long the `C_Str` is good for is there too.
 
 Strings are joined with `++`, which has the same precedence as `+` and `-` and is left associative. It takes two strings, or a string and a rune on either side, and a rune is joined as its UTF-8 bytes, so `"Hello" ++ ' ' ++ "world" ++ '🚀'` is the string `"Hello world🚀"`. Both operands must be constants, see [Constants](#constants), because the joining is done when the program is compiled: the program has the joined text as one string, like a string literal, and nothing is joined when it runs. `++` does not allocate, and an operand that is known only when the program runs, such as a variable or the result of a call, is an error. Two runes are not joined, and neither is a number, so `'a' ++ 'b'` and `"count: " ++ 3` are errors. The result is an untyped string, so it can be given to a `C_Str` too, unless an operand is a constant that was given the type `Str`, and then the result is a `Str`. The joined text of all the constants of a program is limited in size, and a program that has more is rejected.
 
@@ -706,7 +688,7 @@ encode :: proc(character: Rune) Int ->
 
 `encode('🚀')` returns 4, `encode('é')` returns 2 and `encode('A')` returns 1. A rune is made of a `Byte` with `cast(Rune)`, and a `Rune` is made an `Int` with `cast(Int)`, which are the casts of a character to and from its number, and nothing makes a rune of an `Int` or of bytes, because those are not always characters.
 
-The other direction, to a type that holds fewer values, is not a cast, because a value may not fit: `int_to_byte` makes a `Byte` of an `Int` and stops the program when the number is not from 0 to 255, see [Bytes](#bytes). A `Bool` is never made out of an `Int`, which is written as a comparison, `n not= 0`, see [Booleans](#booleans).
+The other direction, to a type that holds fewer values, is not a cast, because a value may not fit: [`int_to_byte`](#int_to_byte) makes a `Byte` of an `Int` and stops the program when the number is not from 0 to 255, see [Bytes](#bytes). A `Bool` is never made out of an `Int`, which is written as a comparison, `n not= 0`, see [Booleans](#booleans).
 
 A cast binds like `%`: it is written before an operand, which can have subscripts, fields and carets after it, and it binds tighter than every operator, so `cast(Int)a + b` is `(cast(Int)a) + b` and `cast(Int)a[2]` is the cast of the element. A cast cannot follow a cast, which would do nothing, and a cast is not a constant, so `LIMIT :: cast(Int)SMALL` is an error. The type is a name, and the word `cast` is a [keyword](#reserved-words).
 
@@ -1437,30 +1419,7 @@ array_element_range_assignment :: proc() Int ->
 
 `array_element_range_assignment` returns 69. The elements of the value must be of the type of the elements of the range. The assignment operators such as `+=` are for one element, so `a[0:3] += 1` is an error.
 
-### Length of an array
-
-The built-in procedure `length_of` gives the number of elements of an array or an array slice, as an `Int`. It takes one argument, and it is called like any procedure:
-
-```
-length_of_array :: proc() Int ->
-    a := [const]Int { 1, 2, 3, 4, 5 }
-    return length_of(a)
-
-average :: proc(elements: []Int) Int ->
-    if length_of(elements) == 0 ->
-        return 0
-    return sum(elements) / length_of(elements)
-
-fill_with_length :: proc() Int ->
-    a := [const]Int { 0, 0, 0, 0 }
-    for i in 0..<length_of(a) ->
-        a[i] = i + 1
-    return sum(a)
-```
-
-`length_of_array` returns 5. The length of an array is part of the program, so for an array `length_of` is a number that is known when the program is compiled, also for an array whose length is `const`. The length of a slice is not known until the program runs, so for a slice it reads the length that the slice holds, which for `a[low:high]` is `high - low`. The length of an array of nothing, `[const]Int { }`, is 0. Anything else as the argument, such as an `Int` or a `Str`, is an error.
-
-`length_of` is not a keyword but a name that a program can define itself: a procedure with that name is called instead of the built-in one. The [members of an enum](#static-reflection) are an array, so `length_of` gives their number as well.
+The number of elements of an array or an array slice is given by the built-in procedure [`length_of`](#length_of), as an `Int`: `length_of(a)` for the array `a`.
 
 ## Custom data types
 
@@ -2006,6 +1965,101 @@ A few things cannot be done with a pointer to a procedure, which a later version
 - A global variable cannot hold one, because its initial value is a constant expression, and no constant expression is a pointer to a procedure.
 - Only the name of a variable, a parameter or a global variable is called, and not an element, a field or the result of following a pointer, which are stored in a variable first.
 
+
+## Built-in procedures
+
+A built-in procedure is a procedure that the language has, and that is called like any other, with its arguments between parentheses, see [Calling procedures](#calling-procedures). It is not written in the program, and it is not a keyword: its name is an [identifier](#identifiers), so a program can define a procedure of the same name, such as `length_of`, which is then called instead of the built-in one, and the built-in one is called only where the program has nothing of that name. A built-in procedure is not a value, so it cannot be assigned to a variable or have its address taken, and a call of it has the arguments that it says and no others. The procedures that the language has are:
+
+| Procedure | Takes | Gives |
+|-----------|-------|-------|
+| [`length_of`](#length_of) | an array or an array slice | the number of its elements, an `Int` |
+| [`int_to_byte`](#int_to_byte) | an `Int` | a `Byte` of it, and stops the program when it is not from 0 to 255 |
+| [`str_to_c_str`](#str_to_c_str) | a `Str` | a `C_Str`, a copy of it that ends with a zero |
+| [`try_str_to_int`](#try_str_to_int) | a `Str` | two values: the `Int` that it is, and whether it is one |
+
+### length_of
+
+`length_of` gives the number of elements of an array or an array slice, as an `Int`. It takes one argument, and it is called like any procedure:
+
+```
+length_of_array :: proc() Int ->
+    a := [const]Int { 1, 2, 3, 4, 5 }
+    return length_of(a)
+
+average :: proc(elements: []Int) Int ->
+    if length_of(elements) == 0 ->
+        return 0
+    return sum(elements) / length_of(elements)
+
+fill_with_length :: proc() Int ->
+    a := [const]Int { 0, 0, 0, 0 }
+    for i in 0..<length_of(a) ->
+        a[i] = i + 1
+    return sum(a)
+```
+
+`length_of_array` returns 5. The length of an array is part of the program, so for an array `length_of` is a number that is known when the program is compiled, also for an array whose length is `const`. The length of a slice is not known until the program runs, so for a slice it reads the length that the slice holds, which for `a[low:high]` is `high - low`. The length of an array of nothing, `[const]Int { }`, is 0. Anything else as the argument, such as an `Int` or a `Str`, is an error.
+
+`length_of` is not a keyword but a name that a program can define itself: a procedure with that name is called instead of the built-in one. The [members of an enum](#static-reflection) are an array, so `length_of` gives their number as well.
+
+### int_to_byte
+
+`int_to_byte` makes a `Byte` of an `Int`. An `Int` is never a `Byte` without it, whatever its value, because its value is known only when the program runs, see [Bytes](#bytes). It takes one `Int`, and gives a `Byte` that has the same number, and when the number is not from 0 to 255 there is no `Byte` that has it, so the program is stopped, as it is for an index that is outside of an array:
+
+```
+to_byte :: proc(n: Int) Byte ->
+    return int_to_byte(n)
+```
+
+`to_byte(200)` is the `Byte` 200, and `to_byte(256)` and `to_byte(0 - 1)` stop the program. A number that is known when the program is compiled needs no conversion: an untyped integer from 0 to 255 is a `Byte` where one is wanted. The other direction, from a `Byte` to an `Int`, never loses anything, so it is a [cast](#casts), `cast(Int)b`.
+
+### str_to_c_str
+
+A `Str` value is never converted to a `C_Str` implicitly. A string literal, and a constant that is an untyped string, is not a `Str` yet: it is a `C_Str` where one is wanted, which is the same as `str_to_c_str` of it, see [Untyped constants](#untyped-constants). `str_to_c_str` makes a `C_Str` of a `Str` explicitly, and the `C_Str` it gives can be kept in a variable, passed on or returned. Example:
+
+```
+package greetings
+
+import foreign libc
+
+foreign libc ->
+    puts :: proc(content: C_Str) -> ...
+
+greet :: proc() ->
+    text : C_Str = "Hello, world!"
+    puts(text)
+
+main :: proc() Int ->
+    puts("Hello, world!")
+    puts(str_to_c_str("The same, written out."))
+    return 0
+```
+
+`str_to_c_str`, and an untyped string that is a `C_Str`, copies the bytes of the string and a zero after them to temporary storage, and gives the address of the copy. Temporary storage is a stack of strings that belongs to the program: a copy is made on top of it, and all the copies that a procedure made are given back when that procedure returns. So the `C_Str` that `str_to_c_str` gives is good until the procedure that called it returns, and it must not be returned from that procedure or kept anywhere that outlives it. Temporary storage has a fixed size, and a program that makes more copies than fit in it is stopped.
+
+See [Compilation targets](#compilation-targets) for which targets have it, and what they allow as the argument.
+
+### try_str_to_int
+
+`try_str_to_int` makes an `Int` of a `Str`, when the string is the text of one. It takes one `Str`, or an untyped string such as a literal, and it gives two values, which is why the call is written as the definition of two names, see [Multiple return values](#multiple-return-values): the first is the number, an `Int`, and the second is a `Bool` that says whether the string was a number at all.
+
+```
+parse_port :: proc(text: Str) Int ->
+    port, is_ok := try_str_to_int(text)
+    if not is_ok or port > 65535 ->
+        return 0 - 1
+    return port
+
+is_number :: proc(text: Str) Bool ->
+    _, is_ok := try_str_to_int(text)
+    return is_ok
+```
+
+`parse_port("8080")` returns 8080, and `parse_port("80a")` and `parse_port("")` return -1. A string is a number when it is an optional `-`, and then one or more of the digits 0 to 9, and nothing else. So `"42"`, `"-42"` and `"0042"` are numbers, and `""`, `"-"`, `"+5"`, `" 5"`, `"5 "`, `"1_000"`, `"0x10"`, `"--5"` and `"3.5"` are not: there is no plus sign, no space, no separator, no other base and no fraction. The number must fit in an `Int`, so `"9223372036854775807"` and `"-9223372036854775808"`, the largest and the smallest, are numbers, and `"9223372036854775808"` and `"-9223372036854775809"` are not, because a number is never wrapped around.
+
+When the string is not a number, the first value is 0 and the second is `false`, so a program that does not look at the second value cannot tell `"0"` from `"zero"`. The first value can be left out with the name `_`, as above. A call that is given one name, as in `n := try_str_to_int(text)`, is an error, since it gives two values, and so is a call that is given another number of names.
+
+The string is converted when the program runs, also when it is a literal, so the result is not a constant, and cannot be the length of an array or the pattern of a [match statement](#match-statements). A `C_Str` is not converted, because it has no length that the language knows, see [C strings](#c-strings).
 
 ## Scope resolution
 

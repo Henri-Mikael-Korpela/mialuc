@@ -1258,6 +1258,6 @@ bool semantic_is_built_in_procedure(Str name) {
     assert(name.bytes != NULL);
 
     return str_equals(name, STR("int_to_byte")) || str_equals(name, STR("length_of")) ||
-           str_equals(name, STR("str_to_c_str"));
+           str_equals(name, STR("str_to_c_str")) || str_equals(name, STR("try_str_to_int"));
 }
 

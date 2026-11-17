@@ -528,6 +528,11 @@ static bool         x64_c_str_write              (X64_Builder *builder, Ast_Node
                                                   byte register_number);
 static bool         x64_call_is_built_in         (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
+static bool         x64_call_is_try_str_to_int   (X64_Builder const *builder,
+                                                  Ast_Node_Index expression);
+static void         x64_try_str_to_int_write     (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame,
+                                                  int32_t place);
 static bool         x64_call_is_str_to_c_str     (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
 static Ast_Node_Index x64_call_procedure         (X64_Builder const *builder, Ast_Node_Index call);
@@ -3083,14 +3088,18 @@ static bool x64_results_definition_write(X64_Builder *builder, Ast_Node_Index le
     Ast_Node_Index call = builder->nodes[leader].last_child;
     size_t result_count = builder->nodes[leader].result_count;
 
-    // The call must be of a procedure that returns as many values as there are names.
+    // The call must be of a procedure that returns as many values as there are names, or of the
+    // built-in procedure `try_str_to_int`, which returns two.
     Ast_Node_Index procedure = AST_NODE_INDEX_NONE;
+    bool is_try_str_to_int = x64_call_is_try_str_to_int(builder, call);
     if (builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
         not x64_call_is_built_in(builder, call)) {
         procedure = x64_call_procedure(builder, call);
     }
-    if (procedure == AST_NODE_INDEX_NONE ||
-        ast_procedure_return_count(&builder->nodes[procedure]) != result_count) {
+    if (is_try_str_to_int ? result_count != 2
+                          : (procedure == AST_NODE_INDEX_NONE ||
+                             ast_procedure_return_count(&builder->nodes[procedure]) !=
+                                 result_count)) {
         return x64_fail(builder, X64_BUILD_STATUS_RESULT_COUNT_MISMATCH, name);
     }
     if (not x64_expression_write(builder, call, x64_type_make(X64_TYPE_KIND_NONE),
@@ -3805,7 +3814,8 @@ static X64_Type x64_child_wanted(X64_Builder const *builder, X64_Expression_Fram
             if (str_equals(node->payload.call.name, STR("int_to_byte"))) {
                 return x64_type_make(X64_TYPE_KIND_INT);
             }
-            if (str_equals(node->payload.call.name, STR("str_to_c_str"))) {
+            if (str_equals(node->payload.call.name, STR("str_to_c_str")) ||
+                str_equals(node->payload.call.name, STR("try_str_to_int"))) {
                 return x64_type_make(X64_TYPE_KIND_STR);
             }
             break;
@@ -4391,6 +4401,13 @@ static bool x64_built_in_write(X64_Builder *builder, X64_Expression_Frame const 
     int32_t place = x64_stack_displacement(builder, frame->stack_start,
                                            builder->stack_words - frame->stack_start);
 
+    if (str_equals(name, STR("try_str_to_int"))) {
+        if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_STR), argument)) {
+            return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        }
+        x64_try_str_to_int_write(builder, frame, place);
+        return true;
+    }
     if (str_equals(name, STR("length_of"))) {
         if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
@@ -4412,6 +4429,109 @@ static bool x64_built_in_write(X64_Builder *builder, X64_Expression_Frame const 
     int32_t target = x64_stack_push(builder, 1);
     x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
     return true;
+}
+
+/**
+ * Writes the built-in procedure `try_str_to_int`, whose argument, a `Str`, is on the stack of values
+ * at `place`, an address and a length. It gives two values on the stack in place of it: the number
+ * and a `Bool` that says whether the text was one. The text is an optional `-` and then one or more
+ * of the digits 0 to 9, and nothing else, and it must fit in an `Int`. For any other text both
+ * values are 0.
+ *
+ * The number is built as a negative one, one digit at a time with `value * 10 - digit`, because
+ * the negative numbers hold one more than the positive ones, so that the smallest `Int` can be
+ * written. Before each step the value is compared with the smallest `Int` divided by 10, which is
+ * the last that has room for another digit, and a value that is equal to it has room for a digit
+ * up to 8. At the end a number without a `-` is negated, which cannot hold the smallest `Int`.
+ * The registers are `r10`, the address of the next byte, `r11`, the number of bytes that are left,
+ * `rax`, the value, `r8`, 1 for a `-`, and `rcx`, `rdx` and `r9` for what is worked out.
+ */
+static void x64_try_str_to_int_write(X64_Builder *builder, X64_Expression_Frame const *frame,
+                                     int32_t place) {
+    uint32_t failed_jumps = X64_JUMP_NONE;
+    uint32_t done_jumps = X64_JUMP_NONE;
+    uint32_t finished_jumps = X64_JUMP_NONE;
+    uint32_t no_sign_jumps = X64_JUMP_NONE;
+    uint32_t has_room_jumps = X64_JUMP_NONE;
+    uint32_t negative_jumps = X64_JUMP_NONE;
+
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, place);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R11, X64_REGISTER_RBP,
+                     place + X64_WORD_SIZE_BYTES);
+    x64_write_load_integer(builder, X64_REGISTER_RAX, 0);
+    x64_write_load_integer(builder, X64_REGISTER_R8, 0);
+
+    // No bytes is not a number.
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_R11, X64_REGISTER_R11);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &failed_jumps);
+
+    // A `-` is taken off, and a digit has to come after it.
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RCX,
+                              X64_REGISTER_R10, 0);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, '-');
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RCX);
+    x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &no_sign_jumps);
+    x64_write_load_integer(builder, X64_REGISTER_R8, 1);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    x64_write_add_immediate(builder, X64_REGISTER_R11, -1);
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_R11, X64_REGISTER_R11);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &failed_jumps);
+    x64_jumps_resolve(builder, no_sign_jumps);
+
+    uint32_t loop = (uint32_t)(builder->writer.length - builder->text_start);
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_R11, X64_REGISTER_R11);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &finished_jumps);
+    // The digit is the byte less the code of 0, and one that is not from 0 to 9 is above 9 as an
+    // unsigned number, also when the byte is below the code of 0.
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RCX,
+                              X64_REGISTER_R10, 0);
+    x64_write_add_immediate(builder, X64_REGISTER_RCX, -'0');
+    x64_write_load_integer(builder, X64_REGISTER_RDX, 9);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RCX);
+    x64_jump_write(builder, X64_CONDITION_ABOVE, &failed_jumps);
+    // The value has room for another digit unless it is below the smallest number divided by 10,
+    // or equal to it and the digit is above 8.
+    x64_write_load_integer(builder, X64_REGISTER_R9, INT64_MIN / 10);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_R9, X64_REGISTER_RAX);
+    x64_jump_write(builder, X64_CONDITION_LESS, &failed_jumps);
+    x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &has_room_jumps);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, -(INT64_MIN % 10));
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RCX);
+    x64_jump_write(builder, X64_CONDITION_ABOVE, &failed_jumps);
+    x64_jumps_resolve(builder, has_room_jumps);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, 10);
+    x64_write_multiply(builder, X64_REGISTER_RAX, X64_REGISTER_RDX);
+    x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    x64_write_add_immediate(builder, X64_REGISTER_R11, -1);
+    x64_jump_back_write(builder, loop);
+
+    // Without a `-` the number is negated, which the smallest `Int` does not survive.
+    x64_jumps_resolve(builder, finished_jumps);
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_R8, X64_REGISTER_R8);
+    x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &negative_jumps);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, INT64_MIN);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RAX);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &failed_jumps);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, 0);
+    x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_RAX, X64_REGISTER_RDX);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_RDX, X64_REGISTER_RAX);
+    x64_jumps_resolve(builder, negative_jumps);
+    x64_write_load_integer(builder, X64_REGISTER_RCX, 1);
+    x64_jump_write(builder, X64_CONDITION_ALWAYS, &done_jumps);
+
+    x64_jumps_resolve(builder, failed_jumps);
+    x64_write_load_integer(builder, X64_REGISTER_RAX, 0);
+    x64_write_load_integer(builder, X64_REGISTER_RCX, 0);
+    x64_jumps_resolve(builder, done_jumps);
+
+    x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+    // The values of a call are on the stack one after the other, and the stack grows down, so the
+    // first one is the one at the higher address.
+    int32_t target = x64_stack_push(builder, 2);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                     target + X64_WORD_SIZE_BYTES);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RCX, X64_REGISTER_RBP, target);
 }
 
 /**
@@ -5090,6 +5210,15 @@ static bool x64_call_is_built_in(X64_Builder const *builder, Ast_Node_Index expr
 }
 
 /**
+ * Returns whether `expression` is a call of the built-in procedure `try_str_to_int`.
+ */
+static bool x64_call_is_try_str_to_int(X64_Builder const *builder, Ast_Node_Index expression) {
+    return builder->nodes[expression].node_type == AST_NODE_TYPE_CALL &&
+           x64_call_is_built_in(builder, expression) &&
+           str_equals(builder->nodes[expression].payload.call.name, STR("try_str_to_int"));
+}
+
+/**
  * Returns whether `expression` is a call of the built-in procedure `str_to_c_str`.
  */
 static bool x64_call_is_str_to_c_str(X64_Builder const *builder, Ast_Node_Index expression) {
@@ -5399,6 +5528,12 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
             if (str_equals(name, STR("int_to_byte"))) {
                 return x64_type_make(X64_TYPE_KIND_BYTE);
             }
+            if (str_equals(name, STR("try_str_to_int"))) {
+                // An `Int` and a `Bool`, which no procedure returns, so it has none to say so.
+                X64_Type tuple = x64_type_make(X64_TYPE_KIND_TUPLE);
+                tuple.definition = AST_NODE_INDEX_NONE;
+                return tuple;
+            }
             return x64_type_make(X64_TYPE_KIND_INT);
         }
         Ast_Node_Index procedure = x64_call_procedure(builder, expression);
@@ -5535,12 +5670,19 @@ static X64_Type x64_result_variable_type(X64_Builder const *builder, Ast_Node_In
         leader = ast_variable_leader(builder->nodes, variable);
     }
     Ast_Node_Index call = builder->nodes[leader].last_child;
+    size_t index = builder->nodes[variable].result_index;
+    if (x64_call_is_try_str_to_int(builder, call)) {
+        // The number, and whether the text was one.
+        if (index == 0) {
+            return x64_type_make(X64_TYPE_KIND_INT);
+        }
+        return index == 1 ? x64_type_make(X64_TYPE_KIND_BOOL) : x64_type_make(X64_TYPE_KIND_NONE);
+    }
     if (builder->nodes[call].node_type != AST_NODE_TYPE_CALL ||
         x64_call_is_built_in(builder, call)) {
         return x64_type_make(X64_TYPE_KIND_NONE);
     }
     Ast_Node_Index procedure = x64_call_procedure(builder, call);
-    size_t index = builder->nodes[variable].result_index;
     if (procedure == AST_NODE_INDEX_NONE ||
         index >= ast_procedure_return_count(&builder->nodes[procedure])) {
         return x64_type_make(X64_TYPE_KIND_NONE);
@@ -6335,7 +6477,11 @@ static size_t x64_type_word_count(X64_Builder const *builder, X64_Type type) {
         return word_count;
     }
     case X64_TYPE_KIND_TUPLE: {
-        // The words of the values that a procedure returns, one after the other.
+        // The words of the values that a procedure returns, one after the other. The values of
+        // `try_str_to_int`, which has no procedure, are an `Int` and a `Bool`.
+        if (type.definition == AST_NODE_INDEX_NONE) {
+            return 2;
+        }
         size_t word_count = 0;
         size_t count = ast_procedure_return_count(&builder->nodes[type.definition]);
         for (size_t i = 0; i < count; i += 1) {

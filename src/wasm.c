@@ -772,6 +772,11 @@ static void            wasm_type_info_region_write            (Wasm_Builder *bui
                                                                 Ast_Node_Index info);
 static Ast_Node_Index  wasm_parent_find                       (Wasm_Builder const *builder,
                                                                 Ast_Node_Index child);
+static bool            wasm_call_is_try_str_to_int            (Wasm_Builder const *builder,
+                                                               Ast_Node_Index call);
+static void            wasm_build_code_section_body_try_str_to_int
+                                                              (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
 static bool            wasm_call_is_built_in                  (Wasm_Builder const *builder,
                                                                 Ast_Node_Index call);
 static size_t          wasm_string_size_bytes                 (Ast_Node const *literal);
@@ -3097,6 +3102,8 @@ static bool wasm_build_code_section_body_call_statement(Wasm_Builder *builder,
     Wasm_Type value_type = wasm_expression_type(builder, call);
     if (value_type.kind != WASM_VALUE_TYPE_NONE) {
         slot_count = wasm_type_slot_count(builder, value_type);
+    } else if (wasm_call_is_try_str_to_int(builder, call)) {
+        slot_count = 2;
     } else if (not wasm_call_is_built_in(builder, call)) {
         Ast_Node_Index callee = wasm_call_signature(builder, call);
         if (callee != AST_NODE_INDEX_NONE) {
@@ -3133,7 +3140,8 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
         bool is_argument_valid = wasm_type_is_sequence(argument_type);
         if (str_equals(name, STR("int_to_byte"))) {
             is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_INT;
-        } else if (str_equals(name, STR("str_to_c_str"))) {
+        } else if (str_equals(name, STR("str_to_c_str")) ||
+                   str_equals(name, STR("try_str_to_int"))) {
             is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_STR;
         }
         if (not is_argument_valid) {
@@ -3653,14 +3661,19 @@ static bool wasm_build_code_section_body_results(Wasm_Builder *builder, Ast_Node
     Str name = builder->nodes[leader].payload.variable_definition.name;
     size_t result_count = builder->nodes[leader].result_count;
 
-    // The call must be of a procedure that returns as many values as there are names.
+    // The call must be of a procedure that returns as many values as there are names, or of the
+    // built-in procedure `try_str_to_int`, which returns two.
     Ast_Node_Index callee = AST_NODE_INDEX_NONE;
+    bool is_try_str_to_int = builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
+                             wasm_call_is_try_str_to_int(builder, call);
     if (builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
         not wasm_call_is_built_in(builder, call)) {
         callee = wasm_call_signature(builder, call);
     }
-    if (callee == AST_NODE_INDEX_NONE ||
-        ast_procedure_return_count(&builder->nodes[callee]) != result_count) {
+    if (is_try_str_to_int ? result_count != 2
+                          : (callee == AST_NODE_INDEX_NONE ||
+                             ast_procedure_return_count(&builder->nodes[callee]) !=
+                                 result_count)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_RESULT_COUNT_MISMATCH, name);
     }
     if (not wasm_build_code_section_body_expression(builder, definition, call, false)) {
@@ -3751,6 +3764,12 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
                 }
             } else if (wasm_variable_type(builder, statement).kind == WASM_VALUE_TYPE_NONE) {
                 // A call that returns several values needs a name for each of them.
+                if (statement_node->result_count == 0 &&
+                    builder->nodes[value].node_type == AST_NODE_TYPE_CALL &&
+                    wasm_call_is_try_str_to_int(builder, value)) {
+                    return wasm_fail(builder, WASM_BUILD_STATUS_RESULT_COUNT_MISMATCH,
+                                     statement_node->payload.variable_definition.name);
+                }
                 if (statement_node->result_count == 0 &&
                     builder->nodes[value].node_type == AST_NODE_TYPE_CALL &&
                     not wasm_call_is_built_in(builder, value)) {
@@ -4096,6 +4115,12 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
             }
             if (str_equals(builder->nodes[expression].payload.call.name, STR("str_to_c_str"))) {
                 return wasm_type_make(WASM_VALUE_TYPE_C_STR);
+            }
+            // `try_str_to_int` gives two values, so it is not a value of one type, as a procedure
+            // that returns two is not, and the definition of two names reads its types, see
+            // `wasm_call_result_type`.
+            if (wasm_call_is_try_str_to_int(builder, expression)) {
+                return wasm_type_make(WASM_VALUE_TYPE_NONE);
             }
             return wasm_type_make(WASM_VALUE_TYPE_INT);
         }
@@ -5040,6 +5065,11 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
         if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
             str_equals(node->payload.call.name, STR("str_to_c_str"))) {
             // The address of the literal is on the stack already, see the string literal.
+            break;
+        }
+        if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
+            str_equals(node->payload.call.name, STR("try_str_to_int"))) {
+            wasm_build_code_section_body_try_str_to_int(builder, procedure);
             break;
         }
         if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
@@ -8060,6 +8090,14 @@ static Wasm_Type wasm_call_result_type(Wasm_Builder const *builder, Ast_Node_Ind
                                        size_t index) {
     assert(call < builder->node_count);
 
+    // The number that `try_str_to_int` makes of a string, and whether it was one.
+    if (builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
+        wasm_call_is_try_str_to_int(builder, call)) {
+        if (index == 0) {
+            return wasm_type_make(WASM_VALUE_TYPE_INT);
+        }
+        return wasm_type_make(index == 1 ? WASM_VALUE_TYPE_BOOL : WASM_VALUE_TYPE_NONE);
+    }
     if (builder->nodes[call].node_type != AST_NODE_TYPE_CALL ||
         wasm_call_is_built_in(builder, call)) {
         return wasm_type_make(WASM_VALUE_TYPE_NONE);
@@ -8879,6 +8917,178 @@ static void wasm_type_info_region_write(Wasm_Builder *builder, Ast_Node_Index in
         wasm_write_byte(&builder->writer, 0);
     }
     assert(written_bytes == wasm_type_info_region_bytes(builder, info));
+}
+
+/**
+ * Returns whether the call `call` is a call of the built-in procedure `try_str_to_int`.
+ */
+static bool wasm_call_is_try_str_to_int(Wasm_Builder const *builder, Ast_Node_Index call) {
+    return wasm_call_is_built_in(builder, call) &&
+           str_equals(builder->nodes[call].payload.call.name, STR("try_str_to_int"));
+}
+
+/**
+ * Writes the instructions of the built-in procedure `try_str_to_int`, whose argument is on the stack
+ * as an address and a length, and which leaves two values: the number, an `i64`, and an `i32` that
+ * is 1 when the text was one and 0 when it was not. The text is an optional `-` and then one or more
+ * of the digits 0 to 9, and nothing else, and it must fit in an `Int`. For any other text both
+ * values are 0.
+ *
+ * The number is built as a negative one, one digit at a time with `value * 10 - digit`, because
+ * the negative numbers hold one more than the positive ones, so that the smallest `Int` can be
+ * written. Before each step the value is compared with the smallest `Int` divided by 10, which is
+ * the last that has room for another digit, and a value that is equal to it has room for a digit
+ * up to 8. At the end a number without a `-` is negated, which cannot hold the smallest `Int`.
+ * The scratch locals are the address of the next byte and the address after the last one, whether
+ * there was a `-`, whether the text is a number so far, which are 32-bit, and the value and the
+ * digit, which are 64-bit.
+ */
+static void wasm_build_code_section_body_try_str_to_int(Wasm_Builder *builder,
+                                                        Ast_Node_Index procedure) {
+    Wasm_Writer *writer = &builder->writer;
+    size_t next = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+    size_t end = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_SECOND);
+    size_t is_negative = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_TEMPORARY_32);
+    size_t is_number = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_STRING);
+    size_t value = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_LOW);
+    size_t digit = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_HIGH);
+
+    // The address and the length are taken off the stack, and the end is the address after the
+    // last byte.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, value);
+    wasm_write_i32_const(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, is_negative);
+
+    // No bytes is not a number.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_LT_U);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, is_number);
+
+    // A `-` is taken off, and a digit has to come after it.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, is_number);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_i32_const(writer, '-');
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQ);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, is_negative);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_LT_U);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, is_number);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    // Label 0 is the loop and label 1 the block around it, which is left when the text is not a
+    // number, or when there are no bytes left.
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, is_number);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GE_U);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+
+    // The digit is the byte less the code of 0, and one that is not from 0 to 9 is above 9 as an
+    // unsigned number, also when the byte is below the code of 0.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_i32_const(writer, '0');
+    wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+    wasm_write_byte(writer, WASM_OPCODE_I64_EXTEND_I32_U);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, digit);
+
+    // The text is not a number when the digit is above 9, or when there is no room for another
+    // digit, which is when the value is below the smallest number divided by 10, or is equal to it
+    // and the digit is above 8. The `if` is label 0, the loop 1 and the block 2.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, digit);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, 9);
+    wasm_write_byte(writer, WASM_OPCODE_I64_GT_U);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, value);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, INT64_MIN / 10);
+    wasm_write_byte(writer, WASM_OPCODE_I64_LT_S);
+    wasm_write_byte(writer, WASM_OPCODE_I32_OR);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, value);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, INT64_MIN / 10);
+    wasm_write_byte(writer, WASM_OPCODE_I64_EQ);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, digit);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, -(INT64_MIN % 10));
+    wasm_write_byte(writer, WASM_OPCODE_I64_GT_U);
+    wasm_write_byte(writer, WASM_OPCODE_I32_AND);
+    wasm_write_byte(writer, WASM_OPCODE_I32_OR);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_i32_const(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, is_number);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 2);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, value);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, 10);
+    wasm_write_byte(writer, WASM_OPCODE_I64_MUL);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, digit);
+    wasm_write_byte(writer, WASM_OPCODE_I64_SUB);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, value);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 0);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    // Without a `-` the number is negated, which the smallest `Int` does not survive.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, is_number);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, is_negative);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, value);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, INT64_MIN);
+    wasm_write_byte(writer, WASM_OPCODE_I64_EQ);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_i32_const(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, is_number);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, value);
+    wasm_write_byte(writer, WASM_OPCODE_I64_SUB);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, value);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    // The number, which is 0 when the text is not one, and whether it is.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, value);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, is_number);
+    wasm_write_byte(writer, WASM_OPCODE_I64_EXTEND_I32_U);
+    wasm_write_byte(writer, WASM_OPCODE_I64_MUL);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, is_number);
 }
 
 /**
