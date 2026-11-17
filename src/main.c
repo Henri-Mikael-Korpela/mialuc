@@ -927,6 +927,7 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
         if (nodes[value].node_type == AST_NODE_TYPE_ARRAY_LITERAL ||
             nodes[value].node_type == AST_NODE_TYPE_FIELD_ACCESS ||
             nodes[value].node_type == AST_NODE_TYPE_DEREFERENCE ||
+            nodes[value].node_type == AST_NODE_TYPE_SLICE ||
             nodes[value].node_type == AST_NODE_TYPE_SUBSCRIPT) {
             return main_expression_type_write(nodes, bindings, constants, node_count, value,
                                               depth + 1, text, text_size_bytes);
@@ -1066,6 +1067,7 @@ static bool main_expression_type_write(Ast_Node const *nodes, Semantic_Binding c
     case AST_NODE_TYPE_ARRAY_LITERAL:
         return main_array_literal_type_write(nodes, expression, text, text_size_bytes);
     case AST_NODE_TYPE_DEREFERENCE:
+    case AST_NODE_TYPE_SLICE:
     case AST_NODE_TYPE_SUBSCRIPT:
     case AST_NODE_TYPE_FIELD_ACCESS: {
         char base[256] = "";
@@ -1078,11 +1080,20 @@ static bool main_expression_type_write(Ast_Node const *nodes, Semantic_Binding c
             return base[0] == '^' &&
                    main_text_write(text, text_size_bytes, str_make(base + 1, strlen(base + 1)));
         }
-        if (node->node_type == AST_NODE_TYPE_SUBSCRIPT) {
+        if (node->node_type == AST_NODE_TYPE_SUBSCRIPT ||
+            node->node_type == AST_NODE_TYPE_SLICE) {
             // The type of an array or a slice has the brackets first, and the element is the rest.
             char const *close = base[0] == '[' ? strchr(base, ']') : NULL;
-            return close != NULL &&
-                   main_text_write(text, text_size_bytes, str_make(close + 1, strlen(close + 1)));
+            if (close == NULL) {
+                return false;
+            }
+            if (node->node_type == AST_NODE_TYPE_SLICE) {
+                // A range of the elements views them, and its length is known only when the
+                // program runs, whatever the array has.
+                int written = snprintf(text, text_size_bytes, "[]%s", close + 1);
+                return written >= 0 && (size_t)written < text_size_bytes;
+            }
+            return main_text_write(text, text_size_bytes, str_make(close + 1, strlen(close + 1)));
         }
         char const *struct_name = base[0] == '^' ? base + 1 : base;
         Ast_Node_Index struct_definition = main_struct_of_name(

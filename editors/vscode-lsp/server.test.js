@@ -111,6 +111,11 @@ const TYPES_SOURCE = [
     "    a := [const]Int { 1, 2, 3 }",
     "    return sum(a) + a[1]",
     "",
+    "middle :: proc() Int ->",
+    "    a := [const]Int { 1, 2, 3, 4 }",
+    "    part := a[1:3]",
+    "    return part[0]",
+    "",
 ].join("\n");
 
 test("a name shows its type when the pointer rests on it", async () => {
@@ -166,6 +171,11 @@ test("a name shows its type when the pointer rests on it", async () => {
         assert.match((await hover(31, 4)).contents.value, /a: \[3\]Int/);
         assert.match((await hover(32, 15)).contents.value, /a: \[3\]Int/);
         assert.match((await hover(27, 13)).contents.value, /items: \[\]Int/);
+
+        // A range of an array is a slice, which has no length that is known when the program is
+        // compiled, where it is defined and where it is used.
+        assert.match((await hover(36, 5)).contents.value, /part: \[\]Int/);
+        assert.match((await hover(37, 12)).contents.value, /part: \[\]Int/);
 
         // Nothing is shown on a keyword or on a space.
         assert.strictEqual(await hover(6, 12), null);
