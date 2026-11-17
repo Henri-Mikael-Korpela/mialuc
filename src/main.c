@@ -853,6 +853,21 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
 
         if (node->node_type == AST_NODE_TYPE_PARAMETER) {
             return main_type_text_write(nodes, node->first_child, text, text_size_bytes);
+        } else if (node->node_type == AST_NODE_TYPE_FOR_STATEMENT) {
+            // The iterator of a range is an `Int`, and the one of an array or a slice is one of
+            // its elements, so it has the type that the brackets of the array leave.
+            if (nodes[node->first_child].node_type == AST_NODE_TYPE_RANGE) {
+                return main_text_write(text, text_size_bytes, STR("Int"));
+            }
+            char sequence[256] = "";
+            if (not main_expression_type_write(nodes, bindings, constants, node_count,
+                                               node->first_child, depth + 1, sequence,
+                                               sizeof(sequence))) {
+                return false;
+            }
+            char const *close = sequence[0] == '[' ? strchr(sequence, ']') : NULL;
+            return close != NULL &&
+                   main_text_write(text, text_size_bytes, str_make(close + 1, strlen(close + 1)));
         } else if (node->node_type == AST_NODE_TYPE_CONSTANT_DEFINITION) {
             value = node->first_child;
             if (nodes[value].node_type == AST_NODE_TYPE_PROCEDURE) {
@@ -1191,6 +1206,11 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
             break;
         case AST_NODE_TYPE_PARAMETER:
             name = node->payload.parameter.name;
+            target = index;
+            break;
+        case AST_NODE_TYPE_FOR_STATEMENT:
+            // The iterator is a variable that the statement defines.
+            name = node->payload.for_statement.name;
             target = index;
             break;
         case AST_NODE_TYPE_VARIABLE_DEFINITION:

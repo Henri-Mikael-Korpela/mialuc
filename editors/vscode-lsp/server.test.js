@@ -116,6 +116,15 @@ const TYPES_SOURCE = [
     "    part := a[1:3]",
     "    return part[0]",
     "",
+    "Person :: struct ->",
+    "    age: Int",
+    "",
+    "oldest :: proc(people: []Person) Int ->",
+    "    best := 0",
+    "    for person in people ->",
+    "        best = person.age",
+    "    return best",
+    "",
 ].join("\n");
 
 test("a name shows its type when the pointer rests on it", async () => {
@@ -176,6 +185,12 @@ test("a name shows its type when the pointer rests on it", async () => {
         // compiled, where it is defined and where it is used.
         assert.match((await hover(36, 5)).contents.value, /part: \[\]Int/);
         assert.match((await hover(37, 12)).contents.value, /part: \[\]Int/);
+
+        // The iterator of a for statement over an array or a slice has the type of its elements,
+        // where the statement defines it and where it is used, and so do the fields of it.
+        assert.match((await hover(44, 9)).contents.value, /person: Person/);
+        assert.match((await hover(45, 16)).contents.value, /person: Person/);
+        assert.match((await hover(45, 23)).contents.value, /age: Int/);
 
         // Nothing is shown on a keyword or on a space.
         assert.strictEqual(await hover(6, 12), null);
