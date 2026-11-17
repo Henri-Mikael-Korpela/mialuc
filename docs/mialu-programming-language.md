@@ -411,7 +411,7 @@ A string literal is the text between a pair of double quotes, on one line:
 
 A `Str` is encoded in UTF-8: its bytes are always a valid UTF-8 encoding of text, as defined by [RFC 3629](https://www.rfc-editor.org/rfc/rfc3629). A string can hold any Unicode character, such as `"héllo"` or `"日本語"`, and each character takes one to four bytes.
 
-A string is length-based, not null-terminated. It is its bytes together with the number of them, so the length is known without looking for an end, and a string can hold a zero byte. The length counts bytes, not characters: `"héllo"` has a length of 6, because `é` takes two bytes. The empty string `""` has a length of zero. A string is immutable, and does not own its bytes: a string literal is a view of bytes that are part of the program, so returning one from a procedure is safe.
+A string is length-based, not null-terminated. It is its bytes together with the number of them, so the length is known without looking for an end, and a string can hold a zero byte. The bytes are what a string is: it is stored, copied and given to the C library as bytes, and nothing in it is converted or normalized. The empty string `""` has no bytes. The operations that go by the position of a character, which are the subscript and `length_of`, read the bytes as UTF-8 and count characters, see below. A string is immutable, and does not own its bytes: a string literal is a view of bytes that are part of the program, so returning one from a procedure is safe.
 
 > **Lessons learnt from C** In C, a string is a pointer to bytes that end with a zero, so its length is found by walking over it every time, a string cannot hold a zero byte, and a function that copies or appends to one has to be trusted to have enough room, which is the source of a great many buffer overflows. A missing terminator makes code read on past the end of the string. In Mialu a `Str` knows its length, so none of that is needed, and the null-terminated form exists only as the separate type `C_Str`, for interoperating with C code.
 
@@ -422,6 +422,19 @@ A `C_Str` (short for "C string") represents a null-terminated string. Unlike `St
 A `C_Str` is for interoperating with existing C code, as in [foreign procedures](#foreign-procedures), the equivalent type in C being `char*` or `char const*` Nothing can be done with a `C_Str` but to keep it in a variable or a parameter, pass it on, return it, and hand it to a foreign procedure.
 
 A `Str` value is never converted to a `C_Str` implicitly. A string literal, and a constant that is an untyped string, is not a `Str` yet: it is a `C_Str` where one is wanted, which is the same as `str_to_c_str` of it, see [Untyped constants](#untyped-constants). The built-in procedure [`str_to_c_str`](#str_to_c_str) makes a `C_Str` of a `Str` explicitly, and how long the `C_Str` is good for is there too.
+
+A character is a Unicode code point, which is what a [`Rune`](#characters) holds, and it takes one to four bytes. A string is subscripted by the character, and not by the byte. The subscript `s[i]` is the `Rune` of the character at the index `i`, which is counted from 0, and `length_of(s)` is the number of characters, see [length_of](#length_of):
+
+```
+s := "äiti"
+first := s[0]
+second := s[1]
+count := length_of(s)
+```
+
+`first` is `'ä'`, which takes two bytes, `second` is `'i'`, and `count` is 4, though the string has 5 bytes. So `"héllo"` has 5 characters and takes 6 bytes. An index that is negative or not below the number of characters stops the program, as an index outside of an array does. The subscript is a value and not a place, so a character cannot be assigned to, `s[0] = 'x'` is an error, since a string is immutable, and the address of one cannot be taken. The index must be an `Int`.
+
+Characters are found by walking over the string from its start, because the bytes of the characters before one say how far it is, so `s[i]` takes as long as `i` is large, and not the same time for every index as the subscript of an array does. The characters are code points: a character that a person sees can be more than one of them, such as an `e` with an accent that is written as two code points, and a string is never normalized, so `"é"` of one code point and of two are different strings, with different lengths.
 
 Strings are joined with `++`, which has the same precedence as `+` and `-` and is left associative. It takes two strings, or a string and a rune on either side, and a rune is joined as its UTF-8 bytes, so `"Hello" ++ ' ' ++ "world" ++ '🚀'` is the string `"Hello world🚀"`. Both operands must be constants, see [Constants](#constants), because the joining is done when the program is compiled: the program has the joined text as one string, like a string literal, and nothing is joined when it runs. `++` does not allocate, and an operand that is known only when the program runs, such as a variable or the result of a call, is an error. Two runes are not joined, and neither is a number, so `'a' ++ 'b'` and `"count: " ++ 3` are errors. The result is an untyped string, so it can be given to a `C_Str` too, unless an operand is a constant that was given the type `Str`, and then the result is a `Str`. The joined text of all the constants of a program is limited in size, and a program that has more is rejected.
 
@@ -1972,14 +1985,14 @@ A built-in procedure is a procedure that the language has, and that is called li
 
 | Procedure | Takes | Gives |
 |-----------|-------|-------|
-| [`length_of`](#length_of) | an array or an array slice | the number of its elements, an `Int` |
+| [`length_of`](#length_of) | an array, an array slice or a `Str` | the number of its elements or characters, an `Int` |
 | [`int_to_byte`](#int_to_byte) | an `Int` | a `Byte` of it, and stops the program when it is not from 0 to 255 |
 | [`str_to_c_str`](#str_to_c_str) | a `Str` | a `C_Str`, a copy of it that ends with a zero |
 | [`try_str_to_int`](#try_str_to_int) | a `Str` | two values: the `Int` that it is, and whether it is one |
 
 ### length_of
 
-`length_of` gives the number of elements of an array or an array slice, as an `Int`. It takes one argument, and it is called like any procedure:
+`length_of` gives the number of elements of an array or an array slice, or the number of characters of a string, as an `Int`. It takes one argument, and it is called like any procedure:
 
 ```
 length_of_array :: proc() Int ->
@@ -1998,7 +2011,7 @@ fill_with_length :: proc() Int ->
     return sum(a)
 ```
 
-`length_of_array` returns 5. The length of an array is part of the program, so for an array `length_of` is a number that is known when the program is compiled, also for an array whose length is `const`. The length of a slice is not known until the program runs, so for a slice it reads the length that the slice holds, which for `a[low:high]` is `high - low`. The length of an array of nothing, `[const]Int { }`, is 0. Anything else as the argument, such as an `Int` or a `Str`, is an error.
+`length_of_array` returns 5. The length of an array is part of the program, so for an array `length_of` is a number that is known when the program is compiled, also for an array whose length is `const`. The length of a slice is not known until the program runs, so for a slice it reads the length that the slice holds, which for `a[low:high]` is `high - low`. The length of an array of nothing, `[const]Int { }`, is 0. The length of a string is the number of its code points, so `length_of("äiti")` is 4, and it is worked out when the program runs by counting the bytes that are not the continuation of another, which takes as long as the string is long, see [Strings](#strings). Anything else as the argument, such as an `Int`, is an error.
 
 `length_of` is not a keyword but a name that a program can define itself: a procedure with that name is called instead of the built-in one. The [members of an enum](#static-reflection) are an array, so `length_of` gives their number as well.
 

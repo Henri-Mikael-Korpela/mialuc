@@ -400,6 +400,15 @@ static void            wasm_build_type_section                (Wasm_Builder *bui
                                                                Ast_Node_Index module,
                                                                size_t definition_count);
 static byte            wasm_comparison_opcode                 (Ast_Comparison_Operator operator);
+static void            wasm_utf8_skip_write                   (Wasm_Builder *builder, size_t next,
+                                                               size_t end, size_t count);
+static void            wasm_utf8_decode_write                 (Wasm_Builder *builder, size_t next,
+                                                               size_t value, size_t mask,
+                                                               size_t extra);
+static void            wasm_string_subscript_write            (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
+static void            wasm_string_length_write               (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure);
 static bool            wasm_comparison_is_of_strings          (Wasm_Builder const *builder,
                                                                Ast_Node_Index comparison);
 static void            wasm_build_code_section_body_string_comparison
@@ -3137,7 +3146,11 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
         }
         Wasm_Type argument_type =
             wasm_expression_type(builder, builder->nodes[call].first_child);
-        bool is_argument_valid = wasm_type_is_sequence(argument_type);
+        // `length_of` takes an array, an array slice, or a string, which it counts by the
+        // character.
+        bool is_argument_valid = wasm_type_is_sequence(argument_type) ||
+                                 (argument_type.kind == WASM_VALUE_TYPE_STR &&
+                                  str_equals(name, STR("length_of")));
         if (str_equals(name, STR("int_to_byte"))) {
             is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_INT;
         } else if (str_equals(name, STR("str_to_c_str")) ||
@@ -4186,6 +4199,10 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     }
     case AST_NODE_TYPE_SUBSCRIPT: {
         Wasm_Type sequence = wasm_expression_type(builder, node->first_child);
+        // A string is subscripted by the character, which is a `Rune`.
+        if (sequence.kind == WASM_VALUE_TYPE_STR) {
+            return wasm_type_make(WASM_VALUE_TYPE_RUNE);
+        }
         if (not wasm_type_is_sequence(sequence)) {
             return wasm_type_make(WASM_VALUE_TYPE_NONE);
         }
@@ -5088,6 +5105,11 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
             break;
         }
         if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE) {
+            // `length_of` of a string counts its characters.
+            if (wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_STR) {
+                wasm_string_length_write(builder, procedure);
+                break;
+            }
             // `length_of`: the address and the length of the slice are on the stack, and
             // only the length stays, as a 64-bit `Int`. The address is below it, so the length
             // is kept aside while the address is dropped.
@@ -6147,6 +6169,230 @@ static void wasm_array_decay(Wasm_Builder *builder, Ast_Node_Index expression) {
 }
 
 /**
+ * Writes the instructions that move forward over `count` characters of a string, which is a number
+ * of code points: the local `next` has the address of the next byte and `end` the address after the
+ * last one, and `next` is moved to the first byte of the character that comes after them. A
+ * character is its first byte, which does not have the bits 10 at the top, and the bytes after it
+ * that do, so one step goes over a byte and then over the bytes that continue it. The program traps
+ * when the string has fewer characters than that, but not for exactly as many, which leaves `next`
+ * at the end. `count` is an `i64` local, which is counted as unsigned, so a negative number is a
+ * very large one, and traps too. `count` is changed.
+ */
+static void wasm_utf8_skip_write(Wasm_Builder *builder, size_t next, size_t end, size_t count) {
+    Wasm_Writer *writer = &builder->writer;
+
+    // Label 0 is the loop and label 1 the block around it.
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, count);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, 0);
+    wasm_write_byte(writer, WASM_OPCODE_I64_EQ);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GE_U);
+    wasm_structured_trap(builder);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    // The bytes that continue the character, which end the inner loop at the end of the string or
+    // at the first byte that does not have the bits 10 at the top.
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GE_U);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_i32_const(writer, 0xC0);
+    wasm_write_byte(writer, WASM_OPCODE_I32_AND);
+    wasm_write_i32_const(writer, 0x80);
+    wasm_write_byte(writer, WASM_OPCODE_I32_NE);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 0);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, count);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I64_SUB);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, count);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 0);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+}
+
+/**
+ * Writes the instructions that decode the character whose first byte is at the address in the local
+ * `next`, which must be the start of a character in a string that is valid UTF-8: its code point is
+ * put in the local `value`, and `next` is moved to the address after it. The first byte says how
+ * many bytes continue it, which is none below 0xC0, one below 0xE0, two below 0xF0 and three above,
+ * and which of its bits are the code point, which `mask` and `extra` hold for it. Each byte that
+ * continues it gives its low 6 bits, which are put after the ones so far. All four are 32-bit
+ * locals, and the last three are changed.
+ */
+static void wasm_utf8_decode_write(Wasm_Builder *builder, size_t next, size_t value, size_t mask,
+                                   size_t extra) {
+    Wasm_Writer *writer = &builder->writer;
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, value);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_i32_const(writer, 0x7F);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, mask);
+    wasm_write_i32_const(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, extra);
+    int64_t limits[3] = {0xC0, 0xE0, 0xF0};
+    int64_t masks[3] = {0x1F, 0x0F, 0x07};
+    for (size_t i = 0; i < 3; i += 1) {
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, value);
+        wasm_write_i32_const(writer, limits[i]);
+        wasm_write_byte(writer, WASM_OPCODE_I32_GE_U);
+        wasm_structured_begin(builder, WASM_OPCODE_IF);
+        wasm_write_i32_const(writer, masks[i]);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, mask);
+        wasm_write_i32_const(writer, (int64_t)(i + 1));
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, extra);
+        wasm_write_byte(writer, WASM_OPCODE_END);
+    }
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, value);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, mask);
+    wasm_write_byte(writer, WASM_OPCODE_I32_AND);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, value);
+
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, extra);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, value);
+    wasm_write_i32_const(writer, 6);
+    wasm_write_byte(writer, WASM_OPCODE_I32_SHL);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_i32_const(writer, 0x3F);
+    wasm_write_byte(writer, WASM_OPCODE_I32_AND);
+    wasm_write_byte(writer, WASM_OPCODE_I32_OR);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, value);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, extra);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, extra);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 0);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+}
+
+/**
+ * Writes the instructions for the subscript `s[i]` of a string, whose address, length and index
+ * are on the stack: the `Rune` of the character at the index, which counts characters and not bytes,
+ * so the bytes before it are walked over, see `wasm_utf8_skip_write`. The program traps for an
+ * index that is negative or not below the number of characters.
+ */
+static void wasm_string_subscript_write(Wasm_Builder *builder, Ast_Node_Index procedure) {
+    Wasm_Writer *writer = &builder->writer;
+    size_t next = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+    size_t end = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_SECOND);
+    size_t mask = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_TEMPORARY_32);
+    size_t extra = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_STRING);
+    size_t count = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_LOW);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, count);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+    wasm_utf8_skip_write(builder, next, end, count);
+
+    // The character must be there, so the address is below the end. The end is not needed after
+    // that, so its local holds the code point.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GE_U);
+    wasm_structured_trap(builder);
+    wasm_utf8_decode_write(builder, next, end, mask, extra);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+}
+
+/**
+ * Writes the instructions that count the characters of the string whose address and length are on
+ * the stack, and leave the count as an `Int`: the bytes that are not the continuation of another,
+ * which have the bits 10 at the top, are the first byte of a character.
+ */
+static void wasm_string_length_write(Wasm_Builder *builder, Ast_Node_Index procedure) {
+    Wasm_Writer *writer = &builder->writer;
+    size_t next = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+    size_t end = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_SECOND);
+    size_t count = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_LOW);
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, count);
+
+    wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+    wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GE_U);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_i32_const(writer, 0xC0);
+    wasm_write_byte(writer, WASM_OPCODE_I32_AND);
+    wasm_write_i32_const(writer, 0x80);
+    wasm_write_byte(writer, WASM_OPCODE_I32_NE);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, count);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I64_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, count);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 0);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, count);
+}
+
+/**
  * Writes the instructions that leave the address of an element, from the array slice and the index
  * that are on the stack: the address of the first element, its length as a 32-bit integer, and
  * the index as a 64-bit one. An index that is not below the length, which is also any negative
@@ -6322,6 +6568,14 @@ static bool wasm_build_code_section_body_subscript(Wasm_Builder *builder,
     Ast_Node_Index index = builder->nodes[subscript].last_child;
 
     Wasm_Type base_type = wasm_expression_type(builder, base);
+    if (base_type.kind == WASM_VALUE_TYPE_STR) {
+        if (wasm_expression_type(builder, index).kind != WASM_VALUE_TYPE_INT) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, index));
+        }
+        wasm_string_subscript_write(builder, procedure);
+        return true;
+    }
     if (not wasm_type_is_sequence(base_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, base));

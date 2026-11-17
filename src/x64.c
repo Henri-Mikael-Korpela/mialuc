@@ -722,6 +722,11 @@ static void         x64_sequence_length_load     (X64_Builder *builder, X64_Type
 static Ast_Node_Index x64_signature_canonical    (X64_Builder const *builder,
                                                   Ast_Node_Index signature);
 static bool         x64_signatures_check         (X64_Builder *builder);
+static void         x64_utf8_skip_write          (X64_Builder *builder);
+static void         x64_utf8_decode_write        (X64_Builder *builder);
+static bool         x64_string_subscript_write   (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame);
+static void         x64_string_length_write      (X64_Builder *builder, int32_t place);
 static bool         x64_slice_write              (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static int32_t      x64_stack_displacement       (X64_Builder const *builder, size_t start,
@@ -3932,6 +3937,12 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
         return true;
     case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_SUBSCRIPT: {
+        // A character of a string is not in a place: it is decoded from the bytes.
+        if (builder->nodes[node].node_type == AST_NODE_TYPE_SUBSCRIPT &&
+            x64_expression_type(builder, builder->nodes[node].first_child).kind ==
+                X64_TYPE_KIND_STR) {
+            return x64_string_subscript_write(builder, frame);
+        }
         // The address of the place, and then what is there.
         if (not x64_address_write(builder, frame)) {
             return false;
@@ -4252,6 +4263,150 @@ static bool x64_field_address_write(X64_Builder *builder, X64_Expression_Frame c
 }
 
 /**
+ * Writes the instructions that move forward over `rax` characters of a string, which is a number of
+ * code points: `r10` is the address of the next byte and `r11` the address after the last one, and
+ * `r10` is moved to the first byte of the character that comes after them. A character is its
+ * first byte, which does not have the bits 10 at the top, and the bytes after it that do, so one
+ * step goes over a byte and then over the bytes that continue it. The program traps when the
+ * string has fewer characters than that, but not for exactly as many, which leaves `r10` at the end.
+ * A number that is negative is a very large one, so it traps as well. `rax`, `rcx` and `rdx`
+ * are changed.
+ */
+static void x64_utf8_skip_write(X64_Builder *builder) {
+    uint32_t done_jumps = X64_JUMP_NONE;
+    uint32_t after_jumps = X64_JUMP_NONE;
+
+    uint32_t loop = (uint32_t)(builder->writer.length - builder->text_start);
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_RAX, X64_REGISTER_RAX);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &done_jumps);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_R11, X64_REGISTER_R10);
+    x64_write_trap_unless(builder, X64_CONDITION_BELOW);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    uint32_t inner = (uint32_t)(builder->writer.length - builder->text_start);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_R11, X64_REGISTER_R10);
+    x64_jump_write(builder, X64_CONDITION_ABOVE_EQUAL, &after_jumps);
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RCX,
+                              X64_REGISTER_R10, 0);
+    x64_write_and_immediate(builder, X64_REGISTER_RCX, (int8_t)0xC0);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, 0x80);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RCX);
+    x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &after_jumps);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    x64_jump_back_write(builder, inner);
+    x64_jumps_resolve(builder, after_jumps);
+    x64_write_add_immediate(builder, X64_REGISTER_RAX, -1);
+    x64_jump_back_write(builder, loop);
+    x64_jumps_resolve(builder, done_jumps);
+}
+
+/**
+ * Writes the instructions that decode the character whose first byte is at the address in `r10`,
+ * which must be the start of a character in a string that is valid UTF-8: its code point is in
+ * `rax`, and `r10` is the address after it. The first byte says how many bytes continue it, which
+ * is none below 0xC0, one below 0xE0, two below 0xF0 and three above, and which of its bits are
+ * the code point. Each byte that continues it gives its low 6 bits, which are put after the ones
+ * so far with a multiplication by 64. `rcx`, `rdx`, `r8` and `r9` are changed.
+ */
+static void x64_utf8_decode_write(X64_Builder *builder) {
+    uint32_t loop_done_jumps = X64_JUMP_NONE;
+
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RAX,
+                              X64_REGISTER_R10, 0);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    x64_write_load_integer(builder, X64_REGISTER_R8, 0x7F);
+    x64_write_load_integer(builder, X64_REGISTER_R9, 0);
+    int64_t limits[3] = {0xC0, 0xE0, 0xF0};
+    int64_t masks[3] = {0x1F, 0x0F, 0x07};
+    for (size_t i = 0; i < 3; i += 1) {
+        uint32_t below_jumps = X64_JUMP_NONE;
+        x64_write_load_integer(builder, X64_REGISTER_RCX, limits[i]);
+        x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+        x64_jump_write(builder, X64_CONDITION_BELOW, &below_jumps);
+        x64_write_load_integer(builder, X64_REGISTER_R8, masks[i]);
+        x64_write_load_integer(builder, X64_REGISTER_R9, (int64_t)(i + 1));
+        x64_jumps_resolve(builder, below_jumps);
+    }
+    x64_write_registers(builder, X64_OPCODE_AND, X64_REGISTER_R8, X64_REGISTER_RAX);
+
+    uint32_t loop = (uint32_t)(builder->writer.length - builder->text_start);
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_R9, X64_REGISTER_R9);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &loop_done_jumps);
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RCX,
+                              X64_REGISTER_R10, 0);
+    x64_write_and_immediate(builder, X64_REGISTER_RCX, 0x3F);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, 64);
+    x64_write_multiply(builder, X64_REGISTER_RAX, X64_REGISTER_RDX);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    x64_write_add_immediate(builder, X64_REGISTER_R9, -1);
+    x64_jump_back_write(builder, loop);
+    x64_jumps_resolve(builder, loop_done_jumps);
+}
+
+/**
+ * Writes the subscript `s[i]` of a string, whose string and index are on the stack of values: the
+ * `Rune` of the character at the index, which counts characters and not bytes, so the bytes before
+ * it are walked over, see `x64_utf8_skip_write`. The program traps for an index that is negative or
+ * not below the number of characters. Returns false after it recorded an error.
+ */
+static bool x64_string_subscript_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
+    Ast_Node_Index node = frame->node;
+    Ast_Node_Index index = builder->nodes[builder->nodes[node].first_child].next_sibling;
+    if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_INT), index)) {
+        return x64_fail(builder, X64_BUILD_STATUS_INDEX_TYPE_INVALID,
+                        x64_expression_subject(builder, index));
+    }
+
+    int32_t string = x64_stack_displacement(builder, frame->stack_start, 2);
+    int32_t place = x64_stack_displacement(builder, frame->stack_start + 2, 1);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, string);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R11, X64_REGISTER_RBP,
+                     string + X64_WORD_SIZE_BYTES);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_R10, X64_REGISTER_R11);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+    x64_utf8_skip_write(builder);
+    // The character must be there, so the address is below the end.
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_R11, X64_REGISTER_R10);
+    x64_write_trap_unless(builder, X64_CONDITION_BELOW);
+    x64_utf8_decode_write(builder);
+
+    x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+    int32_t target = x64_stack_push(builder, 1);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+    return true;
+}
+
+/**
+ * Writes the count of the characters of the string at `rbp + place`, an address and a length in
+ * bytes, to `rax`: the bytes that are not the continuation of another, which have the bits 10 at
+ * the top, are the first byte of a character. `r10`, `r11`, `rcx` and `rdx` are changed.
+ */
+static void x64_string_length_write(X64_Builder *builder, int32_t place) {
+    uint32_t done_jumps = X64_JUMP_NONE;
+    uint32_t continued_jumps = X64_JUMP_NONE;
+
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, place);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R11, X64_REGISTER_RBP,
+                     place + X64_WORD_SIZE_BYTES);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_R10, X64_REGISTER_R11);
+    x64_write_load_integer(builder, X64_REGISTER_RAX, 0);
+    uint32_t loop = (uint32_t)(builder->writer.length - builder->text_start);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_R11, X64_REGISTER_R10);
+    x64_jump_write(builder, X64_CONDITION_ABOVE_EQUAL, &done_jumps);
+    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RCX,
+                              X64_REGISTER_R10, 0);
+    x64_write_and_immediate(builder, X64_REGISTER_RCX, (int8_t)0xC0);
+    x64_write_load_integer(builder, X64_REGISTER_RDX, 0x80);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RCX);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &continued_jumps);
+    x64_write_add_immediate(builder, X64_REGISTER_RAX, 1);
+    x64_jumps_resolve(builder, continued_jumps);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
+    x64_jump_back_write(builder, loop);
+    x64_jumps_resolve(builder, done_jumps);
+}
+
+/**
  * Writes the slice `a[low:high]` of `frame`, whose array or array slice and bounds are on the
  * stack of values, and leaves the slice: the address of the element at `low` and the number of
  * elements up to `high`. It traps unless `low` is not above `high` and `high` is not above the
@@ -4409,10 +4564,13 @@ static bool x64_built_in_write(X64_Builder *builder, X64_Expression_Frame const 
         return true;
     }
     if (str_equals(name, STR("length_of"))) {
-        if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+        if (type.kind == X64_TYPE_KIND_STR) {
+            x64_string_length_write(builder, place);
+        } else if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        } else {
+            x64_sequence_length_load(builder, type, X64_REGISTER_RAX, place);
         }
-        x64_sequence_length_load(builder, type, X64_REGISTER_RAX, place);
     } else if (str_equals(name, STR("int_to_byte"))) {
         if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_INT), argument)) {
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
@@ -5434,6 +5592,13 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
         }
         case AST_NODE_TYPE_SLICE:
         case AST_NODE_TYPE_SUBSCRIPT:
+            // A string is subscripted by the code point, which is a `Rune`.
+            if (type.kind == X64_TYPE_KIND_STR) {
+                if (builder->nodes[path[i - 1]].node_type == AST_NODE_TYPE_SUBSCRIPT) {
+                    type = x64_type_make(X64_TYPE_KIND_RUNE);
+                }
+                break;
+            }
             if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
                 return x64_type_make(X64_TYPE_KIND_NONE);
             }
