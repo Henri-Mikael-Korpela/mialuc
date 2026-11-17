@@ -204,6 +204,19 @@ bool constant_is_i32(Constant_Value value) {
            value.integer <= INT32_MAX;
 }
 
+bool constant_is_u32(Constant_Value value) {
+    assert(value.status == CONSTANT_STATUS_OK);
+
+    return value.type == CONSTANT_TYPE_UNTYPED_INTEGER && value.integer >= 0 &&
+           value.integer <= UINT32_MAX;
+}
+
+bool constant_is_u64(Constant_Value value) {
+    assert(value.status == CONSTANT_STATUS_OK);
+
+    return value.type == CONSTANT_TYPE_UNTYPED_INTEGER && value.integer >= 0;
+}
+
 bool constant_is_f32(Constant_Value value) {
     assert(value.status == CONSTANT_STATUS_OK);
 
@@ -223,6 +236,8 @@ Constant_Type constant_type_default(Constant_Type type) {
     case CONSTANT_TYPE_INT:
     case CONSTANT_TYPE_RUNE:
     case CONSTANT_TYPE_STR:
+    case CONSTANT_TYPE_U32:
+    case CONSTANT_TYPE_U64:
         return type;
     case CONSTANT_TYPE_UNTYPED_FLOAT:
         // The widest float, which holds every number that a literal can be, and every `F32`.
@@ -479,6 +494,12 @@ static Constant_Value constant_convert(Ast_Node const *nodes, Ast_Node_Index def
         // Every untyped integer fits, because it is a number of 64 bits already.
         target = CONSTANT_TYPE_I64;
         untyped = CONSTANT_TYPE_UNTYPED_INTEGER;
+    } else if (str_equals(name, STR("U32"))) {
+        target = CONSTANT_TYPE_U32;
+        untyped = CONSTANT_TYPE_UNTYPED_INTEGER;
+    } else if (str_equals(name, STR("U64"))) {
+        target = CONSTANT_TYPE_U64;
+        untyped = CONSTANT_TYPE_UNTYPED_INTEGER;
     } else if (str_equals(name, STR("F32"))) {
         target = CONSTANT_TYPE_F32;
         untyped = CONSTANT_TYPE_UNTYPED_FLOAT;
@@ -509,6 +530,12 @@ static Constant_Value constant_convert(Ast_Node const *nodes, Ast_Node_Index def
         return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, definition);
     }
     if (target == CONSTANT_TYPE_I32 && not constant_is_i32(value)) {
+        return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, definition);
+    }
+    if (target == CONSTANT_TYPE_U32 && not constant_is_u32(value)) {
+        return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, definition);
+    }
+    if (target == CONSTANT_TYPE_U64 && not constant_is_u64(value)) {
         return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, definition);
     }
     if (target == CONSTANT_TYPE_F32) {
@@ -705,10 +732,20 @@ static Constant_Value constant_arithmetic(Ast_Node const *nodes, Ast_Node_Index 
     // an `Int`, because nothing is converted.
     bool is_i32 = left.type == CONSTANT_TYPE_I32 || right.type == CONSTANT_TYPE_I32;
     bool is_i64 = left.type == CONSTANT_TYPE_I64 || right.type == CONSTANT_TYPE_I64;
+    bool is_u32 = left.type == CONSTANT_TYPE_U32 || right.type == CONSTANT_TYPE_U32;
+    bool is_u64 = left.type == CONSTANT_TYPE_U64 || right.type == CONSTANT_TYPE_U64;
     // The sized types are not worked with each other, or with an `Int`.
-    if ((is_i32 && is_i64) ||
-        ((is_i32 || is_i64) && (left.type == CONSTANT_TYPE_INT || right.type == CONSTANT_TYPE_INT))) {
+    size_t sized_count = (size_t)is_i32 + (size_t)is_i64 + (size_t)is_u32 + (size_t)is_u64;
+    if (sized_count > 1 ||
+        (sized_count == 1 && (left.type == CONSTANT_TYPE_INT || right.type == CONSTANT_TYPE_INT))) {
         return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, operation);
+    }
+    // An untyped operand of an unsigned type must be a number that the type holds.
+    if ((is_u32 && ((left.type == CONSTANT_TYPE_UNTYPED_INTEGER && not constant_is_u32(left)) ||
+                    (right.type == CONSTANT_TYPE_UNTYPED_INTEGER && not constant_is_u32(right)))) ||
+        (is_u64 && ((left.type == CONSTANT_TYPE_UNTYPED_INTEGER && not constant_is_u64(left)) ||
+                    (right.type == CONSTANT_TYPE_UNTYPED_INTEGER && not constant_is_u64(right))))) {
+        return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, operation);
     }
     if (is_i32) {
         if (left.type == CONSTANT_TYPE_UNTYPED_INTEGER && not constant_is_i32(left)) {
@@ -749,6 +786,20 @@ static Constant_Value constant_arithmetic(Ast_Node const *nodes, Ast_Node_Index 
     }
     if (is_i64) {
         result.type = CONSTANT_TYPE_I64;
+    }
+    // An unsigned constant does not wrap around either: a result below zero, or above what the
+    // type holds, is an error.
+    if (is_u32) {
+        if (result.integer < 0 || result.integer > UINT32_MAX) {
+            return constant_fail(CONSTANT_STATUS_OVERFLOW, operation);
+        }
+        result.type = CONSTANT_TYPE_U32;
+    }
+    if (is_u64) {
+        if (result.integer < 0) {
+            return constant_fail(CONSTANT_STATUS_OVERFLOW, operation);
+        }
+        result.type = CONSTANT_TYPE_U64;
     }
     return result;
 }
@@ -943,6 +994,18 @@ static Constant_Value constant_comparison(Ast_Node const *nodes, Ast_Node_Index 
         if (right.type == CONSTANT_TYPE_I32 && is_left_untyped && not constant_is_i32(left)) {
             return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
         }
+        if (left.type == CONSTANT_TYPE_U32 && is_right_untyped && not constant_is_u32(right)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
+        }
+        if (right.type == CONSTANT_TYPE_U32 && is_left_untyped && not constant_is_u32(left)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
+        }
+        if (left.type == CONSTANT_TYPE_U64 && is_right_untyped && not constant_is_u64(right)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
+        }
+        if (right.type == CONSTANT_TYPE_U64 && is_left_untyped && not constant_is_u64(left)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
+        }
     } else if (constant_type_is_float(left.type) && constant_type_is_float(right.type)) {
         bool is_left_untyped = left.type == CONSTANT_TYPE_UNTYPED_FLOAT;
         bool is_right_untyped = right.type == CONSTANT_TYPE_UNTYPED_FLOAT;
@@ -1111,6 +1174,7 @@ static bool constant_type_is_float(Constant_Type type) {
 static bool constant_type_is_integer(Constant_Type type) {
     return type == CONSTANT_TYPE_INT || type == CONSTANT_TYPE_BYTE ||
            type == CONSTANT_TYPE_I32 || type == CONSTANT_TYPE_I64 ||
+           type == CONSTANT_TYPE_U32 || type == CONSTANT_TYPE_U64 ||
            type == CONSTANT_TYPE_UNTYPED_INTEGER;
 }
 

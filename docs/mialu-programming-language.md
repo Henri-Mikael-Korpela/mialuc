@@ -246,6 +246,8 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 | `Int` | A signed 64-bit integer. Written as a number, such as `42`, `0b101010` or `0x2A`. See [Integers](#integers). |
 | `I32` | A signed 32-bit integer, from -2147483648 to 2147483647. It is the `int` of the C library. See [32-bit integers](#32-bit-integers). |
 | `I64` | A signed 64-bit integer, the size of an `Int` and a type of its own. It is the `long long`, `int64_t` and `size_t` of the C library. See [64-bit integers](#64-bit-integers). |
+| `U32` | An unsigned 32-bit integer, from 0 to 4294967295. It is the `unsigned int` and the `DWORD` of the C library and of Windows. See [Integers](#integers). |
+| `U64` | An unsigned 64-bit integer, from 0 to 18446744073709551615. It is the `unsigned long long` and the `QWORD`. A constant of it is at most 9223372036854775807. See [Integers](#integers). |
 | `F32` | A 32-bit floating point number. Written as a number with a fractional part, such as `1.42`. See [Floats](#floating-point-numbers). |
 | `F64` | A 64-bit floating point number. Written as a number with a fractional part, such as `1.42`, and the type of one where nothing says. See [Floats](#floating-point-numbers). |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
@@ -256,7 +258,7 @@ The following primitive data types are reserved for possible future use:
 | Category | Types |
 | -------- | ----- |
 | Signed integer | `I8 I16` |
-| Unsigned integer | `U8 U16 U32 U64` |
+| Unsigned integer | `U8 U16` |
 
 ### Booleans
 
@@ -396,6 +398,22 @@ A literal or a constant without a type is not an `Int` yet, so it becomes an `I6
 The arithmetic operators `+`, `-`, `*` and `/` take two `I64` values, or an `I64` and a literal, and give an `I64`, and so do `+=`, `-=`, `*=` and `/=`. The comparison operators take two `I64` values with all six operators, and the order is the one of the numbers with their signs. The operations are the ones of an `Int`: addition, subtraction and multiplication wrap around in 64 bits, and a division goes toward zero and traps when the divisor is zero and when the smallest number is divided by -1.
 
 An `I64` and an `Int` are each made the other with a [cast](#casts), `cast(Int)n` and `cast(I64)n`, which keep the number, and so are an `I32`, a `Byte`, a `Bool` and a `Rune`, which are made an `I64` the same way, and a float, which is made one as it is made an `Int`, with its fraction dropped. An `I64` is made an `I32` by [`int_to_i32`](#int_to_i32), which takes an `Int` or an `I64`, and stops the program when the number does not fit. An `I64` takes the same place in memory as an `Int`, so a `^I64` is a pointer to an `Int` in all but its type, and an array of `I64` values is the array of 64-bit numbers that C has.
+
+A `U32` is an unsigned 32-bit integer: it holds the numbers from 0 to 4294967295, and a `U64` is an unsigned 64-bit integer, which holds the numbers from 0 to 18446744073709551615. Each is a type of its own, as an `I32` and an `I64` are: nothing is converted to them or from them implicitly, so `n : U32 = count` is an error when `count` is an `Int`, and so is `a + count` for a `U32` `a`. They are for what has a size and no sign, which is the `unsigned int`, the `DWORD`, the `unsigned long long`, the `QWORD` and the flags and sizes of the system libraries, see [Foreign procedures](#foreign-procedures). The default value of both is `0`.
+
+```
+GENERIC_READ : U32 : 0x80000000
+size : U64 = 5_000_000_000
+
+total :: proc(a: U32, b: U32) U32 ->
+    return a + b
+```
+
+A literal or a constant without a type becomes a `U32` where one is wanted when it is from 0 to 4294967295, and a `U64` when it is not negative, see [Untyped constants](#untyped-constants). A constant can have the type, `MASK : U32 : 4294967295`, and arithmetic of constants of it is exact, so it is an error when the result is below 0 or does not fit. A constant of a `U64` goes as far as an `Int` does, 9223372036854775807, because the constants are 64-bit numbers with a sign, but the value of a variable goes up to 18446744073709551615.
+
+The arithmetic operators `+`, `-`, `*` and `/` take two `U32` values, or a `U32` and a literal, and give a `U32`, and so do `+=`, `-=`, `*=` and `/=`, and the same goes for a `U64`. The comparison operators take two values of the type with all six operators, and the order is the unsigned one, so `3000000000 > 5` is true for a `U32`, and `0 - 1 > 5` is true for a `U64`. Addition, subtraction and multiplication wrap around in the bits of the type, so `0 - 1` is 4294967295 for a `U32` and 18446744073709551615 for a `U64`, and a division goes down, and traps when the divisor is zero. There is no unary minus.
+
+A `Byte`, a `Bool` and a `Rune` are made a `U32` with a [cast](#casts), because they always fit, and every integer and a `Rune` is made a `U64`, a negative number as the number that has its bits, so `cast(U64)-1` is 18446744073709551615. An `Int` and an `I32` are not cast to a `U32`, because they may not fit, and a float is cast to neither. A `U32` is made an `Int`, an `I64` or a float by a cast, and a `U64` is made an `Int` or an `I64`, which keep its bits. A `U32` takes the same place in memory as an `Int` does, which is 8 bytes in a struct or an array, and is passed and returned by value as C does an `unsigned int`. JavaScript gets a `U32` as a number and a `U64` as a `BigInt`, and since WebAssembly has no unsigned values, a number above 2147483647 or 9223372036854775807 is the negative number that has the same bits there.
 
 ### Bytes
 
@@ -744,6 +762,12 @@ A cast to `Int` of a `Byte`, a `Bool`, an `I32`, an `I64` or a `Rune` never lose
 | `Int` | `Int` | The same number. |
 | `Int`, `I32`, `Byte`, `Bool` or `Rune` | `I64` | The same number. |
 | `I64` | `I64` | The same number. |
+| `Byte`, `Bool` or `Rune` | `U32` | The same number, which fits. |
+| `U32` | `U32` | The same number. |
+| `Int`, `I32`, `I64`, `U32`, `Byte`, `Bool` or `Rune` | `U64` | The same number, which for a negative one is the number that has its bits, so `-1` is 18446744073709551615. |
+| `U64` | `U64` | The same number. |
+| `U32` | `Int`, `I64` or `F32` or `F64` | The same number, exactly, or the nearest float. |
+| `U64` | `Int` or `I64` | The number that has the same bits, which is negative above 9223372036854775807. |
 | `Byte`, `Bool` or `Rune` | `I32` | The same number, which fits, since a `Rune` is at most 0x10FFFF. |
 | `I32` | `I32` | The same number. |
 | `Rune` | `Int` | The code point of the character, from 0 to 0x10FFFF. |
@@ -829,7 +853,7 @@ An untyped constant becomes a value of its type when the program is compiled, so
 
 | Kind | Literals | Becomes | Default type |
 | ---- | -------- | ------- | ------------ |
-| Untyped integer | `42`, `0b101010`, `0x2A` | `Int`, an `I64`, an `I32` when it is from -2147483648 to 2147483647, or a `Byte` when it is from 0 to 255 | `Int` |
+| Untyped integer | `42`, `0b101010`, `0x2A` | `Int`, an `I64`, a `U64` when it is not negative, an `I32` when it is from -2147483648 to 2147483647, a `U32` when it is from 0 to 4294967295, or a `Byte` when it is from 0 to 255 | `Int` |
 | Untyped float | `1.42`, `0.5` | `F32`, when it is not above the largest `F32`, or `F64` | `F64` |
 | Untyped boolean | `true`, `false` | `Bool` | `Bool` |
 | Untyped string | `"Hello"` | `Str`, or a `C_Str` | `Str` |
@@ -848,7 +872,7 @@ COUNT : Int : 3
 NAME : Str : "Mialu"
 ```
 
-The type of a constant is `Int`, `I32`, `I64`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`, and its value must be a constant expression that has that type, or that is untyped and fits in it, so `MASK : Byte : 256` and `COUNT : Int : "three"` are errors. A typed constant follows the rules of its type: `MASK + 1` is an error, because a `Byte` has no arithmetic, and so is `b : Byte = COUNT`, because an `Int` is not a `Byte`. A typed and an untyped operand give a value of the type, so `COUNT * 2` is the `Int` 6.
+The type of a constant is `Int`, `I32`, `I64`, `U32`, `U64`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`, and its value must be a constant expression that has that type, or that is untyped and fits in it, so `MASK : Byte : 256` and `COUNT : Int : "three"` are errors. A typed constant follows the rules of its type: `MASK + 1` is an error, because a `Byte` has no arithmetic, and so is `b : Byte = COUNT`, because an `Int` is not a `Byte`. A typed and an untyped operand give a value of the type, so `COUNT * 2` is the `Int` 6.
 
 That is how a literal is written once and used with every type that can hold it: no type is chosen for it until it is used, so it needs no conversion, which a [cast](#casts) and `int_to_byte` are for values that are known only when the program runs.
 
@@ -1588,7 +1612,7 @@ Color :: enum Int ->
 
 Enum members must have name but values are optional. An enum must have at least one member, and no two members have the same name. If the first enum member does not have a value, it has value `0`. Every subsequent member without an explicit value continues from the previous member value by `1` so in the example above, RED = 0, GREEN = 1 and BLUE = 2.
 
-The integer types that are reserved for the future, such as `I8` and `U32`, will be the others. 
+The integer types that are reserved for the future, such as `I8` and `U16`, will be the others. 
 
 A member can be referenced by writing the name of its enum and a dot, such as `Color.RED`:
 

@@ -223,6 +223,8 @@ typedef enum {
     X64_TYPE_KIND_STR,
     X64_TYPE_KIND_STRUCT,
     X64_TYPE_KIND_TUPLE,
+    X64_TYPE_KIND_U32,
+    X64_TYPE_KIND_U64,
 } X64_Type_Kind;
 
 /**

@@ -91,9 +91,11 @@
        bits, give an `I32` and a `Bool`, and the same goes for `I64`, and an `Int` is neither of
        them, so the operands of an operator must be both of one of them. `int_to_i32` takes an
        `Int` or an `I64`.
+     - `U32` and `U64` are the unsigned integers of 32 and of 64 bits. They are used like `I32` and
+       `I64`, with the unsigned order and the unsigned division.
      - `int_to_str` is a built-in procedure like `length_of` that is also a constant: it takes one
-       integer that is known when the program is compiled, which is untyped or an `Int`, `I32` or
-       `I64`, and gives its decimal text as a string, so it can be an operand of `++`.
+       integer that is known when the program is compiled, which is untyped or an `Int`, `I32`,
+       `I64`, `U32` or `U64`, and gives its decimal text as a string, so it can be an operand of `++`.
      - `try_str_to_int` is a built-in procedure like `length_of`. It takes a `Str` and gives two
        values, an `Int` and a `Bool`, so it is a call that is only accepted as the value of the
        definition of two names, `number, is_ok := try_str_to_int(text)`.

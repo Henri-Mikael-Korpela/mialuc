@@ -56,6 +56,13 @@ typedef enum {
     // defined with the type `Rune`. A rune has no arithmetic, and no untyped integer is one.
     CONSTANT_TYPE_RUNE,
     CONSTANT_TYPE_STR,
+    // A constant that is defined with the type `U32`, or arithmetic of one with an untyped integer.
+    // Its value is a number from 0 to 4294967295.
+    CONSTANT_TYPE_U32,
+    // A constant that is defined with the type `U64`, or arithmetic of one with an untyped integer.
+    // Its value is a number from 0 to 9223372036854775807, which is as far as the 64 bits of
+    // `integer` go, so a constant is not larger than an `Int` is.
+    CONSTANT_TYPE_U64,
     // `true`, `false`, a comparison of constants, and `and`, `or` and `not` of untyped truth
     // values.
     CONSTANT_TYPE_UNTYPED_BOOL,
@@ -97,7 +104,7 @@ typedef enum {
     // The text of the strings that `++` joins does not fit in the `Constant_Text` any more.
     // `error` is the operator.
     CONSTANT_STATUS_TEXT_TOO_LONG,
-    // A typed constant whose type is not `Int`, `I32`, `I64`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`,
+    // A typed constant whose type is not `Int`, `I32`, `I64`, `U32`, `U64`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`,
     // which are the types that a constant can have. `error` is the definition.
     CONSTANT_STATUS_TYPE_INVALID,
     // A value that is not of the type that it is given, such as a string for a constant of type
@@ -186,6 +193,14 @@ bool constant_definition_is_value(Ast_Node const *nodes, Ast_Node_Index definiti
  */
 bool constant_is_byte(Constant_Value value);
 bool constant_is_i32(Constant_Value value);
+
+/**
+ * Returns whether `value`, which must be `CONSTANT_STATUS_OK`, is an untyped integer that fits in a
+ * `U32`, which is a number from 0 to 4294967295, or in a `U64`, of which a constant holds the
+ * numbers from 0 to 9223372036854775807, the ones that an `Int` holds too.
+ */
+bool constant_is_u32(Constant_Value value);
+bool constant_is_u64(Constant_Value value);
 
 /**
  * Returns whether `value`, which must be `CONSTANT_STATUS_OK`, is an untyped float that an `F32`

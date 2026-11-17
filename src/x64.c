@@ -181,6 +181,7 @@ enum {
     X64_DWARF_ENCODING_FLOAT = 0x04,
     X64_DWARF_ENCODING_UTF = 0x10,
     X64_DWARF_ENCODING_SIGNED = 0x05,
+    X64_DWARF_ENCODING_UNSIGNED = 0x07,
     X64_DWARF_ENCODING_UNSIGNED_CHAR = 0x08,
     X64_DWARF_OP_ADDR = 0x03,
     X64_DWARF_OP_FBREG = 0x91,
@@ -379,6 +380,8 @@ typedef struct {
     uint32_t f64_type;
     uint32_t i32_type;
     uint32_t i64_type;
+    uint32_t u32_type;
+    uint32_t u64_type;
     uint32_t int_type;
     uint32_t rune_type;
     uint32_t str_type;
@@ -835,6 +838,8 @@ static void         x64_write_call_import        (X64_Builder *builder, uint32_t
 static void         x64_write_call_local         (X64_Builder *builder, size_t target_offset);
 static void         x64_write_call_register      (X64_Builder *builder, byte register_number);
 static void         x64_write_divide             (X64_Builder *builder, byte divisor);
+static void         x64_write_divide_unsigned    (X64_Builder *builder, byte divisor);
+static void         x64_write_zero_extend        (X64_Builder *builder);
 static void         x64_write_load_integer       (X64_Builder *builder, byte register_number,
                                                   int64_t number);
 static void         x64_write_memory             (X64_Builder *builder, byte opcode,
@@ -1527,6 +1532,7 @@ static bool x64_data_layout(X64_Builder *builder) {
                         type.kind == X64_TYPE_KIND_F32 || type.kind == X64_TYPE_KIND_F64 ||
                         type.kind == X64_TYPE_KIND_I32 || type.kind == X64_TYPE_KIND_I64 ||
                         type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_RUNE ||
+                        type.kind == X64_TYPE_KIND_U32 || type.kind == X64_TYPE_KIND_U64 ||
                         type.kind == X64_TYPE_KIND_STR ||
                         (type.kind == X64_TYPE_KIND_ARRAY && x64_type_info_access_is(builder,
                                                                                    value));
@@ -3273,7 +3279,8 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
         // The operators work on an `Int` or on a float, the place and the value alike.
         value_type = type;
         if (type.kind != X64_TYPE_KIND_INT && type.kind != X64_TYPE_KIND_I32 &&
-            type.kind != X64_TYPE_KIND_I64 && not x64_type_is_float(type)) {
+            type.kind != X64_TYPE_KIND_I64 && type.kind != X64_TYPE_KIND_U32 &&
+            type.kind != X64_TYPE_KIND_U64 && not x64_type_is_float(type)) {
             return x64_fail(builder, X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, subject);
         }
         mismatch = X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID;
@@ -3315,7 +3322,11 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
             x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
             break;
         case AST_NODE_TYPE_DIVISION_ASSIGNMENT:
-            x64_write_divide(builder, X64_REGISTER_RCX);
+            if (type.kind == X64_TYPE_KIND_U64) {
+                x64_write_divide_unsigned(builder, X64_REGISTER_RCX);
+            } else {
+                x64_write_divide(builder, X64_REGISTER_RCX);
+            }
             break;
         case AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT:
             x64_write_multiply(builder, X64_REGISTER_RAX, X64_REGISTER_RCX);
@@ -3329,6 +3340,8 @@ static bool x64_assignment_write(X64_Builder *builder, Ast_Node_Index statement)
         }
         if (type.kind == X64_TYPE_KIND_I32) {
             x64_i32_wrap_write(builder, node_type == AST_NODE_TYPE_DIVISION_ASSIGNMENT);
+        } else if (type.kind == X64_TYPE_KIND_U32) {
+            x64_write_zero_extend(builder);
         }
         x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, operand);
     }
@@ -4636,7 +4649,13 @@ static bool x64_cast_write(X64_Builder *builder, X64_Expression_Frame const *fra
     X64_Type source = x64_expression_type(builder, cast->first_child);
     bool is_integer_source = source.kind == X64_TYPE_KIND_BYTE || source.kind == X64_TYPE_KIND_BOOL ||
                              source.kind == X64_TYPE_KIND_I32 || source.kind == X64_TYPE_KIND_I64 ||
+                             source.kind == X64_TYPE_KIND_U32 || source.kind == X64_TYPE_KIND_U64 ||
                              source.kind == X64_TYPE_KIND_INT;
+    // A `U32` holds every `Byte`, `Bool` and `Rune`, and itself, and nothing else is cast to one,
+    // because it may not fit. A `U64` holds the number of every integer and of a `Rune`, which for
+    // a negative one is the number that its 64 bits are. Neither is made of a float.
+    bool is_u32_source = source.kind == X64_TYPE_KIND_BYTE || source.kind == X64_TYPE_KIND_BOOL ||
+                         source.kind == X64_TYPE_KIND_U32 || source.kind == X64_TYPE_KIND_RUNE;
     // A `Rune` is cast to an `Int`, a `Byte` and a `Rune` to a `Rune`, and a `Rune` to the 4 bytes of
     // its encoding, which are an array.
     // An `I32` holds every `Byte`, `Bool` and `Rune`, and itself, and an `Int` is not cast to one,
@@ -4645,7 +4664,10 @@ static bool x64_cast_write(X64_Builder *builder, X64_Expression_Frame const *fra
                          source.kind == X64_TYPE_KIND_I32 || source.kind == X64_TYPE_KIND_RUNE;
     // An `I64` is the same number as an `Int`, so each is cast to the other, and every integer, a
     // `Rune` and a float are cast to either, as they are to an `Int`.
-    bool is_valid = (target.kind == X64_TYPE_KIND_I64 &&
+    bool is_valid = (target.kind == X64_TYPE_KIND_U64 &&
+                     (is_integer_source || source.kind == X64_TYPE_KIND_RUNE)) ||
+                    (target.kind == X64_TYPE_KIND_U32 && is_u32_source) ||
+                    (target.kind == X64_TYPE_KIND_I64 &&
                      (is_integer_source || source.kind == X64_TYPE_KIND_RUNE ||
                       x64_type_is_float(source))) ||
                     (target.kind == X64_TYPE_KIND_I32 && is_i32_source) ||
@@ -4656,7 +4678,8 @@ static bool x64_cast_write(X64_Builder *builder, X64_Expression_Frame const *fra
                     (target.kind == X64_TYPE_KIND_INT &&
                      (is_integer_source || x64_type_is_float(source))) ||
                     (x64_type_is_float(target) &&
-                     ((is_integer_source && source.kind != X64_TYPE_KIND_BOOL) ||
+                     ((is_integer_source && source.kind != X64_TYPE_KIND_BOOL &&
+                       source.kind != X64_TYPE_KIND_U64) ||
                       x64_type_is_float(source)));
     if (not is_valid) {
         return x64_fail(builder, X64_BUILD_STATUS_CAST_INVALID, cast->payload.cast.type_name);
@@ -4667,7 +4690,8 @@ static bool x64_cast_write(X64_Builder *builder, X64_Expression_Frame const *fra
     if (target.kind == X64_TYPE_KIND_ARRAY) {
         x64_cast_array_write(builder, frame, place);
     } else if (target.kind == X64_TYPE_KIND_INT || target.kind == X64_TYPE_KIND_RUNE ||
-               target.kind == X64_TYPE_KIND_I32 || target.kind == X64_TYPE_KIND_I64) {
+               target.kind == X64_TYPE_KIND_I32 || target.kind == X64_TYPE_KIND_I64 ||
+               target.kind == X64_TYPE_KIND_U32 || target.kind == X64_TYPE_KIND_U64) {
         // A `Rune`, a `Byte` and a `Bool` are numbers in a word, and so is the number that they are
         // cast to, so the word is the value already.
         if (x64_type_is_float(source)) {
@@ -5239,7 +5263,11 @@ static bool x64_operation_write(X64_Builder *builder, X64_Expression_Frame const
         x64_write_registers(builder, X64_OPCODE_AND, X64_REGISTER_RCX, X64_REGISTER_RAX);
         break;
     case AST_NODE_TYPE_DIVISION:
-        x64_write_divide(builder, X64_REGISTER_RCX);
+        if (operand_type.kind == X64_TYPE_KIND_U64) {
+            x64_write_divide_unsigned(builder, X64_REGISTER_RCX);
+        } else {
+            x64_write_divide(builder, X64_REGISTER_RCX);
+        }
         break;
     case AST_NODE_TYPE_MULTIPLICATION:
         x64_write_multiply(builder, X64_REGISTER_RAX, X64_REGISTER_RCX);
@@ -5259,6 +5287,8 @@ static bool x64_operation_write(X64_Builder *builder, X64_Expression_Frame const
     }
     if (operand_type.kind == X64_TYPE_KIND_I32) {
         x64_i32_wrap_write(builder, node_type == AST_NODE_TYPE_DIVISION);
+    } else if (operand_type.kind == X64_TYPE_KIND_U32) {
+        x64_write_zero_extend(builder);
     }
 
     x64_stack_pop(builder, builder->stack_words - frame->stack_start);
@@ -5337,6 +5367,7 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     }
     bool is_ordered = type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_I32 ||
                       type.kind == X64_TYPE_KIND_I64 || type.kind == X64_TYPE_KIND_BYTE ||
+                      type.kind == X64_TYPE_KIND_U32 || type.kind == X64_TYPE_KIND_U64 ||
                       type.kind == X64_TYPE_KIND_RUNE || x64_type_is_float(type);
     // Two strings are the same when they have the same bytes, and have no order.
     bool is_equatable = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_ENUM ||
@@ -5384,6 +5415,28 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     case AST_COMPARISON_OPERATOR_NOT_EQUAL:
         condition = X64_CONDITION_NOT_EQUAL;
         break;
+    }
+
+    // The order of a `U64` is the unsigned one. A `U32` is a number from 0 to 4294967295 in a
+    // word, which the signed order of the 64 bits puts in the right order.
+    if (type.kind == X64_TYPE_KIND_U64) {
+        switch (operator) {
+        case AST_COMPARISON_OPERATOR_GREATER:
+            condition = X64_CONDITION_ABOVE;
+            break;
+        case AST_COMPARISON_OPERATOR_GREATER_EQUAL:
+            condition = X64_CONDITION_ABOVE_EQUAL;
+            break;
+        case AST_COMPARISON_OPERATOR_LESS:
+            condition = X64_CONDITION_BELOW;
+            break;
+        case AST_COMPARISON_OPERATOR_LESS_EQUAL:
+            condition = X64_CONDITION_BELOW_EQUAL;
+            break;
+        case AST_COMPARISON_OPERATOR_EQUAL:
+        case AST_COMPARISON_OPERATOR_NOT_EQUAL:
+            break;
+        }
     }
 
     // `mov rax, left`, `mov rcx, right`, `cmp rax, rcx` and the `Bool` of the condition in `rax`.
@@ -5653,6 +5706,9 @@ static bool x64_call_write(X64_Builder *builder, X64_Expression_Frame const *fra
             // A procedure of the C library that returns an `int` leaves it in `eax`, and what is in
             // the upper half of `rax` is not said, so the sign is filled in from the lower one.
             x64_write_registers(builder, X64_OPCODE_MOVSXD, X64_REGISTER_RAX, X64_REGISTER_RAX);
+        } else if (return_type.kind == X64_TYPE_KIND_U32) {
+            // An `unsigned int` is in `eax` the same way, and its upper half is made zero.
+            x64_write_zero_extend(builder);
         }
         int32_t target = x64_stack_push(builder, 1);
         x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
@@ -5957,6 +6013,14 @@ static X64_Type x64_expression_type_for(X64_Builder const *builder, Ast_Node_Ind
         wanted.kind == X64_TYPE_KIND_I64) {
         return wanted;
     }
+    if (constant.status == CONSTANT_STATUS_OK && constant_is_u32(constant) &&
+        wanted.kind == X64_TYPE_KIND_U32) {
+        return wanted;
+    }
+    if (constant.status == CONSTANT_STATUS_OK && constant_is_u64(constant) &&
+        wanted.kind == X64_TYPE_KIND_U64) {
+        return wanted;
+    }
     if (constant.status == CONSTANT_STATUS_OK && constant.type == CONSTANT_TYPE_UNTYPED_FLOAT &&
         ((wanted.kind == X64_TYPE_KIND_F32 && constant_is_f32(constant)) ||
          wanted.kind == X64_TYPE_KIND_F64)) {
@@ -6103,6 +6167,10 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
             return x64_type_make(X64_TYPE_KIND_I32);
         case CONSTANT_TYPE_I64:
             return x64_type_make(X64_TYPE_KIND_I64);
+        case CONSTANT_TYPE_U32:
+            return x64_type_make(X64_TYPE_KIND_U32);
+        case CONSTANT_TYPE_U64:
+            return x64_type_make(X64_TYPE_KIND_U64);
         case CONSTANT_TYPE_INT:
             return x64_type_make(X64_TYPE_KIND_INT);
         case CONSTANT_TYPE_RUNE:
@@ -6929,6 +6997,7 @@ static bool x64_structs_check(X64_Builder *builder) {
                             type.kind == X64_TYPE_KIND_I64 || type.kind == X64_TYPE_KIND_INT ||
                             type.kind == X64_TYPE_KIND_POINTER ||
                             type.kind == X64_TYPE_KIND_RUNE ||
+                            type.kind == X64_TYPE_KIND_U32 || type.kind == X64_TYPE_KIND_U64 ||
                             type.kind == X64_TYPE_KIND_PROCEDURE ||
                             type.kind == X64_TYPE_KIND_STR || type.kind == X64_TYPE_KIND_STRUCT;
             if (not is_valid) {
@@ -6975,6 +7044,8 @@ static X64_Type x64_type_pointer_to(X64_Type target) {
     case X64_TYPE_KIND_I32:
     case X64_TYPE_KIND_I64:
     case X64_TYPE_KIND_INT:
+    case X64_TYPE_KIND_U32:
+    case X64_TYPE_KIND_U64:
     case X64_TYPE_KIND_PROCEDURE:
     case X64_TYPE_KIND_RUNE:
     case X64_TYPE_KIND_STR:
@@ -7047,6 +7118,7 @@ static X64_Type x64_type_sequence_of(X64_Type element, X64_Type_Kind kind, int64
         element.kind != X64_TYPE_KIND_F64 && element.kind != X64_TYPE_KIND_I32 &&
         element.kind != X64_TYPE_KIND_I64 && element.kind != X64_TYPE_KIND_INT &&
         element.kind != X64_TYPE_KIND_RUNE &&
+        element.kind != X64_TYPE_KIND_U32 && element.kind != X64_TYPE_KIND_U64 &&
         element.kind != X64_TYPE_KIND_POINTER && element.kind != X64_TYPE_KIND_PROCEDURE &&
         element.kind != X64_TYPE_KIND_STR && element.kind != X64_TYPE_KIND_STRUCT) {
         return x64_type_make(X64_TYPE_KIND_NONE);
@@ -7110,6 +7182,8 @@ static size_t x64_type_word_count(X64_Builder const *builder, X64_Type type) {
     case X64_TYPE_KIND_I32:
     case X64_TYPE_KIND_I64:
     case X64_TYPE_KIND_INT:
+    case X64_TYPE_KIND_U32:
+    case X64_TYPE_KIND_U64:
     case X64_TYPE_KIND_NIL:
     case X64_TYPE_KIND_POINTER:
     case X64_TYPE_KIND_PROCEDURE:
@@ -7195,6 +7269,10 @@ static X64_Type x64_type_of_name(X64_Builder const *builder, Str name) {
         base = x64_type_make(X64_TYPE_KIND_I32);
     } else if (str_equals(base_name, STR("I64"))) {
         base = x64_type_make(X64_TYPE_KIND_I64);
+    } else if (str_equals(base_name, STR("U32"))) {
+        base = x64_type_make(X64_TYPE_KIND_U32);
+    } else if (str_equals(base_name, STR("U64"))) {
+        base = x64_type_make(X64_TYPE_KIND_U64);
     } else if (str_equals(base_name, STR("Int"))) {
         base = x64_type_make(X64_TYPE_KIND_INT);
     } else if (str_equals(base_name, STR("Rune"))) {
@@ -7766,6 +7844,35 @@ static void x64_write_divide(X64_Builder *builder, byte divisor) {
 }
 
 /**
+ * Writes `xor edx, edx` and `div divisor`, which divides the unsigned number in `rax` by the one in
+ * `divisor`, leaving the quotient in `rax` and the remainder in `rdx`. It traps on a division by
+ * zero, as `idiv` does.
+ */
+static void x64_write_divide_unsigned(X64_Builder *builder, byte divisor) {
+    assert(divisor < 16);
+    assert(divisor != X64_REGISTER_RAX);
+    assert(divisor != X64_REGISTER_RDX);
+
+    static byte const CLEAR_RDX[] = {0x31, 0xD2};
+    x64_write_bytes(&builder->writer, CLEAR_RDX, sizeof(CLEAR_RDX));
+    x64_write_byte(&builder->writer, (byte)(X64_REX_WIDE | (divisor >> 3)));
+    x64_write_byte(&builder->writer, 0xF7);
+    // The middle bits are 6, which say that the instruction is `div`.
+    x64_write_byte(&builder->writer, (byte)(0xC0 | (6 << 3) | (divisor & 7)));
+}
+
+/**
+ * Writes `mov eax, eax`, which cuts `rax` down to its lower 32 bits and zeroes the upper ones: a
+ * `U32` is kept in a word as its number, with the upper half zero, so that the comparison and the
+ * other operations are the ones of an `Int`, and the result of an operation wraps around as 32 bits
+ * do.
+ */
+static void x64_write_zero_extend(X64_Builder *builder) {
+    static byte const MOVE_32[] = {0x89, 0xC0};
+    x64_write_bytes(&builder->writer, MOVE_32, sizeof(MOVE_32));
+}
+
+/**
  * Writes `set` of `condition` to `al`, which is 1 when the flags of the last comparison hold it
  * and 0 otherwise, and `movzx rax, al`, so that `rax` is that `Bool`.
  */
@@ -8068,13 +8175,15 @@ static X64_Type x64_arithmetic_type(X64_Builder const *builder, Ast_Node_Index o
     if (x64_is_constant(builder, left) && not x64_is_constant(builder, right)) {
         X64_Type right_type = x64_expression_type(builder, right);
         if (x64_type_is_float(right_type) || right_type.kind == X64_TYPE_KIND_I32 ||
-            right_type.kind == X64_TYPE_KIND_I64) {
+            right_type.kind == X64_TYPE_KIND_I64 || right_type.kind == X64_TYPE_KIND_U32 ||
+            right_type.kind == X64_TYPE_KIND_U64) {
             return right_type;
         }
     }
     X64_Type left_type = x64_expression_type(builder, left);
     if (x64_type_is_float(left_type) || left_type.kind == X64_TYPE_KIND_I32 ||
-        left_type.kind == X64_TYPE_KIND_I64) {
+        left_type.kind == X64_TYPE_KIND_I64 || left_type.kind == X64_TYPE_KIND_U32 ||
+        left_type.kind == X64_TYPE_KIND_U64) {
         return left_type;
     }
     return x64_type_make(X64_TYPE_KIND_INT);
@@ -8588,6 +8697,17 @@ static void x64_debug_unit_write(X64_Builder *builder, size_t text_size_bytes) {
     x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_BASE_TYPE);
     x64_write_string(writer, STR("I64"));
     x64_write_byte(writer, X64_DWARF_ENCODING_SIGNED);
+    x64_write_byte(writer, X64_WORD_SIZE_BYTES);
+    // A `U32` is a word with the upper half zero, so its 4 bytes are the lower ones.
+    types.u32_type = (uint32_t)(writer->length - unit_start);
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_BASE_TYPE);
+    x64_write_string(writer, STR("U32"));
+    x64_write_byte(writer, X64_DWARF_ENCODING_UNSIGNED);
+    x64_write_byte(writer, 4);
+    types.u64_type = (uint32_t)(writer->length - unit_start);
+    x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_BASE_TYPE);
+    x64_write_string(writer, STR("U64"));
+    x64_write_byte(writer, X64_DWARF_ENCODING_UNSIGNED);
     x64_write_byte(writer, X64_WORD_SIZE_BYTES);
     types.bool_type = (uint32_t)(writer->length - unit_start);
     x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_BASE_TYPE);
@@ -9109,6 +9229,10 @@ static uint32_t x64_debug_type_reference(X64_Builder const *builder, X64_Debug_T
         return types.i32_type;
     case X64_TYPE_KIND_I64:
         return types.i64_type;
+    case X64_TYPE_KIND_U32:
+        return types.u32_type;
+    case X64_TYPE_KIND_U64:
+        return types.u64_type;
     case X64_TYPE_KIND_INT:
         return types.int_type;
     case X64_TYPE_KIND_RUNE:

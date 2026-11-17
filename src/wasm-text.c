@@ -988,6 +988,18 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
         case WASM_OPCODE_I32_DIV_S:
             wasm_text_write_instruction(&formatter->writer, STR("i32.div_s"));
             break;
+        case WASM_OPCODE_I32_DIV_U:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.div_u"));
+            break;
+        case WASM_OPCODE_I64_DIV_U:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.div_u"));
+            break;
+        case WASM_OPCODE_I64_GE_U:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.ge_u"));
+            break;
+        case WASM_OPCODE_I64_LT_U:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.lt_u"));
+            break;
         case WASM_OPCODE_I32_GE_S:
             wasm_text_write_instruction(&formatter->writer, STR("i32.ge_s"));
             break;
