@@ -1419,6 +1419,37 @@ static void main_struct_literal_rows_print(Str source, Ast_Node const *nodes, si
 }
 
 /**
+ * Returns the signature of the built-in procedure `name`, written like the type of a procedure
+ * that is defined in a program, or NULL when `name` is not one. The types of the parameters that a
+ * built-in takes in more than one way are written with `|` between them, which no type of the
+ * source is, and a built-in that gives two values has them between parentheses.
+ */
+static char const *main_built_in_signature(Str name) {
+    if (str_equals(name, STR("length_of"))) {
+        return "proc(elements: [N]T | []T | Str) Int";
+    }
+    if (str_equals(name, STR("int_to_byte"))) {
+        return "proc(number: Int) Byte";
+    }
+    if (str_equals(name, STR("int_to_i32"))) {
+        return "proc(number: Int | I64) I32";
+    }
+    if (str_equals(name, STR("int_to_str"))) {
+        return "proc(number: Int | I32 | I64) Str";
+    }
+    if (str_equals(name, STR("str_to_c_str"))) {
+        return "proc(text: Str) C_Str";
+    }
+    if (str_equals(name, STR("try_str_to_int"))) {
+        return "proc(text: Str) (Int, Bool)";
+    }
+    if (str_equals(name, STR("utf8_decode"))) {
+        return "proc(bytes: [N]Byte | []Byte) (Str, Bool)";
+    }
+    return NULL;
+}
+
+/**
  * Prints a line for each place where a constant, a global variable, a parameter or a variable is
  * defined or used, and whose type is known: the line and the column of its name, both counted from
  * 1, the length of the name in bytes, the name, and the type as it is written in the source,
@@ -1513,8 +1544,19 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
             continue;
         }
 
+        // A call of a built-in procedure shows its signature, which no definition has.
+        char const *built_in = NULL;
+        if (node->node_type == AST_NODE_TYPE_CALL &&
+            bindings[index].kind == SEMANTIC_BINDING_KIND_NONE) {
+            built_in = main_built_in_signature(name);
+        }
+
         char text[256] = "";
-        if (enum_definition != AST_NODE_INDEX_NONE) {
+        if (built_in != NULL) {
+            if (not main_text_write(text, sizeof(text), str_make(built_in, strlen(built_in)))) {
+                continue;
+            }
+        } else if (enum_definition != AST_NODE_INDEX_NONE) {
             if (not main_text_write(text, sizeof(text),
                                     nodes[enum_definition].payload.constant_definition.name)) {
                 continue;

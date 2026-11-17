@@ -135,6 +135,10 @@ const TYPES_SOURCE = [
     "FRAMED : Str : '«' ++ TITLE ++ '»'",
     "LINES :: \"a\" ++ '\\n' ++ \"b\"",
     "",
+    "measure :: proc(text: Str) Int ->",
+    "    number, is_number := try_str_to_int(text)",
+    "    return length_of(text) + number",
+    "",
 ].join("\n");
 
 test("a name shows its type when the pointer rests on it", async () => {
@@ -224,6 +228,13 @@ test("a name shows its type when the pointer rests on it", async () => {
             "```mialu\nLINES: untyped Str\n```\nvalue\n```mialu\n\"a\\nb\"\n```");
         assert.strictEqual((await hover(lineOf("GREETING"), 1)).contents.value,
                            "```mialu\nGREETING: untyped Str\n```");
+
+        // A call of a built-in procedure shows its signature, though the program defines none.
+        const measured = lineOf("measure");
+        assert.match((await hover(measured + 1, 25)).contents.value,
+                     /try_str_to_int: proc\(text: Str\) \(Int, Bool\)/);
+        assert.match((await hover(measured + 2, 12)).contents.value,
+                     /length_of: proc\(elements: \[N\]T \| \[\]T \| Str\) Int/);
 
         // Nothing is shown on a keyword or on a space.
         assert.strictEqual(await hover(6, 12), null);
