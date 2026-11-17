@@ -5,6 +5,9 @@
 #   powershell -File scripts/deploy-release.ps1          ask before pushing
 #   powershell -File scripts/deploy-release.ps1 -Yes     do not ask
 #
+# When the tag exists already, the script asks whether to replace it, which moves the tag to the
+# current commit, also on GitHub. `-Yes` does not answer that question, because it cannot be undone.
+#
 # Set the version first with scripts/bump-version.ps1 and commit it.
 
 param(
@@ -57,8 +60,17 @@ if ($behind -gt 0) {
     throw "main is $behind commit(s) behind origin/main. Pull first."
 }
 
+# The fetch above brought the tags of GitHub, so a tag that is only there is found too.
+$isReplacing = $false
 if (Invoke-Git tag --list $tag) {
-    throw "The tag $tag already exists. Bump the version first with scripts/bump-version.ps1."
+    $tagCommit = (Invoke-Git log -1 --format='%h %s' "$tag^{commit}").Trim()
+    Write-Host "The tag $tag already exists, on: $tagCommit"
+    $answer = Read-Host "Replace the tag with a new release of the current commit? [y/n]"
+    if ($answer -notmatch '^[yY]') {
+        Write-Host 'Cancelled. To release a new version, bump it first with scripts/bump-version.ps1.'
+        exit 1
+    }
+    $isReplacing = $true
 }
 
 $ahead = [int](Invoke-Git rev-list --count 'origin/main..HEAD')
@@ -67,7 +79,8 @@ Write-Host "Version: $version"
 Write-Host "Commit:  $commit"
 Write-Host "Pushes:  main ($ahead new commit(s)) and tag $tag to origin"
 
-if ($Yes -eq $false) {
+# Replacing the tag was confirmed above, so it is not asked a second time.
+if ($Yes -eq $false -and $isReplacing -eq $false) {
     $answer = Read-Host "Create the tag and push? [y/N]"
     if ($answer -notmatch '^[yY]') {
         Write-Host 'Cancelled.'
@@ -77,7 +90,12 @@ if ($Yes -eq $false) {
 
 # The commits go first, so that the tag is never on a commit that GitHub does not have on main.
 Invoke-Git push origin main | Out-Null
-Invoke-Git tag -a $tag -m "Release $version" | Out-Null
-Invoke-Git push origin $tag | Out-Null
+if ($isReplacing) {
+    Invoke-Git tag -f -a $tag -m "Release $version" | Out-Null
+    Invoke-Git push --force origin $tag | Out-Null
+} else {
+    Invoke-Git tag -a $tag -m "Release $version" | Out-Null
+    Invoke-Git push origin $tag | Out-Null
+}
 
 Write-Host "Pushed $tag. The release workflow is running: see the Actions tab of the repository."
