@@ -447,6 +447,13 @@ b := text[7:12]
 
 `array_slice[low:high]` makes a view of the elements of an array in the same way, see [Array slices](#array-slices): the difference is that the bounds of the elements of an array are found at once, and the bounds of the characters of a string are found by walking over the bytes from the start, like the subscript.
 
+The characters of a string are gone through by a [for statement](#for-statements) as well, with the iterator a `Rune`, which does not walk over the string again for each one, as the subscript does:
+
+```
+for character in "Héllo" ->
+    ...
+```
+
 Characters are found by walking over the string from its start, because the bytes of the characters before one say how far it is, so `s[i]` and `s[low:high]` take as long as the index is large, and not the same time for every index as the subscript of an array does. The characters are code points: a character that a person sees can be more than one of them, such as an `e` with an accent that is written as two code points, and a string is never normalized, so `"é"` of one code point and of two are different strings, with different lengths.
 
 Strings are joined with `++`, which has the same precedence as `+` and `-` and is left associative. It takes two strings, or a string and a rune on either side, and a rune is joined as its UTF-8 bytes, so `"Hello" ++ ' ' ++ "world" ++ '🚀'` is the string `"Hello world🚀"`. Both operands must be constants, see [Constants](#constants), because the joining is done when the program is compiled: the program has the joined text as one string, like a string literal, and nothing is joined when it runs. `++` does not allocate, and an operand that is known only when the program runs, such as a variable or the result of a call, is an error. Two runes are not joined, and neither is a number, so `'a' ++ 'b'` and `"count: " ++ 3` are errors. The result is an untyped string, so it can be given to a `C_Str` too, unless an operand is a constant that was given the type `Str`, and then the result is a `Str`. The joined text of all the constants of a program is limited in size, and a program that has more is rejected.
@@ -1063,7 +1070,7 @@ sum_of_elements :: proc() Int ->
     return total
 ```
 
-`sum_of_elements` returns 15. A for statement is told to go through a range by the `..<` or `..<=` in it, so one without such an operator must have an array or a slice after `in`, and `for x in 5 ->` is an error. The address and the length of what is gone through are read once, before the loop, but the elements are read as the loop goes on, so a change to an element that has not been reached yet in the block is seen by it. The iterator is a copy of an element, so it cannot be used to change one, and the same rules as for the iterator of a range hold: it cannot be assigned to, it is not in scope in the expression, and `break` and `continue` work as in any loop. An array with no elements runs the block no times. To change the elements, write the index of each:
+`sum_of_elements` returns 15. A for statement is told to go through a range by the `..<` or `..<=` in it, so one without such an operator must have an array, a slice or a string after `in`, and `for x in 5 ->` is an error. The address and the length of what is gone through are read once, before the loop, but the elements are read as the loop goes on, so a change to an element that has not been reached yet in the block is seen by it. The iterator is a copy of an element, so it cannot be used to change one, and the same rules as for the iterator of a range hold: it cannot be assigned to, it is not in scope in the expression, and `break` and `continue` work as in any loop. An array with no elements runs the block no times. To change the elements, write the index of each:
 
 ```
 fill :: proc() Int ->
@@ -1072,6 +1079,19 @@ fill :: proc() Int ->
         a[i] = i * i
     return a[4]
 ```
+
+The characters of a string can be gone through the same way. The expression after `in` is a `Str`, and the block runs once for each character, in order from the first, with the iterator a `Rune`: the code point of the character, which is what the subscript of a string gives too, see [Strings](#strings):
+
+```
+count_vowels :: proc(text: Str) Int ->
+    count := 0
+    for character in text ->
+        if character == 'a' or character == 'e' or character == 'ä' ->
+            count += 1
+    return count
+```
+
+`for character in "Héllo"` runs 5 times, though the string has 6 bytes, with the `Rune` values `'H'`, `'é'`, `'l'`, `'l'` and `'o'`. This is the way to go through a string by character: the loop decodes the UTF-8 as it goes, from the first byte to the last, so it takes as long as the string is long, and a loop over the indexes of `length_of(text)` that subscripts `text[i]` walks over the string from its start for every index, and takes as long as the square of that. The address and the length of the string are read once, before the loop, and the string is immutable, so nothing in the block changes what is gone through. The iterator is a copy, which cannot be assigned to, and `break` and `continue` work as in any loop. A string with no characters, such as `""`, runs the block no times. To go through a string by byte, see [Strings](#strings).
 
 A for statement with no iterator and no range is an infinite loop, like `for(;;)` and `while(true)` in C. It is written `for ->`, and the block, which is indented one level deeper, runs again and again until a `break` or a `return` leaves it. Example:
 

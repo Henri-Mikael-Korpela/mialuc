@@ -3746,7 +3746,7 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
             if (sequence.kind == WASM_VALUE_TYPE_NONE) {
                 return wasm_expression_fail(builder, definition, elements);
             }
-            if (not wasm_type_is_sequence(sequence)) {
+            if (sequence.kind != WASM_VALUE_TYPE_STR && not wasm_type_is_sequence(sequence)) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                                  wasm_expression_subject(builder, definition, elements));
             }
@@ -4016,6 +4016,10 @@ static Wasm_Type wasm_variable_type(Wasm_Builder const *builder, Ast_Node_Index 
                 return wasm_type_make(WASM_VALUE_TYPE_INT);
             }
             Wasm_Type sequence = wasm_expression_type(builder, first);
+            // A string is gone through by the character, which is a `Rune`.
+            if (sequence.kind == WASM_VALUE_TYPE_STR) {
+                return wasm_type_make(WASM_VALUE_TYPE_RUNE);
+            }
             if (not wasm_type_is_sequence(sequence)) {
                 return wasm_type_make(WASM_VALUE_TYPE_NONE);
             }
@@ -7079,7 +7083,31 @@ static bool wasm_build_code_section_body_for_each(Wasm_Builder *builder, Ast_Nod
     if (not wasm_build_code_section_body_expression(builder, definition, elements, false)) {
         return false;
     }
-    if (not wasm_type_is_sequence(wasm_expression_type(builder, elements))) {
+    Wasm_Type elements_type = wasm_expression_type(builder, elements);
+    if (elements_type.kind == WASM_VALUE_TYPE_STR) {
+        // The characters of a string: the iterator is decoded from the bytes at the address of the
+        // next one, which moves on over the character, see `wasm_utf8_decode_write`. The stack has
+        // the address and the length, and the end is the address plus the length.
+        size_t mask = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_TEMPORARY_32);
+        size_t extra = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_STRING);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, end);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_TEE, cursor);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, end);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_I32_ADD);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, end);
+
+        wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+        wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, cursor);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, end);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_I32_GE_U);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_BR_IF);
+        wasm_write_unsigned(&builder->writer, 1);
+        wasm_utf8_decode_write(builder, cursor, iterator, mask, extra);
+        wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+        return true;
+    }
+    if (not wasm_type_is_sequence(elements_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, elements));
     }

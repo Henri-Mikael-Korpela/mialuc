@@ -635,6 +635,8 @@ static bool         x64_field_target_is_read_only(X64_Builder const *builder,
 static Ast_Node_Index x64_field_union_match      (X64_Builder const *builder,
                                                   Ast_Node_Index field);
 static bool         x64_for_each_start_write     (X64_Builder *builder, Ast_Node_Index statement);
+static bool         x64_for_each_character_start_write(X64_Builder *builder,
+                                                       Ast_Node_Index statement);
 static bool         x64_for_start_write          (X64_Builder *builder, Ast_Node_Index statement);
 static void         x64_headers_write            (X64_Builder *builder, size_t text_size_bytes);
 static bool         x64_identifier_address_load  (X64_Builder *builder, Ast_Node_Index identifier,
@@ -1836,6 +1838,9 @@ static void x64_procedure_layout(X64_Builder *builder, Ast_Node_Index procedure)
                 type = x64_type_make(X64_TYPE_KIND_NONE);
                 if (sequence.kind == X64_TYPE_KIND_ARRAY || sequence.kind == X64_TYPE_KIND_SLICE) {
                     type = x64_type_element(sequence);
+                } else if (sequence.kind == X64_TYPE_KIND_STR) {
+                    // A string is gone through by the character, which is a `Rune`.
+                    type = x64_type_make(X64_TYPE_KIND_RUNE);
                 }
                 size_bytes += X64_WORD_SIZE_BYTES;
             }
@@ -2246,6 +2251,48 @@ static bool x64_for_start_write(X64_Builder *builder, Ast_Node_Index statement) 
 }
 
 /**
+ * Writes the start of the for statement `statement` that goes through the characters of a string:
+ * like the one that goes through the elements of an array, see `x64_for_each_start_write`, it
+ * keeps the address of the next byte and the address after the last one after the iterator, and
+ * the loop starts with a test that leaves it when the next address is not below the end. The
+ * iterator is the `Rune` that is decoded from the bytes there, see `x64_utf8_decode_write`, and the
+ * address moves on to the byte after the character before the block, so that a `continue` needs
+ * only to go back to the test. The string is valid UTF-8, so the characters end where the string
+ * does. Returns false after it recorded an error.
+ */
+static bool x64_for_each_character_start_write(X64_Builder *builder, Ast_Node_Index statement) {
+    Ast_Node_Index sequence = builder->nodes[statement].first_child;
+    int32_t iterator = -(int32_t)builder->layouts[statement].frame_offset;
+    int32_t next = iterator + X64_WORD_SIZE_BYTES;
+    int32_t end = next + X64_WORD_SIZE_BYTES;
+
+    X64_Type type = x64_type_make(X64_TYPE_KIND_STR);
+    if (not x64_expression_write(builder, sequence, type, X64_MODE_VALUE, true)) {
+        return false;
+    }
+    int32_t place = x64_stack_displacement(builder, builder->stack_words - 2, 2);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, place);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, next);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP,
+                     place + X64_WORD_SIZE_BYTES);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RAX, X64_REGISTER_RCX);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RCX, X64_REGISTER_RBP, end);
+    x64_stack_pop(builder, 2);
+
+    builder->loop_start = (uint32_t)(builder->writer.length - builder->text_start);
+    builder->loop_exit_jumps = X64_JUMP_NONE;
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, next);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, end);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_jump_write(builder, X64_CONDITION_ABOVE_EQUAL, &builder->loop_exit_jumps);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_R10);
+    x64_utf8_decode_write(builder);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, iterator);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_R10, X64_REGISTER_RBP, next);
+    return true;
+}
+
+/**
  * Writes the start of the for statement `statement` that goes through the elements of an array or
  * an array slice: the address of the first element and the address after the last one are kept
  * after the iterator, see `x64_procedure_layout`, which reads the address and the length once.
@@ -2257,6 +2304,9 @@ static bool x64_for_start_write(X64_Builder *builder, Ast_Node_Index statement) 
 static bool x64_for_each_start_write(X64_Builder *builder, Ast_Node_Index statement) {
     Ast_Node_Index sequence = builder->nodes[statement].first_child;
     X64_Type type = x64_expression_type(builder, sequence);
+    if (type.kind == X64_TYPE_KIND_STR) {
+        return x64_for_each_character_start_write(builder, statement);
+    }
     if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
         return x64_fail(builder, X64_BUILD_STATUS_ARRAY_EXPECTED,
                         x64_expression_subject(builder, sequence));
