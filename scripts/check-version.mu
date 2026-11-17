@@ -2,9 +2,9 @@
 /// for the current compiler implementation.
 ///
 /// The version is written down in src/version.h, which is the source of truth. This file has to say
-/// the same, and `main` checks that it does, by reading src/version.h and parsing the three
-/// numbers out of its `#define MIALU_VERSION_MAJOR`, `MINOR` and `PATCH` lines. Run it from the
-/// root of the project: `mialuc run scripts/check-version.mu`.
+/// the same, and `main` checks that it does, by reading src/version.h line by line and parsing the
+/// three numbers out of its `#define MIALU_VERSION_MAJOR`, `MINOR` and `PATCH` lines. Run it from
+/// the root of the project: `mialuc run scripts/check-version.mu`.
 ///
 /// Not everything that the check should do can be written in Mialu yet. The features that are
 /// missing are marked with MISSING FEATURE below, and nothing is implemented past them.
@@ -12,18 +12,15 @@ package mialuc
 
 import foreign libc
 
-/// The procedures of the C library are declared with the types that C has: `puts`, `fgetc` and
-/// `fclose` give an `int`, which is an `I32`, and `fread` takes and gives a `size_t`, which is an
-/// `I64`. An `fgetc` that was declared to give an `Int` would be read as 64 bits, and the -1 that it
-/// gives at the end of the file would arrive with the upper half of the register not set. A number
-/// of bytes that is a literal fits in an `I64`, so it is compared with the result of `fread` as it
-/// is.
+/// The procedures of the C library are declared with the types that C has: `puts`, `fgets` and
+/// `fclose` take or give an `int`, which is an `I32`, and `strlen` gives a `size_t`, which is as large
+/// as an `Int`. `fgets` and `strlen` take the buffer as a `^Byte`, the address of its first byte.
 foreign libc ->
-    puts :: proc(content: C_Str) I32 -> ...
-    fopen :: proc(path: C_Str, mode: C_Str) ^Byte -> ...
-    fgetc :: proc(file: ^Byte) I32 -> ...
-    fread :: proc(buffer: ^Byte, size: I64, count: I64, file: ^Byte) I64 -> ...
     fclose :: proc(file: ^Byte) I32 -> ...
+    fgets :: proc(buffer: ^Byte, size: I32, file: ^Byte) ^Byte -> ...
+    fopen :: proc(path: C_Str, mode: C_Str) ^Byte -> ...
+    puts :: proc(content: C_Str) I32 -> ...
+    strlen :: proc(buffer: ^Byte) Int -> ...
 
 /// The version, written once, as the text of each number. `++` joins strings, so VERSION_STRING is
 /// joined from them when the program is compiled, and the numbers are made of the text by
@@ -47,143 +44,73 @@ VERSION_STRING :: VERSION_MAJOR ++ '.' ++ VERSION_MINOR ++ '.' ++ VERSION_PATCH
 // somewhere else than the root of the project.
 HEADER_PATH :: "src/version.h"
 
-/// The bytes of the text that is read, which are the ASCII codes of its characters, as `fgetc` gives
-/// them: an `I32`, which is -1 at the end of the file, so that is what a byte is here too.
-//
-// MISSING FEATURE: the escape sequences of strings and runes, which a backslash would start, so that
-// the new line is written `'\n'` and not as its number, since there is no way to write one. Also a
-// constant that is the number of a rune, such as `NEW_LINE :: cast(I32)'\n'`, which a cast is not,
-// so that the other bytes could be constants too, and not the result of `code('#')` where they are
-// used.
-END_OF_FILE :: -1
-NEW_LINE :: 10
-
-/// The code of a character, which is the byte that `fgetc` gives for it, when it is ASCII. This is
-/// the only place where a `Rune` is made an `I32`, so that the rest of the program compares bytes
-/// with characters without a cast of its own.
-code :: proc(character: Rune) I32 ->
-    return cast(I32)character
-
-/// Whether what `fgetc` gave is the end of the file.
-is_end_of_file :: proc(c: I32) Bool ->
-    return c == END_OF_FILE
+/// What a line of the header that defines a number starts with, and the length of that, the length
+/// of the name that comes after it, which the three names have, and the space after the name.
+DEFINE_PREFIX :: "#define MIALU_VERSION_"
+DEFINE_PREFIX_LENGTH :: 22
+NAME_LENGTH :: 5
 
 /// What was found in the header. `found` counts the `#define` lines that were read, one for each
 /// of the three numbers.
 Version :: struct ->
-    major: I32
-    minor: I32
-    patch: I32
+    major: Int
+    minor: Int
+    patch: Int
     found: Int
 
-/// Reads from the file one byte for each character of `text`, and gives whether they were all
-/// there, and the last byte that was read, which is the first one that was not when they were not.
-/// The text is ASCII, so a character and a byte are the same, and the characters of a string are
-/// gone through by the for statement.
-read_text :: proc(file: ^Byte, text: Str) (Bool, I32) ->
-    last : I32 = 0
-    for expected in text ->
-        last = fgetc(file)
-        if last not= code(expected) ->
-            return false, last
-    return true, last
-
-/// Reads the digits of a number, up to the first byte that is not a digit, and gives the number,
-/// whether there were digits, and that byte.
-//
-// MISSING FEATURE: a `Str` made of bytes that are read, such as `str_from_bytes(bytes)`, which
-// would let `try_str_to_int` do this, and with its check for a number that is too large. The digits
-// are read from the file as bytes, and bytes cannot be made into a `Str`, nor can a `C_Str` be
-// converted, so the number is made of them here, one digit at a time.
-read_number :: proc(file: ^Byte) (I32, Bool, I32) ->
-    number : I32 = 0
-    has_digits := false
-    for ->
-        c := fgetc(file)
-        if c < code('0') or c > code('9') ->
-            return number, has_digits, c
-        number = number * 10 + c - code('0')
-        has_digits = true
-
-/// Reads up to the end of the line, given the last byte that was read from it. Gives false at the
-/// end of the file.
-skip_line :: proc(file: ^Byte, last: I32) Bool ->
-    c := last
-    for ->
-        if c == NEW_LINE ->
-            return true
-        if is_end_of_file(c) ->
-            return false
-        c = fgetc(file)
-
-/// Reads the name of a macro, up to the space after it, and gives which of the three names it is:
-/// 1 for MAJOR, 2 for MINOR and 3 for PATCH, and 0 for any other, such as STRING and
-/// STRING_HELPER. The last byte that was read is given as well.
+/// Reads the next line of the file into `buffer`, and gives its text without the end of the line,
+/// and false at the end of the file. A line that does not fit is cut where the buffer ends, and the
+/// rest of it is the next line, which no line of the header that matters is long enough to make.
 ///
-/// The three names have 5 bytes, so 5 bytes are read into an array, and an array of bytes is
-/// compared with another with `==`, so the name is the one that its bytes are the same as. A name
-/// that has more than 5 bytes, such as STRING_HELPER, has its first 5 the same as nothing, and one
-/// that starts with a name, such as MAJORS, has a byte after it that is not the space.
-read_name :: proc(file: ^Byte) (Int, I32) ->
-    name := [const]Byte { 0, 0, 0, 0, 0 }
-    if fread(%name[0], 1, 5, file) not= 5 ->
-        return 0, END_OF_FILE
-
-    // The codes of the letters, which are written as numbers, since a character is not a `Byte`.
-    major := [const]Byte { 77, 65, 74, 79, 82 }
-    minor := [const]Byte { 77, 73, 78, 79, 82 }
-    patch := [const]Byte { 80, 65, 84, 67, 72 }
-    which := 0
-    if name == major ->
-        which = 1
-    else if name == minor ->
-        which = 2
-    else if name == patch ->
-        which = 3
-
-    c := fgetc(file)
-    if c not= code(' ') ->
-        return 0, c
-    return which, c
-
-/// Reads the rest of a `#define MIALU_VERSION_` line, which is a name and a number, and stores the
-/// number in the field of `version` that the name is of. Gives the last byte that was read.
+/// Bytes that are not valid UTF-8 are a line with no text, since `utf8_decode` gives the empty
+/// string for them.
 //
-// MISSING FEATURE: a `Str` converted to bytes, such as `cast([]Byte)"MAJOR"`, see
-// "Converting a string to bytes" in the language specification. The name is read as bytes, and
-// compared with bytes, which are the codes of the letters here and not the text "MAJOR", since there
-// is no way to make the bytes of a string, and a `Str` is not made of the bytes that are read.
-read_define :: proc(file: ^Byte, version: ^Version) I32 ->
-    which, last := read_name(file)
-    if which == 0 ->
-        return last
+// MISSING FEATURE: the escape sequences of strings and runes, which a backslash would start, so that
+// the line feed and the carriage return are written `'\n'` and `'\r'`, and not as their numbers 10
+// and 13, which are compared with a `Byte`.
+read_line :: proc(file: ^Byte, buffer: []Byte) (Str, Bool) ->
+    if fgets(%buffer[0], int_to_i32(length_of(buffer)), file) == nil ->
+        return "", false
 
-    number, has_digits, after := read_number(file)
-    if not has_digits ->
-        return after
-    match which ->
-        case 1 ->
-            version.major = number
-        case 2 ->
-            version.minor = number
-        case 3 ->
-            version.patch = number
-    version.found += 1
-    return after
+    length := strlen(%buffer[0])
+    for ->
+        if length == 0 ->
+            break
+        last := buffer[length - 1]
+        if last not= 10 and last not= 13 ->
+            break
+        length -= 1
+    text, _ := utf8_decode(buffer[0:length])
+    return text, true
 
-/// Reads one line of the header, and gives false at the end of the file. A line that starts with
-/// `#define MIALU_VERSION_` is read as a definition of the version, and the others are skipped.
-read_line :: proc(file: ^Byte, version: ^Version) Bool ->
-    first := fgetc(file)
-    if is_end_of_file(first) ->
+/// Reads a line of the header, `#define MIALU_VERSION_MAJOR 0`, which is the prefix, a name of
+/// five letters, a space and a number, and stores the number in the field of `version` that the
+/// name is of. Gives whether the line was one. A line that is anything else is left alone, so the
+/// names that are longer, such as STRING and STRING_HELPER, are skipped, and so are a name that
+/// goes on after the five letters, such as MAJORS, which has no space after them, and a number
+/// that is not one.
+read_definition :: proc(line: Str, version: ^Version) Bool ->
+    name_end := DEFINE_PREFIX_LENGTH + NAME_LENGTH
+    if length_of(line) <= name_end + 1 ->
         return false
-    last := first
-    if first == code('#') ->
-        is_define, after := read_text(file, "define MIALU_VERSION_")
-        last = after
-        if is_define ->
-            last = read_define(file, version)
-    return skip_line(file, last)
+    if line[0:DEFINE_PREFIX_LENGTH] not= DEFINE_PREFIX ->
+        return false
+    if line[name_end:name_end + 1] not= " " ->
+        return false
+    number, is_ok := try_str_to_int(line[name_end + 1:length_of(line)])
+    if not is_ok ->
+        return false
+    name := line[DEFINE_PREFIX_LENGTH:name_end]
+    if name == "MAJOR" ->
+        version.major = number
+    else if name == "MINOR" ->
+        version.minor = number
+    else if name == "PATCH" ->
+        version.patch = number
+    else ->
+        return false
+    version.found += 1
+    return true
 
 /// Parses the version that src/version.h says. Gives false when the file cannot be read, and
 /// otherwise gives the version, whose `found` says whether the three numbers were all there.
@@ -193,39 +120,44 @@ parse_header :: proc(version: ^Version) Bool ->
         return false
     defer fclose(file)
 
+    buffer := [128]Byte { .. = 0 }
     for ->
-        if not read_line(file, version) ->
+        line, is_read := read_line(file, buffer)
+        if not is_read ->
             break
-
+        read_definition(line, version)
     return true
 
 /// Whether a number of the version of this file, which is text, is the number that the header says:
-/// the text must be a number, and the same one. The number of the header is an `I32` and the one of
-/// `try_str_to_int` an `Int`, which is not converted, so the `I32` is made an `Int`, which never
-/// loses anything.
-is_same_number :: proc(text: Str, number: I32) Bool ->
+/// the text must be a number, and the same one.
+is_same_number :: proc(text: Str, number: Int) Bool ->
     value, is_ok := try_str_to_int(text)
-    return is_ok and value == cast(Int)number
+    return is_ok and value == number
 
 /// Whether `text` is a version written as MAJOR.MINOR.PATCH, of the three numbers that are given.
-/// The characters of the text are gone through, and a `.` ends a number, which is made of the digits
-/// before it. A text that has anything else, such as a space or a minus, or a number too many, such
-/// as `1.2.3.4`, or too few, is not one. There are three numbers, and `part` says which is made, so
-/// the digits are put in the `part`th of an array.
-is_version_string :: proc(text: Str, major: I32, minor: I32, patch: I32) Bool ->
-    numbers := [const]I32 { 0, 0, 0 }
-    part := 0
+/// The characters of the text are gone through, and a `.` ends a number, which is the text from the
+/// one before it. A text that has a number too many, such as `1.2.3.4`, or too few, or that has a
+/// part that is not a number, such as `1.x.3`, is not one.
+is_version_string :: proc(text: Str, major: Int, minor: Int, patch: Int) Bool ->
+    numbers := [3]Int { .. = 0 }
+    parts := 0
+    start := 0
+    index := 0
     for character in text ->
         if character == '.' ->
-            part += 1
-            if part > 2 ->
+            if parts > 1 ->
                 return false
-        else if character >= '0' and character <= '9' ->
-            numbers[part] = numbers[part] * 10 + code(character) - code('0')
-        else ->
-            return false
-    if part not= 2 ->
+            number, is_ok := try_str_to_int(text[start:index])
+            if not is_ok ->
+                return false
+            numbers[parts] = number
+            parts += 1
+            start = index + 1
+        index += 1
+    number, is_ok := try_str_to_int(text[start:index])
+    if parts not= 2 or not is_ok ->
         return false
+    numbers[2] = number
     is_same_major_and_minor := numbers[0] == major and numbers[1] == minor
     return is_same_major_and_minor and numbers[2] == patch
 
