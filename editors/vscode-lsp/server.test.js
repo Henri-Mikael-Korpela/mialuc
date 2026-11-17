@@ -104,6 +104,13 @@ const TYPES_SOURCE = [
     "    q := Point { x = 1, next = p }",
     "    return p.next.x + q.x",
     "",
+    "sum :: proc(items: []Int) Int ->",
+    "    return items[0]",
+    "",
+    "table :: proc() Int ->",
+    "    a := [const]Int { 1, 2, 3 }",
+    "    return sum(a) + a[1]",
+    "",
 ].join("\n");
 
 test("a name shows its type when the pointer rests on it", async () => {
@@ -153,6 +160,12 @@ test("a name shows its type when the pointer rests on it", async () => {
         assert.match((await hover(25, 14)).contents.value, /next: \^Point/);
         assert.match((await hover(25, 18)).contents.value, /x: Int/);
         assert.match((await hover(25, 24)).contents.value, /x: Int/);
+
+        // An array whose length is left to its elements, `[const]Int`, shows the length that the
+        // compiler counted, where it is defined and where it is used.
+        assert.match((await hover(31, 4)).contents.value, /a: \[3\]Int/);
+        assert.match((await hover(32, 15)).contents.value, /a: \[3\]Int/);
+        assert.match((await hover(27, 13)).contents.value, /items: \[\]Int/);
 
         // Nothing is shown on a keyword or on a space.
         assert.strictEqual(await hover(6, 12), null);

@@ -116,6 +116,9 @@ static bool         main_definition_type_write             (Ast_Node const *node
                                                             Ast_Node_Index target,
                                                             size_t depth, char *text,
                                                             size_t text_size_bytes);
+static bool         main_array_literal_type_write          (Ast_Node const *nodes,
+                                                            Ast_Node_Index literal, char *text,
+                                                            size_t text_size_bytes);
 static bool         main_expression_type_write             (Ast_Node const *nodes,
                                                             Semantic_Binding const *bindings,
                                                             Constant_Value const *constants,
@@ -877,6 +880,15 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
                 return main_result_type_write(nodes, bindings, target, text, text_size_bytes);
             }
             if (main_node_type_is_type(nodes[value].node_type)) {
+                // A type that leaves the length to the value, `[const]Int`, gets the length of
+                // the array literal that gives the value.
+                Ast_Node_Index literal = nodes[value].next_sibling;
+                if (nodes[value].node_type == AST_NODE_TYPE_ARRAY_TYPE &&
+                    nodes[value].payload.array_type.length_kind == AST_ARRAY_LENGTH_INFERRED &&
+                    literal != AST_NODE_INDEX_NONE &&
+                    nodes[literal].node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
+                    return main_array_literal_type_write(nodes, literal, text, text_size_bytes);
+                }
                 return main_type_text_write(nodes, value, text, text_size_bytes);
             }
         } else {
@@ -912,7 +924,8 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
             }
         }
 
-        if (nodes[value].node_type == AST_NODE_TYPE_FIELD_ACCESS ||
+        if (nodes[value].node_type == AST_NODE_TYPE_ARRAY_LITERAL ||
+            nodes[value].node_type == AST_NODE_TYPE_FIELD_ACCESS ||
             nodes[value].node_type == AST_NODE_TYPE_DEREFERENCE ||
             nodes[value].node_type == AST_NODE_TYPE_SUBSCRIPT) {
             return main_expression_type_write(nodes, bindings, constants, node_count, value,
@@ -951,6 +964,39 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
         return false;
     }
     return false;
+}
+
+/**
+ * Writes the type of the array literal `literal` to `text`, such as `[5]Int`. A literal that starts
+ * with `[const]Int`, which leaves the length to the elements, has the number of its elements as the
+ * length, which is known when the program is compiled, so it is written as the length. Returns
+ * false when the type of the elements cannot be written or it does not fit.
+ */
+static bool main_array_literal_type_write(Ast_Node const *nodes, Ast_Node_Index literal,
+                                          char *text, size_t text_size_bytes) {
+    assert(nodes[literal].node_type == AST_NODE_TYPE_ARRAY_LITERAL);
+
+    // The first child is the type that starts the literal, and the elements follow it.
+    Ast_Node_Index type_node = nodes[literal].first_child;
+    if (nodes[type_node].node_type != AST_NODE_TYPE_ARRAY_TYPE) {
+        return false;
+    }
+    if (nodes[type_node].payload.array_type.length_kind != AST_ARRAY_LENGTH_INFERRED) {
+        return main_type_text_write(nodes, type_node, text, text_size_bytes);
+    }
+
+    size_t element_count = 0;
+    for (Ast_Node_Index element = nodes[type_node].next_sibling; element != AST_NODE_INDEX_NONE;
+         element = nodes[element].next_sibling) {
+        element_count += 1;
+    }
+    int written = snprintf(text, text_size_bytes, "[%zu]", element_count);
+    if (written < 0 || (size_t)written >= text_size_bytes) {
+        return false;
+    }
+    // The type of the elements is the child of the array type, written the way any type is.
+    return main_type_text_write(nodes, nodes[type_node].first_child, text + written,
+                                text_size_bytes - (size_t)written);
 }
 
 /**
@@ -1017,6 +1063,8 @@ static bool main_expression_type_write(Ast_Node const *nodes, Semantic_Binding c
     case AST_NODE_TYPE_STRUCT_LITERAL:
         return node->payload.struct_literal.name.bytes != NULL &&
                main_text_write(text, text_size_bytes, node->payload.struct_literal.name);
+    case AST_NODE_TYPE_ARRAY_LITERAL:
+        return main_array_literal_type_write(nodes, expression, text, text_size_bytes);
     case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_SUBSCRIPT:
     case AST_NODE_TYPE_FIELD_ACCESS: {
