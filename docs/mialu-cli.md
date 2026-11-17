@@ -14,6 +14,8 @@ The commands are:
 build       compile a source file and write a program for a target
 dump-asm    compile a source file and print the assembly of the program
 dump-ast    print the tokens and the syntax tree of a source file
+dump-outline
+            print the definitions of a source file, with the fields and members below them
 dump-struct-sizes
             print the size and the alignment of each struct of a source file
 dump-types  print the type of each constant, variable and parameter of a source file
@@ -89,6 +91,24 @@ Dump-ast reads the source file, and prints what the front end made of it to the 
 The tokens are printed before the source is parsed, and the tree before the names are resolved, so a program with a syntax error still shows its tokens, and a program with an unknown name still shows its tree.
 
 Dump-ast does not build the program, so it does not depend on a target, and it also shows programs that no target can build.
+
+## Print the outline of a file
+
+Usage:
+
+```
+mialuc dump-outline <source file>
+```
+
+Dump-outline reads the source file, checks it up to the names, as dump-ast does, and prints a line for each definition of the module in the order of the source, with a line for each field of a struct and each member of an enum right after it. A line has six fields separated by tabs: the depth, which is 0 for a definition and 1 for a field or a member, the kind, the line and the column of the name, both counted from 1 with columns that count bytes, the length of the name in bytes, and the name. The kind is `procedure`, `struct`, `enum`, `constant` or `variable` for a definition, and `field` or `member` below a struct or an enum. For a few lines of `test-code/x64/structs.mu`:
+
+```
+0	struct	23	1	6	Person
+1	field	24	5	3	age
+1	field	25	5	7	initial
+```
+
+The command does not build the program, so it also shows programs that the target cannot build. It is what the [language server](../editors/vscode-lsp/README.md) shows as the outline of a file in an editor.
 
 ## Print the sizes of the structs
 

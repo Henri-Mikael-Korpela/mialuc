@@ -49,6 +49,7 @@ typedef enum {
     COMMAND_MODE_BUILD,
     COMMAND_MODE_DUMP_ASM,
     COMMAND_MODE_DUMP_AST,
+    COMMAND_MODE_DUMP_OUTLINE,
     COMMAND_MODE_DUMP_STRUCT_SIZES,
     COMMAND_MODE_DUMP_TYPES,
     COMMAND_MODE_INVALID,
@@ -172,6 +173,7 @@ static int32_t      main_run_command_build                 (Command command, Buf
 static int32_t      main_run_command_build_x64             (Command command, Buffers const *buffers,
                                                             Str source, Parse_Result parse_result,
                                                             Semantic_Result semantic_result);
+static void         main_run_command_print_outline         (Str source, Parse_Result parse_result);
 static void         main_run_command_print_struct_sizes    (Str source, Parse_Result parse_result);
 static void         main_run_command_print_tokens          (Array_Slice tokens);
 static void         main_run_command_print_types           (Str source, Parse_Result parse_result,
@@ -217,6 +219,7 @@ int main(int argc, char *argv[]) {
                 "Usage: %s run <source file>\n"
                 "       %s dump-ast <source file>\n"
                 "       %s dump-asm --target x64-win32 <source file>\n"
+                "       %s dump-outline <source file>\n"
                 "       %s dump-struct-sizes <source file>\n"
                 "       %s dump-types <source file>\n"
                 "       %s build --target wasm -o <output file> <source file>\n"
@@ -224,7 +227,7 @@ int main(int argc, char *argv[]) {
                 "       %s build --target x64-win32 [--debug] -o <output file> <source file>\n"
                 "       %s --version\n",
                 argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0],
-                argv[0]);
+                argv[0], argv[0]);
         return 2;
     }
 
@@ -298,6 +301,7 @@ int main(int argc, char *argv[]) {
  *     mialuc run <source file>
  *     mialuc dump-ast <source file>
  *     mialuc dump-asm --target x64-win32 <source file>
+ *     mialuc dump-outline <source file>
  *     mialuc dump-struct-sizes <source file>
  *     mialuc dump-types <source file>
  *     mialuc build --target wasm -o <output file> <source file>
@@ -365,6 +369,19 @@ static Command main_command_parse(Array_Slice args) {
             .source_path = argv[2],
             .output_path = NULL,
             .mode = COMMAND_MODE_DUMP_STRUCT_SIZES,
+            .target = COMMAND_TARGET_NONE,
+            .is_debug = false,
+        };
+    }
+
+    if (strcmp(argv[1], "dump-outline") == 0) {
+        if (args.length != 3) {
+            return invalid;
+        }
+        return (Command){
+            .source_path = argv[2],
+            .output_path = NULL,
+            .mode = COMMAND_MODE_DUMP_OUTLINE,
             .target = COMMAND_TARGET_NONE,
             .is_debug = false,
         };
@@ -522,6 +539,9 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
                                           semantic_result);
     case COMMAND_MODE_DUMP_AST:
         return 0;
+    case COMMAND_MODE_DUMP_OUTLINE:
+        main_run_command_print_outline(source, parse_result);
+        return 0;
     case COMMAND_MODE_DUMP_STRUCT_SIZES:
         main_run_command_print_struct_sizes(source, parse_result);
         return 0;
@@ -537,6 +557,72 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
 
     assert(false);
     return 1;
+}
+
+/**
+ * Prints a line of `dump-outline`: the depth, the kind, and the line and column of the name, both
+ * counted from 1 with columns that count bytes, the length of the name in bytes and the name,
+ * separated by tabs. Nothing is printed for a name that is not in the source.
+ */
+static void main_outline_row_print(Str source, int depth, char const *kind, Str name) {
+    if (name.bytes < source.bytes || name.bytes >= source.bytes + source.length) {
+        return;
+    }
+    Str_Position position = str_position_at(source, (size_t)(name.bytes - source.bytes));
+    printf("%d\t%s\t%zu\t%zu\t%zu\t%.*s\n", depth, kind, position.line, position.column,
+           name.length, (int)name.length, (char const *)name.bytes);
+}
+
+/**
+ * Prints a line for each definition of the module in the order of the source, and below a struct
+ * a line for each of its fields and below an enum a line for each of its members, which is what an
+ * editor shows as the outline of a file. The kind is `procedure`, `struct`, `enum`, `constant` or
+ * `variable` for a definition, and `field` or `member` for what is in a struct or an enum.
+ */
+static void main_run_command_print_outline(Str source, Parse_Result parse_result) {
+    assert(parse_result.status == PARSE_STATUS_OK);
+
+    Ast_Node const *nodes = parse_result.nodes.elements;
+    Ast_Node_Index definition = nodes[parse_result.root].first_child;
+    for (size_t i = 0; i < parse_result.nodes.length && definition != AST_NODE_INDEX_NONE; i += 1) {
+        Ast_Node const *node = &nodes[definition];
+        definition = node->next_sibling;
+
+        if (node->node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
+            main_outline_row_print(source, 0, "variable", ast_definition_name(node));
+            continue;
+        }
+        if (node->node_type != AST_NODE_TYPE_CONSTANT_DEFINITION) {
+            continue;
+        }
+
+        Ast_Node_Type value_type = nodes[node->first_child].node_type;
+        char const *kind = "constant";
+        char const *child_kind = NULL;
+        if (value_type == AST_NODE_TYPE_PROCEDURE) {
+            kind = "procedure";
+        } else if (value_type == AST_NODE_TYPE_STRUCT_TYPE) {
+            kind = "struct";
+            child_kind = "field";
+        } else if (value_type == AST_NODE_TYPE_ENUM_TYPE) {
+            kind = "enum";
+            child_kind = "member";
+        }
+        main_outline_row_print(source, 0, kind, ast_definition_name(node));
+
+        if (child_kind == NULL) {
+            continue;
+        }
+        for (Ast_Node_Index child = nodes[node->first_child].first_child;
+             child != AST_NODE_INDEX_NONE; child = nodes[child].next_sibling) {
+            if (nodes[child].node_type == AST_NODE_TYPE_FIELD) {
+                main_outline_row_print(source, 1, child_kind, nodes[child].payload.field.name);
+            } else if (nodes[child].node_type == AST_NODE_TYPE_ENUM_MEMBER) {
+                main_outline_row_print(source, 1, child_kind,
+                                       nodes[child].payload.enum_member.name);
+            }
+        }
+    }
 }
 
 /**

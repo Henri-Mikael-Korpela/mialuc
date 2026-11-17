@@ -104,7 +104,7 @@ class Connection {
 }
 
 /**
- * Starts the server and the sync of the documents, and registers the code lens and hover providers.
+ * Starts the server and the sync of the documents, and registers the code lens, hover and document symbol providers.
  */
 async function activate(context) {
     const output = vscode.window.createOutputChannel("Mialu Language Server");
@@ -207,6 +207,28 @@ async function activate(context) {
                 } catch (error) {
                     output.appendLine(String(error.message ?? error));
                     return undefined;
+                }
+            },
+        }),
+        vscode.languages.registerDocumentSymbolProvider({ language: LANGUAGE_ID }, {
+            async provideDocumentSymbols(document) {
+                try {
+                    const symbols = await connection.request("textDocument/documentSymbol", {
+                        textDocument: { uri: document.uri.toString() },
+                    });
+                    const range = ({ start, end }) =>
+                        new vscode.Range(start.line, start.character, end.line, end.character);
+                    const convert = (symbol) => {
+                        const result = new vscode.DocumentSymbol(
+                            symbol.name, "", symbol.kind - 1, range(symbol.range),
+                            range(symbol.selectionRange));
+                        result.children = (symbol.children ?? []).map(convert);
+                        return result;
+                    };
+                    return symbols.map(convert);
+                } catch (error) {
+                    output.appendLine(String(error.message ?? error));
+                    return [];
                 }
             },
         }),

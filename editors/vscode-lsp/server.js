@@ -7,6 +7,9 @@
 // The second is a hover: resting the pointer on the name of a constant, a global variable, a
 // parameter or a variable shows its type, such as `LIMIT: untyped Int`.
 //
+// A third feature is the outline of a document, the definitions with the fields and the members
+// below them, from `mialuc dump-outline`.
+//
 // The server does not work any of that out itself. It asks the compiler, which knows the layouts
 // and the types: `mialuc dump-struct-sizes <file>` prints a line for each struct and `mialuc
 // dump-types <file>` a line for each name, see docs/mialu-cli.md. The text of an open document is
@@ -111,6 +114,82 @@ function namesFromOutput(output) {
         names.push({ line: line - 1, column: column - 1, length, name, type, note: note ?? "" });
     }
     return names;
+}
+
+// The kinds of symbols of the protocol that the kinds of `mialuc dump-outline` are shown as.
+const SYMBOL_KINDS = {
+    procedure: 12, // Function
+    struct: 23,    // Struct
+    enum: 10,      // Enum
+    constant: 14,  // Constant
+    variable: 13,  // Variable
+    field: 8,      // Field
+    member: 22,    // EnumMember
+};
+
+/**
+ * Turns the output of `mialuc dump-outline` into the document symbols of `text`. A line of the
+ * output is the depth, 0 for a definition and 1 for a field or a member, the kind, the line and the
+ * column of the name, both counted from 1 in bytes, the length of the name in bytes and the name,
+ * separated by tabs. A line that is not like that is skipped. The range of a definition goes from
+ * its name to the last line that is not empty before the next definition, and the range of what is
+ * in it is its name.
+ */
+function symbolsFromOutput(output, text) {
+    const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
+    const rows = [];
+    for (const row of output.split("\n")) {
+        const [depthText, kind, lineText, columnText, lengthText, name] =
+            row.replace(/\r$/, "").split("\t");
+        const depth = Number(depthText);
+        const line = Number(lineText);
+        const column = Number(columnText);
+        const length = Number(lengthText);
+        if ((depth !== 0 && depth !== 1) || SYMBOL_KINDS[kind] === undefined ||
+            !Number.isInteger(line) || line < 1 || line > lines.length ||
+            !Number.isInteger(column) || column < 1 || !Number.isInteger(length) || length < 1 ||
+            !name) {
+            continue;
+        }
+        // The columns are bytes of UTF-8 and the protocol counts UTF-16 code units.
+        const bytes = Buffer.from(lines[line - 1], "utf8");
+        const start = bytes.toString("utf8", 0, column - 1).length;
+        rows.push({
+            depth, kind, name, line: line - 1,
+            start, end: start + bytes.toString("utf8", column - 1, column - 1 + length).length,
+        });
+    }
+
+    const symbols = [];
+    for (let i = 0; i < rows.length; i += 1) {
+        const row = rows[i];
+        const selectionRange = {
+            start: { line: row.line, character: row.start },
+            end: { line: row.line, character: row.end },
+        };
+        const symbol = {
+            name: row.name, kind: SYMBOL_KINDS[row.kind], range: selectionRange, selectionRange,
+        };
+        if (row.depth === 0) {
+            let next = i + 1;
+            while (next < rows.length && rows[next].depth !== 0) {
+                next += 1;
+            }
+            let last = next < rows.length ? rows[next].line - 1 : lines.length - 1;
+            while (last > row.line && lines[last].trim() === "") {
+                last -= 1;
+            }
+            symbol.range = {
+                start: selectionRange.start,
+                end: { line: last, character: lines[last].length },
+            };
+            symbol.children = [];
+            symbols.push(symbol);
+        } else if (symbols.length > 0) {
+            symbols[symbols.length - 1].children.push(symbol);
+        }
+    }
+    return symbols;
 }
 
 /**
@@ -218,10 +297,27 @@ async function codeLens(uri) {
     return document.lenses;
 }
 
+/**
+ * Answers the outline of a document. While the text does not compile, the symbols of the last text
+ * that did are kept.
+ */
+async function documentSymbol(uri) {
+    const document = documents.get(uri);
+    if (document === undefined) {
+        return [];
+    }
+    const text = document.text;
+    const output = await compilerRun("dump-outline", text);
+    if (output !== null && document.text === text) {
+        document.symbols = symbolsFromOutput(output, text);
+    }
+    return document.symbols;
+}
+
 function documentSet(uri, text) {
     const document = documents.get(uri);
     if (document === undefined) {
-        documents.set(uri, { text, lenses: [], names: [] });
+        documents.set(uri, { text, lenses: [], names: [], symbols: [] });
     } else {
         document.text = text;
     }
@@ -245,6 +341,7 @@ async function handle(message) {
                 textDocumentSync: { openClose: true, change: TEXT_DOCUMENT_SYNC_FULL },
                 codeLensProvider: { resolveProvider: false },
                 hoverProvider: true,
+                documentSymbolProvider: true,
             },
             serverInfo: { name: "mialu-lsp", version: "0.0.1" },
         });
@@ -282,6 +379,9 @@ async function handle(message) {
         break;
     case "textDocument/hover":
         reply(id, await hover(params.textDocument.uri, params.position));
+        break;
+    case "textDocument/documentSymbol":
+        reply(id, await documentSymbol(params.textDocument.uri));
         break;
     default:
         // A request must be answered, and a notification that is not known is ignored.

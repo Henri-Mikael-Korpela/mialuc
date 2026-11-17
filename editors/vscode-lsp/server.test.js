@@ -261,3 +261,37 @@ test("a struct has a lens with its size above its definition", async () => {
         assert.strictEqual((await request("shutdown", null)).result, null);
     });
 });
+
+test("a document has an outline of its definitions", async () => {
+    await withServer(async (request, notify) => {
+        await request("initialize", {
+            processId: null,
+            rootUri: null,
+            capabilities: {},
+            initializationOptions: { compilerPath: COMPILER },
+        });
+        notify("initialized", {});
+
+        const uri = "file:///outline.mu";
+        notify("textDocument/didOpen", {
+            textDocument: { uri, languageId: "mialu", version: 1, text: SOURCE },
+        });
+        const outline = await request("textDocument/documentSymbol", { textDocument: { uri } });
+        // Function is 12 and Struct is 23, and a field is 8. The lines are counted from 0.
+        assert.deepStrictEqual(
+            outline.result.map((symbol) => [symbol.name, symbol.kind, symbol.range.start.line, symbol.range.end.line]),
+            [["Point", 23, 2, 4], ["Person", 23, 6, 9], ["main", 12, 11, 12]]);
+        assert.deepStrictEqual(
+            outline.result[1].children.map((symbol) => [symbol.name, symbol.kind, symbol.selectionRange.start.line]),
+            [["age", 8, 7], ["name", 8, 8], ["home", 8, 9]]);
+
+        // A text that does not compile keeps the outline of the last text that did.
+        notify("textDocument/didChange", {
+            textDocument: { uri, version: 2 },
+            contentChanges: [{ text: SOURCE + "Broken :: struct ->\n    x: " }],
+        });
+        const broken = await request("textDocument/documentSymbol", { textDocument: { uri } });
+        assert.strictEqual(broken.result.length, 3);
+        assert.strictEqual((await request("shutdown", null)).result, null);
+    });
+});
