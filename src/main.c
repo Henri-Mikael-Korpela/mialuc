@@ -872,6 +872,8 @@ static char const *main_constant_type_text(Constant_Type type, bool is_constant)
         return "F32";
     case CONSTANT_TYPE_F64:
         return "F64";
+    case CONSTANT_TYPE_I32:
+        return "I32";
     case CONSTANT_TYPE_INT:
         return "Int";
     case CONSTANT_TYPE_RUNE:
@@ -2127,7 +2129,7 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 result.subject.bytes);
         break;
     case X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: an operand of arithmetic at '%.*s' is not an Int or a float, "
+        fprintf(stderr, "%s:%zu:%zu: an operand of arithmetic at '%.*s' is not an Int, an I32 or a float, "
                 "or is not of the type of the other operand.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
@@ -2227,9 +2229,10 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_CAST_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool, an Int, a "
-                "Rune or a float can be cast to Int, a Byte, an Int or a float to a float, a Byte "
-                "or a Rune to Rune, and a Rune to [4]Byte.\n", path, position.line,
+        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool, an I32, an "
+                "Int, a Rune or a float can be cast to Int, a Byte, a Bool, an I32 or a Rune to an I32, "
+                "a Byte, an I32, an Int or a float to a float, a Byte or a Rune to Rune, and a Rune "
+                "to [4]Byte.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
     case X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID:
@@ -2419,7 +2422,7 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int or a float, or is not of the type of the "
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an Int, an I32 or a float, or is not of the type of the "
                 "other operand, so it cannot be used in arithmetic.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
@@ -2518,14 +2521,16 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_CAST_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool, an Int, a "
-                "Rune or a float can be cast to Int, a Byte, an Int or a float to a float, a Byte "
-                "or a Rune to Rune, and a Rune to [4]Byte.\n", path, position.line,
+        fprintf(stderr, "%s:%zu:%zu: the value cannot be cast to '%.*s': a Byte, a Bool, an I32, an "
+                "Int, a Rune or a float can be cast to Int, a Byte, a Bool, an I32 or a Rune to an I32, "
+                "a Byte, an I32, an Int or a float to a float, a Byte or a Rune to Rune, and a Rune "
+                "to [4]Byte.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
         break;
     case WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID:
         fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "
-                "must be Int, or both must be floats of one type, or both must be Bool, Str or "
+                "must be Int, or both must be I32, or both must be floats of one type, or both must be "
+                "Bool, Str or "
                 "pointers of one type for == and not=.\n",
                 path, position.line,
                 position.column, subject_length, result.subject.bytes);

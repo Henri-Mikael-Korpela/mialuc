@@ -979,6 +979,27 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             wasm_text_write_unsigned(&formatter->writer, local_index);
             break;
         }
+        case WASM_OPCODE_F32_CONVERT_I32_S:
+            wasm_text_write_instruction(&formatter->writer, STR("f32.convert_i32_s"));
+            break;
+        case WASM_OPCODE_F64_CONVERT_I32_S:
+            wasm_text_write_instruction(&formatter->writer, STR("f64.convert_i32_s"));
+            break;
+        case WASM_OPCODE_I32_DIV_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.div_s"));
+            break;
+        case WASM_OPCODE_I32_GE_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.ge_s"));
+            break;
+        case WASM_OPCODE_I32_GT_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.gt_s"));
+            break;
+        case WASM_OPCODE_I32_LE_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i32.le_s"));
+            break;
+        case WASM_OPCODE_I64_EXTEND_I32_S:
+            wasm_text_write_instruction(&formatter->writer, STR("i64.extend_i32_s"));
+            break;
         case WASM_OPCODE_I32_ADD:
             wasm_text_write_instruction(&formatter->writer, STR("i32.add"));
             break;

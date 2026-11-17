@@ -557,6 +557,7 @@ static size_t x64_text_format_instruction(X64_Text_Formatter *formatter,
         switch (opcode) {
         case 0x01:
         case 0x09:
+        case 0x63:
         case 0x21:
         case 0x29:
         case 0x31:
@@ -843,6 +844,15 @@ static bool x64_text_format_operands(X64_Text_Formatter *formatter, X64_Text_Cur
         x64_text_write_memory(writer, operand);
         x64_text_write(writer, STR(":u8, "));
         x64_text_write_register_byte(writer, operand.register_number);
+    } else if (opcode == 0x63) {
+        // `movsxd` of a register of 32 bits to one of 64, which fills in its sign.
+        if (not is_wide) {
+            return false;
+        }
+        x64_text_write(writer, STR("movsxd "));
+        x64_text_write_register(writer, operand.register_number, true);
+        x64_text_write(writer, STR(", "));
+        x64_text_write_operand(writer, operand, false);
     } else if (opcode == 0x8B) {
         x64_text_write(writer, STR("mov "));
         x64_text_write_register(writer, operand.register_number, is_wide);

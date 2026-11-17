@@ -195,6 +195,13 @@ bool constant_is_byte(Constant_Value value) {
            value.integer <= 255;
 }
 
+bool constant_is_i32(Constant_Value value) {
+    assert(value.status == CONSTANT_STATUS_OK);
+
+    return value.type == CONSTANT_TYPE_UNTYPED_INTEGER && value.integer >= INT32_MIN &&
+           value.integer <= INT32_MAX;
+}
+
 bool constant_is_f32(Constant_Value value) {
     assert(value.status == CONSTANT_STATUS_OK);
 
@@ -209,6 +216,7 @@ Constant_Type constant_type_default(Constant_Type type) {
     case CONSTANT_TYPE_BYTE:
     case CONSTANT_TYPE_F32:
     case CONSTANT_TYPE_F64:
+    case CONSTANT_TYPE_I32:
     case CONSTANT_TYPE_INT:
     case CONSTANT_TYPE_RUNE:
     case CONSTANT_TYPE_STR:
@@ -441,6 +449,9 @@ static Constant_Value constant_convert(Ast_Node const *nodes, Ast_Node_Index def
     } else if (str_equals(name, STR("Byte"))) {
         target = CONSTANT_TYPE_BYTE;
         untyped = CONSTANT_TYPE_UNTYPED_INTEGER;
+    } else if (str_equals(name, STR("I32"))) {
+        target = CONSTANT_TYPE_I32;
+        untyped = CONSTANT_TYPE_UNTYPED_INTEGER;
     } else if (str_equals(name, STR("F32"))) {
         target = CONSTANT_TYPE_F32;
         untyped = CONSTANT_TYPE_UNTYPED_FLOAT;
@@ -468,6 +479,9 @@ static Constant_Value constant_convert(Ast_Node const *nodes, Ast_Node_Index def
         return constant_fail(CONSTANT_STATUS_TYPE_MISMATCH, definition);
     }
     if (target == CONSTANT_TYPE_BYTE && not constant_is_byte(value)) {
+        return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, definition);
+    }
+    if (target == CONSTANT_TYPE_I32 && not constant_is_i32(value)) {
         return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, definition);
     }
     if (target == CONSTANT_TYPE_F32) {
@@ -605,6 +619,20 @@ static Constant_Value constant_arithmetic(Ast_Node const *nodes, Ast_Node_Index 
     if (left.type == CONSTANT_TYPE_BYTE || right.type == CONSTANT_TYPE_BYTE) {
         return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, operation);
     }
+    // An `I32` is worked with another `I32`, or an untyped integer that fits in it, and not with
+    // an `Int`, because nothing is converted.
+    bool is_i32 = left.type == CONSTANT_TYPE_I32 || right.type == CONSTANT_TYPE_I32;
+    if (is_i32) {
+        if (left.type == CONSTANT_TYPE_INT || right.type == CONSTANT_TYPE_INT) {
+            return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, operation);
+        }
+        if (left.type == CONSTANT_TYPE_UNTYPED_INTEGER && not constant_is_i32(left)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, operation);
+        }
+        if (right.type == CONSTANT_TYPE_UNTYPED_INTEGER && not constant_is_i32(right)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, operation);
+        }
+    }
 
     Ast_Node_Type operator = nodes[operation].node_type;
     Constant_Value result = constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, operation);
@@ -622,10 +650,17 @@ static Constant_Value constant_arithmetic(Ast_Node const *nodes, Ast_Node_Index 
         return result;
     }
 
-    // The integers are untyped or `Int`, and an untyped one takes the type of the other.
+    // The integers are untyped, `Int` or `I32`, and an untyped one takes the type of the other.
+    // The result of an `I32` must fit in it, because a constant does not wrap around.
     result.type = CONSTANT_TYPE_UNTYPED_INTEGER;
     if (left.type == CONSTANT_TYPE_INT || right.type == CONSTANT_TYPE_INT) {
         result.type = CONSTANT_TYPE_INT;
+    }
+    if (is_i32) {
+        if (result.integer < INT32_MIN || result.integer > INT32_MAX) {
+            return constant_fail(CONSTANT_STATUS_OVERFLOW, operation);
+        }
+        result.type = CONSTANT_TYPE_I32;
     }
     return result;
 }
@@ -814,6 +849,12 @@ static Constant_Value constant_comparison(Ast_Node const *nodes, Ast_Node_Index 
             not constant_is_byte(left)) {
             return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
         }
+        if (left.type == CONSTANT_TYPE_I32 && is_right_untyped && not constant_is_i32(right)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
+        }
+        if (right.type == CONSTANT_TYPE_I32 && is_left_untyped && not constant_is_i32(left)) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
+        }
     } else if (constant_type_is_float(left.type) && constant_type_is_float(right.type)) {
         bool is_left_untyped = left.type == CONSTANT_TYPE_UNTYPED_FLOAT;
         bool is_right_untyped = right.type == CONSTANT_TYPE_UNTYPED_FLOAT;
@@ -970,7 +1011,7 @@ static bool constant_type_is_float(Constant_Type type) {
 
 static bool constant_type_is_integer(Constant_Type type) {
     return type == CONSTANT_TYPE_INT || type == CONSTANT_TYPE_BYTE ||
-           type == CONSTANT_TYPE_UNTYPED_INTEGER;
+           type == CONSTANT_TYPE_I32 || type == CONSTANT_TYPE_UNTYPED_INTEGER;
 }
 
 static bool constant_type_is_string(Constant_Type type) {

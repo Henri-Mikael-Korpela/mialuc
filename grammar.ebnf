@@ -85,7 +85,11 @@
        must be written. A for statement can go through a `Str` too, `for c in s`, whose iterator is
        the `Rune` of each character.
      - `int_to_byte` is a built-in procedure like `length_of`. It takes an `Int` and gives a
-       `Byte`.
+       `Byte`. `int_to_i32` takes an `Int` and gives an `I32`.
+     - `I32` is a type like `Int`, a signed 32-bit integer. The arithmetic and the comparison of
+       two `I32` values, or of an `I32` and an untyped integer that fits in 32 bits, give an `I32`
+       and a `Bool`, and an `Int` is not an `I32`, so the operands of an operator must be both of
+       one of them.
      - `try_str_to_int` is a built-in procedure like `length_of`. It takes a `Str` and gives two
        values, an `Int` and a `Bool`, so it is a call that is only accepted as the value of the
        definition of two names, `number, is_ok := try_str_to_int(text)`.

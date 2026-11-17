@@ -13,6 +13,7 @@
   - [Booleans](#booleans)
   - [Characters](#characters)
   - [Integers](#integers)
+  - [32-bit integers](#32-bit-integers)
   - [Bytes](#bytes)
   - [Floating-point numbers](#floating-point-numbers)
   - [Strings](#strings)
@@ -56,6 +57,7 @@
 - [Built-in procedures](#built-in-procedures)
   - [length_of](#length_of)
   - [int_to_byte](#int_to_byte)
+  - [int_to_i32](#int_to_i32)
   - [str_to_c_str](#str_to_c_str)
   - [try_str_to_int](#try_str_to_int)
   - [utf8_decode](#utf8_decode)
@@ -241,6 +243,7 @@ Every value has a type, which is written as an identifier. Mialu has the followi
 | `Byte` | An unsigned 8-bit integer, from 0 to 255. It is the unit of memory and of binary data. See [Bytes](#bytes). |
 | `Rune` | A Unicode character, which is its 32-bit code point. Written between single quotes, such as `'A'`, `'芋'` or `'🚀'`. See [Characters](#characters). |
 | `Int` | A signed 64-bit integer. Written as a number, such as `42`, `0b101010` or `0x2A`. See [Integers](#integers). |
+| `I32` | A signed 32-bit integer, from -2147483648 to 2147483647. It is the `int` of the C library. See [32-bit integers](#32-bit-integers). |
 | `F32` | A 32-bit floating point number. Written as a number with a fractional part, such as `1.42`. See [Floats](#floating-point-numbers). |
 | `F64` | A 64-bit floating point number. Written as a number with a fractional part, such as `1.42`, and the type of one where nothing says. See [Floats](#floating-point-numbers). |
 | `Str` | A string, which is text encoded in UTF-8. Written in quotes, such as `"Bob"`. |
@@ -250,7 +253,7 @@ The following primitive data types are reserved for possible future use:
 
 | Category | Types |
 | -------- | ----- |
-| Signed integer | `I8 I16 I32 I64` |
+| Signed integer | `I8 I16 I64` |
 | Unsigned integer | `U8 U16 U32 U64` |
 
 ### Booleans
@@ -321,7 +324,7 @@ An escape sequence is a way to write one character, so a rune literal that has o
 
 ### Integers
 
-There's one integer type, `Int`, a signed 64-bit integer: it holds the numbers from -9223372036854775808 to 9223372036854775807. An integer literal is written in one of three bases:
+The integer type that numbers are by default is `Int`, a signed 64-bit integer: it holds the numbers from -9223372036854775808 to 9223372036854775807. A [`Byte`](#bytes) and an [`I32`](#32-bit-integers) are the integers of other sizes. An integer literal is written in one of three bases:
 
 - decimal, such as `42`,
 - binary, after the prefix `0b`, such as `0b101010`, whose digits are `0` and `1`,
@@ -357,6 +360,26 @@ The arithmetic operators `+`, `-`, `*` and `/` take two `Int` values and give an
 > **Lessons learnt from C** In C, the size of `int` and `long` depends on the platform, so the same code can overflow on one machine and not on another, and overflow of a signed integer is undefined behavior, which lets a compiler assume that it never happens and remove checks that a programmer wrote against it. Integer types of different sizes and signs are also converted into each other silently, so a comparison of a signed and an unsigned number can give a surprising answer. In Mialu there is one `Int` of 64 bits whose overflow wraps around in a defined way, nothing is converted implicitly, and the cases of division that have no result are traps and not undefined behavior.
 
 An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an error, it is not a `Byte`, and an operand of arithmetic that is not an `Int` is an error. A literal or a constant without a type is not an `Int` yet, so it becomes a `Byte` where one is wanted without being converted, see [Untyped constants](#untyped-constants). The integer types `I8`, `I16`, `I32`, `I64` and `U8`, `U16`, `U32`, `U64` are reserved for possible future use, see [Primitive data types](#primitive-data-types).
+
+### 32-bit integers
+
+An `I32` is a signed 32-bit integer: it holds the numbers from -2147483648 to 2147483647. It is the type of the `int` of C, which is what it is for: a procedure of the C library that takes or gives an `int` is declared with an `I32`, see [Foreign procedures in the C library](#foreign-procedures-in-the-c-library), and so is a procedure of JavaScript that takes numbers of 32 bits, which are plain numbers there and not a `BigInt`, see [Foreign procedures in WebAssembly](#foreign-procedures-in-webassembly). The default value of an `I32` is `0`.
+
+```
+level : I32 = 3
+limit : I32 : 2147483647
+
+add :: proc(a: I32, b: I32) I32 ->
+    return a + b
+```
+
+An `I32` is a type of its own, and nothing is converted to it or from it implicitly, as for a `Byte`: an `Int` is not an `I32`, so `n : I32 = count` is an error when `count` is an `Int`, and so is `a + count` for an `I32` `a`. A literal or a constant without a type is not an `Int` yet, so it becomes an `I32` where one is wanted, as long as its value fits in 32 bits, see [Untyped constants](#untyped-constants): `level : I32 = 3` needs no conversion, and `n : I32 = 2147483648` is an error. A constant can have the type, `LIMIT : I32 : 100`, and arithmetic of constants of it is exact, and so is an error when the result does not fit, as for an `Int`.
+
+The arithmetic operators `+`, `-`, `*` and `/` take two `I32` values, or an `I32` and a literal that fits in one, and give an `I32`, and so do `+=`, `-=`, `*=` and `/=`. The comparison operators take two `I32` values with all six operators, and the order is the one of the numbers with their signs. Addition, subtraction and multiplication wrap around in 32 bits, as those of an `Int` do in 64, so the largest `I32` plus 1 is the smallest, and `46341 * 46341` is -2147479015. A division goes toward zero, and traps when the divisor is zero, and when the smallest `I32` is divided by -1, since the result, 2147483648, is not an `I32`, as for an `Int`.
+
+An `I32` is made an `Int` or a float with a [cast](#casts), `cast(Int)n`, which never loses anything and keeps the sign, and a `Byte`, a `Bool` or a `Rune` is made an `I32` the same way. An `Int` is not cast to an `I32`, because it may not fit: the built-in procedure [`int_to_i32`](#int_to_i32) makes an `I32` of an `Int`, and stops the program when the number is not from -2147483648 to 2147483647.
+
+An `I32` takes the same place in memory as an `Int` does, which is 8 bytes in a struct or an array, so a pointer to an `I32`, `^I32`, is not a pointer to an `int` of C, and an array of `I32` values is not an array of `int`. An `I32` is passed and returned by value, which is what C does with an `int`.
 
 ### Bytes
 
@@ -687,19 +710,24 @@ increment :: proc() Int ->
 
 A cast converts a value to another type with `cast(Type)` before the value: `my_int := cast(Int)my_byte`. Nothing is converted implicitly in Mialu, so a cast is how a value of one type is used as a value of another, and it is written wherever the conversion happens, which makes it easy to find.
 
-A cast to `Int` of a `Byte`, a `Bool` or a `Rune` never loses anything, a cast of a `Byte` to a `Rune` never does either, and a cast of a `Rune` to the 4 bytes of its UTF-8 encoding, `[4]Byte`, never does, because no character takes more than 4 bytes. A cast of an `Int` to a `Rune` is not allowed, since most numbers are not Unicode characters. and a cast of an `Int` to a float rounds to the nearest number of the type when the number has more digits than it holds, and a cast of a float to an `Int` drops the fraction, truncating toward zero, and stops the program for a number that is not in the range of an `Int` and for not a number, since there is no `Int` for it. A cast of an `F32` to an `F64` never loses anything, and a cast of an `F64` to an `F32` rounds, to infinity for a number that is too large. Today these casts are allowed, and every other one is an error:
+A cast to `Int` of a `Byte`, a `Bool`, an `I32` or a `Rune` never loses anything, a cast of those but an `Int` to an `I32` never does either, and an `Int` is not cast to an `I32`, see [`int_to_i32`](#int_to_i32), a cast of a `Byte` to a `Rune` never does either, and a cast of a `Rune` to the 4 bytes of its UTF-8 encoding, `[4]Byte`, never does, because no character takes more than 4 bytes. A cast of an `Int` to a `Rune` is not allowed, since most numbers are not Unicode characters. and a cast of an `Int` to a float rounds to the nearest number of the type when the number has more digits than it holds, and a cast of a float to an `Int` drops the fraction, truncating toward zero, and stops the program for a number that is not in the range of an `Int` and for not a number, since there is no `Int` for it. A cast of an `F32` to an `F64` never loses anything, and a cast of an `F64` to an `F32` rounds, to infinity for a number that is too large. Today these casts are allowed, and every other one is an error:
 
 | From | To | Result |
 |------|----|--------|
 | `Byte` | `Int` | The number of the byte, from 0 to 255. |
 | `Bool` | `Int` | 1 for `true` and 0 for `false`. |
+| `I32` | `Int` | The same number, with its sign, from -2147483648 to 2147483647. |
 | `Int` | `Int` | The same number. |
+| `Byte`, `Bool` or `Rune` | `I32` | The same number, which fits, since a `Rune` is at most 0x10FFFF. |
+| `I32` | `I32` | The same number. |
 | `Rune` | `Int` | The code point of the character, from 0 to 0x10FFFF. |
 | `Byte` | `Rune` | The character with that code point, one of the first 256, which are the ones of Latin-1: 65 is `'A'`, and 233 is `'é'`. |
 | `Rune` | `Rune` | The same character. |
 | `Rune` | `[4]Byte` | The UTF-8 encoding of the character, which is 1 to 4 bytes, followed by as many zero bytes as it takes to make 4, see below. |
 | `F32` or `F64` | `Int` | The number with its fraction dropped, truncated toward zero, so `-3.75` is -3. The program stops for a number that is not in the range of an `Int`, and for not a number. |
 | `Byte` | `F32` or `F64` | The number of the byte, exactly. |
+| `I32` | `F32` | The nearest `F32`, which is the number itself when it has at most 24 significant bits. |
+| `I32` | `F64` | The number, exactly. |
 | `Int` | `F32` | The nearest `F32`, which is the number itself when it has at most 24 significant bits. |
 | `Int` | `F64` | The nearest `F64`, which is the number itself when it has at most 53 significant bits. |
 | `F32` | `F64` | The same number, exactly. |
@@ -773,7 +801,7 @@ An untyped constant becomes a value of its type when the program is compiled, so
 
 | Kind | Literals | Becomes | Default type |
 | ---- | -------- | ------- | ------------ |
-| Untyped integer | `42`, `0b101010`, `0x2A` | `Int`, or a `Byte` when it is from 0 to 255 | `Int` |
+| Untyped integer | `42`, `0b101010`, `0x2A` | `Int`, an `I32` when it is from -2147483648 to 2147483647, or a `Byte` when it is from 0 to 255 | `Int` |
 | Untyped float | `1.42`, `0.5` | `F32`, when it is not above the largest `F32`, or `F64` | `F64` |
 | Untyped boolean | `true`, `false` | `Bool` | `Bool` |
 | Untyped string | `"Hello"` | `Str`, or a `C_Str` | `Str` |
@@ -792,7 +820,7 @@ COUNT : Int : 3
 NAME : Str : "Mialu"
 ```
 
-The type of a constant is `Int`, `Byte`, `Bool` or `Str`, and its value must be a constant expression that has that type, or that is untyped and fits in it, so `MASK : Byte : 256` and `COUNT : Int : "three"` are errors. A typed constant follows the rules of its type: `MASK + 1` is an error, because a `Byte` has no arithmetic, and so is `b : Byte = COUNT`, because an `Int` is not a `Byte`. A typed and an untyped operand give a value of the type, so `COUNT * 2` is the `Int` 6.
+The type of a constant is `Int`, `I32`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`, and its value must be a constant expression that has that type, or that is untyped and fits in it, so `MASK : Byte : 256` and `COUNT : Int : "three"` are errors. A typed constant follows the rules of its type: `MASK + 1` is an error, because a `Byte` has no arithmetic, and so is `b : Byte = COUNT`, because an `Int` is not a `Byte`. A typed and an untyped operand give a value of the type, so `COUNT * 2` is the `Int` 6.
 
 That is how a literal is written once and used with every type that can hold it: no type is chosen for it until it is used, so it needs no conversion, which a [cast](#casts) and `int_to_byte` are for values that are known only when the program runs.
 
@@ -2024,6 +2052,7 @@ A built-in procedure is a procedure that the language has, and that is called li
 |-----------|-------|-------|
 | [`length_of`](#length_of) | an array, an array slice or a `Str` | the number of its elements or characters, an `Int` |
 | [`int_to_byte`](#int_to_byte) | an `Int` | a `Byte` of it, and stops the program when it is not from 0 to 255 |
+| [`int_to_i32`](#int_to_i32) | an `Int` | an `I32` of it, and stops the program when it is not from -2147483648 to 2147483647 |
 | [`str_to_c_str`](#str_to_c_str) | a `Str` | a `C_Str`, a copy of it that ends with a zero |
 | [`try_str_to_int`](#try_str_to_int) | a `Str` | two values: the `Int` that it is, and whether it is one |
 | [`utf8_decode`](#utf8_decode) | an array or an array slice of `Byte` | two values: the `Str` of the bytes, and whether they are valid UTF-8 |
@@ -2063,6 +2092,17 @@ to_byte :: proc(n: Int) Byte ->
 ```
 
 `to_byte(200)` is the `Byte` 200, and `to_byte(256)` and `to_byte(0 - 1)` stop the program. A number that is known when the program is compiled needs no conversion: an untyped integer from 0 to 255 is a `Byte` where one is wanted. The other direction, from a `Byte` to an `Int`, never loses anything, so it is a [cast](#casts), `cast(Int)b`.
+
+### int_to_i32
+
+`int_to_i32` makes an `I32` of an `Int`, which is not a cast because an `Int` may not fit in 32 bits, see [32-bit integers](#32-bit-integers). It takes one `Int`, and gives an `I32` that has the same number, and when the number is not from -2147483648 to 2147483647 there is no `I32` that has it, so the program is stopped, as it is by `int_to_byte`:
+
+```
+to_i32 :: proc(n: Int) I32 ->
+    return int_to_i32(n)
+```
+
+`to_i32(123456)` and `to_i32(0 - 5)` are the `I32` values 123456 and -5, and `to_i32(2147483648)` and `to_i32(0 - 2147483649)` stop the program. A number that is known when the program is compiled needs no conversion: an untyped integer that fits in 32 bits is an `I32` where one is wanted. The other direction, from an `I32` to an `Int`, never loses anything, so it is a [cast](#casts), `cast(Int)n`.
 
 ### str_to_c_str
 
@@ -2218,11 +2258,11 @@ The compiler cannot know what the other language does, so it trusts the declarat
 
 ### Foreign procedures in WebAssembly
 
-The target makes a foreign procedure an imported function of the module. See [WebAssembly](build-target-wasm.md#foreign-procedures).
+The target makes a foreign procedure an imported function of the module. See [WebAssembly](build-target-wasm.md#foreign-procedures). An `I32` arrives in JavaScript as a plain number and is returned as one, where an `Int` is a `BigInt`.
 
 ### Foreign procedures in the C library
 
-A foreign procedure of `libc` is a function of the C library of the platform, which the program links to and calls by the name of the procedure, as C code does. A parameter or a result that is an `F32` is a `float` in C, and one that is an `F64` is a `double`, so `sqrtf :: proc(x: F32) F32 -> ...` and `sqrt :: proc(x: F64) F64 -> ...` are the functions of `math.h`, and `printf :: proc(format: C_Str, value: F64) Int -> ...` takes a `double` for `%f`. C converts a `float` to a `double` when it is one of the variable number of arguments of a procedure like `printf`, and Mialu does not, so an `F32` is made an `F64` with `cast` first. See [x64-win32](build-target-x64-win32.md#foreign-procedures).
+A foreign procedure of `libc` is a function of the C library of the platform, which the program links to and calls by the name of the procedure, as C code does. A parameter or a result that is an `I32` is an `int` in C, so `abs :: proc(number: I32) I32 -> ...` and `atoi :: proc(text: C_Str) I32 -> ...` are the functions of `stdlib.h`, and an `Int` is a `long long`, which is not the same size, so a function that returns an `int` is declared with an `I32`, since the other half of what it returns is not said. A parameter or a result that is an `F32` is a `float` in C, and one that is an `F64` is a `double`, so `sqrtf :: proc(x: F32) F32 -> ...` and `sqrt :: proc(x: F64) F64 -> ...` are the functions of `math.h`, and `printf :: proc(format: C_Str, value: F64) Int -> ...` takes a `double` for `%f`. C converts a `float` to a `double` when it is one of the variable number of arguments of a procedure like `printf`, and Mialu does not, so an `F32` is made an `F64` with `cast` first. See [x64-win32](build-target-x64-win32.md#foreign-procedures).
 
 ## Compilation targets
 

@@ -100,6 +100,7 @@ typedef enum {
     WASM_VALUE_TYPE_ENUM_LITERAL,
     WASM_VALUE_TYPE_F32,
     WASM_VALUE_TYPE_F64,
+    WASM_VALUE_TYPE_I32,
     WASM_VALUE_TYPE_INT,
     WASM_VALUE_TYPE_NIL,
     WASM_VALUE_TYPE_NONE,
@@ -403,6 +404,7 @@ static void            wasm_build_type_section                (Wasm_Builder *bui
                                                                Ast_Node_Index module,
                                                                size_t definition_count);
 static byte            wasm_comparison_opcode                 (Ast_Comparison_Operator operator);
+static byte            wasm_comparison_opcode_i32             (Ast_Comparison_Operator operator);
 static void            wasm_utf8_skip_write                   (Wasm_Builder *builder, size_t next,
                                                                size_t end, size_t count);
 static void            wasm_utf8_decode_write                 (Wasm_Builder *builder, size_t next,
@@ -1572,10 +1574,12 @@ static void wasm_build_global_section(Wasm_Builder *builder) {
                     wasm_write_float_const(&builder->writer, value_type, constant.floating);
                     wasm_write_byte(&builder->writer, WASM_OPCODE_END);
                 } else {
-                    // A `Byte`, a `Bool` and a `Rune` are 32-bit values, and the number is from 0 to
-                    // 255, 0 or 1, or a code point, which the check of the global made sure of.
+                    // A `Byte`, a `Bool`, a `Rune` and an `I32` are 32-bit values, and the number is
+                    // from 0 to 255, 0 or 1, a code point, or one that fits in 32 bits, which the
+                    // check of the global made sure of.
                     assert(value_type.kind == WASM_VALUE_TYPE_BYTE ||
                            value_type.kind == WASM_VALUE_TYPE_BOOL ||
+                           value_type.kind == WASM_VALUE_TYPE_I32 ||
                            value_type.kind == WASM_VALUE_TYPE_RUNE);
                     wasm_write_byte(&builder->writer, WASM_TYPE_I32);
                     wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
@@ -3166,7 +3170,7 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
         bool is_argument_valid = wasm_type_is_sequence(argument_type) ||
                                  (argument_type.kind == WASM_VALUE_TYPE_STR &&
                                   str_equals(name, STR("length_of")));
-        if (str_equals(name, STR("int_to_byte"))) {
+        if (str_equals(name, STR("int_to_byte")) || str_equals(name, STR("int_to_i32"))) {
             is_argument_valid = argument_type.kind == WASM_VALUE_TYPE_INT;
         } else if (str_equals(name, STR("str_to_c_str")) ||
                    str_equals(name, STR("try_str_to_int"))) {
@@ -3369,7 +3373,8 @@ static bool wasm_build_code_section_body_variable_assignment(Wasm_Builder *build
         return true;
     }
 
-    if (variable_type.kind != WASM_VALUE_TYPE_INT && not wasm_type_is_float(variable_type)) {
+    if (variable_type.kind != WASM_VALUE_TYPE_INT && variable_type.kind != WASM_VALUE_TYPE_I32 &&
+        not wasm_type_is_float(variable_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID, target_name);
     }
 
@@ -3481,7 +3486,8 @@ static bool wasm_build_code_section_body_field_assignment(Wasm_Builder *builder,
             return true;
         }
 
-        if (path.type.kind != WASM_VALUE_TYPE_INT && not wasm_type_is_float(path.type)) {
+        if (path.type.kind != WASM_VALUE_TYPE_INT && path.type.kind != WASM_VALUE_TYPE_I32 &&
+            not wasm_type_is_float(path.type)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
                              field_name);
         }
@@ -3574,7 +3580,8 @@ static bool wasm_build_code_section_body_place_store(Wasm_Builder *builder,
         return true;
     }
 
-    if (type.kind != WASM_VALUE_TYPE_INT && not wasm_type_is_float(type)) {
+    if (type.kind != WASM_VALUE_TYPE_INT && type.kind != WASM_VALUE_TYPE_I32 &&
+        not wasm_type_is_float(type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
                          wasm_expression_subject(builder, definition, target));
     }
@@ -4152,6 +4159,9 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
             if (str_equals(builder->nodes[expression].payload.call.name, STR("int_to_byte"))) {
                 return wasm_type_make(WASM_VALUE_TYPE_BYTE);
             }
+            if (str_equals(builder->nodes[expression].payload.call.name, STR("int_to_i32"))) {
+                return wasm_type_make(WASM_VALUE_TYPE_I32);
+            }
             if (str_equals(builder->nodes[expression].payload.call.name, STR("str_to_c_str"))) {
                 return wasm_type_make(WASM_VALUE_TYPE_C_STR);
             }
@@ -4305,12 +4315,12 @@ static Wasm_Type wasm_arithmetic_type(Wasm_Builder const *builder, Ast_Node_Inde
     Ast_Node_Index right = builder->nodes[operation].last_child;
     if (wasm_is_constant(builder, left) && not wasm_is_constant(builder, right)) {
         Wasm_Type right_type = wasm_expression_type(builder, right);
-        if (wasm_type_is_float(right_type)) {
+        if (wasm_type_is_float(right_type) || right_type.kind == WASM_VALUE_TYPE_I32) {
             return right_type;
         }
     }
     Wasm_Type left_type = wasm_expression_type(builder, left);
-    if (wasm_type_is_float(left_type)) {
+    if (wasm_type_is_float(left_type) || left_type.kind == WASM_VALUE_TYPE_I32) {
         return left_type;
     }
     return wasm_type_make(WASM_VALUE_TYPE_INT);
@@ -4407,8 +4417,14 @@ static Str wasm_expression_subject(Wasm_Builder const *builder, Ast_Node_Index d
 static bool wasm_cast_is_valid(Wasm_Type target, Wasm_Type source) {
     if (target.kind == WASM_VALUE_TYPE_INT) {
         return source.kind == WASM_VALUE_TYPE_BYTE || source.kind == WASM_VALUE_TYPE_BOOL ||
-               source.kind == WASM_VALUE_TYPE_INT || source.kind == WASM_VALUE_TYPE_RUNE ||
-               wasm_type_is_float(source);
+               source.kind == WASM_VALUE_TYPE_I32 || source.kind == WASM_VALUE_TYPE_INT ||
+               source.kind == WASM_VALUE_TYPE_RUNE || wasm_type_is_float(source);
+    }
+    // An `I32` holds every `Byte`, `Bool` and `Rune`, and itself. An `Int` is not cast to one,
+    // because it may not fit, see `int_to_i32`.
+    if (target.kind == WASM_VALUE_TYPE_I32) {
+        return source.kind == WASM_VALUE_TYPE_BYTE || source.kind == WASM_VALUE_TYPE_BOOL ||
+               source.kind == WASM_VALUE_TYPE_I32 || source.kind == WASM_VALUE_TYPE_RUNE;
     }
     // Every byte is a character of the first 256, which is a rune, and a rune is a rune.
     if (target.kind == WASM_VALUE_TYPE_RUNE) {
@@ -4419,8 +4435,8 @@ static bool wasm_cast_is_valid(Wasm_Type target, Wasm_Type source) {
         return source.kind == WASM_VALUE_TYPE_RUNE;
     }
     return wasm_type_is_float(target) &&
-           (source.kind == WASM_VALUE_TYPE_BYTE || source.kind == WASM_VALUE_TYPE_INT ||
-            wasm_type_is_float(source));
+           (source.kind == WASM_VALUE_TYPE_BYTE || source.kind == WASM_VALUE_TYPE_I32 ||
+            source.kind == WASM_VALUE_TYPE_INT || wasm_type_is_float(source));
 }
 
 /**
@@ -4514,6 +4530,21 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
                              wasm_expression_subject(builder, definition, left));
         }
         if (not wasm_value_is_accepted(builder, rune_type, right)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, right));
+        }
+        return true;
+    }
+
+    // An `I32` has an order, the signed one. The other operand is an `I32` too, or an untyped
+    // integer that fits in 32 bits, which is one there.
+    if (left_type.kind == WASM_VALUE_TYPE_I32 || right_type.kind == WASM_VALUE_TYPE_I32) {
+        Wasm_Type i32_type = wasm_type_make(WASM_VALUE_TYPE_I32);
+        if (not wasm_value_is_accepted(builder, i32_type, left)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+                             wasm_expression_subject(builder, definition, left));
+        }
+        if (not wasm_value_is_accepted(builder, i32_type, right)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                              wasm_expression_subject(builder, definition, right));
         }
@@ -4704,6 +4735,31 @@ static byte wasm_comparison_opcode(Ast_Comparison_Operator operator) {
     // Unreachable: every operator is handled above.
     assert(false);
     return WASM_OPCODE_I64_EQ;
+}
+
+/**
+ * Returns the instruction that compares two `I32` values with `operator`, which are 32-bit integers
+ * with a sign, so the comparison is signed.
+ */
+static byte wasm_comparison_opcode_i32(Ast_Comparison_Operator operator) {
+    switch (operator) {
+    case AST_COMPARISON_OPERATOR_EQUAL:
+        return WASM_OPCODE_I32_EQ;
+    case AST_COMPARISON_OPERATOR_GREATER:
+        return WASM_OPCODE_I32_GT_S;
+    case AST_COMPARISON_OPERATOR_GREATER_EQUAL:
+        return WASM_OPCODE_I32_GE_S;
+    case AST_COMPARISON_OPERATOR_LESS:
+        return WASM_OPCODE_I32_LT_S;
+    case AST_COMPARISON_OPERATOR_LESS_EQUAL:
+        return WASM_OPCODE_I32_LE_S;
+    case AST_COMPARISON_OPERATOR_NOT_EQUAL:
+        return WASM_OPCODE_I32_NE;
+    }
+
+    // Unreachable: every operator is handled above.
+    assert(false);
+    return WASM_OPCODE_I32_EQ;
 }
 
 /**
@@ -4903,12 +4959,15 @@ static void wasm_cast_write(Wasm_Builder *builder, Ast_Node_Index cast) {
     if (target.kind == WASM_VALUE_TYPE_ARRAY) {
         return;
     }
-    if (target.kind == WASM_VALUE_TYPE_RUNE) {
-        // A `Byte` and a `Rune` are 32-bit integers, and a byte is a code point as it is.
+    if (target.kind == WASM_VALUE_TYPE_RUNE || target.kind == WASM_VALUE_TYPE_I32) {
+        // A `Byte`, a `Bool`, a `Rune` and an `I32` are 32-bit integers, and the number of a byte
+        // is the same in an `I32`, as in a `Rune`.
         return;
     }
     if (target.kind == WASM_VALUE_TYPE_INT) {
-        if (source.kind == WASM_VALUE_TYPE_F32) {
+        if (source.kind == WASM_VALUE_TYPE_I32) {
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_S);
+        } else if (source.kind == WASM_VALUE_TYPE_F32) {
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_TRUNC_F32_S);
         } else if (source.kind == WASM_VALUE_TYPE_F64) {
             wasm_write_byte(&builder->writer, WASM_OPCODE_I64_TRUNC_F64_S);
@@ -4924,6 +4983,9 @@ static void wasm_cast_write(Wasm_Builder *builder, Ast_Node_Index cast) {
     if (source.kind == WASM_VALUE_TYPE_INT) {
         wasm_write_byte(&builder->writer,
                         is_double ? WASM_OPCODE_F64_CONVERT_I64_S : WASM_OPCODE_F32_CONVERT_I64_S);
+    } else if (source.kind == WASM_VALUE_TYPE_I32) {
+        wasm_write_byte(&builder->writer,
+                        is_double ? WASM_OPCODE_F64_CONVERT_I32_S : WASM_OPCODE_F32_CONVERT_I32_S);
     } else if (source.kind == WASM_VALUE_TYPE_BYTE) {
         wasm_write_byte(&builder->writer,
                         is_double ? WASM_OPCODE_F64_CONVERT_I32_U : WASM_OPCODE_F32_CONVERT_I32_U);
@@ -5087,7 +5149,10 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
                                                         wasm_arithmetic_type(builder, current)));
             break;
         }
-        wasm_write_byte(&builder->writer, WASM_OPCODE_I64_ADD);
+        wasm_write_byte(&builder->writer,
+                        wasm_arithmetic_type(builder, current).kind == WASM_VALUE_TYPE_I32
+                            ? WASM_OPCODE_I32_ADD
+                            : WASM_OPCODE_I64_ADD);
         break;
     case AST_NODE_TYPE_AND:
         // Both operands are on the stack, as 0 or 1, so the bitwise instruction is the logical
@@ -5123,6 +5188,23 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
         if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
             str_equals(node->payload.call.name, STR("try_str_to_int"))) {
             wasm_build_code_section_body_try_str_to_int(builder, procedure);
+            break;
+        }
+        if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
+            str_equals(node->payload.call.name, STR("int_to_i32"))) {
+            // A number that is not the same after it is cut down to 32 bits and given its sign again
+            // does not fit, so one comparison finds both too large and too small. The program stops
+            // for it.
+            size_t number = wasm_scratch_local_index(builder, procedure,
+                                                     WASM_SCRATCH_TEMPORARY_64);
+            wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_TEE, number);
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I32_WRAP_I64);
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_S);
+            wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, number);
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I64_NE);
+            wasm_structured_trap(builder);
+            wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, number);
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I32_WRAP_I64);
             break;
         }
         if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
@@ -5207,6 +5289,13 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
                                                            node->last_child)));
             break;
         }
+        // An `I32` is compared as the signed 32-bit integer that it is.
+        if (wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_I32 ||
+            wasm_expression_type(builder, node->last_child).kind == WASM_VALUE_TYPE_I32) {
+            wasm_write_byte(&builder->writer,
+                            wasm_comparison_opcode_i32(node->payload.comparison.operator));
+            break;
+        }
         // Bytes and runes are compared as the unsigned 32-bit integers that they are.
         if (wasm_expression_type(builder, node->first_child).kind == WASM_VALUE_TYPE_BYTE ||
             wasm_expression_type(builder, node->last_child).kind == WASM_VALUE_TYPE_BYTE ||
@@ -5240,7 +5329,10 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
                                                         wasm_arithmetic_type(builder, current)));
             break;
         }
-        wasm_write_byte(&builder->writer, WASM_OPCODE_I64_DIV_S);
+        wasm_write_byte(&builder->writer,
+                        wasm_arithmetic_type(builder, current).kind == WASM_VALUE_TYPE_I32
+                            ? WASM_OPCODE_I32_DIV_S
+                            : WASM_OPCODE_I64_DIV_S);
         break;
     case AST_NODE_TYPE_MULTIPLICATION:
         if (wasm_type_is_float(wasm_arithmetic_type(builder, current))) {
@@ -5249,7 +5341,10 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
                                                         wasm_arithmetic_type(builder, current)));
             break;
         }
-        wasm_write_byte(&builder->writer, WASM_OPCODE_I64_MUL);
+        wasm_write_byte(&builder->writer,
+                        wasm_arithmetic_type(builder, current).kind == WASM_VALUE_TYPE_I32
+                            ? WASM_OPCODE_I32_MUL
+                            : WASM_OPCODE_I64_MUL);
         break;
     case AST_NODE_TYPE_SUBTRACTION:
         if (wasm_type_is_float(wasm_arithmetic_type(builder, current))) {
@@ -5258,7 +5353,10 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
                                                         wasm_arithmetic_type(builder, current)));
             break;
         }
-        wasm_write_byte(&builder->writer, WASM_OPCODE_I64_SUB);
+        wasm_write_byte(&builder->writer,
+                        wasm_arithmetic_type(builder, current).kind == WASM_VALUE_TYPE_I32
+                            ? WASM_OPCODE_I32_SUB
+                            : WASM_OPCODE_I64_SUB);
         break;
     case AST_NODE_TYPE_CONSTANT_DEFINITION:
         // The parser only makes operators, literals and names in an expression.
@@ -5706,22 +5804,26 @@ static bool wasm_for_is_each(Wasm_Builder const *builder, Ast_Node_Index stateme
  */
 static byte wasm_assignment_opcode(Ast_Node_Type node_type, Wasm_Type type) {
     assert(node_type != AST_NODE_TYPE_ASSIGNMENT);
-    assert(type.kind == WASM_VALUE_TYPE_INT || wasm_type_is_float(type));
+    assert(type.kind == WASM_VALUE_TYPE_INT || type.kind == WASM_VALUE_TYPE_I32 ||
+           wasm_type_is_float(type));
 
     if (wasm_type_is_float(type)) {
         return wasm_float_operation_opcode(node_type, type);
     }
+    // An `I32` is a 32-bit integer, whose operations wrap around in 32 bits, as those of an `Int`
+    // do in 64. A division of the smallest number by -1 traps, as it does for an `Int`.
+    bool is_32 = type.kind == WASM_VALUE_TYPE_I32;
     if (node_type == AST_NODE_TYPE_DIVISION_ASSIGNMENT) {
-        return WASM_OPCODE_I64_DIV_S;
+        return is_32 ? WASM_OPCODE_I32_DIV_S : WASM_OPCODE_I64_DIV_S;
     }
     if (node_type == AST_NODE_TYPE_MULTIPLICATION_ASSIGNMENT) {
-        return WASM_OPCODE_I64_MUL;
+        return is_32 ? WASM_OPCODE_I32_MUL : WASM_OPCODE_I64_MUL;
     }
     if (node_type == AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT) {
-        return WASM_OPCODE_I64_SUB;
+        return is_32 ? WASM_OPCODE_I32_SUB : WASM_OPCODE_I64_SUB;
     }
     assert(node_type == AST_NODE_TYPE_ADDITION_ASSIGNMENT);
-    return WASM_OPCODE_I64_ADD;
+    return is_32 ? WASM_OPCODE_I32_ADD : WASM_OPCODE_I64_ADD;
 }
 
 /**
@@ -7205,6 +7307,7 @@ static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
     case WASM_VALUE_TYPE_ENUM:
     case WASM_VALUE_TYPE_F32:
     case WASM_VALUE_TYPE_F64:
+    case WASM_VALUE_TYPE_I32:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_PROCEDURE:
     case WASM_VALUE_TYPE_RUNE:
@@ -7636,6 +7739,9 @@ static Wasm_Type wasm_type_of_plain_name(Wasm_Builder const *builder, Str type_n
     if (str_equals(type_name, STR("F64"))) {
         return wasm_type_make(WASM_VALUE_TYPE_F64);
     }
+    if (str_equals(type_name, STR("I32"))) {
+        return wasm_type_make(WASM_VALUE_TYPE_I32);
+    }
     if (str_equals(type_name, STR("Int"))) {
         return wasm_type_make(WASM_VALUE_TYPE_INT);
     }
@@ -7828,6 +7934,7 @@ static size_t wasm_struct_slots(Wasm_Builder const *builder, Ast_Node_Index stru
                 leaf = WASM_VALUE_TYPE_INT;
             } else if (not str_equals(name, STR("Bool")) &&
                        not str_equals(name, STR("Byte")) &&
+                       not str_equals(name, STR("I32")) &&
                        not str_equals(name, STR("Rune"))) {
                 nested = wasm_struct_find(builder, name);
             }
@@ -7883,6 +7990,7 @@ static size_t wasm_type_slot_count(Wasm_Builder const *builder, Wasm_Type type) 
     case WASM_VALUE_TYPE_C_STR:
     case WASM_VALUE_TYPE_F32:
     case WASM_VALUE_TYPE_F64:
+    case WASM_VALUE_TYPE_I32:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_ENUM:
     case WASM_VALUE_TYPE_ENUM_LITERAL:
@@ -7929,6 +8037,7 @@ static byte wasm_type_slot_kind(Wasm_Builder const *builder, Wasm_Type type, siz
     case WASM_VALUE_TYPE_BOOL:
     case WASM_VALUE_TYPE_BYTE:
     case WASM_VALUE_TYPE_C_STR:
+    case WASM_VALUE_TYPE_I32:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_POINTER:
     case WASM_VALUE_TYPE_PROCEDURE:
@@ -8061,6 +8170,7 @@ static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
     case WASM_VALUE_TYPE_ENUM_LITERAL:
     case WASM_VALUE_TYPE_F32:
     case WASM_VALUE_TYPE_F64:
+    case WASM_VALUE_TYPE_I32:
     case WASM_VALUE_TYPE_INT:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_NONE:
@@ -8135,6 +8245,8 @@ static Wasm_Type wasm_constant_type(Constant_Type type) {
         return wasm_type_make(WASM_VALUE_TYPE_F32);
     case CONSTANT_TYPE_F64:
         return wasm_type_make(WASM_VALUE_TYPE_F64);
+    case CONSTANT_TYPE_I32:
+        return wasm_type_make(WASM_VALUE_TYPE_I32);
     case CONSTANT_TYPE_INT:
         return wasm_type_make(WASM_VALUE_TYPE_INT);
     case CONSTANT_TYPE_RUNE:
@@ -8168,6 +8280,7 @@ static bool wasm_constant_is_accepted(Wasm_Type target, Constant_Value value) {
     case CONSTANT_TYPE_BYTE:
     case CONSTANT_TYPE_F32:
     case CONSTANT_TYPE_F64:
+    case CONSTANT_TYPE_I32:
     case CONSTANT_TYPE_INT:
     case CONSTANT_TYPE_RUNE:
     case CONSTANT_TYPE_STR:
@@ -8179,7 +8292,8 @@ static bool wasm_constant_is_accepted(Wasm_Type target, Constant_Value value) {
                target.kind == WASM_VALUE_TYPE_F64;
     case CONSTANT_TYPE_UNTYPED_INTEGER:
         return target.kind == WASM_VALUE_TYPE_INT ||
-               (target.kind == WASM_VALUE_TYPE_BYTE && constant_is_byte(value));
+               (target.kind == WASM_VALUE_TYPE_BYTE && constant_is_byte(value)) ||
+               (target.kind == WASM_VALUE_TYPE_I32 && constant_is_i32(value));
     case CONSTANT_TYPE_UNTYPED_STRING:
         return target.kind == WASM_VALUE_TYPE_STR || target.kind == WASM_VALUE_TYPE_C_STR;
     }
@@ -8206,6 +8320,7 @@ static void wasm_constant_write(Wasm_Builder *builder, Constant_Value value, Was
     switch (type.kind) {
     case WASM_VALUE_TYPE_BOOL:
     case WASM_VALUE_TYPE_BYTE:
+    case WASM_VALUE_TYPE_I32:
     case WASM_VALUE_TYPE_RUNE:
         wasm_write_i32_const(&builder->writer, value.integer);
         break;

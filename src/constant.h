@@ -45,6 +45,9 @@ typedef enum {
     CONSTANT_TYPE_F32,
     // A constant that is defined with the type `F64`, or arithmetic of one with an untyped float.
     CONSTANT_TYPE_F64,
+    // A constant that is defined with the type `I32`, or arithmetic of one with an untyped integer.
+    // Its value is a number from -2147483648 to 2147483647.
+    CONSTANT_TYPE_I32,
     CONSTANT_TYPE_INT,
     // A rune literal, such as `'A'`, whose code point is in `integer`, and a constant that is
     // defined with the type `Rune`. A rune has no arithmetic, and no untyped integer is one.
@@ -91,7 +94,7 @@ typedef enum {
     // The text of the strings that `++` joins does not fit in the `Constant_Text` any more.
     // `error` is the operator.
     CONSTANT_STATUS_TEXT_TOO_LONG,
-    // A typed constant whose type is not `Int`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`,
+    // A typed constant whose type is not `Int`, `I32`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`,
     // which are the types that a constant can have. `error` is the definition.
     CONSTANT_STATUS_TYPE_INVALID,
     // A value that is not of the type that it is given, such as a string for a constant of type
@@ -179,6 +182,7 @@ bool constant_definition_is_value(Ast_Node const *nodes, Ast_Node_Index definiti
  * `Byte`, which is a number from 0 to 255, so that it becomes one where a `Byte` is wanted.
  */
 bool constant_is_byte(Constant_Value value);
+bool constant_is_i32(Constant_Value value);
 
 /**
  * Returns whether `value`, which must be `CONSTANT_STATUS_OK`, is an untyped float that an `F32`
