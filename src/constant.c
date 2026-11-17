@@ -913,6 +913,17 @@ static Constant_Value constant_comparison(Ast_Node const *nodes, Ast_Node_Index 
             integer = 1;
         }
         return constant_make(CONSTANT_TYPE_UNTYPED_BOOL, integer);
+    } else if ((left.type == CONSTANT_TYPE_BYTE && right.type == CONSTANT_TYPE_RUNE) ||
+               (left.type == CONSTANT_TYPE_RUNE && right.type == CONSTANT_TYPE_BYTE)) {
+        // A `Byte` and a rune are compared with `==` and `not=` when the rune is in the ASCII range,
+        // which is one byte in UTF-8, by the number that both are.
+        if (not is_equality) {
+            return constant_fail(CONSTANT_STATUS_OPERAND_TYPE_INVALID, comparison);
+        }
+        Constant_Value rune = left.type == CONSTANT_TYPE_RUNE ? left : right;
+        if (rune.integer < 0 || rune.integer > 0x7F) {
+            return constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, comparison);
+        }
     } else if (left.type == CONSTANT_TYPE_RUNE && right.type == CONSTANT_TYPE_RUNE) {
         // Runes are compared by their code points, with every operator, like numbers.
     } else if (constant_type_is_bool(left.type) && constant_type_is_bool(right.type)) {

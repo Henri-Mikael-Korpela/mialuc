@@ -406,6 +406,8 @@ static void            wasm_build_type_section                (Wasm_Builder *bui
                                                                size_t definition_count);
 static byte            wasm_comparison_opcode                 (Ast_Comparison_Operator operator);
 static byte            wasm_comparison_opcode_i32             (Ast_Comparison_Operator operator);
+static bool            wasm_is_ascii_rune_constant            (Wasm_Builder const *builder,
+                                                               Ast_Node_Index expression);
 static void            wasm_utf8_skip_write                   (Wasm_Builder *builder, size_t next,
                                                                size_t end, size_t count);
 static void            wasm_utf8_decode_write                 (Wasm_Builder *builder, size_t next,
@@ -4536,8 +4538,13 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     }
 
     // Runes have an order too, the one of their code points. The other operand is a `Rune`, and
-    // there is no untyped number that is one.
-    if (left_type.kind == WASM_VALUE_TYPE_RUNE || right_type.kind == WASM_VALUE_TYPE_RUNE) {
+    // there is no untyped number that is one. A `Byte` is compared with one that is in the ASCII
+    // range below.
+    bool is_byte_and_rune_constant =
+        (left_type.kind == WASM_VALUE_TYPE_BYTE && wasm_is_ascii_rune_constant(builder, right)) ||
+        (right_type.kind == WASM_VALUE_TYPE_BYTE && wasm_is_ascii_rune_constant(builder, left));
+    if (not is_byte_and_rune_constant &&
+        (left_type.kind == WASM_VALUE_TYPE_RUNE || right_type.kind == WASM_VALUE_TYPE_RUNE)) {
         Wasm_Type rune_type = wasm_type_make(WASM_VALUE_TYPE_RUNE);
         if (not wasm_value_is_accepted(builder, rune_type, left)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
@@ -4581,15 +4588,22 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     }
 
     // Bytes have an order, like numbers. The other operand is a `Byte` too, or an untyped integer
-    // from 0 to 255, which is a `Byte` there.
+    // from 0 to 255, which is a `Byte` there. With `==` and `not=` it can also be a rune that is
+    // known when the program is compiled and is in the ASCII range, which is one byte in UTF-8, so
+    // it is the byte that has its number.
     if (left_type.kind == WASM_VALUE_TYPE_BYTE || right_type.kind == WASM_VALUE_TYPE_BYTE) {
+        bool is_equality_here =
+            node->payload.comparison.operator == AST_COMPARISON_OPERATOR_EQUAL ||
+            node->payload.comparison.operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
         if (left_type.kind != WASM_VALUE_TYPE_BYTE &&
-            not wasm_is_byte_literal(builder, left)) {
+            not wasm_is_byte_literal(builder, left) &&
+            not(is_equality_here && wasm_is_ascii_rune_constant(builder, left))) {
             return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                              wasm_expression_subject(builder, definition, left));
         }
         if (right_type.kind != WASM_VALUE_TYPE_BYTE &&
-            not wasm_is_byte_literal(builder, right)) {
+            not wasm_is_byte_literal(builder, right) &&
+            not(is_equality_here && wasm_is_ascii_rune_constant(builder, right))) {
             return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                              wasm_expression_subject(builder, definition, right));
         }
@@ -4786,6 +4800,17 @@ static byte wasm_comparison_opcode(Ast_Comparison_Operator operator) {
     // Unreachable: every operator is handled above.
     assert(false);
     return WASM_OPCODE_I64_EQ;
+}
+
+/**
+ * Returns whether `expression` is known when the program is compiled to be a rune in the ASCII
+ * range, from 0 to 127, which is the same number as the byte that is its UTF-8 encoding.
+ */
+static bool wasm_is_ascii_rune_constant(Wasm_Builder const *builder, Ast_Node_Index expression) {
+    return wasm_is_constant(builder, expression) &&
+           builder->constants[expression].type == CONSTANT_TYPE_RUNE &&
+           builder->constants[expression].integer >= 0 &&
+           builder->constants[expression].integer <= 0x7F;
 }
 
 /**

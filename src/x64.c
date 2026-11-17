@@ -882,6 +882,8 @@ static X64_Type     x64_arithmetic_type          (X64_Builder const *builder,
                                                   Ast_Node_Index operation);
 static X64_Type_Kind x64_parameter_float_at       (X64_Builder const *builder,
                                                   Ast_Node_Index procedure, size_t word);
+static bool         x64_is_ascii_rune_constant   (X64_Builder const *builder,
+                                                  Ast_Node_Index expression);
 static bool         x64_type_is_byte_sequence    (X64_Type type);
 static void         x64_bytes_length_load        (X64_Builder *builder, X64_Type type,
                                                   byte register_number, int32_t place);
@@ -5317,6 +5319,15 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     }
     bool is_equality = operator == AST_COMPARISON_OPERATOR_EQUAL ||
                        operator == AST_COMPARISON_OPERATOR_NOT_EQUAL;
+    // A `Byte` is the same as a rune that is known when the program is compiled and is in the ASCII
+    // range, which is one byte in UTF-8, so the two are compared with `==` and `not=` as bytes.
+    bool is_ascii_pair = (left_type.kind == X64_TYPE_KIND_BYTE &&
+                          x64_is_ascii_rune_constant(builder, right)) ||
+                         (x64_is_ascii_rune_constant(builder, left) &&
+                          right_type.kind == X64_TYPE_KIND_BYTE);
+    if (is_ascii_pair) {
+        type = x64_type_make(X64_TYPE_KIND_BYTE);
+    }
     bool is_ordered = type.kind == X64_TYPE_KIND_INT || type.kind == X64_TYPE_KIND_I32 ||
                       type.kind == X64_TYPE_KIND_I64 || type.kind == X64_TYPE_KIND_BYTE ||
                       type.kind == X64_TYPE_KIND_RUNE || x64_type_is_float(type);
@@ -5325,8 +5336,14 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
                         type.kind == X64_TYPE_KIND_POINTER ||
                         type.kind == X64_TYPE_KIND_PROCEDURE || type.kind == X64_TYPE_KIND_STR;
     bool is_valid = is_ordered || (is_equatable && is_equality);
-    if (not is_valid || not x64_type_accepts(builder, type, left) ||
-        not x64_type_accepts(builder, type, right)) {
+    if (is_ascii_pair && not is_equality) {
+        is_valid = false;
+    }
+    bool is_left_accepted = (is_ascii_pair && x64_is_ascii_rune_constant(builder, left)) ||
+                            x64_type_accepts(builder, type, left);
+    bool is_right_accepted = (is_ascii_pair && x64_is_ascii_rune_constant(builder, right)) ||
+                             x64_type_accepts(builder, type, right);
+    if (not is_valid || not is_left_accepted || not is_right_accepted) {
         return x64_fail(builder, X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
                         x64_expression_subject(builder, node));
     }
@@ -5375,6 +5392,16 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     assert(target == first);
     x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
     return true;
+}
+
+/**
+ * Returns whether `expression` is known when the program is compiled to be a rune in the ASCII range,
+ * from 0 to 127, which is the same number as the byte that is its UTF-8 encoding.
+ */
+static bool x64_is_ascii_rune_constant(X64_Builder const *builder, Ast_Node_Index expression) {
+    Constant_Value constant = builder->constant_values[expression];
+    return constant.status == CONSTANT_STATUS_OK && constant.type == CONSTANT_TYPE_RUNE &&
+           constant.integer >= 0 && constant.integer <= 0x7F;
 }
 
 /**

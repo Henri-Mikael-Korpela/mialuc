@@ -131,7 +131,8 @@
        the operands of a comparison must both be `Int`, or both floats of one type (or an untyped
        float, which is of that type there), or both `Byte` (or an untyped integer from 0 to 255, which is a `Byte` there),
        or both `Bool` or both `Str` (or an untyped string, which is a `Str` there) or both arrays or
-       array slices of `Byte` for `==` and `not=`. A
+       array slices of `Byte` for `==` and `not=`, which also take a `Byte` and a rune literal or a
+       constant rune from 0 to 127. A
        variable defined in a block can only be used in that block. All are checked after parsing.
      - The elements of an array and of an array slice must be `Int`, `Bool`, `Byte`, `Str` or a struct, an
        array literal must have as many elements as the length of its type when that is a number,

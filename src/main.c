@@ -2536,7 +2536,7 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be compared here: both operands of a comparison "
                 "must be Int, or both must be I32, or both must be I64, or both must be floats of one "
                 "type, or both must be "
-                "Bool, Str, arrays or array slices of Byte or "
+                "Bool, Str, arrays or array slices of Byte, or a Byte and an ASCII rune for == and not=, or "
                 "pointers of one type for == and not=.\n",
                 path, position.line,
                 position.column, subject_length, result.subject.bytes);
