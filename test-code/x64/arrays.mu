@@ -61,7 +61,7 @@ average :: proc(elements: []Int) Int ->
     return sum(elements) / length_of(elements)
 
 fill_with_length :: proc() Int ->
-    a := [const]Int { 0, 0, 0, 0 }
+    a := [4]Int { .. = 0 }
     for i in 0..<length_of(a) ->
         a[i] = i + 1
     return sum(a)
@@ -101,12 +101,7 @@ main :: proc() Int ->
     wrong += check("bytes[0] is %lld", cast(Int)bytes[0], 250)
 
     // An array of bytes is a buffer for the C library: `%bytes[0]` is the address of the first.
-    buffer := [64]Byte {
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    }
+    buffer := [64]Byte { .. = 0 }
     sprintf(%buffer[0], "%lld", 2026)
     wrong += check("the first is '2', which is %lld", cast(Int)buffer[0], 50)
     wrong += check("the one after the last is %lld", cast(Int)buffer[4], 0)

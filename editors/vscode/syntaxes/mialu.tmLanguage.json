@@ -180,6 +180,11 @@
                     "match": "\\.\\.\\."
                 },
                 {
+                    "name": "keyword.operator.fill.mialu",
+                    "comment": "The .. that stands for every element in an array literal that gives them all one value, as in [5]Int { .. = 0 }. It comes before the dot of a field access, so its dots are not taken for that, and after the ... and the ranges, which start the same way.",
+                    "match": "\\.\\.(?![.<])"
+                },
+                {
                     "name": "punctuation.accessor.dot.mialu",
                     "comment": "The dot of a field access, as in p.age. The tokens ..< and ..<= of a range come before it, so their dots are not taken for it.",
                     "match": "\\."

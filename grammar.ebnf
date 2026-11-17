@@ -135,6 +135,7 @@
        variable defined in a block can only be used in that block. All are checked after parsing.
      - The elements of an array and of an array slice must be `Int`, `Bool`, `Byte`, `Str` or a struct, an
        array literal must have as many elements as the length of its type when that is a number,
+       or, for `{ .. = 0 }`, a length that is a number, which fills all of them,
        and a variable of an array type must be given an array literal. What is subscripted, sliced or gone through by a for
        statement must be an array or an array slice, and an index must be an `Int`. An array can
        be a variable, but not a parameter, a global variable or a returned value. The grammar
@@ -676,9 +677,15 @@ subscript = "[" , ws , expression , ws , [ ":" , ws , expression , ws ] , "]" ;
 
 (* An array literal is the type of an array, which has a length or `const`, followed by its
    elements between braces. The elements are expressions separated by commas, and there may be none.
-   They can be on lines of their own, and a comma can come after the last one. *)
+   They can be on lines of their own, and a comma can come after the last one. A literal can also
+   give every element the same value, `[5]Int { .. = 0 }`, whose value is worked out once. Its length
+   must be a number, since `const` is the number of the elements that are written, which the parser
+   checks, as the grammar does not tell a number from `const` by its place. *)
 array_literal =
-    "[" , ws , array_length , ws , "]" , ws , element_type , ws , "{" , gap , [ elements , gap ] , "}" ;
+    "[" , ws , array_length , ws , "]" , ws , element_type , ws , "{" , gap , [ elements , gap ] , "}"
+  | "[" , ws , integer_literal , ws , "]" , ws , element_type , ws , "{" , gap , fill , gap , "}" ;
+
+fill = ".." , ws , "=" , ws , expression , [ gap , "," ] ;
 
 elements = expression , { gap , "," , gap , expression } , [ gap , "," ] ;
 

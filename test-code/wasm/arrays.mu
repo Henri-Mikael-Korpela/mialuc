@@ -88,7 +88,7 @@ compound_element_assignment :: proc() Int ->
     return a[0] * 10000 + a[1] * 1000 + a[2] * 100 + a[3] * 10 + a[4]
 
 fill_with_loop :: proc() Int ->
-    a := [const]Int { 0, 0, 0, 0, 0 }
+    a := [5]Int { .. = 0 }
     for i in 0..<5 ->
         a[i] = i * i
     return sum(a)
@@ -102,7 +102,7 @@ swap_ends :: proc() Int ->
 
 copy_between_arrays :: proc() Int ->
     a := [const]Int { 1, 2, 3 }
-    b := [const]Int { 0, 0, 0, 0 }
+    b := [4]Int { .. = 0 }
     b[1:4] = a
     return b[0] * 1000 + b[1] * 100 + b[2] * 10 + b[3]
 
@@ -226,7 +226,7 @@ average :: proc(elements: []Int) Int ->
     return sum(elements) / length_of(elements)
 
 fill_with_length :: proc() Int ->
-    a := [const]Int { 0, 0, 0, 0 }
+    a := [4]Int { .. = 0 }
     for i in 0..<length_of(a) ->
         a[i] = i + 1
     return sum(a)

@@ -99,6 +99,8 @@ typedef enum {
     TOKEN_KIND_PLUS_EQUALS,
     // `++`, which joins the text of two constants, see `AST_NODE_TYPE_CONCATENATION`.
     TOKEN_KIND_PLUS_PLUS,
+    // `..`, which stands for every element of an array literal, `[3]Int { .. = 0 }`.
+    TOKEN_KIND_DOT_DOT,
     // `..<` and `..<=`, which are the ends of an exclusive and of an inclusive range.
     TOKEN_KIND_RANGE_EXCLUSIVE,
     TOKEN_KIND_RANGE_INCLUSIVE,

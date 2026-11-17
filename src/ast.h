@@ -146,7 +146,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   tighter than `AST_NODE_TYPE_OR` and looser than `AST_NODE_TYPE_NOT`.
  * - `AST_NODE_TYPE_ARRAY_LITERAL`: first the `AST_NODE_TYPE_ARRAY_TYPE` that starts the literal,
  *   whose length is not omitted, and then one child per element, in the order of the source, each
- *   one an expression. `[const]Int { 1, 2, 3 }` and `[3]Int { 1, 2, 3 }` are array literals. The
+ *   one an expression. `[const]Int { 1, 2, 3 }` and `[3]Int { 1, 2, 3 }` are array literals. In
+ *   `[3]Int { .. = 0 }`, whose `payload.array_literal.is_fill` is set, the only element is the value
+ *   of every one of the elements that its length says, which is a number. The
  *   nodes of the elements come after the node of the type, so the nodes are in the order of the
  *   source. It is an expression, and it can be followed by subscripts.
  * - `AST_NODE_TYPE_ARRAY_TYPE`: one child, the type of the elements, which is an
@@ -437,6 +439,11 @@ typedef struct {
     // This union is named, because unnamed unions are C11 and the project uses C99.
     // Only the member that matches `node_type` is meaningful.
     union {
+        struct {
+            // Whether the literal is `[3]Int { .. = 0 }`, which has one child after its type, the
+            // value of every element, and as many elements as the length of its type.
+            bool is_fill;
+        } array_literal;
         struct {
             // Only the member of the kind `AST_ARRAY_LENGTH_FIXED` is a length.
             int64_t length;

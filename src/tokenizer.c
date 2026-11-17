@@ -1120,8 +1120,8 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
             offset += size_bytes;
         }
         // The tokens that start with a `.` are `..<`, or `..<=` when an `=` follows it directly,
-        // `...`, and the single dot of a field access. A `..` that is not followed by `<` or by a
-        // third dot is two dots, which the parser rejects.
+        // `...`, the `..` that is not followed by `<` or by a third dot, and the single dot of a
+        // field access.
         else if (character == '.') {
             if (offset + 2 < source.length && source.bytes[offset + 1] == '.' &&
                 source.bytes[offset + 2] == '.') {
@@ -1136,6 +1136,16 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
 
             bool is_range = offset + 2 < source.length && source.bytes[offset + 1] == '.' &&
                             source.bytes[offset + 2] == '<';
+            // Two dots that are not a range, such as the `..` of `{ .. = 0 }`, are one token.
+            if (not is_range && offset + 1 < source.length && source.bytes[offset + 1] == '.') {
+                token_elements[result.tokens.length] = (Token){
+                    .kind = TOKEN_KIND_DOT_DOT,
+                    .source_offset = (uint32_t)offset,
+                };
+                result.tokens.length += 1;
+                offset += 2;
+                continue;
+            }
             if (not is_range) {
                 token_elements[result.tokens.length] = (Token){
                     .kind = TOKEN_KIND_DOT,

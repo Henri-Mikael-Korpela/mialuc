@@ -643,6 +643,8 @@ static bool         x64_field_target_is_read_only(X64_Builder const *builder,
                                                   Ast_Node_Index target);
 static Ast_Node_Index x64_field_union_match      (X64_Builder const *builder,
                                                   Ast_Node_Index field);
+static void         x64_array_fill_write         (X64_Builder *builder, Ast_Node_Index literal,
+                                                  X64_Type element);
 static bool         x64_for_each_start_write     (X64_Builder *builder, Ast_Node_Index statement);
 static bool         x64_for_each_character_start_write(X64_Builder *builder,
                                                        Ast_Node_Index statement);
@@ -3706,6 +3708,10 @@ static bool x64_child_done(X64_Builder *builder, X64_Expression_Frame const *par
             return x64_fail(builder, X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
                             x64_expression_subject(builder, child->node));
         }
+        if (builder->nodes[parent->node].payload.array_literal.is_fill) {
+            x64_array_fill_write(builder, parent->node, element);
+            return true;
+        }
         // `lea r10, [element]` and the store of the value there.
         int32_t place = -(int32_t)builder->layouts[parent->node].frame_offset +
                         (int32_t)(child->index * x64_type_stride_bytes(builder, element));
@@ -4989,6 +4995,41 @@ static void x64_try_str_to_int_write(X64_Builder *builder, X64_Expression_Frame 
 }
 
 /**
+ * Stores the value on the top of the stack of values, of the type `element`, in every element of
+ * the array literal `literal`, which is `[3]Int { .. = 0 }`, and takes it off the stack. The value is
+ * worked out once. A loop stores its words at the address in `r10`, which moves on by the size of an
+ * element, as many times as the length of the array, which `r11` counts down.
+ */
+static void x64_array_fill_write(X64_Builder *builder, Ast_Node_Index literal, X64_Type element) {
+    size_t word_count = x64_type_word_count(builder, element);
+    size_t stride = x64_type_stride_bytes(builder, element);
+    int32_t source = x64_stack_displacement(builder, builder->stack_words - word_count,
+                                            word_count);
+    uint32_t done_jumps = X64_JUMP_NONE;
+
+    x64_write_memory(builder, X64_OPCODE_LEA, X64_REGISTER_R10, X64_REGISTER_RBP,
+                     -(int32_t)builder->layouts[literal].frame_offset);
+    x64_write_load_integer(builder, X64_REGISTER_R11, builder->layouts[literal].type.length);
+    uint32_t loop = (uint32_t)(builder->writer.length - builder->text_start);
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_R11, X64_REGISTER_R11);
+    x64_jump_write(builder, X64_CONDITION_EQUAL, &done_jumps);
+    for (size_t i = 0; i < word_count; i += 1) {
+        int32_t offset = (int32_t)(i * X64_WORD_SIZE_BYTES);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                         source + offset);
+        x64_write_memory(builder, element.kind == X64_TYPE_KIND_BYTE ? X64_OPCODE_STORE_BYTE
+                                                                      : X64_OPCODE_STORE,
+                         X64_REGISTER_RAX, X64_REGISTER_R10, offset);
+    }
+    x64_write_load_integer(builder, X64_REGISTER_RCX, (int64_t)stride);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_R10);
+    x64_write_add_immediate(builder, X64_REGISTER_R11, -1);
+    x64_jump_back_write(builder, loop);
+    x64_jumps_resolve(builder, done_jumps);
+    x64_stack_pop(builder, word_count);
+}
+
+/**
  * Puts the value of `type` that is in memory at the address in `base` on the stack of values. A
  * `Byte` is one byte there, which `movzx` widens to its word, and every other value is its words.
  * `base` is `r10` or `r11`, which the copy does not use.
@@ -6063,7 +6104,11 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
             return x64_type_make(X64_TYPE_KIND_NONE);
         }
         // The elements are the children after the type, and the type of a literal has the length
-        // of its elements, which is checked against the length that is written.
+        // of its elements, which is checked against the length that is written. The one child of
+        // a literal that fills is the value of all of its elements, which are as many as the length.
+        if (node->payload.array_literal.is_fill) {
+            return type;
+        }
         int64_t count = 0;
         for (Ast_Node_Index child = builder->nodes[node->first_child].next_sibling;
              child != AST_NODE_INDEX_NONE; child = builder->nodes[child].next_sibling) {

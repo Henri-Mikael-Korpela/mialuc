@@ -1132,7 +1132,7 @@ sum_of_elements :: proc() Int ->
 
 ```
 fill :: proc() Int ->
-    a := [const]Int { 0, 0, 0, 0, 0 }
+    a := [5]Int { .. = 0 }
     for i in 0..<5 ->
         a[i] = i * i
     return a[4]
@@ -1444,6 +1444,16 @@ names := [const]Str {
     "Alice",
 }
 ```
+
+An array whose elements all have the same value is written with `..` in place of the elements, as `.. = value`, which says that the value is the value of every element. This is the way to make an array of zeros, or a buffer, without writing every element:
+
+```
+zeros := [5]Int { .. = 0 }
+buffer := [64]Byte { .. = 0 }
+flags := [8]Bool { .. = true }
+```
+
+`zeros` has the five elements that its length says, every one of them 0, and `buffer` has 64 bytes that are 0. The `..` means the whole range of the array, which is why the length must be written as a number: `const` is the number of the elements that are written, so with only `.. = 0` it would have none to count, and `[const]Int { .. = 0 }` is an error. The value is an expression of the type of the elements, and it is worked out once, not once for each element, so `[4]Int { .. = next() }` calls `next` one time and gives all four elements what it returned. Each element is a copy, so a struct or a string that is given is put in every element, and changing one element changes no other. The length can be 0, which has no elements, and the literal, `.. = value` and a comma after it, can be on lines of its own, as the elements of any other literal can. A literal that fills has nothing but `.. = value` between its braces: `{ .. = 0, 1 }` is an error, and so is `{ .. 0 }`, which has no `=`.
 
 A variable of an array type is defined with an array literal, and not with another array or a call: `b := a` is an error, because an array is not copied by a definition. The type can be written as well, as long as the literal has the number of elements that it says:
 
@@ -2116,7 +2126,7 @@ average :: proc(elements: []Int) Int ->
     return sum(elements) / length_of(elements)
 
 fill_with_length :: proc() Int ->
-    a := [const]Int { 0, 0, 0, 0 }
+    a := [4]Int { .. = 0 }
     for i in 0..<length_of(a) ->
         a[i] = i + 1
     return sum(a)

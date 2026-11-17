@@ -245,7 +245,7 @@ slice_of_enums :: proc() Int ->
     return count_color(colors, .GREEN) * 10 + count_color(colors[0:2], .GREEN)
 
 assign_enum_element :: proc() Color ->
-    colors := [const]Color { .RED, .RED }
+    colors := [2]Color { .. = .RED }
     colors[1] = .BLUE
     return colors[1]
 

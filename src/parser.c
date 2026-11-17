@@ -2607,6 +2607,36 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
+    // `{ .. = 0 }` gives every element the same value, and is the only element. It needs a length
+    // that is a number, because `const` is the number of the elements that are written.
+    parse_skip_indentation(parser);
+    if (parse_token_current(parser)->kind == TOKEN_KIND_DOT_DOT) {
+        if (parser->nodes[type].payload.array_type.length_kind != AST_ARRAY_LENGTH_FIXED) {
+            return parse_fail(parser, STR("a number as the length of an array that '..' fills"));
+        }
+        parse_token_advance(parser);
+        if (not parse_token_expect(parser, TOKEN_KIND_EQUALS, STR("'=' after '..'"))) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->literal_depth += 1;
+        Ast_Node_Index value = parse_expression(parser);
+        parser->literal_depth -= 1;
+        if (value == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, literal, value);
+        parser->nodes[literal].payload.array_literal.is_fill = true;
+        parse_skip_indentation(parser);
+        if (parse_token_current(parser)->kind == TOKEN_KIND_COMMA) {
+            parse_token_advance(parser);
+            parse_skip_indentation(parser);
+        }
+        if (not parse_token_expect(parser, TOKEN_KIND_BRACE_RIGHT, STR("'}'"))) {
+            return AST_NODE_INDEX_NONE;
+        }
+        return literal;
+    }
+
     // The elements can be on lines of their own, and a comma can come after the last one. Every
     // element consumes a token, so there are fewer elements than tokens, which bounds the loop.
     parser->literal_depth += 1;

@@ -428,6 +428,8 @@ static void            wasm_build_code_section_body_string_comparison
 static bool            wasm_check_signatures                  (Wasm_Builder *builder,
                                                                Ast_Node_Index module,
                                                                size_t definition_count);
+static size_t          wasm_array_literal_count               (Wasm_Builder const *builder,
+                                                               Ast_Node_Index literal);
 static size_t          wasm_children_count                    (Wasm_Builder const *builder,
                                                                Ast_Node_Index parent);
 static bool            wasm_check_foreign_targets             (Wasm_Builder *builder);
@@ -5079,6 +5081,7 @@ static bool wasm_build_code_section_body_expression(Wasm_Builder *builder,
             // after it, see `wasm_build_code_section_body_child`.
             if (path_count > 0 &&
                 builder->nodes[path[path_count - 1]].node_type == AST_NODE_TYPE_ARRAY_LITERAL &&
+                not builder->nodes[path[path_count - 1]].payload.array_literal.is_fill &&
                 wasm_type_of_node(builder, builder->nodes[path[path_count - 1]].first_child)
                         .element_kind == WASM_VALUE_TYPE_INT) {
                 wasm_write_local_instruction(
@@ -6236,8 +6239,7 @@ static size_t wasm_frame_literal_offset(Wasm_Builder const *builder, Ast_Node_In
             continue;
         }
 
-        // The first child is the type, which is not an element.
-        size_t element_count = wasm_children_count(builder, node) - 1;
+        size_t element_count = wasm_array_literal_count(builder, node);
         offset_bytes += wasm_frame_round_up(
             element_count * wasm_type_stride_bytes(builder, wasm_type_element(array_type)));
     }
@@ -6302,6 +6304,22 @@ static void wasm_frame_leave(Wasm_Builder *builder, Ast_Node_Index procedure) {
 }
 
 /**
+ * Returns the number of elements of the array literal `literal`: the children after its type, or the
+ * length of its type for `[3]Int { .. = 0 }`, whose one child is the value of all of them.
+ */
+static size_t wasm_array_literal_count(Wasm_Builder const *builder, Ast_Node_Index literal) {
+    assert(builder->nodes[literal].node_type == AST_NODE_TYPE_ARRAY_LITERAL);
+
+    if (builder->nodes[literal].payload.array_literal.is_fill) {
+        Ast_Node_Index type = builder->nodes[literal].first_child;
+        assert(builder->nodes[type].payload.array_type.length_kind == AST_ARRAY_LENGTH_FIXED);
+        return (size_t)builder->nodes[type].payload.array_type.length;
+    }
+    // The first child is the type, which is not an element.
+    return wasm_children_count(builder, literal) - 1;
+}
+
+/**
  * Returns the number of elements of the array that `expression` is, which is an array literal or a
  * name that stands for a variable that was given one. The length of an array is not part of its
  * value at run time, only of the program, so the code that needs it, for example for a bounds
@@ -6315,8 +6333,7 @@ static size_t wasm_array_length(Wasm_Builder const *builder, Ast_Node_Index expr
     // steps than nodes.
     for (size_t i = 0; i < builder->node_count; i += 1) {
         if (builder->nodes[current].node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
-            // The first child is the type, which is not an element.
-            return wasm_children_count(builder, current) - 1;
+            return wasm_array_literal_count(builder, current);
         }
         // The array that a cast makes of a rune has the 4 bytes of the encoding.
         if (wasm_cast_is_array(builder, current)) {
@@ -6717,7 +6734,7 @@ static bool wasm_build_code_section_body_array_literal(Wasm_Builder *builder,
                          wasm_type_subject(builder, type));
     }
 
-    size_t element_count = wasm_children_count(builder, literal) - 1;
+    size_t element_count = wasm_array_literal_count(builder, literal);
     Ast_Array_Length_Kind length_kind = builder->nodes[type].payload.array_type.length_kind;
     if (length_kind == AST_ARRAY_LENGTH_FIXED &&
         (size_t)builder->nodes[type].payload.array_type.length != element_count) {
@@ -6759,6 +6776,65 @@ static bool wasm_build_code_section_body_child(Wasm_Builder *builder, Ast_Node_I
         if (not wasm_value_is_accepted(builder, element, child)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
                              wasm_expression_subject(builder, definition, child));
+        }
+
+        // `[3]Int { .. = 0 }`: the value is stored in the first element, which is then copied to
+        // each of the others, with `memory.copy`, one element at a time, by a loop. The value is
+        // worked out once. An array of no elements has no place for it, so it is dropped.
+        if (builder->nodes[parent].payload.array_literal.is_fill) {
+            Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+            size_t count = wasm_array_literal_count(builder, parent);
+            size_t stride = wasm_type_stride_bytes(builder, element);
+            size_t offset_bytes = wasm_frame_literal_offset(builder, procedure, parent);
+            size_t frame = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FRAME);
+            if (count == 0) {
+                for (size_t slot = 0; slot < wasm_type_slot_count(builder, element); slot += 1) {
+                    wasm_write_byte(&builder->writer, WASM_OPCODE_DROP);
+                }
+                return true;
+            }
+            wasm_slots_store(builder, procedure, element, frame, offset_bytes);
+            if (count > 1) {
+                size_t destination =
+                    wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+                size_t left = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_SECOND);
+                Wasm_Writer *writer = &builder->writer;
+                wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+                wasm_write_i32_const(writer, (int64_t)(offset_bytes + stride));
+                wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+                wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, destination);
+                wasm_write_i32_const(writer, (int64_t)(count - 1));
+                wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, left);
+                // Label 0 is the loop and label 1 the block around it.
+                wasm_structured_begin(builder, WASM_OPCODE_BLOCK);
+                wasm_structured_begin(builder, WASM_OPCODE_LOOP);
+                wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, left);
+                wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+                wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+                wasm_write_unsigned(writer, 1);
+                wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, destination);
+                wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+                wasm_write_i32_const(writer, (int64_t)offset_bytes);
+                wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+                wasm_write_i32_const(writer, (int64_t)stride);
+                wasm_write_byte(writer, WASM_OPCODE_PREFIX_MISC);
+                wasm_write_unsigned(writer, WASM_OPCODE_MISC_MEMORY_COPY);
+                wasm_write_byte(writer, 0x00);
+                wasm_write_byte(writer, 0x00);
+                wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, destination);
+                wasm_write_i32_const(writer, (int64_t)stride);
+                wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+                wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, destination);
+                wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, left);
+                wasm_write_i32_const(writer, 1);
+                wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+                wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, left);
+                wasm_write_byte(writer, WASM_OPCODE_BR);
+                wasm_write_unsigned(writer, 0);
+                wasm_write_byte(writer, WASM_OPCODE_END);
+                wasm_write_byte(writer, WASM_OPCODE_END);
+            }
+            return true;
         }
 
         // The position among the children, where the first is the type.

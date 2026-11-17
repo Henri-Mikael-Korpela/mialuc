@@ -1780,6 +1780,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_KIND_DOT:
             printf("DOT\n");
             break;
+        case TOKEN_KIND_DOT_DOT:
+            printf("DOT_DOT\n");
+            break;
         case TOKEN_KIND_COMMENT:
             printf("COMMENT %.*s\n", (int)token.payload.comment.text.length,
                    token.payload.comment.text.bytes);
