@@ -1008,7 +1008,7 @@ describe :: proc(x: Int) Str ->
 
 > **Lessons learnt from C** In C, the cases of a `switch` fall through into each other unless each ends with `break`, and a forgotten `break` is a well-known bug that compilers can only warn about. A Mialu case never falls through: its block is its own, like the branch of an `if`.
 
-The subject is an `Int`, a `Byte`, a `Str` or an enum. A pattern is known when the program is compiled: a literal, a [constant](#constants), or arithmetic of them such as `LIMIT + 1` or `0 - 1`, or a signed literal such as `-1`. It must be of the type of the subject, and an untyped one becomes it when it fits, so a pattern of a `Byte` is a number from 0 to 255. A pattern that is a variable or a call is an error, because what it matches would not be known until the program runs. A string matches a pattern when it has the same bytes, so `"go"` does not match `"gone"` or `"Go"`, and `""` matches the empty string only:
+The subject is an integer, which is an `Int`, a `Byte`, an `I32`, an `I64`, a `U32` or a `U64`, a `Str` or an enum. A pattern is known when the program is compiled: a literal, a [constant](#constants), or arithmetic of them such as `LIMIT + 1` or `0 - 1`, or a signed literal such as `-1`. It must be of the type of the subject, and an untyped one becomes it when it fits, so a pattern of a `Byte` is a number from 0 to 255. A pattern that is a variable or a call is an error, because what it matches would not be known until the program runs. A string matches a pattern when it has the same bytes, so `"go"` does not match `"gone"` or `"Go"`, and `""` matches the empty string only:
 
 ```
 command_number :: proc(command: Str) Int ->
@@ -1021,7 +1021,7 @@ command_number :: proc(command: Str) Int ->
             return 0
 ```
 
-An `Int` or a `Byte` can be matched with a range, which is written as in a [for statement](#for-statements): `first..<end` has the numbers from `first` up to, and not including, `end`, and `first..<=end` includes `end`. Both ends are constants, and a range with no numbers, such as `5..<5`, is an error, because it could never match:
+An integer can be matched with a range, which is written as in a [for statement](#for-statements): `first..<end` has the numbers from `first` up to, and not including, `end`, and `first..<=end` includes `end`. Both ends are constants, and a range with no numbers, such as `5..<5`, is an error, because it could never match:
 
 ```
 classify :: proc(n: Int) Str ->
@@ -1038,7 +1038,7 @@ classify :: proc(n: Int) Str ->
 
 No two cases may match a value in common: a pattern that is the same as one above it, a range that overlaps one above it, and a number that is in a range above it are errors, because the case could never run for that value. So the order of the cases does not change what a match does.
 
-A case that has no block, because the next line is another case, runs the block of the next case that has one. That is how cases share a block, as cases without statements in between do in C. The last case must have a block:
+A case that has no block, because the next line is another case, runs the block of the next case that has one. That is how cases share a block, as cases without statements in between do in C. The last case must have a block. It is the same for every type of subject, and the patterns are constants of the type, such as a code that a library gives as a `U32`:
 
 ```
 is_weekend :: proc(day: Int) Bool ->
@@ -1048,6 +1048,22 @@ is_weekend :: proc(day: Int) Bool ->
             return true
         case ->
             return false
+```
+
+```
+ERROR_FILE_NOT_FOUND : U32 : 2
+ERROR_PATH_NOT_FOUND : U32 : 3
+ERROR_ACCESS_DENIED : U32 : 5
+
+error_from :: proc(code: U32) File_Error ->
+    match code ->
+        case ERROR_FILE_NOT_FOUND ->
+        case ERROR_PATH_NOT_FOUND ->
+            return .NOT_FOUND
+        case ERROR_ACCESS_DENIED ->
+            return .ACCESS_DENIED
+        case ->
+            return .OTHER
 ```
 
 The subject can be an enum. The patterns are then members of that enum, written with a dot only, such as `.RED`, because the enum is the one of the subject, or with the name of the enum, such as `Color.RED`. The member of another enum is an error, and so is a range, as members have no order. A match of an enum must have a case for every member of the enum, or a default case, so a member that is added to the enum later is an error in every match that does not handle it, instead of a value that the match skips without a word:

@@ -2380,7 +2380,7 @@ static void main_run_command_report_x64_error(char const *path, Str source,
                 "never match.\n", path, position.line, position.column);
         break;
     case X64_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be matched. A match takes an Int, a Byte, a "
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be matched. A match takes an integer, a "
                 "Str or an enum.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
@@ -2680,7 +2680,7 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 "never match.\n", path, position.line, position.column);
         break;
     case WASM_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be matched. A match takes an Int, a Byte, a "
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot be matched. A match takes an integer, a "
                 "Str or an enum.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;

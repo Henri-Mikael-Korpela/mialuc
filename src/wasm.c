@@ -2617,14 +2617,16 @@ static Wasm_Type wasm_match_subject_type(Wasm_Builder const *builder, Ast_Node_I
  * Returns what `pattern`, the pattern of a case of a match statement whose subject is of the type
  * `subject`, matches, see `Wasm_Match_Pattern`. A pattern is known when the program is compiled:
  * for an enum it is a member of the enum of the subject, written `.RED` or `Color.RED`, and for an
- * `Int`, a `Byte` or a `Str` it is a constant of that type, or for an `Int` and a `Byte` a range of
- * constants, which must have a number in it. The status says what is wrong otherwise.
+ * integer or a `Str` it is a constant of that type, or for an integer a range of constants, which
+ * must have a number in it. The status says what is wrong otherwise.
  */
 static Wasm_Match_Pattern wasm_match_pattern(Wasm_Builder const *builder, Wasm_Type subject,
                                              Ast_Node_Index pattern) {
     assert(pattern < builder->node_count);
     assert(subject.kind == WASM_VALUE_TYPE_BYTE || subject.kind == WASM_VALUE_TYPE_ENUM ||
-           subject.kind == WASM_VALUE_TYPE_INT || subject.kind == WASM_VALUE_TYPE_STR);
+           subject.kind == WASM_VALUE_TYPE_I32 || subject.kind == WASM_VALUE_TYPE_I64 ||
+           subject.kind == WASM_VALUE_TYPE_INT || subject.kind == WASM_VALUE_TYPE_STR ||
+           subject.kind == WASM_VALUE_TYPE_U32 || subject.kind == WASM_VALUE_TYPE_U64);
 
     Wasm_Match_Pattern result = {
         .low = 0,
@@ -2761,7 +2763,9 @@ static bool wasm_match_check(Wasm_Builder *builder, Ast_Node_Index definition,
                          builder->nodes[subject].payload.enum_literal.name);
     }
     if (subject_type.kind != WASM_VALUE_TYPE_BYTE && subject_type.kind != WASM_VALUE_TYPE_ENUM &&
-        subject_type.kind != WASM_VALUE_TYPE_INT && subject_type.kind != WASM_VALUE_TYPE_STR) {
+        subject_type.kind != WASM_VALUE_TYPE_I32 && subject_type.kind != WASM_VALUE_TYPE_I64 &&
+        subject_type.kind != WASM_VALUE_TYPE_INT && subject_type.kind != WASM_VALUE_TYPE_STR &&
+        subject_type.kind != WASM_VALUE_TYPE_U32 && subject_type.kind != WASM_VALUE_TYPE_U64) {
         return wasm_fail(builder, WASM_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID,
                          wasm_expression_subject(builder, definition, subject));
     }
@@ -2890,16 +2894,25 @@ static void wasm_build_code_section_body_match_condition(Wasm_Builder *builder,
         return;
     }
 
-    // A `Byte` is a 32-bit value from 0 to 255, so it is compared without a sign, and the others
-    // are 64-bit numbers with one, which the number of a member is too.
-    bool is_byte = subject.kind == WASM_VALUE_TYPE_BYTE;
-    byte equal = WASM_OPCODE_I64_EQ;
+    // A `Byte`, an `I32` and a `U32` are 32-bit values, and the others are 64-bit numbers, which
+    // the number of a member is too. A `Byte`, a `U32` and a `U64` have no sign, so they are
+    // compared without one.
+    bool is_32 = subject.kind == WASM_VALUE_TYPE_BYTE || subject.kind == WASM_VALUE_TYPE_I32 ||
+                 subject.kind == WASM_VALUE_TYPE_U32;
+    bool is_unsigned = subject.kind == WASM_VALUE_TYPE_BYTE ||
+                       subject.kind == WASM_VALUE_TYPE_U32 || subject.kind == WASM_VALUE_TYPE_U64;
+    byte equal = is_32 ? WASM_OPCODE_I32_EQ : WASM_OPCODE_I64_EQ;
     byte at_least = WASM_OPCODE_I64_GE_S;
     byte at_most = WASM_OPCODE_I64_LE_S;
-    if (is_byte) {
-        equal = WASM_OPCODE_I32_EQ;
+    if (is_32 && is_unsigned) {
         at_least = WASM_OPCODE_I32_GE_U;
         at_most = WASM_OPCODE_I32_LE_U;
+    } else if (is_32) {
+        at_least = WASM_OPCODE_I32_GE_S;
+        at_most = WASM_OPCODE_I32_LE_S;
+    } else if (is_unsigned) {
+        at_least = WASM_OPCODE_I64_GE_U;
+        at_most = WASM_OPCODE_I64_LE_U;
     }
 
     // One value, or a range of one number, is one comparison.
@@ -2912,8 +2925,9 @@ static void wasm_build_code_section_body_match_condition(Wasm_Builder *builder,
     }
     for (size_t i = 0; i < bound_count; i += 1) {
         wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, local);
-        if (is_byte) {
-            wasm_write_i32_const(writer, bounds[i]);
+        if (is_32) {
+            // A `U32` above 2147483647 is the negative number that has its 32 bits.
+            wasm_write_i32_const(writer, (int32_t)(uint32_t)bounds[i]);
         } else {
             wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
             wasm_write_signed(writer, bounds[i]);

@@ -2761,7 +2761,7 @@ static bool x64_condition_write(X64_Builder *builder, Ast_Node_Index condition,
 /**
  * Checks the match statement `match` and writes its start: the subject, which is stored in the
  * place of the statement in the frame, see `x64_procedure_layout`, so that it is worked out once
- * and every case compares the same value. The subject is an `Int`, a `Byte`, a `Str` or an enum,
+ * and every case compares the same value. The subject is an integer, a `Str` or an enum,
  * every pattern is one of that type, see `x64_match_pattern`, and no two patterns match a value in
  * common, so the order of the cases does not change what the statement does. A match of an enum
  * without a default case has a case for every member, unless it is `#(partial)`, which only a
@@ -2776,10 +2776,18 @@ static bool x64_match_start_write(X64_Builder *builder, Ast_Node_Index match) {
         return x64_fail(builder, X64_BUILD_STATUS_ENUM_TYPE_UNKNOWN,
                         builder->nodes[subject].payload.enum_literal.name);
     }
+    // A number is in a word, a `Byte` and a `U32` from zero and an `I32` with its sign, so the
+    // signed order of the word is the order of every integer type. A `U64` has constants of at most
+    // the largest `Int`, so a subject above it is below every pattern in that order, and matches
+    // none, as it should.
     bool is_valid = subject_type.kind == X64_TYPE_KIND_BYTE ||
                     subject_type.kind == X64_TYPE_KIND_ENUM ||
+                    subject_type.kind == X64_TYPE_KIND_I32 ||
+                    subject_type.kind == X64_TYPE_KIND_I64 ||
                     subject_type.kind == X64_TYPE_KIND_INT ||
-                    subject_type.kind == X64_TYPE_KIND_STR;
+                    subject_type.kind == X64_TYPE_KIND_STR ||
+                    subject_type.kind == X64_TYPE_KIND_U32 ||
+                    subject_type.kind == X64_TYPE_KIND_U64;
     if (not is_valid) {
         if (subject_type.kind == X64_TYPE_KIND_NONE &&
             builder->nodes[subject].node_type != AST_NODE_TYPE_CALL) {
