@@ -12,7 +12,6 @@ import "mu:filesystem"
 import foreign kernel32 "system:Kernel32.lib"
 import foreign libc
 
-/// `puts` of the C library gives an `int`, which is an `I32`.
 foreign libc ->
     puts :: proc(content: C_Str) I32 -> ...
 
@@ -58,26 +57,31 @@ Version :: struct ->
     patch: Int
     found: Int
 
-// The most bytes of the header that are read is 4096, which is more than it has, and the memory for
-// the path in UTF-16 that `file_open` makes is 128 bytes, which is twice the bytes of the path and
-// two more, and more than the path of the header needs. An array has a length that is written as a
-// number, so the numbers are written where they are used.
+/// The most bytes of the header that are read, which is more than it has.
+//
+// MISSING FEATURE: a constant as the length of an array, so that the array of the buffer below, and
+// the one of the path in UTF-16 that `file_open` makes, which is twice the bytes of the path and two
+// more, could have a constant for their length instead of the number. `read_file` checks the length
+// of the buffer that it is given, so the number cannot differ from the constant without the program
+// stopping.
+BUFFER_SIZE :: 4096
 
-/// Reads the file at `path` into `buffer`, from its start, as many bytes as it has up to 4096, which
-/// the buffer must have, and gives how many, and whether the file was opened and read. The memory
-/// that the standard library needs for the path is on the stack of this procedure and is given to
-/// it, as it takes none of its own. The file is closed when the procedure returns.
+/// Reads the file at `path` into `buffer`, from its start, as many bytes as it has up to
+/// `BUFFER_SIZE`, which the buffer must have, and gives how many, and whether the file was opened
+/// and read. The memory that the standard library needs for the path is on the stack of this
+/// procedure and is given to it, as it takes none of its own. The file is closed when the procedure
+/// returns.
 read_file :: proc(path: Str, buffer: []Byte) (Int, Bool) ->
-    if length_of(buffer) < 4096 ->
+    if length_of(buffer) < BUFFER_SIZE ->
         return 0, false
     scratch := [128]Byte { .. = 0 }
-    file, error := mialu.file_open(path, mialu.File_Open_Mode.READ, scratch[0:128])
-    if error not= mialu.File_Error.NONE ->
+    file, error := mialu.file_open(path, mialu.File_Open_Mode.READ, scratch[:])
+    if error not= .NONE ->
         return 0, false
     defer mialu.file_close(file)
 
     count : U32 = 0
-    if ReadFile(file.handle, %buffer[0], 4096, %count, nil) == 0 ->
+    if ReadFile(file.handle, %buffer[0], BUFFER_SIZE, %count, nil) == 0 ->
         return 0, false
     return cast(Int)count, true
 
@@ -91,11 +95,11 @@ read_definition :: proc(line: Str, version: ^Version) Bool ->
     name_end := DEFINE_PREFIX_LENGTH + NAME_LENGTH
     if length_of(line) <= name_end + 1 ->
         return false
-    if line[0:DEFINE_PREFIX_LENGTH] not= DEFINE_PREFIX ->
+    if line[:DEFINE_PREFIX_LENGTH] not= DEFINE_PREFIX ->
         return false
-    if line[name_end:name_end + 1] not= " " ->
+    if line[name_end:][:1] not= " " ->
         return false
-    number, is_ok := try_str_to_int(line[name_end + 1:length_of(line)])
+    number, is_ok := try_str_to_int(line[name_end + 1:])
     if not is_ok ->
         return false
     match line[DEFINE_PREFIX_LENGTH:name_end] ->
@@ -127,14 +131,14 @@ read_line :: proc(buffer: []Byte, start: Int, end: Int, version: ^Version) ->
 /// header ends with one.
 parse_header :: proc(version: ^Version) Bool ->
     buffer := [4096]Byte { .. = 0 }
-    length, is_read := read_file(HEADER_PATH, buffer[0:4096])
+    length, is_read := read_file(HEADER_PATH, buffer[:])
     if not is_read ->
         return false
 
     start := 0
     for index in 0..<length ->
         if buffer[index] == '\n' ->
-            read_line(buffer[0:4096], start, index, version)
+            read_line(buffer[:], start, index, version)
             start = index + 1
     return true
 
