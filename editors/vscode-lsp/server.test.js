@@ -139,6 +139,15 @@ const TYPES_SOURCE = [
     "    number, is_number := try_str_to_int(text)",
     "    return length_of(text) + number",
     "",
+    "SIZE :: 64 * 64",
+    "MASK : U32 : 0x80000000",
+    "ENABLED :: true",
+    "RATIO :: 0.1",
+    "",
+    "buffer_size :: proc() Int ->",
+    "    buffer := [SIZE]Byte { .. = 0 }",
+    "    return length_of(buffer)",
+    "",
     "split :: proc(text: Str) (Str, Int, Bool) ->",
     "    return text, 1, true",
     "",
@@ -171,7 +180,9 @@ test("a name shows its type when the pointer rests on it", async () => {
 
         // The lines and the characters are counted from 0.
         const limit = await hover(2, 2);
-        assert.strictEqual(limit.contents.value, "```mialu\nLIMIT: untyped Int\n```");
+        // The value that the compiler worked out is shown with the type.
+        assert.strictEqual(limit.contents.value,
+                           "```mialu\nLIMIT: untyped Int\n```\nvalue\n```mialu\n100\n```");
         assert.deepStrictEqual(limit.range, {
             start: { line: 2, character: 0 },
             end: { line: 2, character: 5 },
@@ -245,6 +256,17 @@ test("a name shows its type when the pointer rests on it", async () => {
         assert.match((await hover(measured + 1, 14)).contents.value, /is_number: Bool/);
         assert.match((await hover(measured + 2, 12)).contents.value,
                      /length_of: proc\(elements: \[N\]T \| \[\]T \| Str\) Int/);
+
+        // A constant shows the value that was worked out, at its definition and where it is used,
+        // such as the length of an array. A number is also in hexadecimal when it is 256 or more.
+        const sized = lineOf("SIZE ::");
+        assert.match((await hover(sized, 1)).contents.value, /SIZE: untyped Int[^]*4096 \(0x1000\)/);
+        const buffered = lineOf("buffer_size");
+        assert.match((await hover(buffered + 1, 16)).contents.value,
+                     /SIZE: untyped Int[^]*4096 \(0x1000\)/);
+        assert.match((await hover(lineOf("MASK"), 1)).contents.value, /2147483648 \(0x80000000\)/);
+        assert.match((await hover(lineOf("ENABLED"), 1)).contents.value, /value[^]*true/);
+        assert.match((await hover(lineOf("RATIO"), 1)).contents.value, /value[^]*0\.1/);
 
         // The names that are given the values of a procedure of the program have the type that it
         // returns at their place, the first of them as well, and each use of one has it too.

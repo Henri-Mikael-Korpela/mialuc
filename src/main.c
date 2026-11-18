@@ -146,9 +146,15 @@ static void         main_struct_literal_rows_print         (Str source, Ast_Node
                                                             Ast_Node_Index literal);
 static Ast_Node_Index main_struct_of_name              (Ast_Node const *nodes, size_t node_count,
                                                             Str name);
+static bool        main_constant_value_write              (Ast_Node const *nodes,
+                                                            Semantic_Binding const *bindings,
+                                                            Constant_Value const *constants,
+                                                            size_t node_count,
+                                                            Ast_Node_Index target, char *text,
+                                                            size_t text_size_bytes);
 static void         main_type_row_print                    (Str source, Str name,
                                                             char const *text, char const *note,
-                                                            Str value);
+                                                            Str value, char const *plain_value);
 static Str          main_concatenated_value                (Ast_Node const *nodes,
                                                             Constant_Value const *constants,
                                                             size_t node_count,
@@ -1382,6 +1388,82 @@ static Str main_concatenated_value(Ast_Node const *nodes, Constant_Value const *
 }
 
 /**
+ * Writes the value of the constant that `target` defines to `text` as it is written in a program,
+ * when it is a number, a truth value or a rune, which the compiler worked out: `4096` for the
+ * constant that `SIZE :: 64 * 64` is, and `2147483648 (0x80000000)` for a number that is written
+ * more clearly in hexadecimal too, which is every one from 256 up. A float is written with the
+ * fewest digits that read back as the same float. A string is left to
+ * `main_concatenated_value`, and a constant that is not a value, such as a procedure or a member
+ * of an enum, has none. Returns false when there is none to show.
+ */
+static bool main_constant_value_write(Ast_Node const *nodes, Semantic_Binding const *bindings,
+                                      Constant_Value const *constants, size_t node_count,
+                                      Ast_Node_Index target, char *text, size_t text_size_bytes) {
+    if (target >= node_count || nodes[target].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
+        constants[target].status != CONSTANT_STATUS_OK ||
+        constants[target].string != AST_NODE_INDEX_NONE) {
+        return false;
+    }
+    Ast_Node_Index value_node = nodes[target].first_child;
+    // The member of an enum has the number of the member, which is not what it is to a reader.
+    if (nodes[value_node].node_type == AST_NODE_TYPE_FIELD_ACCESS &&
+        main_enum_of_access(nodes, bindings, value_node) != AST_NODE_INDEX_NONE) {
+        return false;
+    }
+
+    Constant_Value value = constants[target];
+    int written = -1;
+    switch (value.type) {
+    case CONSTANT_TYPE_BOOL:
+    case CONSTANT_TYPE_UNTYPED_BOOL:
+        written = snprintf(text, text_size_bytes, "%s", value.integer != 0 ? "true" : "false");
+        break;
+    case CONSTANT_TYPE_F32:
+    case CONSTANT_TYPE_F64:
+    case CONSTANT_TYPE_UNTYPED_FLOAT: {
+        // The fewest digits that read back as the same number, which is also what the program means.
+        int digits = 15;
+        for (; digits < 17; digits += 1) {
+            char probe[64];
+            (void)snprintf(probe, sizeof(probe), "%.*g", digits, value.floating);
+            if (strtod(probe, NULL) == value.floating) {
+                break;
+            }
+        }
+        written = snprintf(text, text_size_bytes, "%.*g", digits, value.floating);
+        break;
+    }
+    case CONSTANT_TYPE_BYTE:
+    case CONSTANT_TYPE_I32:
+    case CONSTANT_TYPE_I64:
+    case CONSTANT_TYPE_INT:
+    case CONSTANT_TYPE_U32:
+    case CONSTANT_TYPE_U64:
+    case CONSTANT_TYPE_UNTYPED_INTEGER:
+        if (value.integer >= 256) {
+            written = snprintf(text, text_size_bytes, "%" PRId64 " (0x%" PRIX64 ")", value.integer,
+                               (uint64_t)value.integer);
+        } else {
+            written = snprintf(text, text_size_bytes, "%" PRId64, value.integer);
+        }
+        break;
+    case CONSTANT_TYPE_RUNE:
+        if (value.integer >= 0x20 && value.integer < 0x7F && value.integer != '\'' &&
+            value.integer != '\\') {
+            written = snprintf(text, text_size_bytes, "'%c' (%" PRId64 ")", (int)value.integer,
+                               value.integer);
+        } else {
+            written = snprintf(text, text_size_bytes, "U+%04" PRIX64, (uint64_t)value.integer);
+        }
+        break;
+    case CONSTANT_TYPE_STR:
+    case CONSTANT_TYPE_UNTYPED_STRING:
+        return false;
+    }
+    return written >= 0 && (size_t)written < text_size_bytes;
+}
+
+/**
  * Prints `value` as a string in double quotes on one line, which is the seventh field of a line of
  * `dump-types`: a backslash, a double quote and the control characters, a tab and a line break
  * among them, are written with a backslash, as `\t` and `\n`, and the rest as it is, since
@@ -1438,7 +1520,7 @@ static void main_value_print(Str value) {
  * `value` that is not empty is a seventh, after a sixth that is then empty when there is no note.
  */
 static void main_type_row_print(Str source, Str name, char const *text, char const *note,
-                                Str value) {
+                                Str value, char const *plain_value) {
     // The names are views of the source, so the offset of a name is where its bytes are. A member
     // after a dot is not where its node starts, which is why the node is not used.
     // A name that the compiler made up and that is not in the source has no place to show.
@@ -1449,12 +1531,14 @@ static void main_type_row_print(Str source, Str name, char const *text, char con
     Str_Position position = str_position_at(source, name_offset);
     printf("%zu\t%zu\t%zu\t%.*s\t%s", position.line, position.column, name.length,
            (int)name.length, (char const *)name.bytes, text);
-    if (note[0] != '\0' || value.bytes != NULL) {
+    if (note[0] != '\0' || value.bytes != NULL || plain_value[0] != '\0') {
         printf("\t%s", note);
     }
     if (value.bytes != NULL) {
         printf("\t");
         main_value_print(value);
+    } else if (plain_value[0] != '\0') {
+        printf("\t%s", plain_value);
     }
     printf("\n");
 }
@@ -1520,7 +1604,7 @@ static void main_struct_literal_rows_print(Str source, Ast_Node const *nodes, si
         char text[256] = "";
         if (field != AST_NODE_INDEX_NONE &&
             main_type_text_write(nodes, nodes[field].first_child, text, sizeof(text))) {
-            main_type_row_print(source, name, text, "", STR_EMPTY);
+            main_type_row_print(source, name, text, "", STR_EMPTY, "");
         }
     }
 }
@@ -1562,8 +1646,8 @@ static char const *main_built_in_signature(Str name) {
  * 1, the length of the name in bytes, the name, and the type as it is written in the source,
  * separated by tabs. The columns count bytes, as the other tools of the compiler do. A for
  * statement's iterator has the array or slice that it is an element of as a sixth field, and a
- * constant that is a string that `++` joined has the joined text as a seventh, see
- * `main_type_row_print`. This is what an editor shows when the cursor rests on a name.
+ * constant that is a string that `++` joined has the joined text as a seventh, and one that is a
+ * number, a truth value or a rune has its value, see `main_type_row_print`. This is what an editor shows when the cursor rests on a name.
  */
 static void main_run_command_print_types(Str source, Parse_Result parse_result,
                                          Semantic_Result semantic_result, size_t first_node) {
@@ -1695,7 +1779,13 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
         }
         // A constant that is a string that `++` joined shows the text that it joined.
         Str value = main_concatenated_value(nodes, constants, parse_result.nodes.length, target);
-        main_type_row_print(source, name, text, note, value);
+        // A constant that is a number, a truth value or a rune shows the value that was worked out.
+        char plain_value[64] = "";
+        if (value.bytes == NULL) {
+            (void)main_constant_value_write(nodes, bindings, constants, parse_result.nodes.length,
+                                            target, plain_value, sizeof(plain_value));
+        }
+        main_type_row_print(source, name, text, note, value, plain_value);
     }
 }
 
