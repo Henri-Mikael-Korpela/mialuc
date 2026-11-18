@@ -162,4 +162,10 @@ void packages_merge(Packages const *packages, Ast_Node *nodes, Ast_Node_Index ro
  */
 bool packages_locate(Packages const *packages, Str subject, char const **path, Str *source);
 
+/**
+ * Finds the imported file that the node `node` is part of, and gives its source, which the
+ * `source_offset` of the node is in. Returns false when the node is part of the program.
+ */
+bool packages_node_source(Packages const *packages, size_t node, Str *source);
+
 #endif

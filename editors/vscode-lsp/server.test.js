@@ -139,6 +139,8 @@ const TYPES_SOURCE = [
     "    number, is_number := try_str_to_int(text)",
     "    return length_of(text) + number",
     "",
+    "/// The size of a block, in bytes.",
+    "/// It is the length of the buffers.",
     "SIZE :: 64 * 64",
     "MASK : U32 : 0x80000000",
     "ENABLED :: true",
@@ -148,12 +150,27 @@ const TYPES_SOURCE = [
     "    buffer := [SIZE]Byte { .. = 0 }",
     "    return length_of(buffer)",
     "",
+    "// Not documentation: it has two slashes.",
+    "/// Splits the `text`.",
     "split :: proc(text: Str) (Str, Int, Bool) ->",
     "    return text, 1, true",
     "",
+    "/// A packet of a network.",
+    "Packet :: struct ->",
+    "    /// The bytes that follow.",
+    "    size: Int",
+    "",
+    "/// How a packet is sent.",
+    "Mode :: enum Int ->",
+    "    /// The packet is sent at once.",
+    "    NOW",
+    "    LATER",
+    "",
     "use_split :: proc() Int ->",
     "    word, size, is_ok := split(\"a\")",
-    "    return size",
+    "    packet := Packet { size = 1 }",
+    "    mode := Mode.NOW",
+    "    return size + packet.size",
     "",
 ].join("\n");
 
@@ -268,13 +285,34 @@ test("a name shows its type when the pointer rests on it", async () => {
         assert.match((await hover(lineOf("ENABLED"), 1)).contents.value, /value[^]*true/);
         assert.match((await hover(lineOf("RATIO"), 1)).contents.value, /value[^]*0\.1/);
 
+        // The documentation comment above a definition is its description, where the item is defined
+        // and where it is used, and the lines of it are the lines of the text.
+        const documented = (await hover(sized, 1)).contents.value;
+        assert.match(documented,
+                     /The size of a block, in bytes\.\nIt is the length of the buffers\./);
+        assert.match((await hover(buffered + 1, 16)).contents.value, /The size of a block/);
+        const split = lineOf("split ::");
+        assert.match((await hover(split, 1)).contents.value, /\nSplits the `text`\.\n/);
+        assert.doesNotMatch((await hover(split, 1)).contents.value, /Not documentation/);
+        const usedAt = lineOf("use_split");
+        assert.match((await hover(usedAt + 1, 25)).contents.value, /Splits the `text`\./);
+        // A struct and an enum say what they are, and a field and a member are described too.
+        assert.match((await hover(lineOf("Packet ::"), 1)).contents.value,
+                     /Packet: struct[^]*A packet of a network\./);
+        assert.match((await hover(sourceLines.indexOf("    size: Int"), 5)).contents.value, /bytes that follow/);
+        assert.match((await hover(lineOf("Mode ::"), 1)).contents.value, /Mode: enum Int/);
+        assert.match((await hover(lineOf("    NOW"), 5)).contents.value, /sent at once/);
+        assert.match((await hover(usedAt + 3, 18)).contents.value, /sent at once/);
+        // A name that has no documentation comment has no description.
+        assert.doesNotMatch((await hover(lineOf("MASK"), 1)).contents.value, /\n\n/);
+
         // The names that are given the values of a procedure of the program have the type that it
         // returns at their place, the first of them as well, and each use of one has it too.
         const used = lineOf("use_split");
         assert.match((await hover(used + 1, 4)).contents.value, /word: Str/);
         assert.match((await hover(used + 1, 10)).contents.value, /size: Int/);
         assert.match((await hover(used + 1, 16)).contents.value, /is_ok: Bool/);
-        assert.match((await hover(used + 2, 11)).contents.value, /size: Int/);
+        assert.match((await hover(used + 4, 11)).contents.value, /size: Int/);
 
         // Nothing is shown on a keyword or on a space.
         assert.strictEqual(await hover(6, 12), null);

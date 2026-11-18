@@ -99,6 +99,28 @@ function lensesFromOutput(output) {
 }
 
 /**
+ * Gives the text of `quoted`, which is a string in double quotes as `dump-types` writes it, with a
+ * backslash before a backslash, a double quote and a control character, or the empty string when it
+ * is not one. Three dots after the closing quote say that the compiler cut the text, and are kept.
+ */
+function unquote(quoted) {
+    const match = /^"((?:[^"\\]|\\.)*)"(\.\.\.)?$/s.exec(quoted);
+    if (match === null) {
+        return "";
+    }
+    const text = match[1].replace(/\\(x[0-9A-Fa-f]{2}|.)/g, (all, escape) => {
+        switch (escape[0]) {
+            case "n": return "\n";
+            case "r": return "\r";
+            case "t": return "\t";
+            case "x": return String.fromCharCode(parseInt(escape.slice(1), 16));
+            default: return escape;
+        }
+    });
+    return text + (match[2] ?? "");
+}
+
+/**
  * Turns the output of `mialuc dump-types` into the names with their types. A line of the output is
  * the line and the column of a name, both counted from 1 in bytes, the length of the name in bytes,
  * the name and the type, a note that some lines have, and after it the value of a constant that is
@@ -108,7 +130,7 @@ function lensesFromOutput(output) {
 function namesFromOutput(output) {
     const names = [];
     for (const row of output.split("\n")) {
-        const [lineText, columnText, lengthText, name, type, note, value] =
+        const [lineText, columnText, lengthText, name, type, note, value, doc] =
             row.replace(/\r$/, "").split("\t");
         const line = Number(lineText);
         const column = Number(columnText);
@@ -125,6 +147,7 @@ function namesFromOutput(output) {
             type,
             note: note ?? "",
             value: value ?? "",
+            doc: unquote(doc ?? ""),
         });
     }
     return names;
@@ -397,6 +420,10 @@ async function hover(uri, position) {
         }
         const start = bytes.toString("utf8", 0, entry.column).length;
         let value = codeBlock(`${entry.name}: ${entry.type}`);
+        if (entry.doc !== "") {
+            // The documentation comment of the item is its description, and is markdown.
+            value += "\n" + entry.doc + "\n";
+        }
         if (entry.note !== "") {
             // The note is the array or slice that the name is an element of, declared like any
             // other name, so it is code too, and is highlighted as such.

@@ -192,6 +192,18 @@ void packages_merge(Packages const *packages, Ast_Node *nodes, Ast_Node_Index ro
     nodes[root].last_child = tail;
 }
 
+bool packages_node_source(Packages const *packages, size_t node, Str *source) {
+    assert(packages != NULL);
+
+    for (size_t i = 0; i < packages->file_count; i += 1) {
+        if (node >= packages->files[i].node_start && node < packages->files[i].node_end) {
+            *source = packages->files[i].source;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool packages_locate(Packages const *packages, Str subject, char const **path, Str *source) {
     assert(packages != NULL);
 

@@ -43,6 +43,9 @@ enum {
     // The rest is left out, so that an editor is not given the whole of a long string for each use
     // of the constant.
     MAIN_VALUE_BYTES_MAX = 400,
+    // Bounds the text of the documentation comment that `dump-types` prints for a name, in bytes. The
+    // rest is left out, like that of a value.
+    MAIN_DOC_BYTES_MAX = 4000,
     // Bounds the text that the `wat` target writes. The text is allocated once at startup. The
     // largest growth is `i64.add`, one byte of the module that becomes 12 bytes of text, so 16
     // bytes of text per byte of the module is enough.
@@ -154,7 +157,10 @@ static bool        main_constant_value_write              (Ast_Node const *nodes
                                                             size_t text_size_bytes);
 static void         main_type_row_print                    (Str source, Str name,
                                                             char const *text, char const *note,
-                                                            Str value, char const *plain_value);
+                                                            Str value, char const *plain_value,
+                                                            Str doc);
+static Str          main_doc_comment_write                 (Str source, size_t offset, char *text,
+                                                            size_t text_size_bytes);
 static Str          main_concatenated_value                (Ast_Node const *nodes,
                                                             Constant_Value const *constants,
                                                             size_t node_count,
@@ -1464,16 +1470,94 @@ static bool main_constant_value_write(Ast_Node const *nodes, Semantic_Binding co
 }
 
 /**
+ * Writes the documentation comment of the definition that starts at `offset` in `source` to `text`
+ * and returns it, or returns `STR_EMPTY` when there is none. It is the lines of `///` right above
+ * the line of the definition, which a blank line or any other line ends: each has the `///` and a
+ * space after it taken off, and they are joined with line feeds. The text that does not fit is cut
+ * before a character.
+ */
+static Str main_doc_comment_write(Str source, size_t offset, char *text, size_t text_size_bytes) {
+    if (offset > source.length) {
+        return STR_EMPTY;
+    }
+
+    // The lines are found from the line of the definition upwards, and written from the top.
+    enum { DOC_LINES_MAX = 128 };
+    size_t starts[DOC_LINES_MAX];
+    size_t ends[DOC_LINES_MAX];
+    size_t count = 0;
+    size_t line_start = offset;
+    while (line_start > 0 && source.bytes[line_start - 1] != '\n') {
+        line_start -= 1;
+    }
+    while (line_start > 0 && count < DOC_LINES_MAX) {
+        size_t end = line_start - 1;
+        size_t start = end;
+        while (start > 0 && source.bytes[start - 1] != '\n') {
+            start -= 1;
+        }
+        // The line without its indentation and its carriage return.
+        size_t first = start;
+        while (first < end && (source.bytes[first] == ' ' || source.bytes[first] == '\t')) {
+            first += 1;
+        }
+        size_t last = end;
+        if (last > first && source.bytes[last - 1] == '\r') {
+            last -= 1;
+        }
+        if (last - first < 3 || memcmp(source.bytes + first, "///", 3) != 0) {
+            break;
+        }
+        // `////` and more is a line of decoration and not a documentation comment.
+        if (last - first > 3 && source.bytes[first + 3] == '/') {
+            break;
+        }
+        first += 3;
+        if (first < last && source.bytes[first] == ' ') {
+            first += 1;
+        }
+        starts[count] = first;
+        ends[count] = last;
+        count += 1;
+        line_start = start;
+    }
+    if (count == 0) {
+        return STR_EMPTY;
+    }
+
+    size_t length = 0;
+    for (size_t i = count; i > 0; i -= 1) {
+        size_t line_length = ends[i - 1] - starts[i - 1];
+        size_t needed = line_length + (length > 0 ? 1 : 0);
+        if (length + needed >= text_size_bytes) {
+            break;
+        }
+        if (length > 0) {
+            text[length] = '\n';
+            length += 1;
+        }
+        memcpy(text + length, source.bytes + starts[i - 1], line_length);
+        length += line_length;
+    }
+    // A text cut in the middle of a character is cut before it.
+    while (length > 0 && length < text_size_bytes && count > 0 &&
+           ((unsigned char)text[length - 1] & 0xC0u) == 0x80u) {
+        length -= 1;
+    }
+    return str_make(text, length);
+}
+
+/**
  * Prints `value` as a string in double quotes on one line, which is the seventh field of a line of
  * `dump-types`: a backslash, a double quote and the control characters, a tab and a line break
  * among them, are written with a backslash, as `\t` and `\n`, and the rest as it is, since
- * it is UTF-8. A value of more than `MAIN_VALUE_BYTES_MAX` bytes is cut before a character, and
+ * it is UTF-8. A value of more than `bytes_max` bytes is cut before a character, and
  * three dots follow the closing quote.
  */
-static void main_value_print(Str value) {
+static void main_value_print(Str value, size_t bytes_max) {
     size_t length = value.length;
-    if (length > MAIN_VALUE_BYTES_MAX) {
-        length = MAIN_VALUE_BYTES_MAX;
+    if (length > bytes_max) {
+        length = bytes_max;
         // A byte that is `10` in its high bits goes on a character that started before it.
         while (length > 0 && ((unsigned char)value.bytes[length] & 0xC0u) == 0x80u) {
             length -= 1;
@@ -1520,7 +1604,7 @@ static void main_value_print(Str value) {
  * `value` that is not empty is a seventh, after a sixth that is then empty when there is no note.
  */
 static void main_type_row_print(Str source, Str name, char const *text, char const *note,
-                                Str value, char const *plain_value) {
+                                Str value, char const *plain_value, Str doc) {
     // The names are views of the source, so the offset of a name is where its bytes are. A member
     // after a dot is not where its node starts, which is why the node is not used.
     // A name that the compiler made up and that is not in the source has no place to show.
@@ -1531,14 +1615,20 @@ static void main_type_row_print(Str source, Str name, char const *text, char con
     Str_Position position = str_position_at(source, name_offset);
     printf("%zu\t%zu\t%zu\t%.*s\t%s", position.line, position.column, name.length,
            (int)name.length, (char const *)name.bytes, text);
-    if (note[0] != '\0' || value.bytes != NULL || plain_value[0] != '\0') {
+    if (note[0] != '\0' || value.bytes != NULL || plain_value[0] != '\0' || doc.bytes != NULL) {
         printf("\t%s", note);
     }
     if (value.bytes != NULL) {
         printf("\t");
-        main_value_print(value);
+        main_value_print(value, MAIN_VALUE_BYTES_MAX);
     } else if (plain_value[0] != '\0') {
         printf("\t%s", plain_value);
+    } else if (doc.bytes != NULL) {
+        printf("\t");
+    }
+    if (doc.bytes != NULL) {
+        printf("\t");
+        main_value_print(doc, MAIN_DOC_BYTES_MAX);
     }
     printf("\n");
 }
@@ -1604,7 +1694,7 @@ static void main_struct_literal_rows_print(Str source, Ast_Node const *nodes, si
         char text[256] = "";
         if (field != AST_NODE_INDEX_NONE &&
             main_type_text_write(nodes, nodes[field].first_child, text, sizeof(text))) {
-            main_type_row_print(source, name, text, "", STR_EMPTY, "");
+            main_type_row_print(source, name, text, "", STR_EMPTY, "", STR_EMPTY);
         }
     }
 }
@@ -1749,6 +1839,22 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
             if (not main_text_write(text, sizeof(text), str_make(built_in, strlen(built_in)))) {
                 continue;
             }
+        } else if (target != AST_NODE_INDEX_NONE &&
+                   nodes[target].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION &&
+                   (nodes[nodes[target].first_child].node_type == AST_NODE_TYPE_STRUCT_TYPE ||
+                    nodes[nodes[target].first_child].node_type == AST_NODE_TYPE_ENUM_TYPE)) {
+            // A struct and an enum are types, which have no type of a value to show, so the hover
+            // says what kind of type it is, with the documentation of it below.
+            Ast_Node const *type = &nodes[nodes[target].first_child];
+            int written = snprintf(text, sizeof(text), "%s", "struct");
+            if (type->node_type == AST_NODE_TYPE_ENUM_TYPE) {
+                written = snprintf(text, sizeof(text), "enum %.*s",
+                                   (int)type->payload.enum_type.value_type.length,
+                                   type->payload.enum_type.value_type.bytes);
+            }
+            if (written < 0 || (size_t)written >= sizeof(text)) {
+                continue;
+            }
         } else if (enum_definition != AST_NODE_INDEX_NONE) {
             if (not main_text_write(text, sizeof(text),
                                     nodes[enum_definition].payload.constant_definition.name)) {
@@ -1785,7 +1891,40 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
             (void)main_constant_value_write(nodes, bindings, constants, parse_result.nodes.length,
                                             target, plain_value, sizeof(plain_value));
         }
-        main_type_row_print(source, name, text, note, value, plain_value);
+        // The documentation comment above the definition of the name, which is the description of
+        // the item that is defined, where it is defined and where it is used.
+        Ast_Node_Index doc_node = AST_NODE_INDEX_NONE;
+        if (target != AST_NODE_INDEX_NONE &&
+            (nodes[target].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION ||
+             nodes[target].node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION)) {
+            doc_node = target;
+        } else if (node->node_type == AST_NODE_TYPE_FIELD ||
+                   node->node_type == AST_NODE_TYPE_ENUM_MEMBER) {
+            doc_node = index;
+        } else if (enum_definition != AST_NODE_INDEX_NONE) {
+            // A use of a member of an enum has the documentation of the member that is defined.
+            for (Ast_Node_Index member = nodes[nodes[enum_definition].first_child].first_child;
+                 member != AST_NODE_INDEX_NONE; member = nodes[member].next_sibling) {
+                if (nodes[member].node_type == AST_NODE_TYPE_ENUM_MEMBER &&
+                    str_equals(nodes[member].payload.enum_member.name, name)) {
+                    doc_node = member;
+                }
+            }
+        }
+        char doc_text[MAIN_DOC_BYTES_MAX + 1];
+        Str doc = STR_EMPTY;
+        if (doc_node != AST_NODE_INDEX_NONE) {
+            // The nodes of an imported file have their offsets in the source of that file.
+            Str doc_source = source;
+            if (doc_node < first_node && main_packages != NULL) {
+                (void)packages_node_source(main_packages, doc_node, &doc_source);
+            }
+            if (doc_node >= first_node || doc_source.bytes != source.bytes) {
+                doc = main_doc_comment_write(doc_source, nodes[doc_node].source_offset, doc_text,
+                                             sizeof(doc_text));
+            }
+        }
+        main_type_row_print(source, name, text, note, value, plain_value, doc);
     }
 }
 
