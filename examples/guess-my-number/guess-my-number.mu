@@ -9,20 +9,18 @@
 
 package guess_my_number
 
+import "mu:filesystem"
 import foreign libc
 
 /// The procedures of the C library are declared with the types that C has: `int` is an `I32`, and
-/// `time_t` and `size_t` are as large as an `Int`. A `^Byte` is the address of a byte, such as the
-/// start of a buffer, and `nil` is no address, which `time` and `fflush` take to mean "nothing".
+/// `time_t` is as large as an `Int`. A `^Byte` is the address of a byte, and `nil` is no address,
+/// which `time` and `fflush` take to mean "nothing". The input is read with the standard library.
 foreign libc ->
-    _fdopen :: proc(descriptor: I32, mode: C_Str) ^Byte -> ...
     fflush  :: proc(stream: ^Byte) I32 -> ...
-    fgets   :: proc(buffer: ^Byte, size: I32, stream: ^Byte) ^Byte -> ...
     printf  :: proc(format: C_Str, number: Int) I32 -> ...
     puts    :: proc(content: C_Str) I32 -> ...
     rand    :: proc() I32 -> ...
     srand   :: proc(seed: I32) -> ...
-    strlen  :: proc(buffer: ^Byte) Int -> ...
     time    :: proc(timer: ^Byte) Int -> ...
 
 /// The numbers that can be thought of are from LOWEST to HIGHEST.
@@ -47,23 +45,36 @@ think_of_number :: proc() Int ->
     value := cast(Int)rand()
     return LOWEST + value - value / count * count
 
-/// Reads a line from `input` and gives the number that is written on it, or END_OF_INPUT when there
-/// is no line left, or NOT_A_NUMBER when the line is not a number. A line that does not fit in the
-/// buffer is cut where the buffer ends, which no guess is long enough to be.
-read_guess :: proc(input: ^Byte) Int ->
-    buffer := [64]Byte { .. = 0 }
-    if fgets(%buffer[0], int_to_i32(length_of(buffer)), input) == nil ->
-        return END_OF_INPUT
+/// Reads a line from `input` into `buffer`, which the caller owns, and gives how many bytes the line
+/// has, without its end, and whether there was a line. There is none when the input ended before a
+/// byte of it. The file has no buffer of its own, so the line is read one byte at a time, and no
+/// byte of the line after it is taken. A line that does not fit in the buffer is cut where the
+/// buffer ends, which no guess is long enough to be.
+read_line :: proc(input: mu.File, buffer: []Byte) (Int, Bool) ->
+    length := 0
+    for length < length_of(buffer) ->
+        count, error := mu.file_read(input, buffer[length:][:1])
+        if count == 0 or error not= .NONE ->
+            return length, length > 0
+        if buffer[length] == '\n' ->
+            break
+        length += 1
 
     // The end of the line is a line feed, with a carriage return before it on Windows.
-    length := strlen(%buffer[0])
-    for length > 0 ->
-        last := buffer[length - 1]
-        if last not= '\n' and last not= '\r' ->
-            break
-        length -= 1
+    if length > 0 ->
+        if buffer[length - 1] == '\r' ->
+            length -= 1
+    return length, true
 
-    text, is_text := utf8_decode(buffer[0:length])
+/// Reads a line from `input` and gives the number that is written on it, or END_OF_INPUT when there
+/// is no line left, or NOT_A_NUMBER when the line is not a number.
+read_guess :: proc(input: mu.File) Int ->
+    buffer := [64]Byte { .. = 0 }
+    length, is_line := read_line(input, buffer[:])
+    if not is_line ->
+        return END_OF_INPUT
+
+    text, is_text := utf8_decode(buffer[:length])
     if not is_text ->
         return NOT_A_NUMBER
     number, is_number := try_str_to_int(text)
@@ -90,7 +101,7 @@ respond_to :: proc(guess: Int, secret: Int) Bool ->
     return true
 
 /// Asks for a guess, and reads it. The prompt is written out before the program waits for the line.
-ask_for_guess :: proc(input: ^Byte) Int ->
+ask_for_guess :: proc(input: mu.File) Int ->
     puts("Your guess?")
     fflush(nil)
     return read_guess(input)
@@ -99,7 +110,7 @@ main :: proc() Int ->
     seed_random()
     puts("Guess my number")
 
-    input := _fdopen(0, "r")
+    input := mu.file_standard_input()
     secret := think_of_number()
     puts("")
     puts("I am thinking of a number from 0 to 10.")
