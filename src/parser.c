@@ -2664,7 +2664,8 @@ static Ast_Node_Index parse_type_info_of(Parser *parser) {
 /**
  * Parses the subscripts that follow `operand`, which is the node of a name or of a literal:
  * `[index]` is the element at an index, `[first:end]` is the array slice of the elements from the
- * first index up to, and not including, the end, `.name` is a field of a struct, and `^` is what a
+ * first index up to, and not including, the end, where the first index can be left out, which is
+ * the start, and so can the end, which is the length, `.name` is a field of a struct, and `^` is what a
  * pointer points to. They can follow each other, and each one takes everything before it as its
  * first child. Like the
  * operator of an arithmetic operation, the node of a subscript is made after the nodes of its
@@ -2711,17 +2712,35 @@ static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
         }
         parse_token_advance(parser);
 
-        Ast_Node_Index first = parse_expression(parser);
-        if (first == AST_NODE_INDEX_NONE) {
-            return AST_NODE_INDEX_NONE;
+        // The first index can be left out, `a[:4]`, which starts at the first element, so it is a
+        // literal of 0 as far as the nodes go.
+        bool is_first_omitted = parse_token_current(parser)->kind == TOKEN_KIND_TYPE_SEPARATOR;
+        Ast_Node_Index first = AST_NODE_INDEX_NONE;
+        if (is_first_omitted) {
+            first = parse_node_make(parser, AST_NODE_TYPE_INTEGER_LITERAL);
+            if (first == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            parser->nodes[first].payload.integer_literal.value = 0;
+        } else {
+            first = parse_expression(parser);
+            if (first == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
         }
 
+        // The end can be left out too, `a[1:]`, which goes to the end of what is sliced.
         Ast_Node_Index end = AST_NODE_INDEX_NONE;
-        if (parse_token_current(parser)->kind == TOKEN_KIND_TYPE_SEPARATOR) {
+        bool is_slice = parse_token_current(parser)->kind == TOKEN_KIND_TYPE_SEPARATOR;
+        bool is_end_omitted = false;
+        if (is_slice) {
             parse_token_advance(parser);
-            end = parse_expression(parser);
-            if (end == AST_NODE_INDEX_NONE) {
-                return AST_NODE_INDEX_NONE;
+            is_end_omitted = parse_token_current(parser)->kind == TOKEN_KIND_BRACKET_RIGHT;
+            if (not is_end_omitted) {
+                end = parse_expression(parser);
+                if (end == AST_NODE_INDEX_NONE) {
+                    return AST_NODE_INDEX_NONE;
+                }
             }
             if (not parse_token_expect(parser, TOKEN_KIND_BRACKET_RIGHT, STR("']'"))) {
                 return AST_NODE_INDEX_NONE;
@@ -2731,12 +2750,16 @@ static Ast_Node_Index parse_subscripts(Parser *parser, Ast_Node_Index operand) {
         }
 
         Ast_Node_Type node_type = AST_NODE_TYPE_SUBSCRIPT;
-        if (end != AST_NODE_INDEX_NONE) {
+        if (is_slice) {
             node_type = AST_NODE_TYPE_SLICE;
         }
         Ast_Node_Index subscript = parse_node_make(parser, node_type);
         if (subscript == AST_NODE_INDEX_NONE) {
             return AST_NODE_INDEX_NONE;
+        }
+        if (is_slice) {
+            parser->nodes[subscript].payload.slice.is_first_omitted = is_first_omitted;
+            parser->nodes[subscript].payload.slice.is_end_omitted = is_end_omitted;
         }
         parse_node_append_child(parser, subscript, base);
         parse_node_append_child(parser, subscript, first);

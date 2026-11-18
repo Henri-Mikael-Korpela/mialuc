@@ -4727,14 +4727,20 @@ static bool x64_string_slice_write(X64_Builder *builder, X64_Expression_Frame co
  * Writes the slice `a[low:high]` of `frame`, whose array or array slice and bounds are on the
  * stack of values, and leaves the slice: the address of the element at `low` and the number of
  * elements up to `high`. It traps unless `low` is not above `high` and `high` is not above the
- * length, which are unsigned comparisons, so that a negative bound traps too. Returns false after
- * it recorded an error.
+ * length, which are unsigned comparisons, so that a negative bound traps too. A slice that has no
+ * `high`, `a[low:]`, has no word for it on the stack, and `high` is the length. A slice that has no
+ * `low` has a literal of 0 for it. Returns false after it recorded an error.
  */
 static bool x64_slice_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
     Ast_Node_Index node = frame->node;
     Ast_Node_Index sequence = builder->nodes[node].first_child;
     X64_Type type = x64_expression_type(builder, sequence);
     if (type.kind == X64_TYPE_KIND_STR) {
+        // The bounds of a string are both written for now.
+        if (builder->nodes[node].payload.slice.is_first_omitted ||
+            builder->nodes[node].payload.slice.is_end_omitted) {
+            return x64_fail_unsupported(builder);
+        }
         return x64_string_slice_write(builder, frame);
     }
     if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
@@ -4756,7 +4762,11 @@ static bool x64_slice_write(X64_Builder *builder, X64_Expression_Frame const *fr
     int32_t high = x64_stack_displacement(builder, frame->stack_start + sequence_words + 1, 1);
     // `rax` is the low bound and `rcx` the high one, and `rdx` the length.
     x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, low);
-    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, high);
+    if (builder->nodes[node].payload.slice.is_end_omitted) {
+        x64_sequence_length_load(builder, type, X64_REGISTER_RCX, first);
+    } else {
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, high);
+    }
     x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
     x64_write_trap_unless(builder, X64_CONDITION_BELOW_EQUAL);
     x64_sequence_length_load(builder, type, X64_REGISTER_RDX, first);

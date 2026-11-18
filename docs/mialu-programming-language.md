@@ -1612,12 +1612,23 @@ sum_of_middle :: proc() Int ->
     return sum(a[1:4])
 ```
 
-`sum_of_middle` returns 9, which is 2 + 3 + 4. Both bounds are written, and they are expressions of type `Int`. The low bound must not be above the high bound, and the high bound must not be above the length of what is sliced, or else the program traps. So `a[2:2]` is a slice with no elements, and `a[0:5]` has all five elements of `a`. The indexes of a slice start at zero again, so `a[1:4][0]` is `a[1]`, and a slice of a slice is relative to the first one. A slice can be the value of a variable, and then its type is deduced, or it can be written:
+`sum_of_middle` returns 9, which is 2 + 3 + 4. The bounds are expressions of type `Int`. The low bound must not be above the high bound, and the high bound must not be above the length of what is sliced, or else the program traps. So `a[2:2]` is a slice with no elements, and `a[0:5]` has all five elements of `a`. The indexes of a slice start at zero again, so `a[1:4][0]` is `a[1]`, and a slice of a slice is relative to the first one. A slice can be the value of a variable, and then its type is deduced, or it can be written:
 
 ```
 middle := a[1:4]
 everything : []Int = a
 ```
+
+Either bound can be left out. A slice without a low bound starts at the first element, as if the low bound were 0, and one without a high bound goes to the last, as if the high bound were the length of what is sliced, so for the array `a` of 6 elements these four slices are the same, and have all of them:
+
+```
+a[0:6]
+a[:6]
+a[0:]
+a[:]
+```
+
+`a[2:]` has the elements from index 2 on, `a[:2]` the first two, and `a[6:]`, which starts at the length, has none. The bound that is written is checked as before, so `a[7:]` traps, because its low bound is above the length. The slices that start where another one ends, such as `a[offset:]`, are what makes a chunk of a slice simple: a slice of a slice is relative to the first one, so `a[offset:][:length]` has the same elements as `a[offset:offset + length]`, which is the `length` elements from `offset`, and it does not repeat `offset`. A bound that is left out is not an expression, so there is nothing for it to work out: `a[:]` is a slice with the address and the length of `a`. Only a string, whose slices count characters, keeps both bounds for now.
 
 An array can be given where a slice is wanted: the slice then has all the elements of the array. That is the case for an argument of a call and for the value of a variable with a slice type. This is how a procedure takes some elements, whatever the length of the array they come from is. When the length of the array between the brackets of a parameter is left out, the parameter is a slice, not an array:
 

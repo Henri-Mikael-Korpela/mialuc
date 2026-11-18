@@ -392,8 +392,12 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   It is a statement of a procedure body.
  * - `AST_NODE_TYPE_SLICE`: three children, the array or array slice that is sliced, the first index
  *   and the end index, in that order, each one an expression. `a[1:4]` has the elements of `a` from
- *   the one at index 1 up to the one at index 3. It is an expression, and it can be the target of
- *   an `AST_NODE_TYPE_ASSIGNMENT`.
+ *   the one at index 1 up to the one at index 3. Either index can be left out: `a[:4]` starts at
+ *   the first element, which the parser writes as an `AST_NODE_TYPE_INTEGER_LITERAL` of 0 for the
+ *   first index, and `a[1:]` goes to the end of `a`, which has no node and so is a slice of two
+ *   children, whose end is the length of what is sliced, and `a[:]` is both. The payload says
+ *   which was left out. It is an expression, and it can be the target of an
+ *   `AST_NODE_TYPE_ASSIGNMENT`.
  * - `AST_NODE_TYPE_STRING_LITERAL`: no children.
  * - `AST_NODE_TYPE_STRUCT_LITERAL`: one `AST_NODE_TYPE_FIELD_INITIALIZER` for each field that is
  *   given a value, in the order of the source, which is not necessarily the order of the fields of
@@ -554,6 +558,13 @@ typedef struct {
             uint32_t name_length;
             Ast_Foreign_Target target;
         } foreign_import;
+        struct {
+            // Whether the first index was left out, `a[:4]`, in which case the first index is a
+            // literal of 0 that the parser made, and whether the end index was left out, `a[1:]`,
+            // in which case there is no node for it, and the end is the length of what is sliced.
+            bool is_first_omitted;
+            bool is_end_omitted;
+        } slice;
         struct {
             // The text between the quotes, as a view of the source text: the vendor, a colon and
             // the path. See `ast_import_path`.

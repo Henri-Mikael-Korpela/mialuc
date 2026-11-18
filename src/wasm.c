@@ -7381,8 +7381,9 @@ static bool wasm_build_code_section_body_slice(Wasm_Builder *builder, Ast_Node_I
     Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
     Ast_Node_Index base = builder->nodes[slice].first_child;
     Ast_Node_Index first = builder->nodes[base].next_sibling;
+    bool is_end_omitted = builder->nodes[slice].payload.slice.is_end_omitted;
     Ast_Node_Index end = builder->nodes[slice].last_child;
-    assert(first != end);
+    assert((first == end) == is_end_omitted);
 
     Wasm_Type base_type = wasm_expression_type(builder, base);
     if (base_type.kind != WASM_VALUE_TYPE_STR && not wasm_type_is_sequence(base_type)) {
@@ -7390,7 +7391,7 @@ static bool wasm_build_code_section_body_slice(Wasm_Builder *builder, Ast_Node_I
                          wasm_expression_subject(builder, definition, base));
     }
     Ast_Node_Index indexes[2] = {first, end};
-    for (size_t i = 0; i < 2; i += 1) {
+    for (size_t i = 0; i < (is_end_omitted ? 1u : 2u); i += 1) {
         if (wasm_expression_type(builder, indexes[i]).kind != WASM_VALUE_TYPE_INT) {
             return wasm_fail(builder, WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
                              wasm_expression_subject(builder, definition, indexes[i]));
@@ -7398,8 +7399,25 @@ static bool wasm_build_code_section_body_slice(Wasm_Builder *builder, Ast_Node_I
     }
 
     if (base_type.kind == WASM_VALUE_TYPE_STR) {
+        // The bounds of a string are both written for now.
+        if (builder->nodes[slice].payload.slice.is_first_omitted || is_end_omitted) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
+                             wasm_expression_subject(builder, definition, base));
+        }
         wasm_string_slice_write(builder, procedure);
         return true;
+    }
+    if (is_end_omitted) {
+        // The array slice and the first index are on the stack, and the end is the length of the
+        // slice, which is the second value on it: the first index is kept, and the length is kept
+        // while it stays where it is, and then both are put back, the end as a 64-bit number.
+        size_t low = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_LOW);
+        size_t length = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_SET, low);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_TEE, length);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, low);
+        wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET, length);
+        wasm_write_byte(&builder->writer, WASM_OPCODE_I64_EXTEND_I32_U);
     }
     wasm_slice_write(builder, procedure,
                      wasm_type_stride_bytes(builder, wasm_type_element(base_type)));

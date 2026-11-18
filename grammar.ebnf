@@ -710,8 +710,13 @@ dereference = "^" ;
 
 (* A subscript is the index of an element between brackets, `a[2]`, or the two indices of an array
    slice, `a[1:4]`, which has the elements from the first index up to, and not including, the
-   second. All of the indices are expressions that the compiler requires to be `Int`. *)
-subscript = "[" , ws , expression , ws , [ ":" , ws , expression , ws ] , "]" ;
+   second. Either index of a slice can be left out: `a[:4]` starts at the first element, `a[1:]`
+   goes to the last, and `a[:]` has all of them, so for an array of 6 elements `a[0:6]`, `a[:6]`,
+   `a[0:]` and `a[:]` are the same slice. A slice of a slice is a subscript after a subscript, so
+   `a[offset:][:length]` is `a[offset:offset + length]`. All of the indices are expressions that the
+   compiler requires to be `Int`. *)
+subscript = "[" , ws , expression , ws , [ ":" , ws , [ expression , ws ] ] , "]"
+          | "[" , ws , ":" , ws , [ expression , ws ] , "]" ;
 
 (* An array literal is the type of an array, which has a length or `const`, followed by its
    elements between braces. The elements are expressions separated by commas, and there may be none.

@@ -585,7 +585,8 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             printf("SCOPE_STATEMENT\n");
             break;
         case AST_NODE_TYPE_SLICE:
-            printf("SLICE\n");
+            printf("SLICE%s%s\n", node.payload.slice.is_first_omitted ? " first omitted" : "",
+                   node.payload.slice.is_end_omitted ? " end omitted" : "");
             break;
         case AST_NODE_TYPE_STRING_LITERAL:
             printf("STRING_LITERAL \"%.*s\"\n", (int)node.payload.string_literal.text.length,
