@@ -4696,8 +4696,12 @@ static bool x64_string_slice_write(X64_Builder *builder, X64_Expression_Frame co
 
     int32_t string = x64_stack_displacement(builder, frame->stack_start, 2);
     int32_t low = x64_stack_displacement(builder, frame->stack_start + 2, 1);
-    int32_t high = x64_stack_displacement(builder, frame->stack_start + 3, 1);
     bool is_end_omitted = builder->nodes[node].payload.slice.is_end_omitted;
+    // A slice without a high bound has no word for it on the stack.
+    int32_t high = 0;
+    if (not is_end_omitted) {
+        high = x64_stack_displacement(builder, frame->stack_start + 3, 1);
+    }
     x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, low);
     if (not is_end_omitted) {
         x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, high);
@@ -4764,7 +4768,11 @@ static bool x64_slice_write(X64_Builder *builder, X64_Expression_Frame const *fr
     size_t sequence_words = x64_type_word_count(builder, type);
     int32_t first = x64_stack_displacement(builder, frame->stack_start, sequence_words);
     int32_t low = x64_stack_displacement(builder, frame->stack_start + sequence_words, 1);
-    int32_t high = x64_stack_displacement(builder, frame->stack_start + sequence_words + 1, 1);
+    // A slice without a high bound has no word for it on the stack.
+    int32_t high = 0;
+    if (not builder->nodes[node].payload.slice.is_end_omitted) {
+        high = x64_stack_displacement(builder, frame->stack_start + sequence_words + 1, 1);
+    }
     // `rax` is the low bound and `rcx` the high one, and `rdx` the length.
     x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, low);
     if (builder->nodes[node].payload.slice.is_end_omitted) {

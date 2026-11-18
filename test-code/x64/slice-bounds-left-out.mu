@@ -28,6 +28,11 @@ total :: proc(items: []Int) Int ->
         sum += item
     return sum
 
+/// A slice without a high bound in a procedure that has nothing else on the stack of values, which
+/// needs a word for the bound less than one that has it.
+rest :: proc(items: []Int) Int ->
+    return length_of(items[1:])
+
 main :: proc() Int ->
     wrong := 0
     a := [6]Int { 1, 2, 3, 4, 5, 6 }
@@ -70,4 +75,5 @@ main :: proc() Int ->
     bytes := [4]Byte { 1, 2, 3, 4 }
     wrong += check("the bytes from 1 are %lld", length_of(bytes[1:]), 3)
     wrong += check("the first byte of bytes[1:] is %lld", cast(Int)bytes[1:][0], 2)
+    wrong += check("rest(a) has the elements %lld", rest(a[:]), 5)
     return wrong

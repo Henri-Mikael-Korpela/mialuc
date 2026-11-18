@@ -27,6 +27,11 @@ same :: proc(a: Str, b: Str) Int ->
         return 1
     return 0
 
+/// A slice without a high bound in a procedure that has nothing else on the stack of values, which
+/// needs a word for the bound less than one that has it.
+rest :: proc(text: Str) Int ->
+    return length_of(text[1:])
+
 main :: proc() Int ->
     wrong := 0
     s := "hello, world"
@@ -57,4 +62,5 @@ main :: proc() Int ->
     wrong += check("t[2:][:1] is 🚀: %lld", same(t[2:][:1], "🚀"), 1)
     wrong += check("t[4:] is !: %lld", same(t[4:], "!"), 1)
     wrong += check("t[:] has %lld characters", length_of(t[:]), length_of(t))
+    wrong += check("rest(s) has the characters %lld", rest(s), 11)
     return wrong
