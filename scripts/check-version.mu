@@ -57,14 +57,12 @@ Version :: struct ->
     patch: Int
     found: Int
 
-/// The most bytes of the header that are read, which is more than it has.
-//
-// MISSING FEATURE: a constant as the length of an array, so that the array of the buffer below, and
-// the one of the path in UTF-16 that `file_open` makes, which is twice the bytes of the path and two
-// more, could have a constant for their length instead of the number. `read_file` checks the length
-// of the buffer that it is given, so the number cannot differ from the constant without the program
-// stopping.
+/// The most bytes of the header that are read, which is more than it has, and the bytes of the memory
+/// for the path in UTF-16 that `file_open` makes, which is twice the bytes of the path and two more,
+/// and more than the path of the header needs. They are the lengths of the arrays that are made
+/// for them, which are constants as well as the sizes that `read_file` checks and passes on.
 BUFFER_SIZE :: 4096
+PATH_BUFFER_SIZE :: 128
 
 /// Reads the file at `path` into `buffer`, from its start, as many bytes as it has up to
 /// `BUFFER_SIZE`, which the buffer must have, and gives how many, and whether the file was opened
@@ -74,7 +72,7 @@ BUFFER_SIZE :: 4096
 read_file :: proc(path: Str, buffer: []Byte) (Int, Bool) ->
     if length_of(buffer) < BUFFER_SIZE ->
         return 0, false
-    scratch := [128]Byte { .. = 0 }
+    scratch := [PATH_BUFFER_SIZE]Byte { .. = 0 }
     file, error := mialu.file_open(path, mialu.File_Open_Mode.READ, scratch[:])
     if error not= .NONE ->
         return 0, false
@@ -130,7 +128,7 @@ read_line :: proc(buffer: []Byte, start: Int, end: Int, version: ^Version) ->
 /// lines are the bytes between the line feeds, and a last line that has none is not one, as the
 /// header ends with one.
 parse_header :: proc(version: ^Version) Bool ->
-    buffer := [4096]Byte { .. = 0 }
+    buffer := [BUFFER_SIZE]Byte { .. = 0 }
     length, is_read := read_file(HEADER_PATH, buffer[:])
     if not is_read ->
         return false
