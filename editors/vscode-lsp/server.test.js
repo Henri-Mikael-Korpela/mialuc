@@ -487,3 +487,120 @@ test("publishes the error of a document that does not compile and clears it when
         assert.strictEqual((await request("shutdown", null)).result, null);
     });
 });
+
+const ENUM_SOURCE = [
+    "package modes",
+    "",
+    "/// How a packet is sent.",
+    "Mode :: enum Int ->",
+    "    /// The packet is sent at once.",
+    "    NOW",
+    "    LATER",
+    "",
+    "Packet :: struct ->",
+    "    mode: Mode",
+    "    size: Int",
+    "",
+    "pick :: proc(mode: Mode) Mode ->",
+    "    return mode",
+    "",
+    "describe :: proc(packet: Packet, mode: Mode) (Int, Mode) ->",
+    "    return 1, mode",
+    "",
+    "send :: proc(packet: Packet, mode: Mode) Int ->",
+    "    if mode == .NOW ->",
+    "        return 1",
+    "    match mode ->",
+    "        case .NOW ->",
+    "            return 2",
+    "        case ->",
+    "            return 0",
+    "",
+    "main :: proc() Int ->",
+    "    mode := Mode.NOW",
+    "    packet := Packet { mode = .NOW, size = 1 }",
+    "    chosen : Mode = .LATER",
+    "    return send(packet, .NOW) + length_of(\"a\")",
+    "",
+].join("\n");
+
+test("the members of an enum are suggested after a dot where the enum can be told", async () => {
+    await withServer(async (request, notify) => {
+        const initialized = await request("initialize", {
+            processId: null, rootUri: null, capabilities: {},
+            initializationOptions: { compilerPath: COMPILER },
+        });
+        assert.deepStrictEqual(initialized.result.capabilities.completionProvider,
+                               { triggerCharacters: ["."] });
+        notify("initialized", {});
+
+        const uri = "file:///modes.mu";
+        notify("textDocument/didOpen", {
+            textDocument: { uri, languageId: "mialu", version: 1, text: ENUM_SOURCE },
+        });
+        const lines = ENUM_SOURCE.split("\n");
+        // The text as it is when the dot has just been typed, and the members that are suggested
+        // there. The text does not compile then, so the names of the text before are used.
+        let version = 1;
+        const suggested = async (lineStart, typed) => {
+            const index = lines.findIndex((line) => line.startsWith(lineStart));
+            assert.notStrictEqual(index, -1, lineStart);
+            const changed = lines.slice();
+            changed[index] = typed;
+            version += 1;
+            notify("textDocument/didChange", {
+                textDocument: { uri, version }, contentChanges: [{ text: changed.join("\n") }],
+            });
+            const items = (await request("textDocument/completion", {
+                textDocument: { uri },
+                position: { line: index, character: typed.length },
+            })).result;
+            return items;
+        };
+        const labels = (items) => items?.map((item) => item.label);
+
+        // The text compiles at first, which is where the names are taken from.
+        await request("textDocument/completion", {
+            textDocument: { uri }, position: { line: 0, character: 0 },
+        });
+
+        // After `==`, `not=` and `=` of a name that is of the enum.
+        const both = ["NOW", "LATER"];
+        assert.deepStrictEqual(labels(await suggested("    if mode ==", "    if mode == .")), both);
+        assert.deepStrictEqual(labels(await suggested("    if mode ==", "    if mode not= .")), both);
+        // The field of a struct literal, which has the enum as its type.
+        assert.deepStrictEqual(
+            labels(await suggested("    packet := Packet", "    packet := Packet { mode = .")), both);
+        // The value that is given to a name of a type that is written.
+        assert.deepStrictEqual(labels(await suggested("    chosen :", "    chosen : Mode = .")),
+                               both);
+        // An argument of a procedure, the second of two, and a value that a procedure returns.
+        assert.deepStrictEqual(labels(await suggested("    return send", "    return send(packet, .")),
+                               both);
+        assert.deepStrictEqual(labels(await suggested("    return mode", "    return .")), both);
+        // The second of the two values that a procedure returns is the enum, and the first is not.
+        assert.deepStrictEqual(labels(await suggested("    return 1, mode", "    return 1, .")),
+                               both);
+        assert.strictEqual(await suggested("    return 1, mode", "    return ."), null);
+        // The pattern of a case of a match on a name of the enum.
+        assert.deepStrictEqual(labels(await suggested("        case .NOW", "        case .")), both);
+        // The name of the enum itself, before the dot.
+        assert.deepStrictEqual(labels(await suggested("    mode := Mode", "    mode := Mode.")),
+                               both);
+
+        // A member has its documentation, and the enum as its detail, in the order of the enum.
+        const items = await suggested("    if mode ==", "    if mode == .");
+        assert.strictEqual(items[0].detail, "Mode");
+        assert.strictEqual(items[0].documentation.value, "The packet is sent at once.");
+        assert.strictEqual(items[1].documentation, undefined);
+        assert.ok(items[0].sortText < items[1].sortText);
+
+        // Where no enum can be told, nothing is suggested: a number with a point, a name that is
+        // not of an enum, a range, a field of a struct and a dot at the start of an empty place.
+        assert.strictEqual(await suggested("    return mode", "    return 1."), null);
+        assert.strictEqual(await suggested("    if mode ==", "    if packet.size == ."), null);
+        assert.strictEqual(await suggested("    if mode ==", "    if packet."), null);
+        assert.strictEqual(await suggested("    mode := Mode", "    mode := 0.."), null);
+        assert.strictEqual((await request("shutdown", null)).result, null);
+    });
+});

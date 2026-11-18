@@ -14,6 +14,7 @@ The commands are:
 build       compile a source file and write a program for a target
 dump-asm    compile a source file and print the assembly of the program
 dump-ast    print the tokens and the syntax tree of a source file
+dump-enums  print the members of each enum of a source file and of the files that it imports
 dump-outline
             print the definitions of a source file, with the fields and members below them
 dump-struct-sizes
@@ -91,6 +92,23 @@ Dump-ast reads the source file, and prints what the front end made of it to the 
 The tokens are printed before the source is parsed, and the tree before the names are resolved, so a program with a syntax error still shows its tokens, and a program with an unknown name still shows its tree.
 
 Dump-ast does not build the program, so it does not depend on a target, and it also shows programs that no target can build.
+
+## Print the enums
+
+Usage:
+
+```
+mialuc dump-enums <source file>
+```
+
+Dump-enums reads the source file, checks it up to the names, as dump-ast does, and prints a line for each member of each enum of the program, and of the files that it [imports](mialu-programming-language.md#imports), in the order of the definitions. A line has two or three fields separated by tabs: the name of the enum as the program writes it, which is the name that the types of [dump-types](#print-the-types-of-the-names) have, such as `Color` or `mu.File_Error`, the name of the member, and the documentation comment of the member when it has one, as a string in double quotes with the lines joined by `\n`, as dump-types writes it. For a few lines of a program with a `Color` of `RED` and `GREEN`:
+
+```
+Color	RED	"Red, the first."
+Color	GREEN
+```
+
+The command does not build the program, so it also shows programs that the target cannot build. It is what the [language server](../editors/vscode-lsp/README.md) suggests after a dot where the enum can be told.
 
 ## Print the outline of a file
 

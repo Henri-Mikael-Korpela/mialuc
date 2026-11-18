@@ -11,6 +11,9 @@
 // A third feature is the outline of a document, the definitions with the fields and the members
 // below them, from `mialuc dump-outline`.
 //
+// A fifth is completion: after a dot that starts the member of an enum, where the enum can be told
+// from the place, as in `if error == .`, the members of the enum are suggested.
+//
 // A fourth is diagnostics: a moment after a document is opened or changed, the server checks it with
 // the compiler and publishes the error, with `textDocument/publishDiagnostics`, so that the editor
 // marks it in the code and lists it as a problem while it is typed, without a build.
@@ -344,6 +347,11 @@ async function diagnosticsPublish(uri) {
     const diagnostics = await diagnosticsCompute(text);
     if (diagnostics !== null && documents.get(uri) === document && document.text === text) {
         send({ method: "textDocument/publishDiagnostics", params: { uri, diagnostics } });
+        // A text that compiles is where the names and the enums for the completions come from, so
+        // that they are ready when a dot is typed, which does not compile.
+        if (diagnostics.length === 0) {
+            await cachesRefresh(document);
+        }
     }
 }
 
@@ -476,10 +484,316 @@ async function documentSymbol(uri) {
     return document.symbols;
 }
 
+/**
+ * Turns the output of `mialuc dump-enums` into the members of each enum. A line of the output is the
+ * name of the enum as the program writes it, the name of a member, and the documentation comment of
+ * the member as a string in double quotes when it has one, separated by tabs. A line that is not
+ * like that is skipped.
+ */
+function enumsFromOutput(output) {
+    const enums = new Map();
+    for (const row of output.split("\n")) {
+        const [enumName, name, doc] = row.replace(/\r$/, "").split("\t");
+        if (!enumName || !name) {
+            continue;
+        }
+        if (!enums.has(enumName)) {
+            enums.set(enumName, []);
+        }
+        enums.get(enumName).push({ name, doc: unquote(doc ?? "") });
+    }
+    return enums;
+}
+
+/**
+ * Reads the enums that `text` defines, `Mode :: enum Int ->` and the indented lines below it that are
+ * its members, with the documentation comment above each. It is for a compiler that does not have
+ * `dump-enums`, and it does not know the enums of the files that are imported, which only the
+ * compiler does. The names are as the text writes them.
+ */
+function enumsFromText(text) {
+    const enums = new Map();
+    const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
+    for (let i = 0; i < lines.length; i += 1) {
+        const definition = /^([A-Za-z_]\w*)\s*::\s*enum\b.*->\s*(?:\/\/.*)?$/.exec(lines[i]);
+        if (definition === null) {
+            continue;
+        }
+        const members = [];
+        let doc = [];
+        for (let j = i + 1; j < lines.length; j += 1) {
+            const line = lines[j];
+            if (line.trim() === "") {
+                doc = [];
+                continue;
+            }
+            if (!/^\s/.test(line)) {
+                break;
+            }
+            const comment = /^\s*\/\/\/(?!\/) ?(.*)$/.exec(line);
+            if (comment !== null) {
+                doc.push(comment[1]);
+                continue;
+            }
+            const member = /^\s+([A-Za-z_]\w*)\b/.exec(line);
+            if (member !== null) {
+                members.push({ name: member[1], doc: doc.join("\n") });
+            }
+            doc = [];
+        }
+        enums.set(definition[1], members);
+    }
+    return enums;
+}
+
+/**
+ * Asks the compiler for the enums of `text`. Resolves to them, or to null when the compiler does not
+ * accept the text.
+ */
+async function enumsCompute(text) {
+    const output = await compilerRun("dump-enums", text);
+    return output === null ? null : enumsFromOutput(output);
+}
+
+/**
+ * Makes the names and the enums of the document those of its text when the compiler accepts it. A
+ * text that is being typed is not accepted, such as one that has a dot that is not finished, and
+ * then the names and the enums of the last text that was are kept. When there are none yet, the
+ * line that is being typed, which is `line`, is taken out, since the rest of the text may be fine.
+ */
+async function cachesRefresh(document, line) {
+    const text = document.text;
+    if (document.cacheText === text) {
+        return;
+    }
+    // A compiler that has no `dump-enums`, such as one that was built before it was added, does not
+    // answer it, so the enums that the text itself defines are taken from the text.
+    const enumsOf = async (source) => (await enumsCompute(source)) ?? enumsFromText(source);
+    let names = await namesCompute(text);
+    let enums = names === null ? null : await enumsOf(text);
+    if (names === null && document.names.length === 0 && line !== undefined) {
+        const lines = text.split("\n");
+        lines[line] = "";
+        const without = lines.join("\n");
+        names = await namesCompute(without);
+        enums = names === null ? null : await enumsOf(without);
+    }
+    if (names !== null && enums !== null && document.text === text) {
+        document.names = names;
+        document.enums = enums;
+        document.cacheText = text;
+    }
+}
+
+/**
+ * Cuts `text` at the commas that are not inside parentheses, brackets or braces.
+ */
+function splitTopLevel(text) {
+    const parts = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < text.length; i += 1) {
+        const character = text[i];
+        if (character === "(" || character === "[" || character === "{") {
+            depth += 1;
+        } else if (character === ")" || character === "]" || character === "}") {
+            depth -= 1;
+        } else if (character === "," && depth === 0) {
+            parts.push(text.slice(start, i));
+            start = i + 1;
+        }
+    }
+    parts.push(text.slice(start));
+    return parts;
+}
+
+/**
+ * Takes apart the type of a procedure as `dump-types` writes it, `proc(a: Int, b: Mode) (Mode, Bool)`,
+ * into the types of its parameters and of what it returns. Returns null for a type that is not one.
+ */
+function procedureSignature(type) {
+    if (!type.startsWith("proc(")) {
+        return null;
+    }
+    let depth = 0;
+    let close = -1;
+    for (let i = 4; i < type.length; i += 1) {
+        if (type[i] === "(") {
+            depth += 1;
+        } else if (type[i] === ")") {
+            depth -= 1;
+            if (depth === 0) {
+                close = i;
+                break;
+            }
+        }
+    }
+    if (close === -1) {
+        return null;
+    }
+    const inside = type.slice(5, close).trim();
+    const parameters = inside === "" ? [] :
+        splitTopLevel(inside).map((parameter) => parameter.replace(/^[^:]*:\s*/, "").trim());
+    let rest = type.slice(close + 1).trim();
+    if (rest.startsWith("(") && rest.endsWith(")")) {
+        rest = rest.slice(1, -1);
+    }
+    const results = rest === "" ? [] : splitTopLevel(rest).map((result) => result.trim());
+    return { parameters, results };
+}
+
+/**
+ * Returns the type of the name `name`, taken from the names that the compiler gave: the one that is
+ * the closest above `line`, or else the first, since the same name can be a variable in several
+ * procedures. Returns null when no name has it.
+ */
+function typeOfName(document, name, line) {
+    let found = null;
+    for (const entry of document.names) {
+        if (entry.name !== name) {
+            continue;
+        }
+        if (found === null || (entry.line <= line && entry.line >= found.line) ||
+            found.line > line) {
+            found = entry;
+        }
+    }
+    return found === null ? null : found.type;
+}
+
+/**
+ * Tells the enum that a dot that starts a member can only be the member of, from what is before it
+ * in the line and above it, or returns null. A member can be written with a dot alone where the type
+ * is known from the place: after `==`, `not=` and `=` of a name that has the enum as its type, which
+ * includes a field that a struct literal gives a value, as the value after `:` and the type of a
+ * name, as an argument of a procedure that takes the enum, as a value that a procedure returns, and
+ * as the pattern of a case of a match on a name that has the enum as its type. A name of an enum
+ * before the dot, `Mode.`, is the enum itself. The names are the ones of the last text that
+ * compiled, so the text with the dot that is being typed does not need to.
+ */
+function enumDeduce(document, before, line) {
+    const dot = before.lastIndexOf(".");
+    if (dot === -1) {
+        return null;
+    }
+    const isKnown = (type) => type !== null && document.enums.has(type) ? type : null;
+
+    // The name of an enum and a dot.
+    const qualified = /([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.\w*$/.exec(before);
+    if (qualified !== null) {
+        return isKnown(qualified[1]);
+    }
+    // A dot after something that is not a name is where a member starts, but not after a dot, which
+    // is a range, and not after a caret, a bracket or a parenthesis that ends something.
+    if (dot > 0 && /[\w\]^).]/.test(before[dot - 1])) {
+        return null;
+    }
+    const head = before.slice(0, dot);
+    const lines = document.text.split("\n").map((text) => text.replace(/\r$/, ""));
+
+    let match = /([A-Za-z_]\w*)\s*(?:==|not=|=)\s*$/.exec(head);
+    if (match !== null && isKnown(typeOfName(document, match[1], line)) !== null) {
+        return typeOfName(document, match[1], line);
+    }
+    match = /:\s*([A-Za-z_][\w.]*)\s*=\s*$/.exec(head);
+    if (match !== null) {
+        return isKnown(match[1]);
+    }
+
+    // The case of a match: the match is the nearest line above that is less indented.
+    if (/^\s*case\s*$/.test(head)) {
+        const indentation = /^\s*/.exec(head)[0].length;
+        for (let i = line - 1; i >= 0; i -= 1) {
+            const above = /^(\s*)match\s+(?:#\([^)]*\)\s*)*(.+?)\s*->\s*$/.exec(lines[i]);
+            if (above !== null && above[1].length < indentation) {
+                const subject = /([A-Za-z_]\w*)\s*$/.exec(above[2]);
+                return subject === null ? null : isKnown(typeOfName(document, subject[1], i));
+            }
+        }
+        return null;
+    }
+
+    // An argument of a call: the parenthesis that is not closed, and the name before it.
+    let depth = 0;
+    for (let i = head.length - 1; i >= 0; i -= 1) {
+        if (head[i] === ")" || head[i] === "]" || head[i] === "}") {
+            depth += 1;
+        } else if (head[i] === "(" && depth > 0) {
+            depth -= 1;
+        } else if (head[i] === "(" || head[i] === "[" || head[i] === "{") {
+            if (head[i] !== "(") {
+                return null;
+            }
+            const callee = /([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*$/.exec(head.slice(0, i));
+            if (callee === null) {
+                return null;
+            }
+            const signature = procedureSignature(typeOfName(document, callee[1], line) ?? "");
+            const index = splitTopLevel(head.slice(i + 1)).length - 1;
+            return signature === null ? null : isKnown(signature.parameters[index] ?? null);
+        }
+    }
+    // The values of a return: the procedure is the definition above, and its types are the ones
+    // that it returns, of which the one at the place of the value is the one that is wanted.
+    match = /^\s*return\s(.*)$/.exec(head);
+    if (match !== null || /^\s*return\s*$/.test(head)) {
+        const values = splitTopLevel(match === null ? "" : match[1]);
+        for (let i = line - 1; i >= 0; i -= 1) {
+            const definition = /^([A-Za-z_]\w*)\s*::\s*proc\(/.exec(lines[i]);
+            if (definition !== null) {
+                const signature = procedureSignature(typeOfName(document, definition[1], i) ?? "");
+                return signature === null ? null :
+                    isKnown(signature.results[values.length - 1] ?? null);
+            }
+        }
+        return null;
+    }
+
+    return null;
+}
+
+/**
+ * Answers a request for completions: after a dot that starts the member of an enum, where the enum
+ * can be told, all the members of it, with their documentation, see `enumDeduce`. Anything else has
+ * no completions.
+ */
+async function completion(uri, position) {
+    const document = documents.get(uri);
+    if (document === undefined) {
+        return null;
+    }
+    await cachesRefresh(document, position.line);
+
+    const lineText = document.text.split("\n")[position.line]?.replace(/\r$/, "");
+    if (lineText === undefined) {
+        return null;
+    }
+    const type = enumDeduce(document, lineText.slice(0, position.character), position.line);
+    if (type === null) {
+        return null;
+    }
+    return document.enums.get(type).map((member, index) => {
+        const item = {
+            label: member.name,
+            kind: 20, // EnumMember
+            detail: type,
+            // The members are suggested in the order that the enum has them.
+            sortText: String(index).padStart(4, "0"),
+        };
+        if (member.doc !== "") {
+            item.documentation = { kind: "markdown", value: member.doc };
+        }
+        return item;
+    });
+}
+
 function documentSet(uri, text) {
     const document = documents.get(uri);
     if (document === undefined) {
-        documents.set(uri, { text, lenses: [], names: [], symbols: [], timer: undefined });
+        documents.set(uri, {
+            text, lenses: [], names: [], enums: new Map(), cacheText: null, symbols: [],
+            timer: undefined,
+        });
     } else {
         document.text = text;
     }
@@ -505,6 +819,8 @@ async function handle(message) {
                 codeLensProvider: { resolveProvider: false },
                 hoverProvider: true,
                 documentSymbolProvider: true,
+                // The members of an enum are suggested after a dot.
+                completionProvider: { triggerCharacters: ["."] },
             },
             serverInfo: { name: "mialu-lsp", version: "0.0.1" },
         });
@@ -550,6 +866,9 @@ async function handle(message) {
         break;
     case "textDocument/documentSymbol":
         reply(id, await documentSymbol(params.textDocument.uri));
+        break;
+    case "textDocument/completion":
+        reply(id, await completion(params.textDocument.uri, params.position));
         break;
     default:
         // A request must be answered, and a notification that is not known is ignored.
