@@ -9,20 +9,10 @@
 package mialuc
 
 import "mu:filesystem"
-import foreign kernel32 "system:Kernel32.lib"
 import foreign libc
 
 foreign libc ->
     puts :: proc(content: C_Str) I32 -> ...
-
-/// What the standard library cannot do yet is read a file, which `mu:filesystem` only opens and
-/// closes, so the bytes are read with `ReadFile` of Windows. A `HANDLE` is the size of an `Int`, a
-/// `DWORD` is a `U32` and a `BOOL` is an `I32`, and the address of the number of bytes that were
-/// read is the address of a `U32`.
-//
-// MISSING FEATURE: `file_read` in `mu:filesystem`, which would take the place of `ReadFile` here.
-foreign kernel32 #(default_calling_convention("system")) ->
-    ReadFile :: proc(file: Int, buffer: ^Byte, size: U32, read: ^U32, overlapped: ^Byte) I32 -> ...
 
 /// The version, written once, as the three numbers. `int_to_str` makes the text of a constant number
 /// and `++` joins strings, so VERSION_STRING is made of the numbers when the program is compiled.
@@ -60,28 +50,9 @@ Version :: struct ->
 /// The most bytes of the header that are read, which is more than it has, and the bytes of the memory
 /// for the path in UTF-16 that `file_open` makes, which is twice the bytes of the path and two more,
 /// and more than the path of the header needs. They are the lengths of the arrays that are made
-/// for them, which are constants as well as the sizes that `read_file` checks and passes on.
+/// for them.
 BUFFER_SIZE :: 4096
 PATH_BUFFER_SIZE :: 128
-
-/// Reads the file at `path` into `buffer`, from its start, as many bytes as it has up to
-/// `BUFFER_SIZE`, which the buffer must have, and gives how many, and whether the file was opened
-/// and read. The memory that the standard library needs for the path is on the stack of this
-/// procedure and is given to it, as it takes none of its own. The file is closed when the procedure
-/// returns.
-read_file :: proc(path: Str, buffer: []Byte) (Int, Bool) ->
-    if length_of(buffer) < BUFFER_SIZE ->
-        return 0, false
-    scratch := [PATH_BUFFER_SIZE]Byte { .. = 0 }
-    file, error := mialu.file_open(path, mialu.File_Open_Mode.READ, scratch[:])
-    if error not= .NONE ->
-        return 0, false
-    defer mialu.file_close(file)
-
-    count : U32 = 0
-    if ReadFile(file.handle, %buffer[0], BUFFER_SIZE, %count, nil) == 0 ->
-        return 0, false
-    return cast(Int)count, true
 
 /// Reads a line of the header, `#define MIALU_VERSION_MAJOR 0`, which is the prefix, a name of
 /// five letters, a space and a number, and stores the number in the field of `version` that the
@@ -125,12 +96,15 @@ read_line :: proc(buffer: []Byte, start: Int, end: Int, version: ^Version) ->
 
 /// Parses the version that src/version.h says. Gives false when the file cannot be read, and
 /// otherwise gives the version, whose `found` says whether the three numbers were all there. The
-/// lines are the bytes between the line feeds, and a last line that has none is not one, as the
-/// header ends with one.
+/// whole header is read at once, with the memory for it and for its path that is on the stack of
+/// this procedure and is given to the standard library, which takes none of its own. The lines are
+/// the bytes between the line feeds, and a last line that has none is not one, as the header ends
+/// with one.
 parse_header :: proc(version: ^Version) Bool ->
+    path_buffer := [PATH_BUFFER_SIZE]Byte { .. = 0 }
     buffer := [BUFFER_SIZE]Byte { .. = 0 }
-    length, is_read := read_file(HEADER_PATH, buffer[:])
-    if not is_read ->
+    length, error := mu.file_read_all(HEADER_PATH, path_buffer[:], buffer[:])
+    if error not= .NONE ->
         return false
 
     start := 0
