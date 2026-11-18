@@ -1193,8 +1193,15 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
         if (value_node->node_type == AST_NODE_TYPE_CALL &&
             binding.kind == SEMANTIC_BINDING_KIND_CONSTANT) {
             Ast_Node const *procedure = &nodes[nodes[binding.target].first_child];
+            // The first of several names of the values of a call has the first type that the
+            // procedure returns, as the others have theirs, see `main_result_type_write`. A call
+            // that gives several values and is the value of one name has no type of one value.
+            bool is_first_of_several = nodes[target].node_type == AST_NODE_TYPE_VARIABLE_DEFINITION &&
+                                       nodes[target].result_count > 1 &&
+                                       nodes[target].result_index == 0;
             if (procedure->node_type != AST_NODE_TYPE_PROCEDURE ||
-                ast_procedure_return_count(procedure) != 1) {
+                (ast_procedure_return_count(procedure) != 1 &&
+                 not (is_first_of_several && ast_procedure_return_count(procedure) > 1))) {
                 return false;
             }
             return main_text_write(text, text_size_bytes,

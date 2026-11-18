@@ -139,6 +139,13 @@ const TYPES_SOURCE = [
     "    number, is_number := try_str_to_int(text)",
     "    return length_of(text) + number",
     "",
+    "split :: proc(text: Str) (Str, Int, Bool) ->",
+    "    return text, 1, true",
+    "",
+    "use_split :: proc() Int ->",
+    "    word, size, is_ok := split(\"a\")",
+    "    return size",
+    "",
 ].join("\n");
 
 test("a name shows its type when the pointer rests on it", async () => {
@@ -238,6 +245,14 @@ test("a name shows its type when the pointer rests on it", async () => {
         assert.match((await hover(measured + 1, 14)).contents.value, /is_number: Bool/);
         assert.match((await hover(measured + 2, 12)).contents.value,
                      /length_of: proc\(elements: \[N\]T \| \[\]T \| Str\) Int/);
+
+        // The names that are given the values of a procedure of the program have the type that it
+        // returns at their place, the first of them as well, and each use of one has it too.
+        const used = lineOf("use_split");
+        assert.match((await hover(used + 1, 4)).contents.value, /word: Str/);
+        assert.match((await hover(used + 1, 10)).contents.value, /size: Int/);
+        assert.match((await hover(used + 1, 16)).contents.value, /is_ok: Bool/);
+        assert.match((await hover(used + 2, 11)).contents.value, /size: Int/);
 
         // Nothing is shown on a keyword or on a space.
         assert.strictEqual(await hover(6, 12), null);
