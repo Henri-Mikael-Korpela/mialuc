@@ -1,24 +1,29 @@
 /// Contains version information for the current compiler implementation.
 /// The version is also written down in src/version.h, which is the source of truth.
 /// The version info in this file has to say the same, and `main` checks that it does,
-/// by reading src/version.h line by line and parsing the three numbers out of its
+/// by reading src/version.h and parsing the three numbers out of its
 /// `#define MIALU_VERSION_MAJOR`, `MINOR` and `PATCH` lines.
 /// 
 /// Run this from the root of the project: `mialuc run scripts/check-version.mu`.
 
 package mialuc
 
+import "mu:filesystem"
+import foreign kernel32 "system:Kernel32.lib"
 import foreign libc
 
-/// The procedures of the C library are declared with the types that C has: `puts`, `fgets` and
-/// `fclose` take or give an `int`, which is an `I32`, and `strlen` gives a `size_t`, which is as large
-/// as an `Int`. `fgets` and `strlen` take the buffer as a `^Byte`, the address of its first byte.
+/// `puts` of the C library gives an `int`, which is an `I32`.
 foreign libc ->
-    fclose :: proc(file: ^Byte) I32 -> ...
-    fgets  :: proc(buffer: ^Byte, size: I32, file: ^Byte) ^Byte -> ...
-    fopen  :: proc(path: C_Str, mode: C_Str) ^Byte -> ...
-    puts   :: proc(content: C_Str) I32 -> ...
-    strlen :: proc(buffer: ^Byte) Int -> ...
+    puts :: proc(content: C_Str) I32 -> ...
+
+/// What the standard library cannot do yet is read a file, which `mu:filesystem` only opens and
+/// closes, so the bytes are read with `ReadFile` of Windows. A `HANDLE` is the size of an `Int`, a
+/// `DWORD` is a `U32` and a `BOOL` is an `I32`, and the address of the number of bytes that were
+/// read is the address of a `U32`.
+//
+// MISSING FEATURE: `file_read` in `mu:filesystem`, which would take the place of `ReadFile` here.
+foreign kernel32 #(default_calling_convention("system")) ->
+    ReadFile :: proc(file: Int, buffer: ^Byte, size: U32, read: ^U32, overlapped: ^Byte) I32 -> ...
 
 /// The version, written once, as the three numbers. `int_to_str` makes the text of a constant number
 /// and `++` joins strings, so VERSION_STRING is made of the numbers when the program is compiled.
@@ -53,27 +58,28 @@ Version :: struct ->
     patch: Int
     found: Int
 
-/// Reads the next line of the file into `buffer`, and gives its text without the end of the line,
-/// and false at the end of the file. A line that does not fit is cut where the buffer ends, and the
-/// rest of it is the next line, which no line of the header that matters is long enough to make.
-///
-/// Bytes that are not valid UTF-8 are a line with no text, since `utf8_decode` gives the empty
-/// string for them. The end of a line is a line feed, and a carriage return before it for a header
-/// that was written on Windows, which are compared with the bytes as the runes that they are.
-read_line :: proc(file: ^Byte, buffer: []Byte) (Str, Bool) ->
-    if fgets(%buffer[0], int_to_i32(length_of(buffer)), file) == nil ->
-        return "", false
+// The most bytes of the header that are read is 4096, which is more than it has, and the memory for
+// the path in UTF-16 that `file_open` makes is 128 bytes, which is twice the bytes of the path and
+// two more, and more than the path of the header needs. An array has a length that is written as a
+// number, so the numbers are written where they are used.
 
-    length := strlen(%buffer[0])
-    for ->
-        if length == 0 ->
-            break
-        last := buffer[length - 1]
-        if last not= '\n' and last not= '\r' ->
-            break
-        length -= 1
-    text, _ := utf8_decode(buffer[0:length])
-    return text, true
+/// Reads the file at `path` into `buffer`, from its start, as many bytes as it has up to 4096, which
+/// the buffer must have, and gives how many, and whether the file was opened and read. The memory
+/// that the standard library needs for the path is on the stack of this procedure and is given to
+/// it, as it takes none of its own. The file is closed when the procedure returns.
+read_file :: proc(path: Str, buffer: []Byte) (Int, Bool) ->
+    if length_of(buffer) < 4096 ->
+        return 0, false
+    scratch := [128]Byte { .. = 0 }
+    file, error := mialu.file_open(path, mialu.File_Open_Mode.READ, scratch[0:128])
+    if error not= mialu.File_Error.NONE ->
+        return 0, false
+    defer mialu.file_close(file)
+
+    count : U32 = 0
+    if ReadFile(file.handle, %buffer[0], 4096, %count, nil) == 0 ->
+        return 0, false
+    return cast(Int)count, true
 
 /// Reads a line of the header, `#define MIALU_VERSION_MAJOR 0`, which is the prefix, a name of
 /// five letters, a space and a number, and stores the number in the field of `version` that the
@@ -104,20 +110,32 @@ read_definition :: proc(line: Str, version: ^Version) Bool ->
     version.found += 1
     return true
 
-/// Parses the version that src/version.h says. Gives false when the file cannot be read, and
-/// otherwise gives the version, whose `found` says whether the three numbers were all there.
-parse_header :: proc(version: ^Version) Bool ->
-    file := fopen(HEADER_PATH, "rb")
-    if file == nil ->
-        return false
-    defer fclose(file)
+/// Reads the line that is the bytes from `start` to `end` of `buffer`, without the carriage return
+/// that a header that was written on Windows has before its line feed, which is compared with the
+/// byte as the rune that it is. Bytes that are not valid UTF-8 are a line with no text, since
+/// `utf8_decode` gives the empty string for them.
+read_line :: proc(buffer: []Byte, start: Int, end: Int, version: ^Version) ->
+    line_end := end
+    if line_end > start and buffer[line_end - 1] == '\r' ->
+        line_end -= 1
+    line, _ := utf8_decode(buffer[start:line_end])
+    read_definition(line, version)
 
-    buffer := [128]Byte { .. = 0 }
-    for ->
-        line, is_read := read_line(file, buffer)
-        if not is_read ->
-            break
-        read_definition(line, version)
+/// Parses the version that src/version.h says. Gives false when the file cannot be read, and
+/// otherwise gives the version, whose `found` says whether the three numbers were all there. The
+/// lines are the bytes between the line feeds, and a last line that has none is not one, as the
+/// header ends with one.
+parse_header :: proc(version: ^Version) Bool ->
+    buffer := [4096]Byte { .. = 0 }
+    length, is_read := read_file(HEADER_PATH, buffer[0:4096])
+    if not is_read ->
+        return false
+
+    start := 0
+    for index in 0..<length ->
+        if buffer[index] == '\n' ->
+            read_line(buffer[0:4096], start, index, version)
+            start = index + 1
     return true
 
 /// Whether `text` is a version written as MAJOR.MINOR.PATCH, of the three numbers that are given.
