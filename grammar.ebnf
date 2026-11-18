@@ -400,7 +400,12 @@ procedure_type =
 
 array_type = "[" , ws , [ array_length , ws ] , "]" , ws , element_type ;
 
-array_length = integer_literal | "const" ;
+(* The length of an array is a number, `const`, or an expression that is known when the program is
+   compiled, such as a constant, `[SIZE]Int`, or arithmetic of constants, `[SIZE * 2 + 1]Int`: the
+   compiler works it out and requires it to be an integer that is not below zero. An integer
+   literal alone is the number, and any other expression is told from it only by what follows the
+   literal. *)
+array_length = integer_literal | "const" | expression ;
 
 (* One type, or two or more between parentheses and separated by commas, as in `(Int, Str)`: a
    procedure that returns several values. A single type is never written in parentheses. *)
@@ -722,11 +727,12 @@ subscript = "[" , ws , expression , ws , [ ":" , ws , [ expression , ws ] ] , "]
    elements between braces. The elements are expressions separated by commas, and there may be none.
    They can be on lines of their own, and a comma can come after the last one. A literal can also
    give every element the same value, `[5]Int { .. = 0 }`, whose value is worked out once. Its length
-   must be a number, since `const` is the number of the elements that are written, which the parser
-   checks, as the grammar does not tell a number from `const` by its place. *)
+   must be a number or a constant expression, such as `[SIZE]Int { .. = 0 }`, since `const` is the
+   number of the elements that are written, which the parser checks, as the grammar does not tell a
+   number from `const` by its place. *)
 array_literal =
     "[" , ws , array_length , ws , "]" , ws , element_type , ws , "{" , gap , [ elements , gap ] , "}"
-  | "[" , ws , integer_literal , ws , "]" , ws , element_type , ws , "{" , gap , fill , gap , "}" ;
+  | "[" , ws , ( integer_literal | expression ) , ws , "]" , ws , element_type , ws , "{" , gap , fill , gap , "}" ;
 
 fill = ".." , ws , "=" , ws , expression , [ gap , "," ] ;
 

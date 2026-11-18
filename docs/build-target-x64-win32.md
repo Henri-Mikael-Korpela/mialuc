@@ -91,6 +91,8 @@ A match statement works out its subject once and stores it in a place of its own
 
 ## Arrays and pointers
 
+The length of an array type that is a constant, `[SIZE]Int`, or arithmetic of constants, is worked out by the analysis of the program before the target is built, and is a number in the tree like a written one, so the target does not tell them apart.
+
 An array literal that fills, `[5]Int { .. = 0 }`, works out its value once, which is on the stack of values, and a loop stores its words in each element: `r10` is the address of the element, which moves on by the size of an element with `add`, and `r11` counts the elements that are left down to 0, where the loop ends. The value is taken off the stack after the loop, so an array of no elements stores nothing.
 
 An array lives in the frame of the procedure that has its array literal: each literal has a place of its own there, after the places of the variables before it, where the literal stores its elements one after the other, and its value is the address of the first, `lea` of the place. So a variable of an array type is one word that holds that address, and is defined with an array literal, which is not copied. An element takes 8 bytes for each of its words, except a `Byte`, which takes one byte, so that an array of bytes is as small as its bytes, and is a buffer that the C library can write to through the address of its first element, `%buffer[0]`, which is a `^Byte`. Each literal is rounded up to 8 bytes, so that what comes after it is aligned. An array is made into a slice where one is wanted by putting its length after its address.

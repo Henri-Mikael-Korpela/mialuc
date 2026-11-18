@@ -2955,6 +2955,17 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
                 "joined then.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
+    case SEMANTIC_STATUS_ARRAY_LENGTH_NOT_CONSTANT:
+        fprintf(stderr, "%s:%zu:%zu: the length of an array at '%.*s' must be known when the "
+                "program is compiled: an integer literal, or a constant, or arithmetic of "
+                "them.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case SEMANTIC_STATUS_ARRAY_LENGTH_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the length of an array at '%.*s' must be an integer that is "
+                "not below zero.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
     case SEMANTIC_STATUS_INT_TO_STR_NOT_CONSTANT:
         fprintf(stderr, "%s:%zu:%zu: the argument of 'int_to_str' at '%.*s' must be known when "
                 "the program is compiled: an integer, or a constant of one, because the text is "

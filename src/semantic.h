@@ -71,6 +71,12 @@ typedef enum {
     // variable, because the text of the number is made then. The subject is the first name or
     // number of the expression.
     SEMANTIC_STATUS_INT_TO_STR_NOT_CONSTANT,
+    // The length of an array type, `[SIZE]Int`, is not known when the program is compiled, such as
+    // the name of a variable. The subject is the first name in it.
+    SEMANTIC_STATUS_ARRAY_LENGTH_NOT_CONSTANT,
+    // The length of an array type is a constant that is not an integer, or is below zero, such as
+    // `[1.5]Int` and `[0 - 1]Int`. The subject is the first name in it.
+    SEMANTIC_STATUS_ARRAY_LENGTH_INVALID,
     // A constant that is defined in terms of itself. The subject is the name where the circle
     // closes.
     SEMANTIC_STATUS_CONSTANT_CYCLE,

@@ -2812,8 +2812,10 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
     // that is a number, because `const` is the number of the elements that are written.
     parse_skip_indentation(parser);
     if (parse_token_current(parser)->kind == TOKEN_KIND_DOT_DOT) {
-        if (parser->nodes[type].payload.array_type.length_kind != AST_ARRAY_LENGTH_FIXED) {
-            return parse_fail(parser, STR("a number as the length of an array that '..' fills"));
+        if (parser->nodes[type].payload.array_type.length_kind != AST_ARRAY_LENGTH_FIXED &&
+            parser->nodes[type].payload.array_type.length_kind != AST_ARRAY_LENGTH_CONSTANT) {
+            return parse_fail(parser,
+                              STR("a number or a constant as the length of an array that '..' fills"));
         }
         parse_token_advance(parser);
         if (not parse_token_expect(parser, TOKEN_KIND_EQUALS, STR("'=' after '..'"))) {
@@ -3235,9 +3237,10 @@ static bool parse_struct_type_union_tag(Parser *parser, Ast_Node_Index field,
 
 /**
  * Parses a type: a name, such as `Int`, a pointer type, such as `^Int`, or an array type, which is
- * the type of the elements after brackets: `[3]Int` is an array of three, `[const]Int` is an array
- * whose length is the number of elements in the literal that it starts, and `[]Int` is an array
- * slice. The type of the elements is a name or a pointer type, and so is the type that a pointer
+ * the type of the elements after brackets: `[3]Int` is an array of three, `[SIZE * 2]Int` is an
+ * array whose length is a constant expression, which is a child after the type of the elements,
+ * `[const]Int` is an array whose length is the number of elements in the literal that it starts, and
+ * `[]Int` is an array slice. The type of the elements is a name or a pointer type, and so is the type that a pointer
  * points to: `[]^Int` is an array slice of pointers, while a pointer to an array is not a type.
  * `expected` says what the caller wants, for the error that is recorded when the current token
  * starts no type.
@@ -3260,7 +3263,14 @@ static Ast_Node_Index parse_type(Parser *parser, Str expected) {
     Token const *length = parse_token_current(parser);
     Ast_Array_Length_Kind length_kind = AST_ARRAY_LENGTH_OMITTED;
     int64_t length_value = 0;
-    if (length->kind == TOKEN_KIND_INTEGER_LITERAL) {
+    Ast_Node_Index length_expression = AST_NODE_INDEX_NONE;
+    // A literal alone is the length itself, and anything else between the brackets is an expression
+    // that the analysis works out: a name, or arithmetic with names, such as `SIZE * 2`.
+    bool is_literal_alone = length->kind == TOKEN_KIND_INTEGER_LITERAL &&
+                            parser->token_index + 1 < parser->token_count &&
+                            parser->tokens[parser->token_index + 1].kind ==
+                                TOKEN_KIND_BRACKET_RIGHT;
+    if (is_literal_alone) {
         length_kind = AST_ARRAY_LENGTH_FIXED;
         length_value = length->payload.integer_literal.value;
         parse_token_advance(parser);
@@ -3268,7 +3278,11 @@ static Ast_Node_Index parse_type(Parser *parser, Str expected) {
         length_kind = AST_ARRAY_LENGTH_INFERRED;
         parse_token_advance(parser);
     } else if (length->kind != TOKEN_KIND_BRACKET_RIGHT) {
-        return parse_fail(parser, STR("an array length, 'const' or ']'"));
+        length_kind = AST_ARRAY_LENGTH_CONSTANT;
+        length_expression = parse_expression(parser);
+        if (length_expression == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
     }
     parser->nodes[array_type].payload.array_type.length = length_value;
     parser->nodes[array_type].payload.array_type.length_kind = length_kind;
@@ -3281,7 +3295,11 @@ static Ast_Node_Index parse_type(Parser *parser, Str expected) {
     if (element == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
+    // The type of the elements is the first child, whatever the length is.
     parse_node_append_child(parser, array_type, element);
+    if (length_expression != AST_NODE_INDEX_NONE) {
+        parse_node_append_child(parser, array_type, length_expression);
+    }
 
     return array_type;
 }

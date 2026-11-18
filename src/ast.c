@@ -380,6 +380,9 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             break;
         case AST_NODE_TYPE_ARRAY_TYPE:
             switch (node.payload.array_type.length_kind) {
+            case AST_ARRAY_LENGTH_CONSTANT:
+                printf("ARRAY_TYPE constant %" PRId64 "\n", node.payload.array_type.length);
+                break;
             case AST_ARRAY_LENGTH_FIXED:
                 printf("ARRAY_TYPE %" PRId64 "\n", node.payload.array_type.length);
                 break;

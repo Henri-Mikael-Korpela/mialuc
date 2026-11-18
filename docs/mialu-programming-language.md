@@ -1527,7 +1527,19 @@ When the length of the type is the keyword `const` instead of a number, the leng
 a := [const]Int { 1, 2, 3, 4, 5 }
 ```
 
-`a` above is of type `[5]Int`, which is deduced from the value like the type of any variable. A literal that has a number as its length must have exactly that many elements, so `[3]Int { 1, 2 }` is an error. A literal must have a number or `const` as its length, so `[]Int { 1, 2 }` is an error: that is the type of an array slice, which has no elements of its own, see [Array slices](#array-slices). The elements are expressions of the type of the elements, and there may be none, so `[const]Int { }` is an array of length zero. The elements can be on lines of their own, and a comma can come after the last one:
+The length can also be a constant, or arithmetic of constants, so a length that is written once is not repeated as a number where it is used, and an array that is `SIZE` bytes is `[SIZE]Byte`:
+
+```
+SIZE :: 4096
+HEADER : Int : 16
+
+buffer := [SIZE]Byte { .. = 0 }
+packet : [SIZE + HEADER]Byte = [SIZE + HEADER]Byte { .. = 0 }
+```
+
+The expression is worked out when the program is compiled, as the value of a [constant](#constants) is, so it can use constants and literals, the operators `+`, `-`, `*` and `/`, and nothing that is known only when the program runs: the name of a variable or a parameter, or a call, is an error that says that the length must be known when the program is compiled. It is an integer, of the type `Int`, `I32`, `I64`, `U32`, `U64` or `Byte` or an untyped one, and is not below zero, so `[SIZE - 5]Int` is an error when `SIZE` is 4, and so is a length that is a float. After that the length is a number like any other: `[SIZE]Int { 1, 2 }` is an error when `SIZE` is 4, because the literal has another number of elements than its length, and `length_of` of the array is `SIZE`, a number that is known when the program is compiled.
+
+`a` above is of type `[5]Int`, which is deduced from the value like the type of any variable. A literal that has a number as its length must have exactly that many elements, so `[3]Int { 1, 2 }` is an error. A literal must have a number, a constant or `const` as its length, so `[]Int { 1, 2 }` is an error: that is the type of an array slice, which has no elements of its own, see [Array slices](#array-slices). The elements are expressions of the type of the elements, and there may be none, so `[const]Int { }` is an array of length zero. The elements can be on lines of their own, and a comma can come after the last one:
 
 ```
 names := [const]Str {
@@ -1544,7 +1556,7 @@ buffer := [64]Byte { .. = 0 }
 flags := [8]Bool { .. = true }
 ```
 
-`zeros` has the five elements that its length says, every one of them 0, and `buffer` has 64 bytes that are 0. The `..` means the whole range of the array, which is why the length must be written as a number: `const` is the number of the elements that are written, so with only `.. = 0` it would have none to count, and `[const]Int { .. = 0 }` is an error. The value is an expression of the type of the elements, and it is worked out once, not once for each element, so `[4]Int { .. = next() }` calls `next` one time and gives all four elements what it returned. Each element is a copy, so a struct or a string that is given is put in every element, and changing one element changes no other. The length can be 0, which has no elements, and the literal, `.. = value` and a comma after it, can be on lines of its own, as the elements of any other literal can. A literal that fills has nothing but `.. = value` between its braces: `{ .. = 0, 1 }` is an error, and so is `{ .. 0 }`, which has no `=`.
+`zeros` has the five elements that its length says, every one of them 0, and `buffer` has 64 bytes that are 0. The `..` means the whole range of the array, which is why the length must be written as a number or a constant: `const` is the number of the elements that are written, so with only `.. = 0` it would have none to count, and `[const]Int { .. = 0 }` is an error. The value is an expression of the type of the elements, and it is worked out once, not once for each element, so `[4]Int { .. = next() }` calls `next` one time and gives all four elements what it returned. Each element is a copy, so a struct or a string that is given is put in every element, and changing one element changes no other. The length can be 0, which has no elements, and the literal, `.. = value` and a comma after it, can be on lines of its own, as the elements of any other literal can. A literal that fills has nothing but `.. = value` between its braces: `{ .. = 0, 1 }` is an error, and so is `{ .. 0 }`, which has no `=`.
 
 A variable of an array type is defined with an array literal, and not with another array or a call: `b := a` is an error, because an array is not copied by a definition. The type can be written as well, as long as the literal has the number of elements that it says:
 

@@ -46,6 +46,7 @@ typedef struct {
 
 static void             semantic_address_of_resolve (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index address_of);
+static bool             semantic_array_lengths_resolve(Semantic_Analyzer *analyzer);
 static bool             semantic_attributes_check   (Semantic_Analyzer *analyzer,
                                                      Ast_Node_Index node, Str known,
                                                      Semantic_Status unknown_status,
@@ -170,8 +171,8 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root, size_t 
             Ast_Node_Index value = node_elements[definition].first_child;
             if (node_elements[value].node_type == AST_NODE_TYPE_PROCEDURE) {
                 is_ok = semantic_procedure_resolve(&analyzer, definition);
-            } else if (node_elements[value].node_type != AST_NODE_TYPE_STRUCT_TYPE &&
-                       node_elements[value].node_type != AST_NODE_TYPE_ENUM_TYPE) {
+            } else if (node_elements[value].node_type != AST_NODE_TYPE_ENUM_TYPE) {
+                // A struct has the names in the lengths of the arrays that its fields are.
                 is_ok = semantic_definition_names_resolve(&analyzer, definition);
             }
         } else if (node_elements[definition].node_type ==
@@ -185,6 +186,9 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root, size_t 
     // is defined below it.
     if (is_ok) {
         is_ok = semantic_constants_check(&analyzer);
+    }
+    if (is_ok) {
+        is_ok = semantic_array_lengths_resolve(&analyzer);
     }
 
     // Nothing is handed out when there was an error, because the tables are only partly filled.
@@ -376,6 +380,53 @@ static Ast_Node_Index semantic_definition_end(Semantic_Analyzer const *analyzer,
         end += 1;
     }
     return end;
+}
+
+/**
+ * Works out the length of each array type that has a constant expression between its brackets, which
+ * is its second child, and gives the type that length as if it had been written as a number, so
+ * that no target has to know the other. The expression is evaluated here, and not only where the
+ * expressions of a procedure are, because the type of a field of a struct is not in a procedure.
+ * The length is an integer that is not below zero. Returns false after it recorded an error.
+ */
+static bool semantic_array_lengths_resolve(Semantic_Analyzer *analyzer) {
+    for (Ast_Node_Index current = 0; current < analyzer->node_count; current += 1) {
+        Ast_Node *node = &analyzer->nodes[current];
+        if (node->node_type != AST_NODE_TYPE_ARRAY_TYPE ||
+            node->payload.array_type.length_kind != AST_ARRAY_LENGTH_CONSTANT) {
+            continue;
+        }
+
+        Ast_Node_Index expression = analyzer->nodes[node->first_child].next_sibling;
+        assert(expression != AST_NODE_INDEX_NONE);
+        // The definition that the type is part of, which a message about a constant names.
+        Ast_Node_Index definition = analyzer->module;
+        for (Ast_Node_Index child = analyzer->nodes[analyzer->module].first_child;
+             child != AST_NODE_INDEX_NONE && child <= current;
+             child = analyzer->nodes[child].next_sibling) {
+            definition = child;
+        }
+        Constant_Value value = constant_evaluate(analyzer->nodes, analyzer->node_count,
+                                                 analyzer->bindings, analyzer->constants,
+                                                 &analyzer->text, expression);
+        Str subject = semantic_constant_subject(analyzer, expression, definition);
+        if (value.status == CONSTANT_STATUS_NOT_CONSTANT) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_ARRAY_LENGTH_NOT_CONSTANT, subject);
+        }
+        if (value.status != CONSTANT_STATUS_OK) {
+            return semantic_constant_fail(analyzer, value, definition);
+        }
+        bool is_integer = value.type == CONSTANT_TYPE_UNTYPED_INTEGER ||
+                          value.type == CONSTANT_TYPE_INT || value.type == CONSTANT_TYPE_I32 ||
+                          value.type == CONSTANT_TYPE_I64 || value.type == CONSTANT_TYPE_U32 ||
+                          value.type == CONSTANT_TYPE_U64 || value.type == CONSTANT_TYPE_BYTE;
+        if (not is_integer || value.integer < 0) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_ARRAY_LENGTH_INVALID, subject);
+        }
+        node->payload.array_type.length = value.integer;
+        node->payload.array_type.length_kind = AST_ARRAY_LENGTH_FIXED;
+    }
+    return true;
 }
 
 /**

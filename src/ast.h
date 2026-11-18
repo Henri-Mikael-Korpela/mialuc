@@ -104,6 +104,12 @@ typedef enum {
 
 // How the length of an array type is given. Alphabetical, because nothing depends on the order.
 typedef enum {
+    // A constant expression between the brackets that is not just an integer literal, such as a
+    // name, as in `[SIZE]Int` and `[SIZE * 2]Int`. The expression is the second child of the array
+    // type, after the type of the elements. The analysis works the length out, and gives the type
+    // the kind `AST_ARRAY_LENGTH_FIXED` with the length in the payload, so a target only meets
+    // this kind in a program that the analysis did not accept.
+    AST_ARRAY_LENGTH_CONSTANT,
     // An integer literal between the brackets, as in `[5]Int`. It is in the payload.
     AST_ARRAY_LENGTH_FIXED,
     // The keyword `const` between the brackets, as in `[const]Int`: the length is the number of
