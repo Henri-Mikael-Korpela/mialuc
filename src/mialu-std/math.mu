@@ -1,6 +1,6 @@
 /// Numbers: the smallest and the largest of two, and a number held between two others. They work
 /// on every target, as they only use the language itself.
-package mialu
+package mu
 
 /// Gives the smaller of `a` and `b`.
 min :: proc(a: Int, b: Int) Int ->

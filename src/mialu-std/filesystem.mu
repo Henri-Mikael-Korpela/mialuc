@@ -3,7 +3,7 @@
 /// and every procedure takes the memory that it needs from its caller, so nothing here allocates,
 /// and nothing is shared between threads unless the caller shares it. A buffer, a cursor or a lock
 /// is built on top of a `File` by whoever needs one.
-package mialu
+package mu
 
 import foreign kernel32 "system:Kernel32.lib"
 
@@ -14,6 +14,8 @@ foreign kernel32 #(default_calling_convention("system")) ->
     CloseHandle :: proc(handle: Int) I32 -> ...
     CreateFileW :: proc(file_name: ^Byte, desired_access: U32, share_mode: U32, security_attributes: ^Byte, creation_disposition: U32, flags_and_attributes: U32, template_file: Int) Int -> ...
     GetLastError :: proc() U32 -> ...
+    GetStdHandle :: proc(standard_handle: I32) Int -> ...
+    ReadFile :: proc(file: Int, buffer: ^Byte, bytes_to_read: I32, bytes_read: ^U32, overlapped: ^Byte) I32 -> ...
     MultiByteToWideChar :: proc(code_page: U32, flags: U32, text: C_Str, text_length: I32, wide_text: ^Byte, wide_length: I32) I32 -> ...
 
 CP_UTF8 : U32 : 65001
@@ -32,8 +34,18 @@ FILE_ATTRIBUTE_NORMAL : U32 : 0x80
 ERROR_FILE_NOT_FOUND : U32 : 2
 ERROR_PATH_NOT_FOUND : U32 : 3
 ERROR_ACCESS_DENIED : U32 : 5
+ERROR_INVALID_HANDLE : U32 : 6
 ERROR_SHARING_VIOLATION : U32 : 32
+ERROR_BROKEN_PIPE : U32 : 109
 ERROR_INSUFFICIENT_BUFFER : U32 : 122
+
+/// The standard input is asked for with this number, which is the `DWORD` -10, so `GetStdHandle` takes
+/// it as an `I32`, which has the same bits.
+STD_INPUT_HANDLE :: -10
+
+/// The most bytes that one read asks the system for, which is a `DWORD` that is passed as an `I32`,
+/// so it is below 2 GiB. A buffer that is larger is read in parts.
+READ_BYTES_MAX :: 1073741824
 
 /// What the system gives for a file that could not be opened. The handle is -1, which is not a
 /// handle that a file has.
@@ -74,7 +86,7 @@ File_Error :: enum Int ->
     PATH_INVALID
     /// The buffer for the path was too small. See `WIDE_PATH_BYTES_PER_BYTE`.
     BUFFER_TOO_SMALL
-    /// The file given is not an open one.
+    /// The file given is not an open one, or is one that was closed.
     FILE_INVALID
     /// Anything else that the system says.
     OTHER
@@ -87,6 +99,8 @@ file_error_from :: proc(code: U32) File_Error ->
             return .NOT_FOUND
         case ERROR_ACCESS_DENIED ->
             return .ACCESS_DENIED
+        case ERROR_INVALID_HANDLE ->
+            return .FILE_INVALID
         case ERROR_SHARING_VIOLATION ->
             return .IN_USE
         case ERROR_INSUFFICIENT_BUFFER ->
@@ -146,3 +160,58 @@ file_close :: proc(file: File) File_Error ->
     if CloseHandle(file.handle) == 0 ->
         return file_error_from(GetLastError())
     return .NONE
+
+/// The file that the program reads its input from, which is the console, or what the input was
+/// redirected from: a file or a pipe. It is not opened by the program and is not closed by it. A
+/// program that has no input gets a file that is not open, which `file_read` answers.
+file_standard_input :: proc() File ->
+    handle := GetStdHandle(STD_INPUT_HANDLE)
+    if handle == 0 ->
+        return File { handle = INVALID_HANDLE_VALUE }
+    return File { handle = handle }
+
+/// Reads from `file` into `buffer`, which the caller owns, as many bytes as the system gives at
+/// once, which is at most as many as the buffer has, and gives how many with `File_Error.NONE`.
+/// Reading goes on from where the last read of the file stopped, and the file has no buffer of its
+/// own, so nothing is read past what was asked for. Zero bytes is the end of the file, or the end of
+/// the input when the file is a pipe that was closed, or a console that was given the end of the
+/// input, which is Ctrl+Z and Enter on Windows. A console gives a line at a time, so one read of it
+/// may give fewer bytes than the buffer has even when more are coming, and the buffer is not
+/// changed beyond the bytes that were given. A buffer with no bytes asks for none and gets none.
+file_read :: proc(file: File, buffer: []Byte) (Int, File_Error) ->
+    if file.handle == INVALID_HANDLE_VALUE ->
+        return 0, .FILE_INVALID
+    if length_of(buffer) == 0 ->
+        return 0, .NONE
+
+    bytes_to_read := length_of(buffer)
+    if bytes_to_read > READ_BYTES_MAX ->
+        bytes_to_read = READ_BYTES_MAX
+    bytes_read : U32 = 0
+    if ReadFile(file.handle, %buffer[0], int_to_i32(bytes_to_read), %bytes_read, nil) == 0 ->
+        code := GetLastError()
+        // The other end of a pipe that is closed is the end of the input, as it is for a file.
+        if code == ERROR_BROKEN_PIPE ->
+            return 0, .NONE
+        return 0, file_error_from(code)
+    return cast(Int)bytes_read, .NONE
+
+/// Reads the whole file at `path` into `buffer`, from its start, and gives how many bytes it has
+/// with `File_Error.NONE`, or the error and the bytes that were read before it. The file is opened,
+/// read until the end or until the buffer is full, and closed, so what is left of a file that is
+/// larger than the buffer is not read. `wide_path` is the memory that `file_open` needs for the path.
+file_read_all :: proc(path: Str, wide_path: []Byte, buffer: []Byte) (Int, File_Error) ->
+    file, open_error := file_open(path, .READ, wide_path)
+    if open_error not= .NONE ->
+        return 0, open_error
+    defer file_close(file)
+
+    total := 0
+    for total < length_of(buffer) ->
+        count, error := file_read(file, buffer[total:])
+        if error not= .NONE ->
+            return total, error
+        if count == 0 ->
+            break
+        total += count
+    return total, .NONE

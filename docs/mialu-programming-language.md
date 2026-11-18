@@ -132,10 +132,10 @@ import "mu:filesystem"
 
 main :: proc() Int ->
     buffer := [64]Byte { .. = 0 }
-    file, error := mialu.file_open("data.txt", mialu.File_Open_Mode.READ, buffer[0:64])
-    if error not= mialu.File_Error.NONE ->
+    file, error := mu.file_open("data.txt", mu.File_Open_Mode.READ, buffer[0:64])
+    if error not= mu.File_Error.NONE ->
         return 1
-    return cast(Int)mialu.file_close(file)
+    return cast(Int)mu.file_close(file)
 ```
 
 The text in quotes is the vendor, a colon and the path under the vendor. The vendor is the library that the file is in: `mu` is the standard library of Mialu, and it is the only vendor for now. The path is the file below the directory of the library, without `.mu`, with names and slashes, so `mu:filesystem` is the file `filesystem.mu` and `mu:text/ascii` would be `text/ascii.mu`. A path that has anything else, such as a dot, is an error, and so is a vendor that is not known and a file that is not there. `import` is a [keyword](#reserved-words). The other kind of import, `import foreign`, brings in procedures that are not written in Mialu, see [Foreign procedures](#foreign-procedures).
@@ -146,9 +146,9 @@ The standard library is source code, and the compiler reads it when a program im
 
 ### Packages and names
 
-All the definitions of the imported file are part of the program, but they are used with the name of their package, written before the name, with a dot and nothing between: `file_open` that is defined in a file whose package is `mialu` is `mialu.file_open` everywhere outside of that file. That goes for every kind of definition: a procedure, a constant, a global variable, a struct and an enum, and so a type is written as `mialu.File`, a member of an enum as `mialu.File_Error.NOT_FOUND`, and a struct literal as `mialu.File { handle = 5 }`. The name of the package is the one that the imported file has in its [package definition](#packages), and it is not the name of the file, so every file of the standard library has `mialu`, which makes the definitions of all of them `mialu.` something, and no two may have the same name.
+All the definitions of the imported file are part of the program, but they are used with the name of their package, written before the name, with a dot and nothing between: `file_open` that is defined in a file whose package is `mu` is `mu.file_open` everywhere outside of that file. That goes for every kind of definition: a procedure, a constant, a global variable, a struct and an enum, and so a type is written as `mu.File`, a member of an enum as `mu.File_Error.NOT_FOUND`, and a struct literal as `mu.File { handle = 5 }`. The name of the package is the one that the imported file has in its [package definition](#packages), and it is not the name of the file, so every file of the standard library has `mu`, which makes the definitions of all of them `mu.` something, and no two may have the same name.
 
-The program's own names are never the names of a package, and the other way round, so a program that defines a `File` of its own, or `min`, or `CP_UTF8`, has no conflict with the library that has the same, and uses its own without the package before it. Inside the file that defines it a definition is written with its plain name, as everywhere else. A name of a package is not found without the package: `file_open` alone, where `mialu.file_open` is meant, is an unknown name. A parameter or a variable of a program may have the name of any definition of a package, which is not a definition of the program, but one of an imported file may not have the name of a definition of the same file, as in the program.
+The program's own names are never the names of a package, and the other way round, so a program that defines a `File` of its own, or `min`, or `CP_UTF8`, has no conflict with the library that has the same, and uses its own without the package before it. Inside the file that defines it a definition is written with its plain name, as everywhere else. A name of a package is not found without the package: `file_open` alone, where `mu.file_open` is meant, is an unknown name. A parameter or a variable of a program may have the name of any definition of a package, which is not a definition of the program, but one of an imported file may not have the name of a definition of the same file, as in the program.
 
 The files that an imported file imports are imported too, once, before it, in the order that they are written, and a file is only read once however many files import it. Files that import each other, directly or through others, are an error. There are at most 32 files, and the imports go at most 8 files deep.
 

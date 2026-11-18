@@ -39,7 +39,7 @@
      - The vendor of an import is `mu`, and its path has names and slashes only. The file must
        exist in the library, the files that import each other must not make a loop, and a name of
        a package must be written with the name of the package before it and a dot, such as
-       `mialu.file_open`, which the grammar takes as a field of a name. Which package a name is in is
+       `mu.file_open`, which the grammar takes as a field of a name. Which package a name is in is
        for the compiler, which puts the files together before it looks up the names.
      - A program that has a foreign block must have one `import foreign` of the target of the
        block above the first block of that target, and no more than one for each target. The
@@ -215,7 +215,7 @@ package_definition = "package" , required_space , name , ws , line_end ;
 (* `import "mu:filesystem"` brings the definitions of a source file of a library into the program.
    The text in quotes is the vendor, a colon and the path under the vendor, without `.mu`, in names
    and slashes: `mu` is the standard library of Mialu. The definitions are used with the name of the
-   package of the file before them and a dot, such as `mialu.file_open`, which is a name like any
+   package of the file before them and a dot, such as `mu.file_open`, which is a name like any
    other for the grammar. Like a definition it starts in the first column. *)
 import_statement = "import" , ws , string_literal , ws , line_end ;
 
@@ -765,7 +765,7 @@ gap = { " " | "\t" | "\r" | "\n" | comment | "\n" , ws , documentation_comment }
 call = qualified_name , ws , "(" , ws , [ arguments , ws ] , ")" ;
 
 (* A name, or a name with the name of a package before it and a dot, which is how a definition of a
-   file that is imported is written: `mialu.file_open`. The dot has no space around it. *)
+   file that is imported is written: `mu.file_open`. The dot has no space around it. *)
 qualified_name = [ name , "." ] , name ;
 
 arguments = expression , { ws , "," , ws , expression } ;

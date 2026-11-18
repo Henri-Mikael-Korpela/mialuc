@@ -653,7 +653,7 @@ static Str package_mangle_text(Package_Mangling *mangling, Str text) {
  * Gives the names of the definitions of the file whose nodes are from `start` to `end`, whose
  * module is the node `start`, the name of the package before them, and the same in each reference
  * to one in the file: a name, a call, a type, and a struct literal. So the file keeps calling
- * `file_open` that, while every other file, and the program, calls it `mialu.file_open`. A
+ * `file_open` that, while every other file, and the program, calls it `mu.file_open`. A
  * parameter, a variable or an iterator with the name of a definition would be taken for it, so it
  * is an error, as it is in the program. Returns the status, and the name in `subject`.
  */

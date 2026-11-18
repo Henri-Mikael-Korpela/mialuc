@@ -19,8 +19,8 @@
  *
  * The files that a file imports are parsed before it, into the same buffer of nodes, and the
  * definitions of every imported file are part of the program, but their names are the name of the
- * package, a dot and the name that the definition has, so that `file_open` of the package `mialu`
- * is `mialu.file_open` to the program that imports it, and to every other package. Inside the
+ * package, a dot and the name that the definition has, so that `file_open` of the package `mu`
+ * is `mu.file_open` to the program that imports it, and to every other package. Inside the
  * file that defines it, the name is written as it is, and the files that are put together stay
  * apart in what they call things, so that a name of the program, which does not have a package
  * before it, cannot be one of a package. The package name is in the source as three tokens, the
