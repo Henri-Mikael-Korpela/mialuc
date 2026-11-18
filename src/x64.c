@@ -4677,8 +4677,10 @@ static void x64_string_length_write(X64_Builder *builder, int32_t place) {
  * one at `high`. The string is not copied, it views bytes of the string that it is a slice of. The
  * bounds are walked to from the start like the index of a subscript, see `x64_utf8_skip_write`,
  * and it traps unless `low` is not above `high`, which is an unsigned comparison, so that a negative
- * bound traps too, and `high` is not above the number of characters. Returns false after it
- * recorded an error.
+ * bound traps too, and `high` is not above the number of characters. A slice that has no `high`,
+ * `s[low:]`, has no word for it on the stack and goes to the end of the string, so it only needs
+ * the walk to `low`, which traps unless `low` is not above the number of characters. A slice that
+ * has no `low` has a literal of 0 for it. Returns false after it recorded an error.
  */
 static bool x64_string_slice_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
     Ast_Node_Index node = frame->node;
@@ -4695,10 +4697,13 @@ static bool x64_string_slice_write(X64_Builder *builder, X64_Expression_Frame co
     int32_t string = x64_stack_displacement(builder, frame->stack_start, 2);
     int32_t low = x64_stack_displacement(builder, frame->stack_start + 2, 1);
     int32_t high = x64_stack_displacement(builder, frame->stack_start + 3, 1);
+    bool is_end_omitted = builder->nodes[node].payload.slice.is_end_omitted;
     x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, low);
-    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, high);
-    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
-    x64_write_trap_unless(builder, X64_CONDITION_BELOW_EQUAL);
+    if (not is_end_omitted) {
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, high);
+        x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+        x64_write_trap_unless(builder, X64_CONDITION_BELOW_EQUAL);
+    }
 
     x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R10, X64_REGISTER_RBP, string);
     x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R11, X64_REGISTER_RBP,
@@ -4708,10 +4713,15 @@ static bool x64_string_slice_write(X64_Builder *builder, X64_Expression_Frame co
     // from there over the characters up to `high`.
     x64_utf8_skip_write(builder);
     x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_R10, X64_REGISTER_R9);
-    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, high);
-    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, low);
-    x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_RCX, X64_REGISTER_RAX);
-    x64_utf8_skip_write(builder);
+    if (is_end_omitted) {
+        // The slice ends where the string does, which is the address after its last byte.
+        x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_R11, X64_REGISTER_R10);
+    } else {
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, high);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, low);
+        x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_RCX, X64_REGISTER_RAX);
+        x64_utf8_skip_write(builder);
+    }
     // The number of bytes is the distance from the first character to the end of the last one.
     x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_R9, X64_REGISTER_R10);
 
@@ -4736,11 +4746,6 @@ static bool x64_slice_write(X64_Builder *builder, X64_Expression_Frame const *fr
     Ast_Node_Index sequence = builder->nodes[node].first_child;
     X64_Type type = x64_expression_type(builder, sequence);
     if (type.kind == X64_TYPE_KIND_STR) {
-        // The bounds of a string are both written for now.
-        if (builder->nodes[node].payload.slice.is_first_omitted ||
-            builder->nodes[node].payload.slice.is_end_omitted) {
-            return x64_fail_unsupported(builder);
-        }
         return x64_string_slice_write(builder, frame);
     }
     if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {

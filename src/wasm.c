@@ -423,7 +423,8 @@ static void            wasm_string_subscript_write            (Wasm_Builder *bui
 static void            wasm_string_length_write               (Wasm_Builder *builder,
                                                                Ast_Node_Index procedure);
 static void            wasm_string_slice_write                (Wasm_Builder *builder,
-                                                               Ast_Node_Index procedure);
+                                                               Ast_Node_Index procedure,
+                                                               bool is_end_omitted);
 static bool            wasm_comparison_is_of_bytes            (Wasm_Builder const *builder,
                                                                Ast_Node_Index comparison);
 static bool            wasm_comparison_is_of_strings          (Wasm_Builder const *builder,
@@ -6743,8 +6744,11 @@ static void wasm_string_subscript_write(Wasm_Builder *builder, Ast_Node_Index pr
  * is a slice of. The bounds are walked to from the start like the index of a subscript, see
  * `wasm_utf8_skip_write`, and it traps unless `low` is not above `high`, which is an unsigned
  * comparison, so that a negative bound traps too, and `high` is not above the number of characters.
+ * With `is_end_omitted`, `s[low:]`, the stack has no `high`, and the slice goes to the end of the
+ * string, so only `low` is walked to, which traps when it is above the number of characters.
  */
-static void wasm_string_slice_write(Wasm_Builder *builder, Ast_Node_Index procedure) {
+static void wasm_string_slice_write(Wasm_Builder *builder, Ast_Node_Index procedure,
+                                    bool is_end_omitted) {
     Wasm_Writer *writer = &builder->writer;
     size_t next = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
     size_t end = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_SECOND);
@@ -6752,6 +6756,27 @@ static void wasm_string_slice_write(Wasm_Builder *builder, Ast_Node_Index proced
     size_t low = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_LOW);
     size_t high = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_HIGH);
     size_t count = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_TEMPORARY_64);
+
+    if (is_end_omitted) {
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, low);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, next);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+        wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, low);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, count);
+        wasm_utf8_skip_write(builder, next, end, count);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, next);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, start);
+        // The address of the character at `low`, and the bytes from it to the end of the string.
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, start);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, start);
+        wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+        return;
+    }
 
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, high);
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, low);
@@ -7399,12 +7424,7 @@ static bool wasm_build_code_section_body_slice(Wasm_Builder *builder, Ast_Node_I
     }
 
     if (base_type.kind == WASM_VALUE_TYPE_STR) {
-        // The bounds of a string are both written for now.
-        if (builder->nodes[slice].payload.slice.is_first_omitted || is_end_omitted) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
-                             wasm_expression_subject(builder, definition, base));
-        }
-        wasm_string_slice_write(builder, procedure);
+        wasm_string_slice_write(builder, procedure, is_end_omitted);
         return true;
     }
     if (is_end_omitted) {
