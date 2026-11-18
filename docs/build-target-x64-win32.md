@@ -4,6 +4,10 @@ The `x64-win32` target of `mialuc build` writes an executable file for Windows o
 
 The programs in [test-code/x64](../test-code/x64) are for this target.
 
+## Imports
+
+The definitions of the files that a program [imports](mialu-programming-language.md#imports) are built like the program's own, with the names that they have outside of their file: the name of the package, a dot and the name of the definition, which the assembly shows as `.mialu.file_open`. A foreign procedure of an imported file is imported from the library under the name that it has without the package, as `CreateFileW` and not `mialu.CreateFileW`, because that is the name that the library has it by. A debug build has no lines for the procedures of the imported files, whose places are in other source files than the one that the debug information is about.
+
 ## Foreign procedures
 
 A foreign procedure is declared in a `foreign libc` block, or in the block of a library of the system, which an `import foreign kernel32 "system:Kernel32.lib"` gives a name to, see [Foreign procedures](mialu-programming-language.md#foreign-procedures).

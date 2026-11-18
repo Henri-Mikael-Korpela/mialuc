@@ -424,6 +424,7 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
     case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_FOREIGN_BODY:
     case AST_NODE_TYPE_FOREIGN_IMPORT:
+    case AST_NODE_TYPE_IMPORT:
     case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_LABEL:

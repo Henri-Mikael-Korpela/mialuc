@@ -119,7 +119,37 @@ Str process_path_absolute(char const *path, Array_Slice buffer) {
     return str_make(buffer.elements, length);
 }
 
+Str process_executable_directory(Array_Slice buffer) {
+    assert(buffer.elements != NULL);
+
+    DWORD capacity = (DWORD)buffer.length;
+    if (buffer.length > MAXDWORD) {
+        capacity = MAXDWORD;
+    }
+    // The length does not count the zero. A path that does not fit is cut, and the length is then
+    // the capacity.
+    DWORD length = GetModuleFileNameA(NULL, buffer.elements, capacity);
+    if (length == 0 || length >= capacity) {
+        return STR_EMPTY;
+    }
+    char *bytes = buffer.elements;
+    while (length > 0 && bytes[length - 1] != '\\' &&bytes[length - 1] != '/') {
+        length -= 1;
+    }
+    // Without the separator, so that the directory can be written like any other.
+    if (length > 0) {
+        length -= 1;
+    }
+    return str_make(bytes, length);
+}
+
 #else
+
+Str process_executable_directory(Array_Slice buffer) {
+    assert(buffer.elements != NULL);
+
+    return STR_EMPTY;
+}
 
 Process_Result process_run_executable(Array_Slice program) {
     assert(program.elements != NULL);

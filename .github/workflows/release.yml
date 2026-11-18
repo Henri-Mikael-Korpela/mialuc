@@ -77,7 +77,18 @@ jobs:
         run: |
           mkdir "mialuc-$GITHUB_REF_NAME"
           cp build/mialuc.exe LICENSE README.md "mialuc-$GITHUB_REF_NAME/"
+          # The standard library is source code that the compiler reads, as `lib` next to it.
+          cp -r src/mialu-std "mialuc-$GITHUB_REF_NAME/lib"
           7z a "mialuc-$GITHUB_REF_NAME-win-x64.zip" "mialuc-$GITHUB_REF_NAME"
+
+      - name: The package finds its standard library
+        run: |
+          # The directory of the project that the compiler was built from is moved away, so that
+          # only the directory `lib` next to the compiler in the package can be where it is found.
+          mv src/mialu-std src/mialu-std-moved
+          "./mialuc-$GITHUB_REF_NAME/mialuc.exe" build --target x64-win32 -o out/imports.exe test-code/x64/imports.mu
+          "./mialuc-$GITHUB_REF_NAME/mialuc.exe" build --target wasm -o out/imports.wasm test-code/wasm/imports.mu
+          mv src/mialu-std-moved src/mialu-std
 
       - uses: actions/upload-artifact@v4
         with:

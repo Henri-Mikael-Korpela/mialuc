@@ -1484,8 +1484,8 @@ static size_t x64_import_name_offset(X64_Builder const *builder, size_t position
     size_t offset = builder->layout.names_offset + x64_align_up(2 + sizeof(X64_EXIT_NAME), 2);
     for (size_t i = 0; i < position; i += 1) {
         if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN) {
-            Str name = builder->nodes[builder->constants[i].definition]
-                           .payload.constant_definition.name;
+            Str name = ast_foreign_symbol(builder->nodes[builder->constants[i].definition]
+                                              .payload.constant_definition.name);
             offset += x64_align_up(2 + name.length + 1, 2);
         }
     }
@@ -1545,8 +1545,8 @@ static X64_Layout x64_layout_make(X64_Builder const *builder) {
     size_t names_bytes = x64_align_up(2 + sizeof(X64_EXIT_NAME), 2);
     for (size_t i = 0; i < builder->constant_count; i += 1) {
         if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN) {
-            Str name = builder->nodes[builder->constants[i].definition]
-                           .payload.constant_definition.name;
+            Str name = ast_foreign_symbol(builder->nodes[builder->constants[i].definition]
+                                              .payload.constant_definition.name);
             names_bytes += x64_align_up(2 + name.length + 1, 2);
         }
     }
@@ -1871,8 +1871,8 @@ static void x64_rdata_write(X64_Builder *builder) {
     }
     for (size_t i = 0; i < builder->constant_count; i += 1) {
         if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN) {
-            Str name = builder->nodes[builder->constants[i].definition]
-                           .payload.constant_definition.name;
+            Str name = ast_foreign_symbol(builder->nodes[builder->constants[i].definition]
+                                              .payload.constant_definition.name);
             x64_write_u16(writer, 0);
             x64_write_bytes(writer, (byte const *)name.bytes, name.length);
             x64_write_byte(writer, 0);
@@ -8653,6 +8653,11 @@ static void x64_debug_row_add(X64_Builder *builder, X64_Debug_Row_Kind kind,
     if (builder->debug == NULL || builder->row_count == builder->row_capacity) {
         return;
     }
+    // The procedures of the files that the program imports come before it in the nodes, and their
+    // places are in other sources than the one that the debug information is about.
+    if (builder->definition != AST_NODE_INDEX_NONE && builder->definition < builder->module) {
+        return;
+    }
     assert(builder->row_count < builder->row_capacity);
     assert(builder->writer.length >= builder->text_start);
 
@@ -9620,7 +9625,11 @@ static void x64_debug_structs_write(X64_Builder *builder, X64_Debug_Types types)
  */
 static X64_Debug_Cursor x64_debug_cursor_move(Str source, X64_Debug_Cursor cursor,
                                               size_t offset) {
-    assert(offset <= source.length);
+    // The place of a node of an imported file is in the source of that file, which this is not, so
+    // it is taken as the end of this one. Nothing about the program is in it.
+    if (offset > source.length) {
+        offset = source.length;
+    }
 
     if (offset < cursor.offset) {
         cursor = (X64_Debug_Cursor){.offset = 0, .line_start = 0, .line = 1};

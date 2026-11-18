@@ -45,6 +45,7 @@ typedef enum {
     AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION,
     AST_NODE_TYPE_IDENTIFIER,
     AST_NODE_TYPE_IF_STATEMENT,
+    AST_NODE_TYPE_IMPORT,
     AST_NODE_TYPE_INTEGER_LITERAL,
     AST_NODE_TYPE_LABEL,
     AST_NODE_TYPE_LABELED_STATEMENT,
@@ -283,6 +284,11 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   parser, which gives the text between the quotes to the node and to the procedures of the
  *   blocks, and it is the name that `ast_foreign_import_name` gives. It is a child of the
  *   `AST_NODE_TYPE_MODULE`, and not a definition: it has no name.
+ * - `AST_NODE_TYPE_IMPORT`: no children. `import "mu:filesystem"`: the source file of another
+ *   package, from the library of a vendor, whose definitions the program has too. The text between
+ *   the quotes is in the payload, see `ast_import_path`. It is a child of the
+ *   `AST_NODE_TYPE_MODULE` until the files are put together, which takes it out, so no later stage
+ *   sees it, and it is not a definition: it has no name.
  * - `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION`: a global variable, which is defined at file scope.
  *   Its children are one `AST_NODE_TYPE_ATTRIBUTE` for each attribute of its attribute list, in the
  *   order of the source, then the type, an `AST_NODE_TYPE_TYPE_NAME` or an
@@ -549,6 +555,12 @@ typedef struct {
             Ast_Foreign_Target target;
         } foreign_import;
         struct {
+            // The text between the quotes, as a view of the source text: the vendor, a colon and
+            // the path. See `ast_import_path`.
+            char const *path_bytes;
+            uint32_t path_length;
+        } import_statement;
+        struct {
             // The name of the package that the source file defines with `package name`, as a
             // view of the source text.
             Str package_name;
@@ -707,6 +719,19 @@ Str ast_procedure_foreign_library(Ast_Node const *nodes, Ast_Node_Index procedur
  * Returns the text that the `AST_NODE_TYPE_FOREIGN_IMPORT` node `import` names, see the payload.
  */
 Str ast_foreign_import_name(Ast_Node const *import);
+
+/**
+ * Returns the name that a foreign procedure has outside of the program, which is the one that the
+ * library or JavaScript knows it by: the name of its definition without the name of the package
+ * before it. The definitions of an imported file have it, `mialu.CloseHandle`, so that two files
+ * can define the same name.
+ */
+Str ast_foreign_symbol(Str definition_name);
+
+/**
+ * Returns the text that the `AST_NODE_TYPE_IMPORT` node `import` names, such as `mu:filesystem`.
+ */
+Str ast_import_path(Ast_Node const *import);
 
 /**
  * Returns the name of `definition`, which must be an `AST_NODE_TYPE_CONSTANT_DEFINITION` or an

@@ -54,6 +54,7 @@ bool ast_node_type_is_assignment(Ast_Node_Type node_type) {
     case AST_NODE_TYPE_FOREIGN_IMPORT:
     case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
     case AST_NODE_TYPE_IDENTIFIER:
+    case AST_NODE_TYPE_IMPORT:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_INTEGER_LITERAL:
     case AST_NODE_TYPE_LABEL:
@@ -104,6 +105,7 @@ Ast_Node_Index ast_procedure_end(Ast_Node const *nodes, size_t node_count,
     size_t end = procedure + 1;
     while (end < node_count && nodes[end].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION &&
            nodes[end].node_type != AST_NODE_TYPE_FOREIGN_IMPORT &&
+           nodes[end].node_type != AST_NODE_TYPE_MODULE &&
            nodes[end].node_type != AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
         end += 1;
     }
@@ -262,6 +264,22 @@ Str ast_procedure_foreign_library(Ast_Node const *nodes, Ast_Node_Index procedur
     }
     return str_make(body->payload.foreign_body.library_bytes,
                     body->payload.foreign_body.library_length);
+}
+
+Str ast_foreign_symbol(Str definition_name) {
+    size_t start = definition_name.length;
+    while (start > 0 && definition_name.bytes[start - 1] != '.') {
+        start -= 1;
+    }
+    return str_make(definition_name.bytes + start, definition_name.length - start);
+}
+
+Str ast_import_path(Ast_Node const *import) {
+    assert(import != NULL);
+    assert(import->node_type == AST_NODE_TYPE_IMPORT);
+
+    return str_make(import->payload.import_statement.path_bytes,
+                    import->payload.import_statement.path_length);
 }
 
 Str ast_foreign_import_name(Ast_Node const *import) {
@@ -472,6 +490,10 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root) {
             } else {
                 printf("FOREIGN_IMPORT libc\n");
             }
+            break;
+        case AST_NODE_TYPE_IMPORT:
+            printf("IMPORT \"%.*s\"\n", (int)node.payload.import_statement.path_length,
+                   node.payload.import_statement.path_bytes);
             break;
         case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
             printf("GLOBAL_VARIABLE_DEFINITION %.*s\n",

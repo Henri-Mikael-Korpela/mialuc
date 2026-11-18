@@ -4,6 +4,10 @@ The `wasm` and `wat` targets of `mialuc build` write a WebAssembly module, as a 
 
 The programs in [test-code/wasm](../test-code/wasm) are for these targets, and the [playground](playground.md) compiles and runs them in the browser.
 
+## Imports
+
+The definitions of the files that a program [imports](mialu-programming-language.md#imports) are functions of the module like the program's own, and are written in the order that the definitions are, the ones of the imported files first, and their names are the name of the package, a dot and the name of the definition, such as `mialu.clamp`. They are not exported: the export section lists the functions of the program only, because the name of an imported one has a dot in it, which a caller cannot write as a name, and the library is for the program to call. A foreign procedure of an imported file is imported from JavaScript under the name that it has without the package, as one of the program is. A file that uses what this target does not have, such as the procedures of a `foreign libc` block or of a library of the system, is not built, as that is rejected wherever it is, so `mu:filesystem`, which is for Windows, cannot be imported by a program for WebAssembly.
+
 ## Foreign procedures
 
 A foreign procedure is declared in a `foreign js` block, see [Foreign procedures](mialu-programming-language.md#foreign-procedures).

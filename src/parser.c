@@ -101,6 +101,7 @@ static Ast_Node_Index parse_enum_type           (Parser *parser, uint32_t indent
 static bool           parse_foreign_block       (Parser *parser, Ast_Node_Index module);
 static bool           parse_foreign_calling_convention(Parser *parser);
 static Ast_Node_Index parse_foreign_import      (Parser *parser);
+static Ast_Node_Index parse_import_statement    (Parser *parser);
 static Ast_Foreign_Target parse_foreign_target_expect(Parser *parser, Str *name);
 static Ast_Node_Index parse_else_branch         (Parser *parser, Ast_Node_Index parent);
 static Ast_Node_Index parse_if_statement        (Parser *parser, Ast_Node_Index parent);
@@ -171,9 +172,14 @@ static Ast_Node_Index parse_variable_definition (Parser *parser);
 static Ast_Node_Index parse_results_definition  (Parser *parser);
 
 Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
+    return parse_at(tokens, node_buffer, 0);
+}
+
+Parse_Result parse_at(Array_Slice tokens, Array_Slice node_buffer, size_t node_start) {
     assert(tokens.elements != NULL);
     assert(node_buffer.elements != NULL);
     assert(tokens.length >= 1);
+    assert(node_start <= node_buffer.length);
 
     Token const *token_elements = tokens.elements;
     assert(token_elements[tokens.length - 1].kind == TOKEN_KIND_END);
@@ -189,7 +195,7 @@ Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer) {
         .system_library_count = 0,
         .token_count = tokens.length,
         .token_index = 0,
-        .node_count = 0,
+        .node_count = node_start,
         .node_count_max = node_buffer.length,
         .error_token_index = 0,
         .status = PARSE_STATUS_OK,
@@ -351,8 +357,13 @@ static Ast_Node_Index parse_definition(Parser *parser) {
     }
     parse_token_advance(parser);
 
-    // `import foreign js "name"` is not a definition: it has no name of its own.
+    // `import foreign js "name"` and `import "mu:filesystem"` are not definitions: they have no
+    // name of their own.
     if (parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_IMPORT) {
+        if (parser->token_index + 1 < parser->token_count &&
+            parser->tokens[parser->token_index + 1].kind == TOKEN_KIND_STRING_LITERAL) {
+            return parse_import_statement(parser);
+        }
         return parse_foreign_import(parser);
     }
 
@@ -526,6 +537,33 @@ static bool parse_package_definition(Parser *parser, Ast_Node_Index module) {
     parse_token_advance(parser);
 
     return parse_line_end_expect(parser);
+}
+
+/**
+ * Parses `import "mu:filesystem"`, which brings in the definitions of the source file that the text
+ * names, see `AST_NODE_TYPE_IMPORT`. The current token is `import`, and the one after it is the
+ * string. Which file it is, and what is in it, is for the stage that puts the files together.
+ */
+static Ast_Node_Index parse_import_statement(Parser *parser) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_IMPORT);
+
+    Ast_Node_Index import = parse_node_make(parser, AST_NODE_TYPE_IMPORT);
+    if (import == AST_NODE_INDEX_NONE) {
+        return AST_NODE_INDEX_NONE;
+    }
+    parse_token_advance(parser);
+
+    Str text = parse_token_current(parser)->payload.string_literal.text;
+    assert(text.length <= UINT32_MAX);
+    parser->nodes[import].payload.import_statement.path_bytes = text.bytes;
+    parser->nodes[import].payload.import_statement.path_length = (uint32_t)text.length;
+    parse_token_advance(parser);
+
+    if (not parse_line_end_expect(parser)) {
+        return AST_NODE_INDEX_NONE;
+    }
+    return import;
 }
 
 /**

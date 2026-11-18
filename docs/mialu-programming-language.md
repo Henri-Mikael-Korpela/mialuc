@@ -5,6 +5,9 @@
 - [Introduction](#introduction)
 - [Source code representation](#source-code-representation)
 - [Packages](#packages)
+- [Imports](#imports)
+  - [Where the standard library is](#where-the-standard-library-is)
+  - [Packages and names](#packages-and-names)
 - [Lines, spaces and indentation](#lines-spaces-and-indentation)
 - [Comments](#comments)
 - [Reserved words](#reserved-words)
@@ -114,9 +117,42 @@ answer :: proc() Int ->
     return 42
 ```
 
-`package` is a [keyword](#reserved-words), so it cannot be used as a name, and the name of the package is an [identifier](#identifiers), so it follows the rules of one: it has alphanumeric characters and underscores, does not begin with a digit, and is not a reserved word. The convention is to write it in lowercase with underscores, such as `helloworld` or `secret_project`, and to name the package after what the code in it is for. The name has no effect on the program that is built yet, and the compiler does not check it any further: it is kept in the syntax tree, which `mialuc dump-ast` prints on the first line, `MODULE package helloworld`.
+`package` is a [keyword](#reserved-words), so it cannot be used as a name, and the name of the package is an [identifier](#identifiers), so it follows the rules of one: it has alphanumeric characters and underscores, does not begin with a digit, and is not a reserved word. The convention is to write it in lowercase with underscores, such as `helloworld` or `secret_project`, and to name the package after what the code in it is for. The name of the package of the program has no effect on the program that is built, and the compiler does not check it any further: it is kept in the syntax tree, which `mialuc dump-ast` prints on the first line, `MODULE package helloworld`. The package name of a file that is [imported](#imports) is the name that its definitions have outside of the file.
 
 The code examples of this specification that show a part of a program, such as a single procedure, leave the package definition out to keep the example short. A whole program, which can be compiled as it is, has it.
+
+## Imports
+
+An import statement brings the definitions of another source file into the program. It is `import` and a path in quotes, on a line of its own, written in the first column, below the [package definition](#packages) and above the definitions that use it:
+
+```
+package program
+
+import "mu:filesystem"
+
+main :: proc() Int ->
+    buffer := [64]Byte { .. = 0 }
+    file, error := mialu.file_open("data.txt", mialu.File_Open_Mode.READ, buffer[0:64])
+    if error not= mialu.File_Error.NONE ->
+        return 1
+    return cast(Int)mialu.file_close(file)
+```
+
+The text in quotes is the vendor, a colon and the path under the vendor. The vendor is the library that the file is in: `mu` is the standard library of Mialu, and it is the only vendor for now. The path is the file below the directory of the library, without `.mu`, with names and slashes, so `mu:filesystem` is the file `filesystem.mu` and `mu:text/ascii` would be `text/ascii.mu`. A path that has anything else, such as a dot, is an error, and so is a vendor that is not known and a file that is not there. `import` is a [keyword](#reserved-words). The other kind of import, `import foreign`, brings in procedures that are not written in Mialu, see [Foreign procedures](#foreign-procedures).
+
+### Where the standard library is
+
+The standard library is source code, and the compiler reads it when a program imports it. A release of the compiler has it in the directory `lib` that is next to `mialuc.exe`, in the zip file that it is distributed in, which is looked in first. A compiler that is built from the sources of the project finds it in the directory `src/mialu-std` of the project, which is also where the files of the library are kept, so a debug and a release build of the project use the files that are in the project without having them copied. A file that is in neither is an error that says where it looked.
+
+### Packages and names
+
+All the definitions of the imported file are part of the program, but they are used with the name of their package, written before the name, with a dot and nothing between: `file_open` that is defined in a file whose package is `mialu` is `mialu.file_open` everywhere outside of that file. That goes for every kind of definition: a procedure, a constant, a global variable, a struct and an enum, and so a type is written as `mialu.File`, a member of an enum as `mialu.File_Error.NOT_FOUND`, and a struct literal as `mialu.File { handle = 5 }`. The name of the package is the one that the imported file has in its [package definition](#packages), and it is not the name of the file, so every file of the standard library has `mialu`, which makes the definitions of all of them `mialu.` something, and no two may have the same name.
+
+The program's own names are never the names of a package, and the other way round, so a program that defines a `File` of its own, or `min`, or `CP_UTF8`, has no conflict with the library that has the same, and uses its own without the package before it. Inside the file that defines it a definition is written with its plain name, as everywhere else. A name of a package is not found without the package: `file_open` alone, where `mialu.file_open` is meant, is an unknown name. A parameter or a variable of a program may have the name of any definition of a package, which is not a definition of the program, but one of an imported file may not have the name of a definition of the same file, as in the program.
+
+The files that an imported file imports are imported too, once, before it, in the order that they are written, and a file is only read once however many files import it. Files that import each other, directly or through others, are an error. There are at most 32 files, and the imports go at most 8 files deep.
+
+The definitions of an imported file are part of the program that is built: a procedure that nothing calls is in it, so a target has to be able to build all that a file has. A file of the standard library that uses what a target does not have, such as `filesystem`, which is for Windows and calls the system, does not build for the others. [WebAssembly](build-target-wasm.md#imports) does not export the procedures of the imported files, as the name of one has a dot, which a caller cannot write.
 
 ## Lines, spaces and indentation
 

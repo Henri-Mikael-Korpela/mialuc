@@ -273,7 +273,7 @@ typedef struct {
  * type is, so whether the value that a name stands for is of the right type is for the target to
  * check, and so is whether a constant fits in the type that its place wants.
  */
-Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
+Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root, size_t imported_end,
                                  Array_Slice binding_buffer, Array_Slice constant_buffer,
                                  Array_Slice text_buffer);
 

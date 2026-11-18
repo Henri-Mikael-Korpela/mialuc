@@ -36,6 +36,11 @@
        global variable of the module, a variable can only be used below its definition, and no name
        may be declared twice, for example a variable may not have the name of a parameter. This is
        scope resolution, which the compiler does after parsing.
+     - The vendor of an import is `mu`, and its path has names and slashes only. The file must
+       exist in the library, the files that import each other must not make a loop, and a name of
+       a package must be written with the name of the package before it and a dot, such as
+       `mialu.file_open`, which the grammar takes as a field of a name. Which package a name is in is
+       for the compiler, which puts the files together before it looks up the names.
      - A program that has a foreign block must have one `import foreign` of the target of the
        block above the first block of that target, and no more than one for each target. The
        targets are `js`, `libc`, and the libraries of the system that an `import foreign name
@@ -199,12 +204,20 @@
 
 module =
     { blank_line } , package_definition ,
-    { blank_line | definition | foreign_import | foreign_block } , end_of_input ;
+    { blank_line | definition | import_statement | foreign_import | foreign_block } ,
+    end_of_input ;
 
 (* `package name` names the package that the source file is part of. Every source file has exactly
    one, and it is the first line that is not blank or a comment: lines of comments can be above it
    and below it. Like a definition it starts in the first column. `package` is a keyword. *)
 package_definition = "package" , required_space , name , ws , line_end ;
+
+(* `import "mu:filesystem"` brings the definitions of a source file of a library into the program.
+   The text in quotes is the vendor, a colon and the path under the vendor, without `.mu`, in names
+   and slashes: `mu` is the standard library of Mialu. The definitions are used with the name of the
+   package of the file before them and a dot, such as `mialu.file_open`, which is a name like any
+   other for the grammar. Like a definition it starts in the first column. *)
+import_statement = "import" , ws , string_literal , ws , line_end ;
 
 (* A definition at file scope: a constant, or a global variable. *)
 definition = constant_definition | global_variable_definition ;
@@ -377,7 +390,7 @@ element_type = plain_type | procedure_pointer_type ;
 (* A name, or the carets of a pointer type and then a name, and never a procedure type. *)
 plain_type = type_name | "^" , ws , plain_type ;
 
-type_name = name ;
+type_name = qualified_name ;
 
 procedure_pointer_type = "^" , ws , { "^" , ws } , procedure_type ;
 
@@ -664,9 +677,9 @@ operand = [ cast_prefix ] , { "%" , ws } , operand_value ;
    type is an array of a length and the name of the type of its elements. It binds like `%`, and
    only one can be written, so a cast does not follow a cast. The compiler checks after parsing
    which types a value can be cast to. *)
-cast_prefix = "cast" , ws , "(" , ws , ( name | cast_array_type ) , ws , ")" , ws ;
+cast_prefix = "cast" , ws , "(" , ws , ( qualified_name | cast_array_type ) , ws , ")" , ws ;
 
-cast_array_type = "[" , ws , decimal_literal , ws , "]" , ws , name ;
+cast_array_type = "[" , ws , decimal_literal , ws , "]" , ws , qualified_name ;
 
 (* An integer literal, a signed integer literal, a float literal, a signed float literal, a string literal, `true` or `false`, a call of a procedure, or the use of a
    name, such as a parameter or a constant, or an array literal or a struct literal. A call starts
@@ -720,7 +733,7 @@ elements = expression , { gap , "," , gap , expression } , [ gap , "," ] ;
    checks, as the grammar does not know the fields of a struct. The fields are separated by commas, and can be on lines of their own, and a
    comma can come after the last one. A field that is a struct can be given its value without a
    name, `{ x = 1, y = 2 }`, since the field says which struct it is. *)
-struct_literal = name , ws , struct_fields ;
+struct_literal = qualified_name , ws , struct_fields ;
 
 struct_fields = "{" , gap , [ field_initializers , gap ] , "}" ;
 
@@ -738,7 +751,11 @@ gap = { " " | "\t" | "\r" | "\n" | comment | "\n" , ws , documentation_comment }
    is a statement, whose value is thrown away. The compiler checks that the name is a procedure,
    that there are as many arguments as the procedure has parameters, and that each argument has
    the type of its parameter. *)
-call = name , ws , "(" , ws , [ arguments , ws ] , ")" ;
+call = qualified_name , ws , "(" , ws , [ arguments , ws ] , ")" ;
+
+(* A name, or a name with the name of a package before it and a dot, which is how a definition of a
+   file that is imported is written: `mialu.file_open`. The dot has no space around it. *)
+qualified_name = [ name , "." ] , name ;
 
 arguments = expression , { ws , "," , ws , expression } ;
 

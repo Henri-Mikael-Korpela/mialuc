@@ -1787,7 +1787,8 @@ static void wasm_build_import_section(Wasm_Builder *builder, Ast_Node_Index modu
 
         wasm_write_text(&builder->writer, module_name);
         wasm_write_text(&builder->writer,
-                        builder->nodes[definition].payload.constant_definition.name);
+                        ast_foreign_symbol(builder->nodes[definition]
+                                               .payload.constant_definition.name));
         wasm_write_byte(&builder->writer, WASM_IMPORT_KIND_FUNCTION);
         // One type for each function, and the imports are the first of them.
         wasm_write_unsigned(&builder->writer, i);
@@ -1930,9 +1931,11 @@ static void wasm_build_element_section(Wasm_Builder *builder) {
 }
 
 /**
- * Writes the export section, which makes every function of the module callable from outside it
+ * Writes the export section, which makes every function of the program callable from outside it
  * under the name of its definition, which the imported functions are not, and the memory, if there
- * is one, readable under the name `memory`.
+ * is one, readable under the name `memory`. The functions of the files that the program imports
+ * are the ones that come before the module in the nodes, and are not exported: they are the
+ * program's own to call, and their names have a dot in them, which a caller cannot write.
  */
 static bool wasm_build_export_section(Wasm_Builder *builder, Ast_Node_Index module,
                                       size_t definition_count) {
@@ -1946,14 +1949,29 @@ static bool wasm_build_export_section(Wasm_Builder *builder, Ast_Node_Index modu
         memory_export_count = 1;
     }
 
+    size_t function_export_count = 0;
+    Ast_Node_Index counted =
+        wasm_function_find(builder, builder->nodes[module].first_child, false);
+    for (size_t i = 0; i < definition_count; i += 1) {
+        assert(counted != AST_NODE_INDEX_NONE);
+        if (counted > module) {
+            function_export_count += 1;
+        }
+        counted = wasm_function_find(builder, builder->nodes[counted].next_sibling, false);
+    }
+
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_EXPORT);
-    wasm_write_unsigned(&builder->writer, definition_count + memory_export_count);
+    wasm_write_unsigned(&builder->writer, function_export_count + memory_export_count);
 
     Ast_Node_Index definition =
         wasm_function_find(builder, builder->nodes[module].first_child, false);
     for (size_t i = 0; i < definition_count; i += 1) {
         assert(definition != AST_NODE_INDEX_NONE);
         Str name = builder->nodes[definition].payload.constant_definition.name;
+        if (definition < module) {
+            definition = wasm_function_find(builder, builder->nodes[definition].next_sibling, false);
+            continue;
+        }
 
         // The name is taken whether the module has a memory or not, so that adding a string to
         // a program does not make it stop compiling.
@@ -4322,6 +4340,7 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
     case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_FOREIGN_BODY:
     case AST_NODE_TYPE_FOREIGN_IMPORT:
+    case AST_NODE_TYPE_IMPORT:
     case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_LABEL:
@@ -5658,6 +5677,7 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
     case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_FOREIGN_BODY:
     case AST_NODE_TYPE_FOREIGN_IMPORT:
+    case AST_NODE_TYPE_IMPORT:
     case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_LABEL:
@@ -7301,6 +7321,7 @@ static bool wasm_build_code_section_body_address_of(Wasm_Builder *builder,
     case AST_NODE_TYPE_FOR_STATEMENT:
     case AST_NODE_TYPE_FOREIGN_BODY:
     case AST_NODE_TYPE_FOREIGN_IMPORT:
+    case AST_NODE_TYPE_IMPORT:
     case AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION:
     case AST_NODE_TYPE_IF_STATEMENT:
     case AST_NODE_TYPE_INTEGER_LITERAL:

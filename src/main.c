@@ -12,6 +12,7 @@
 #include <mialu/ast.h>
 #include <mialu/common_types.h>
 #include <mialu/constant.h>
+#include <mialu/package.h>
 #include <mialu/parser.h>
 #include <mialu/process.h>
 #include <mialu/semantic.h>
@@ -182,6 +183,13 @@ static bool         main_text_write                        (char *text, size_t t
 static bool         main_type_text_write                   (Ast_Node const *nodes,
                                                             Ast_Node_Index type_node, char *text,
                                                             size_t text_size_bytes);
+static int32_t      main_run_command_front                 (Command command,
+                                                            Buffers const *buffers,
+                                                            Packages *packages);
+static void         main_package_report                    (char const *path, Str source,
+                                                            Package_Result result);
+static void         main_subject_source                    (char const **path, Str *source,
+                                                            Str subject);
 static int32_t      main_run_command                       (Command command,
                                                             Buffers const *buffers);
 static int32_t      main_run_command_build                 (Command command, Buffers const *buffers,
@@ -190,11 +198,14 @@ static int32_t      main_run_command_build                 (Command command, Buf
 static int32_t      main_run_command_build_x64             (Command command, Buffers const *buffers,
                                                             Str source, Parse_Result parse_result,
                                                             Semantic_Result semantic_result);
-static void         main_run_command_print_outline         (Str source, Parse_Result parse_result);
-static void         main_run_command_print_struct_sizes    (Str source, Parse_Result parse_result);
+static void         main_run_command_print_outline         (Str source, Parse_Result parse_result,
+                                                            size_t first_node);
+static void         main_run_command_print_struct_sizes    (Str source, Parse_Result parse_result,
+                                                            size_t first_node);
 static void         main_run_command_print_tokens          (Array_Slice tokens);
 static void         main_run_command_print_types           (Str source, Parse_Result parse_result,
-                                                            Semantic_Result semantic_result);
+                                                            Semantic_Result semantic_result,
+                                                            size_t first_node);
 static Str          main_run_command_read_file             (char const *path, Array_Slice buffer);
 static void         main_run_command_report_parse_error    (char const *path, Str source,
                                                             Array_Slice tokens,
@@ -502,10 +513,31 @@ static Command_Target main_command_target_parse(char const *name) {
 /**
  * Does what the command says. Returns the exit code, which is 0 on success.
  */
+// The files that the program imports, while a command is run, so that an error about one of them
+// is told with its path and its lines. It is NULL when no command is.
+static Packages const *main_packages = NULL;
+
 static int32_t main_run_command(Command command, Buffers const *buffers) {
     assert(buffers != NULL);
     assert(command.source_path != NULL);
     assert(command.mode != COMMAND_MODE_INVALID);
+
+    // The directory of the standard library of this project is where the build was made from, which
+    // is what a build from the sources uses, and a release has the directory `lib` next to the
+    // compiler instead, see `packages_make`.
+    Packages packages = packages_make(MIALU_STD_DIRECTORY);
+    main_packages = &packages;
+    int32_t exit_code = main_run_command_front(command, buffers, &packages);
+    main_packages = NULL;
+    packages_free(&packages);
+    return exit_code;
+}
+
+/**
+ * Runs `command`, with the files that it imports in `packages`, which the caller frees.
+ */
+static int32_t main_run_command_front(Command command, Buffers const *buffers,
+                                      Packages *packages) {
 
     char const *path = command.source_path;
     Str source = main_run_command_read_file(path, buffers->source);
@@ -534,22 +566,31 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
 
     // The comments are tokens for the sake of tools, but the parser does not look at them.
     Array_Slice code_tokens = tokens_without_comments(result.tokens, buffers->code_tokens);
-    Parse_Result parse_result = parse(code_tokens, buffers->nodes);
+
+    // The files that the program imports come first, in the same nodes, and the program after them.
+    Package_Result imported = packages_load(packages, &code_tokens, buffers->nodes,
+                                            SOURCE_SIZE_BYTES_MAX, TOKEN_COUNT_MAX);
+    if (imported.status != PACKAGE_STATUS_OK) {
+        main_package_report(path, source, imported);
+        return 1;
+    }
+    Parse_Result parse_result = parse_at(code_tokens, buffers->nodes, packages->imported_end);
     if (parse_result.status != PARSE_STATUS_OK) {
         main_run_command_report_parse_error(path, source, code_tokens, parse_result);
         return 1;
     }
 
     // The tree is printed before it is analyzed, so that a program with a bad name can be looked
-    // at.
+    // at. It is the one of the program: the imported files are put together after.
     if (is_inspection) {
         printf("\n");
         ast_print(parse_result.nodes, parse_result.root);
     }
+    packages_merge(packages, parse_result.nodes.elements, parse_result.root);
 
     Semantic_Result semantic_result = semantic_analyze(parse_result.nodes, parse_result.root,
-                                                       buffers->bindings, buffers->constants,
-                                                       buffers->text);
+                                                       packages->imported_end, buffers->bindings,
+                                                       buffers->constants, buffers->text);
     if (semantic_result.status != SEMANTIC_STATUS_OK) {
         main_run_command_report_semantic_error(path, source, semantic_result);
         return 1;
@@ -564,13 +605,14 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     case COMMAND_MODE_DUMP_AST:
         return 0;
     case COMMAND_MODE_DUMP_OUTLINE:
-        main_run_command_print_outline(source, parse_result);
+        main_run_command_print_outline(source, parse_result, packages->imported_end);
         return 0;
     case COMMAND_MODE_DUMP_STRUCT_SIZES:
-        main_run_command_print_struct_sizes(source, parse_result);
+        main_run_command_print_struct_sizes(source, parse_result, packages->imported_end);
         return 0;
     case COMMAND_MODE_DUMP_TYPES:
-        main_run_command_print_types(source, parse_result, semantic_result);
+        main_run_command_print_types(source, parse_result, semantic_result,
+                                     packages->imported_end);
         return 0;
     case COMMAND_MODE_INVALID:
         assert(false);
@@ -603,14 +645,20 @@ static void main_outline_row_print(Str source, int depth, char const *kind, Str 
  * editor shows as the outline of a file. The kind is `procedure`, `struct`, `enum`, `constant` or
  * `variable` for a definition, and `field` or `member` for what is in a struct or an enum.
  */
-static void main_run_command_print_outline(Str source, Parse_Result parse_result) {
+static void main_run_command_print_outline(Str source, Parse_Result parse_result,
+                                          size_t first_node) {
     assert(parse_result.status == PARSE_STATUS_OK);
 
     Ast_Node const *nodes = parse_result.nodes.elements;
     Ast_Node_Index definition = nodes[parse_result.root].first_child;
     for (size_t i = 0; i < parse_result.nodes.length && definition != AST_NODE_INDEX_NONE; i += 1) {
         Ast_Node const *node = &nodes[definition];
+        Ast_Node_Index current = definition;
         definition = node->next_sibling;
+        // The definitions of the imported files are not in this source.
+        if (current < first_node) {
+            continue;
+        }
 
         if (node->node_type == AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION) {
             main_outline_row_print(source, 0, "variable", ast_definition_name(node));
@@ -656,7 +704,8 @@ static void main_run_command_print_outline(Str source, Parse_Result parse_result
  * `x64_struct_size_bytes`. This is what an editor shows above the definition of a struct. A struct
  * that has no size, because it contains itself, is left out.
  */
-static void main_run_command_print_struct_sizes(Str source, Parse_Result parse_result) {
+static void main_run_command_print_struct_sizes(Str source, Parse_Result parse_result,
+                                               size_t first_node) {
     assert(parse_result.status == PARSE_STATUS_OK);
 
     Ast_Node const *nodes = parse_result.nodes.elements;
@@ -664,8 +713,9 @@ static void main_run_command_print_struct_sizes(Str source, Parse_Result parse_r
     // Every definition is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < parse_result.nodes.length && definition != AST_NODE_INDEX_NONE; i += 1) {
         Ast_Node const *node = &nodes[definition];
+        Ast_Node_Index current = definition;
         definition = node->next_sibling;
-        if (node->node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
+        if (current < first_node || node->node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
             nodes[node->first_child].node_type != AST_NODE_TYPE_STRUCT_TYPE) {
             continue;
         }
@@ -1509,14 +1559,16 @@ static char const *main_built_in_signature(Str name) {
  * `main_type_row_print`. This is what an editor shows when the cursor rests on a name.
  */
 static void main_run_command_print_types(Str source, Parse_Result parse_result,
-                                         Semantic_Result semantic_result) {
+                                         Semantic_Result semantic_result, size_t first_node) {
     assert(parse_result.status == PARSE_STATUS_OK);
     assert(semantic_result.status == SEMANTIC_STATUS_OK);
 
     Ast_Node const *nodes = parse_result.nodes.elements;
     Semantic_Binding const *bindings = semantic_result.bindings.elements;
     Constant_Value const *constants = semantic_result.constants.elements;
-    for (Ast_Node_Index index = 0; index < parse_result.nodes.length; index += 1) {
+    // The nodes of the imported files are before the ones of the program.
+    for (Ast_Node_Index index = (Ast_Node_Index)first_node; index < parse_result.nodes.length;
+         index += 1) {
         Ast_Node const *node = &nodes[index];
         Str name = STR_EMPTY;
         Ast_Node_Index target = AST_NODE_INDEX_NONE;
@@ -2215,6 +2267,7 @@ static void main_run_command_report_x64_error(char const *path, Str source,
         return;
     }
 
+    main_subject_source(&path, &source, result.subject);
     Str_Position position = main_subject_position(source, result.subject);
 
     // The cast is needed because `%.*s` takes an `int` precision.
@@ -2514,6 +2567,7 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
         return;
     }
 
+    main_subject_source(&path, &source, result.subject);
     Str_Position position = main_subject_position(source, result.subject);
 
     // The cast is needed because `%.*s` takes an `int` precision.
@@ -2814,6 +2868,7 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
                                                    Semantic_Result result) {
     assert(result.status != SEMANTIC_STATUS_OK);
 
+    main_subject_source(&path, &source, result.subject);
     Str_Position position = main_subject_position(source, result.subject);
 
     // The cast is needed because `%.*s` takes an `int` precision.
@@ -3011,6 +3066,96 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
         fprintf(stderr, "%s:%zu:%zu: variable '%.*s' has the name of a constant, a global "
                 "variable or a parameter, which it would hide.\n", path, position.line,
                 position.column, subject_length, result.subject.bytes);
+        break;
+    }
+}
+
+/**
+ * Makes `path` and `source` the file that `subject` is part of when that is a file that the program
+ * imports, so that the line and column of an error in it are those of the file. A subject that is
+ * not part of one is part of the program, and they are left as they are.
+ */
+static void main_subject_source(char const **path, Str *source, Str subject) {
+    if (main_packages == NULL) {
+        return;
+    }
+    char const *imported_path = NULL;
+    Str imported_source = STR_EMPTY;
+    if (packages_locate(main_packages, subject, &imported_path, &imported_source)) {
+        *path = imported_path;
+        *source = imported_source;
+    }
+}
+
+/**
+ * Prints what is wrong with the files that the program imports, which `result` says. A tokenize or
+ * parse error is told as the one of the file that has it.
+ */
+static void main_package_report(char const *path, Str source, Package_Result result) {
+    assert(result.status != PACKAGE_STATUS_OK);
+
+    int subject_length = (int)result.subject.length;
+    switch (result.status) {
+    case PACKAGE_STATUS_TOKENIZE_ERROR:
+        main_run_command_report_tokenize_error(result.path, result.source,
+                                               result.tokenize_result);
+        return;
+    case PACKAGE_STATUS_PARSE_ERROR:
+        main_run_command_report_parse_error(result.path, result.source, result.code_tokens,
+                                            result.parse_result);
+        return;
+    case PACKAGE_STATUS_OK:
+        assert(false);
+        return;
+    default:
+        break;
+    }
+
+    // The others are about an import, or about a name, which is in the program or in an imported
+    // file.
+    main_subject_source(&path, &source, result.subject);
+    Str_Position position = main_subject_position(source, result.subject);
+    switch (result.status) {
+    case PACKAGE_STATUS_CYCLE:
+        fprintf(stderr, "%s:%zu:%zu: the import '%.*s' is a loop: the file imports itself, "
+                "directly or through the files that it imports.\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case PACKAGE_STATUS_FILE_UNREADABLE:
+        fprintf(stderr, "%s:%zu:%zu: the import '%.*s' is a file that cannot be read: %s. The "
+                "standard library is in the directory 'lib' next to the compiler, or in "
+                "'src/mialu-std' of the project that the compiler was built from.\n", path,
+                position.line, position.column, subject_length, result.subject.bytes,
+                result.path == NULL ? "no directory of the library is known" : result.path);
+        break;
+    case PACKAGE_STATUS_IMPORT_PATH_INVALID:
+        fprintf(stderr, "%s:%zu:%zu: the import '%.*s' must be a vendor, a colon and a path of "
+                "names and slashes, such as \"mu:filesystem\".\n", path, position.line,
+                position.column, subject_length, result.subject.bytes);
+        break;
+    case PACKAGE_STATUS_LIMIT:
+        fprintf(stderr, "%s:%zu:%zu: the imports of '%.*s' are more than the program can put "
+                "together: at most %d files, %d imports below each other, and %d bytes of names.\n",
+                path, position.line, position.column, subject_length, result.subject.bytes,
+                PACKAGE_FILE_COUNT_MAX, PACKAGE_DEPTH_MAX, PACKAGE_NAMES_SIZE_BYTES_MAX);
+        break;
+    case PACKAGE_STATUS_OUT_OF_MEMORY:
+        fprintf(stderr, "Out of memory.\n");
+        break;
+    case PACKAGE_STATUS_SHADOWS:
+        fprintf(stderr, "%s:%zu:%zu: '%.*s' has the name of a definition of the same file, which "
+                "it would hide.\n", path, position.line, position.column, subject_length,
+                result.subject.bytes);
+        break;
+    case PACKAGE_STATUS_VENDOR_UNKNOWN:
+        fprintf(stderr, "%s:%zu:%zu: the vendor of the import '%.*s' is not known: 'mu' is the "
+                "standard library of Mialu.\n", path, position.line, position.column,
+                subject_length, result.subject.bytes);
+        break;
+    case PACKAGE_STATUS_OK:
+    case PACKAGE_STATUS_PARSE_ERROR:
+    case PACKAGE_STATUS_TOKENIZE_ERROR:
+        assert(false);
         break;
     }
 }

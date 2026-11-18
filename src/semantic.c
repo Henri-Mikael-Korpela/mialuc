@@ -22,6 +22,10 @@ typedef struct {
     Constant_Text text;
     Str subject;
     size_t node_count;
+    // The nodes below this one are of imported files, whose parameters and variables are not
+    // compared with the definitions of the program: a name of an imported file stands for its own,
+    // see `packages_load`, so it cannot hide one of the program.
+    size_t imported_end;
     Ast_Node_Index module;
     Semantic_Status status;
 } Semantic_Analyzer;
@@ -100,7 +104,7 @@ static Semantic_Binding semantic_variable_find      (Semantic_Analyzer const *an
                                                      Ast_Node_Index before,
                                                      Ast_Node_Index excluded, Str name);
 
-Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
+Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root, size_t imported_end,
                                  Array_Slice binding_buffer, Array_Slice constant_buffer,
                                  Array_Slice text_buffer) {
     assert(nodes.elements != NULL);
@@ -144,6 +148,7 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root,
         .text = {.bytes = text_buffer.elements, .size_bytes = text_buffer.length, .length = 0},
         .subject = STR_EMPTY,
         .node_count = nodes.length,
+        .imported_end = imported_end,
         .module = root,
         .status = SEMANTIC_STATUS_OK,
     };
@@ -936,7 +941,7 @@ static bool semantic_parameter_check(Semantic_Analyzer *analyzer, Ast_Node_Index
     }
 
     Semantic_Binding definition = semantic_definition_find(analyzer, name);
-    if (definition.kind != SEMANTIC_BINDING_KIND_NONE) {
+    if (parameter >= analyzer->imported_end && definition.kind != SEMANTIC_BINDING_KIND_NONE) {
         return semantic_fail(analyzer, SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS, name);
     }
 
@@ -974,7 +979,7 @@ static bool semantic_variable_check(Semantic_Analyzer *analyzer, Ast_Node_Index 
     Semantic_Binding parameter = semantic_parameter_find(analyzer, procedure, name);
     Semantic_Binding definition = semantic_definition_find(analyzer, name);
     if (parameter.kind != SEMANTIC_BINDING_KIND_NONE ||
-        definition.kind != SEMANTIC_BINDING_KIND_NONE) {
+        (variable >= analyzer->imported_end && definition.kind != SEMANTIC_BINDING_KIND_NONE)) {
         return semantic_fail(analyzer, SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS, name);
     }
 

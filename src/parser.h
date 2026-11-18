@@ -36,4 +36,11 @@ typedef struct {
  */
 Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer);
 
+/**
+ * Like `parse`, for a source file whose nodes go after the first `node_start` of `node_buffer`,
+ * which another file has: the indexes of the nodes are those of the whole buffer, and the nodes of
+ * the result are the whole buffer up to the last node that was made.
+ */
+Parse_Result parse_at(Array_Slice tokens, Array_Slice node_buffer, size_t node_start);
+
 #endif

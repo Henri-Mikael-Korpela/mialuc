@@ -45,4 +45,12 @@ Process_Result process_run_executable(Array_Slice program);
  */
 Str process_path_absolute(char const *path, Array_Slice buffer);
 
+/**
+ * Returns the directory that the file of the running program, the compiler, is in, written to
+ * `buffer`, which holds `char` elements, without a separator at its end. Returns an empty `Str`
+ * (`bytes == NULL`) when the system cannot tell or it does not fit, and always on a system other
+ * than Windows.
+ */
+Str process_executable_directory(Array_Slice buffer);
+
 #endif
