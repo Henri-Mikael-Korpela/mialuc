@@ -14,6 +14,8 @@
 #include <mialu/report.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
+#include <mialu/wasm-text.h>
+#include <mialu/x64-text.h>
 #include <mialu/x64.h>
 
 enum {
@@ -846,6 +848,41 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
     [ERROR_CODE_WASM_TYPE_INFO_UNSUPPORTED] = {
         .title = "the wasm target has information about enums only, and '{subject}' is not one",
     },
+
+    // The text of a program.
+    [ERROR_CODE_WASM_TEXT_MODULE_MALFORMED] = {
+        .title = "internal error: the WebAssembly module is malformed at byte {number}",
+        .note = "the formatter reads what the compiler wrote, so what it cannot read is a bug of "
+                "the compiler and not of the program",
+        .help = "report it as a bug of the compiler, with the program that has it",
+    },
+    [ERROR_CODE_WASM_TEXT_MODULE_UNSUPPORTED] = {
+        .title = "internal error: the WebAssembly module cannot be formatted as text at byte "
+                 "{number}",
+        .note = "the formatter reads what the compiler wrote, so what it cannot read is a bug of "
+                "the compiler and not of the program",
+        .help = "report it as a bug of the compiler, with the program that has it",
+    },
+    [ERROR_CODE_WASM_TEXT_OUTPUT_TOO_LARGE] = {
+        .title = "the WebAssembly text is larger than {number} bytes",
+        .note = "the compiler allocates the memory for the text once, when it starts",
+    },
+    [ERROR_CODE_X64_TEXT_EXECUTABLE_MALFORMED] = {
+        .title = "internal error: the executable is malformed at byte {number}",
+        .note = "the formatter reads what the compiler wrote, so what it cannot read is a bug of "
+                "the compiler and not of the program",
+        .help = "report it as a bug of the compiler, with the program that has it",
+    },
+    [ERROR_CODE_X64_TEXT_EXECUTABLE_UNSUPPORTED] = {
+        .title = "internal error: the executable cannot be formatted as assembly at byte {number}",
+        .note = "the formatter reads what the compiler wrote, so what it cannot read is a bug of "
+                "the compiler and not of the program",
+        .help = "report it as a bug of the compiler, with the program that has it",
+    },
+    [ERROR_CODE_X64_TEXT_OUTPUT_TOO_LARGE] = {
+        .title = "the assembly is larger than {number} bytes",
+        .note = "the compiler allocates the memory for the assembly once, when it starts",
+    },
 };
 
 // The code of each status of the analysis.
@@ -1361,6 +1398,55 @@ void report_wasm_error(Reporter const *reporter, char const *path, Str source,
         return;
     }
     report_emit_at_subject(reporter, code, path, source, result.subject, STR("wasm"), 0);
+}
+
+void report_wasm_text_error(Reporter const *reporter, char const *path,
+                            Wasm_Text_Result result) {
+    assert(reporter != NULL);
+    assert(path != NULL);
+    assert(result.status != WASM_TEXT_STATUS_OK);
+
+    switch (result.status) {
+    case WASM_TEXT_STATUS_MODULE_MALFORMED:
+        report_general(reporter, ERROR_CODE_WASM_TEXT_MODULE_MALFORMED, path,
+                       (int64_t)result.error_offset);
+        break;
+    case WASM_TEXT_STATUS_MODULE_UNSUPPORTED:
+        report_general(reporter, ERROR_CODE_WASM_TEXT_MODULE_UNSUPPORTED, path,
+                       (int64_t)result.error_offset);
+        break;
+    case WASM_TEXT_STATUS_OK:
+        assert(false);
+        break;
+    case WASM_TEXT_STATUS_OUTPUT_TOO_LARGE:
+        report_general(reporter, ERROR_CODE_WASM_TEXT_OUTPUT_TOO_LARGE, path,
+                       OUTPUT_TEXT_SIZE_BYTES_MAX);
+        break;
+    }
+}
+
+void report_x64_text_error(Reporter const *reporter, char const *path, X64_Text_Result result) {
+    assert(reporter != NULL);
+    assert(path != NULL);
+    assert(result.status != X64_TEXT_STATUS_OK);
+
+    switch (result.status) {
+    case X64_TEXT_STATUS_EXECUTABLE_MALFORMED:
+        report_general(reporter, ERROR_CODE_X64_TEXT_EXECUTABLE_MALFORMED, path,
+                       (int64_t)result.error_offset);
+        break;
+    case X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED:
+        report_general(reporter, ERROR_CODE_X64_TEXT_EXECUTABLE_UNSUPPORTED, path,
+                       (int64_t)result.error_offset);
+        break;
+    case X64_TEXT_STATUS_OK:
+        assert(false);
+        break;
+    case X64_TEXT_STATUS_OUTPUT_TOO_LARGE:
+        report_general(reporter, ERROR_CODE_X64_TEXT_OUTPUT_TOO_LARGE, path,
+                       OUTPUT_TEXT_SIZE_BYTES_MAX);
+        break;
+    }
 }
 
 /**

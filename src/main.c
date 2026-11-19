@@ -210,10 +210,6 @@ static void         main_run_command_print_types           (Str source, Parse_Re
                                                             Semantic_Result semantic_result,
                                                             size_t first_node);
 static Str          main_run_command_read_file             (char const *path, Array_Slice buffer);
-static void         main_run_command_report_wasm_text_error(char const *path,
-                                                            Wasm_Text_Result result);
-static void         main_run_command_report_x64_text_error (char const *path,
-                                                            X64_Text_Result result);
 static bool         main_run_command_write_file            (char const *path, Array_Slice bytes);
 
 /**
@@ -1951,7 +1947,7 @@ static int32_t main_run_command_build(Command command, Buffers const *buffers, S
     case COMMAND_TARGET_WAT: {
         Wasm_Text_Result text_result = wasm_text_format(build_result.bytes, buffers->output_text);
         if (text_result.status != WASM_TEXT_STATUS_OK) {
-            main_run_command_report_wasm_text_error(path, text_result);
+            report_wasm_text_error(&command.reporter, path, text_result);
             return 1;
         }
         // The text is the filled start of the text buffer, which is writable, unlike the `Str`.
@@ -2015,7 +2011,7 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
         X64_Text_Result text_result = x64_text_format(build_result.bytes, build_result.symbols,
                                                       buffers->labels, buffers->output_text);
         if (text_result.status != X64_TEXT_STATUS_OK) {
-            main_run_command_report_x64_text_error(path, text_result);
+            report_x64_text_error(&command.reporter, path, text_result);
             return 1;
         }
         if (fwrite(text_result.text.bytes, sizeof(byte), text_result.text.length, stdout) !=
@@ -2028,7 +2024,7 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
 
     if (command.mode == COMMAND_MODE_BUILD) {
         if (not main_run_command_write_file(command.output_path, build_result.bytes)) {
-            fprintf(stderr, "%s: cannot write file.\n", command.output_path);
+            report_general(&command.reporter, ERROR_CODE_OUTPUT_UNWRITABLE, command.output_path, 0);
             return 1;
         }
         return 0;
@@ -2334,59 +2330,5 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
             printf("TYPE_SEPARATOR\n");
             break;
         }
-    }
-}
-
-static void main_run_command_report_wasm_text_error(char const *path, Wasm_Text_Result result) {
-    assert(path != NULL);
-    assert(result.status != WASM_TEXT_STATUS_OK);
-
-    // The formatter reads what `wasm_build` wrote, so a module that it cannot format is a bug in
-    // the compiler rather than in the program, and the message says so.
-    switch (result.status) {
-    case WASM_TEXT_STATUS_MODULE_MALFORMED:
-        fprintf(stderr, "%s: internal error: the WebAssembly module is malformed at byte %zu.\n",
-                path, result.error_offset);
-        break;
-    case WASM_TEXT_STATUS_MODULE_UNSUPPORTED:
-        fprintf(stderr,
-                "%s: internal error: the WebAssembly module cannot be formatted as text at byte "
-                "%zu.\n",
-                path, result.error_offset);
-        break;
-    case WASM_TEXT_STATUS_OK:
-        assert(false);
-        break;
-    case WASM_TEXT_STATUS_OUTPUT_TOO_LARGE:
-        fprintf(stderr, "%s: the WebAssembly text is larger than %d bytes.\n", path,
-                OUTPUT_TEXT_SIZE_BYTES_MAX);
-        break;
-    }
-}
-
-static void main_run_command_report_x64_text_error(char const *path, X64_Text_Result result) {
-    assert(path != NULL);
-    assert(result.status != X64_TEXT_STATUS_OK);
-
-    // The formatter reads what `x64_build` wrote, so a file that it cannot format is a bug in the
-    // compiler rather than in the program, and the message says so.
-    switch (result.status) {
-    case X64_TEXT_STATUS_EXECUTABLE_MALFORMED:
-        fprintf(stderr, "%s: internal error: the executable is malformed at byte %zu.\n", path,
-                result.error_offset);
-        break;
-    case X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED:
-        fprintf(stderr,
-                "%s: internal error: the executable cannot be formatted as assembly at byte "
-                "%zu.\n",
-                path, result.error_offset);
-        break;
-    case X64_TEXT_STATUS_OK:
-        assert(false);
-        break;
-    case X64_TEXT_STATUS_OUTPUT_TOO_LARGE:
-        fprintf(stderr, "%s: the assembly is larger than %d bytes.\n", path,
-                OUTPUT_TEXT_SIZE_BYTES_MAX);
-        break;
     }
 }

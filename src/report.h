@@ -11,7 +11,9 @@
 #include <mialu/x64.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
+#include <mialu/wasm-text.h>
 #include <mialu/wasm.h>
+#include <mialu/x64-text.h>
 
 /**
  * The errors of the compiler, all in one place. The stages of the compiler find an error and say
@@ -33,6 +35,7 @@
  * E0501 - E0599   what both targets reject: types, calls, structs, matches and unions
  * E0601 - E0699   what the x64 target rejects, and its limits
  * E0701 - E0799   what the wasm target rejects, and its limits
+ * E0901 - E0999   the text of a program as WebAssembly text and as assembly
  * ```
  *
  * The enumeration is in the order of the numbers and not alphabetical, because the numbers are what
@@ -200,6 +203,13 @@ typedef enum {
     ERROR_CODE_WASM_STRUCT_FIELD_MISSING = 711,
     ERROR_CODE_WASM_TYPE_INFO_MISPLACED = 712,
     ERROR_CODE_WASM_TYPE_INFO_UNSUPPORTED = 713,
+
+    ERROR_CODE_WASM_TEXT_MODULE_MALFORMED = 901,
+    ERROR_CODE_WASM_TEXT_MODULE_UNSUPPORTED = 902,
+    ERROR_CODE_WASM_TEXT_OUTPUT_TOO_LARGE = 903,
+    ERROR_CODE_X64_TEXT_EXECUTABLE_MALFORMED = 904,
+    ERROR_CODE_X64_TEXT_EXECUTABLE_UNSUPPORTED = 905,
+    ERROR_CODE_X64_TEXT_OUTPUT_TOO_LARGE = 906,
 } Error_Code;
 
 /**
@@ -261,5 +271,17 @@ void report_x64_error(Reporter const *reporter, char const *path, Str source,
  */
 void report_wasm_error(Reporter const *reporter, char const *path, Str source,
                        Wasm_Build_Result result);
+
+/**
+ * Reports an error of `wasm_text_format` for the program in the file `path`. They are bugs of the
+ * compiler, except that the text can be too large.
+ */
+void report_wasm_text_error(Reporter const *reporter, char const *path, Wasm_Text_Result result);
+
+/**
+ * Reports an error of `x64_text_format` for the program in the file `path`. They are bugs of the
+ * compiler, except that the assembly can be too large.
+ */
+void report_x64_text_error(Reporter const *reporter, char const *path, X64_Text_Result result);
 
 #endif

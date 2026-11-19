@@ -15,6 +15,7 @@ The text of the errors is all in [report.c](../src/report.c), where each code is
 | E0501 - E0599 | what both targets reject: types, calls, structs, matches and unions |
 | E0601 - E0699 | what the x64 target rejects, and its limits |
 | E0701 - E0799 | what the wasm target rejects, and its limits |
+| E0901 - E0999 | the text of a program as WebAssembly text and as assembly |
 
 ## E0001 - E0099: the command, the files and the system
 
@@ -231,3 +232,16 @@ These are about the `wasm` and `wat` targets, see [WebAssembly](build-target-was
 | E0711 | the field 'name' is not given a value | Either every field is given a value, or the braces are empty and every field has its default value. |
 | E0712 | type_info_of('name') exists only when the program is compiled | A global variable can be given that and nothing more. Write a field after it right away, as in type_info_of(name).members. |
 | E0713 | the wasm target has information about enums only, and 'name' is not one |  |
+
+## E0901 - E0999: the text of a program
+
+These are about the `wat` target and `dump-asm`, which format the module or the executable that the compiler wrote as text, see [mialuc](mialu-cli.md). An error that says `internal error` is about the compiler and not about the program: the formatter reads what the compiler wrote itself, so what it cannot read is a bug, which should be reported with the program that has it.
+
+| Code | Title | When |
+|---|---|---|
+| E0901 | internal error: the WebAssembly module is malformed at byte N | A bug of the compiler. |
+| E0902 | internal error: the WebAssembly module cannot be formatted as text at byte N | A bug of the compiler. |
+| E0903 | the WebAssembly text is larger than N bytes | The text of the module is more than 16 MiB. |
+| E0904 | internal error: the executable is malformed at byte N | A bug of the compiler. |
+| E0905 | internal error: the executable cannot be formatted as assembly at byte N | A bug of the compiler. |
+| E0906 | the assembly is larger than N bytes | The assembly is more than 16 MiB. |
