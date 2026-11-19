@@ -1,0 +1,5 @@
+error[E0408]: the enum has the member 'RED' twice
+ --> test-code/errors/front/E0408-enum-member-duplicate.mu:5:5
+  |
+5 |     RED
+  |     ^^^ defined again here

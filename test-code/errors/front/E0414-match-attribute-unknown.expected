@@ -1,0 +1,7 @@
+error[E0414]: 'loose' is not an attribute of a match statement
+ --> test-code/errors/front/E0414-match-attribute-unknown.mu:8:13
+  |
+8 |     match #(loose) c ->
+  |             ^^^^^ unknown attribute
+  |
+  = note: the only attribute of a match statement is 'partial'

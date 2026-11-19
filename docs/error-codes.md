@@ -10,6 +10,7 @@ The text of the errors is all in [report.c](../src/report.c), where each code is
 | E0101 - E0199 | the tokens: comments, indentation, numbers, runes and strings |
 | E0201 - E0299 | the syntax |
 | E0301 - E0399 | the files that a program imports |
+| E0401 - E0449 | names, attributes, labels and the statements that jump |
 
 ## E0001 - E0099: the command, the files and the system
 
@@ -78,3 +79,37 @@ These are found when the files that `import` names are read and put together, se
 | E0304 | the imports of 'path' are more than the program can put together | At most 32 files, 8 imports below each other, and 262144 bytes of names. |
 | E0305 | 'name' has the name of a definition of the same file | A parameter, a variable or an iterator of an imported file has the name of a definition of that file, which it would hide. |
 | E0306 | the vendor of the import 'path' is not known | The text before the colon is not `mu`, which is the standard library of Mialu. |
+
+## E0401 - E0449: names, attributes, labels and the statements that jump
+
+These are found when the names of the program are resolved, see [Scope resolution](mialu-programming-language.md#scope-resolution), [Attributes](mialu-programming-language.md#attributes), [Labels and scopes](mialu-programming-language.md#labels-and-scopes) and [Defer](mialu-programming-language.md#defer).
+
+| Code | Title | When |
+|---|---|---|
+| E0401 | 'name' is already defined | Two definitions of the module have the same name. |
+| E0402 | cannot find 'name' in this scope | A name is not a variable or a parameter of the procedure, a constant or a global variable. |
+| E0403 | parameter 'name' is declared twice | |
+| E0404 | parameter 'name' has the name of a constant or a global variable | The parameter would hide it. |
+| E0405 | variable 'name' is defined twice | In the same scope. |
+| E0406 | variable 'name' has the name of a constant, a global variable or a parameter | The variable would hide it. |
+| E0407 | the struct already has a field called 'name' | |
+| E0408 | the enum has the member 'name' twice | |
+| E0409 | 'name' is not a variable, so it cannot be assigned to | A parameter or a constant is assigned to. |
+| E0410 | 'name' is the iterator of a for loop, so it cannot be assigned to | |
+| E0411 | 'name' is not a procedure, so it cannot be called | |
+| E0412 | the attribute 'name' is given twice | |
+| E0413 | 'name' is not an attribute of a global variable | The only one is `static`. |
+| E0414 | 'name' is not an attribute of a match statement | The only one is `partial`. |
+| E0415 | global variable 'name' must have the attribute #(static) | A global variable has static storage duration. |
+| E0416 | the initial value of global variable 'name' is not known when the program is compiled | It must be a constant expression, or a field of the information about a type. |
+| E0417 | the program already imports foreign procedures from this target | A program has one `import foreign` for each target. |
+| E0418 | the foreign procedure 'name' has no 'import foreign' of its target above it | |
+| E0419 | 'break' is not inside a loop or a scope | |
+| E0420 | 'name' is not inside a loop | A `continue`, or a `break` of a loop, outside one. |
+| E0421 | 'name' cannot leave the statement of a 'defer' | A deferred statement runs while its block is being left. |
+| E0422 | the label 'name' is already used by a statement around this one | |
+| E0423 | 'name' is not the label of a loop, so 'continue' cannot go on with it | |
+| E0424 | 'name' is not the label of a statement around this 'break' or 'continue' | |
+| E0425 | 'defer' cannot be inside the statement of another 'defer' | |
+| E0426 | 'defer' cannot take this statement | It takes an assignment, a call, or an if, for or scope statement. |
+| E0427 | 'return' cannot be inside the statement of a 'defer' | |

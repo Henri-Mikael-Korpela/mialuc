@@ -7,6 +7,7 @@
 #include <mialu/array_slice.h>
 #include <mialu/package.h>
 #include <mialu/parser.h>
+#include <mialu/semantic.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
 
@@ -25,6 +26,7 @@
  * E0101 - E0199   the tokens: comments, indentation, numbers, runes and strings
  * E0201 - E0299   the syntax
  * E0301 - E0399   the files that a program imports
+ * E0401 - E0449   names, attributes, labels and the statements that jump
  * ```
  *
  * The enumeration is in the order of the numbers and not alphabetical, because the numbers are what
@@ -74,6 +76,34 @@ typedef enum {
     ERROR_CODE_IMPORT_LIMIT = 304,
     ERROR_CODE_IMPORT_SHADOWS = 305,
     ERROR_CODE_IMPORT_VENDOR_UNKNOWN = 306,
+
+    ERROR_CODE_DEFINITION_NAME_DUPLICATE = 401,
+    ERROR_CODE_IDENTIFIER_UNKNOWN = 402,
+    ERROR_CODE_PARAMETER_NAME_DUPLICATE = 403,
+    ERROR_CODE_PARAMETER_NAME_SHADOWS = 404,
+    ERROR_CODE_VARIABLE_NAME_DUPLICATE = 405,
+    ERROR_CODE_VARIABLE_NAME_SHADOWS = 406,
+    ERROR_CODE_FIELD_NAME_DUPLICATE = 407,
+    ERROR_CODE_ENUM_MEMBER_DUPLICATE = 408,
+    ERROR_CODE_ASSIGNMENT_TARGET_NOT_VARIABLE = 409,
+    ERROR_CODE_ASSIGNMENT_TARGET_ITERATOR = 410,
+    ERROR_CODE_CALL_TARGET_NOT_PROCEDURE = 411,
+    ERROR_CODE_ATTRIBUTE_DUPLICATE = 412,
+    ERROR_CODE_ATTRIBUTE_UNKNOWN = 413,
+    ERROR_CODE_MATCH_ATTRIBUTE_UNKNOWN = 414,
+    ERROR_CODE_GLOBAL_NOT_STATIC = 415,
+    ERROR_CODE_GLOBAL_VALUE_NOT_CONSTANT = 416,
+    ERROR_CODE_FOREIGN_IMPORT_DUPLICATE = 417,
+    ERROR_CODE_FOREIGN_IMPORT_MISSING = 418,
+    ERROR_CODE_BREAK_OUTSIDE_SCOPE = 419,
+    ERROR_CODE_JUMP_OUTSIDE_LOOP = 420,
+    ERROR_CODE_JUMP_OUT_OF_DEFER = 421,
+    ERROR_CODE_LABEL_DUPLICATE = 422,
+    ERROR_CODE_LABEL_NOT_LOOP = 423,
+    ERROR_CODE_LABEL_UNKNOWN = 424,
+    ERROR_CODE_DEFER_NESTED = 425,
+    ERROR_CODE_DEFER_STATEMENT_INVALID = 426,
+    ERROR_CODE_RETURN_IN_DEFER = 427,
 } Error_Code;
 
 /**
@@ -114,5 +144,13 @@ void report_parse_error(Reporter const *reporter, char const *path, Str source, 
  */
 void report_package_error(Reporter const *reporter, char const *path, Str source,
                           Package_Result result);
+
+/**
+ * Reports an error of `semantic_analyze` that has a code in the catalog, in the program whose source
+ * is `source` and whose file is `path`, or in a file that it imports. Returns false, and prints
+ * nothing, for an error that does not have one yet.
+ */
+bool report_semantic_error(Reporter const *reporter, char const *path, Str source,
+                           Semantic_Result result);
 
 #endif

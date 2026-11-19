@@ -1,0 +1,9 @@
+error[E0406]: variable 'LIMIT' has the name of a constant, a global variable or a parameter
+ --> test-code/errors/front/E0406-variable-name-shadows.mu:6:5
+  |
+6 |     LIMIT := 2
+  |     ^^^^^ this name is taken
+  |
+  = note: a variable cannot have the name of a constant, a global variable or a parameter, which it
+          would hide
+  = help: choose another name

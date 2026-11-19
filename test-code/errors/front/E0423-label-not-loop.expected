@@ -1,0 +1,7 @@
+error[E0423]: 'outer' is not the label of a loop, so 'continue' cannot go on with it
+ --> test-code/errors/front/E0423-label-not-loop.mu:6:22
+  |
+6 |             continue outer
+  |                      ^^^^^ not the label of a loop
+  |
+  = note: 'continue' goes on with a loop, and not with another statement

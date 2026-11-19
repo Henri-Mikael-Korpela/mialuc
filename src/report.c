@@ -288,6 +288,175 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .label = "unknown vendor",
         .help = "'mu' is the standard library of Mialu",
     },
+
+    // Names, attributes, labels and the statements that jump.
+    [ERROR_CODE_DEFINITION_NAME_DUPLICATE] = {
+        .title = "'{subject}' is already defined",
+        .label = "a definition with this name exists already",
+    },
+    [ERROR_CODE_IDENTIFIER_UNKNOWN] = {
+        .title = "cannot find '{subject}' in this scope",
+        .label = "not found in this scope",
+        .note = "a name is a variable or a parameter of the procedure, a constant or a global "
+                "variable",
+    },
+    [ERROR_CODE_PARAMETER_NAME_DUPLICATE] = {
+        .title = "parameter '{subject}' is declared twice",
+        .label = "declared again here",
+    },
+    [ERROR_CODE_PARAMETER_NAME_SHADOWS] = {
+        .title = "parameter '{subject}' has the name of a constant or a global variable",
+        .label = "this name is taken",
+        .note = "a parameter cannot have the name of a constant or a global variable, which it "
+                "would hide",
+        .help = "choose another name",
+    },
+    [ERROR_CODE_VARIABLE_NAME_DUPLICATE] = {
+        .title = "variable '{subject}' is defined twice",
+        .label = "defined again here",
+    },
+    [ERROR_CODE_VARIABLE_NAME_SHADOWS] = {
+        .title = "variable '{subject}' has the name of a constant, a global variable or a "
+                 "parameter",
+        .label = "this name is taken",
+        .note = "a variable cannot have the name of a constant, a global variable or a parameter, "
+                "which it would hide",
+        .help = "choose another name",
+    },
+    [ERROR_CODE_FIELD_NAME_DUPLICATE] = {
+        .title = "the struct already has a field called '{subject}'",
+        .label = "defined again here",
+    },
+    [ERROR_CODE_ENUM_MEMBER_DUPLICATE] = {
+        .title = "the enum has the member '{subject}' twice",
+        .label = "defined again here",
+    },
+    [ERROR_CODE_ASSIGNMENT_TARGET_NOT_VARIABLE] = {
+        .title = "'{subject}' is not a variable, so it cannot be assigned to",
+        .label = "cannot be assigned to",
+        .note = "a parameter and a constant are not variables",
+    },
+    [ERROR_CODE_ASSIGNMENT_TARGET_ITERATOR] = {
+        .title = "'{subject}' is the iterator of a for loop, so it cannot be assigned to",
+        .label = "cannot be assigned to",
+    },
+    [ERROR_CODE_CALL_TARGET_NOT_PROCEDURE] = {
+        .title = "'{subject}' is not a procedure, so it cannot be called",
+        .label = "not a procedure",
+    },
+    [ERROR_CODE_ATTRIBUTE_DUPLICATE] = {
+        .title = "the attribute '{subject}' is given twice",
+        .label = "given again here",
+    },
+    [ERROR_CODE_ATTRIBUTE_UNKNOWN] = {
+        .title = "'{subject}' is not an attribute of a global variable",
+        .label = "unknown attribute",
+        .note = "the only attribute of a global variable is 'static'",
+    },
+    [ERROR_CODE_MATCH_ATTRIBUTE_UNKNOWN] = {
+        .title = "'{subject}' is not an attribute of a match statement",
+        .label = "unknown attribute",
+        .note = "the only attribute of a match statement is 'partial'",
+    },
+    [ERROR_CODE_GLOBAL_NOT_STATIC] = {
+        .title = "global variable '{subject}' must have the attribute #(static)",
+        .label = "needs #(static)",
+        .note = "a global variable has static storage duration",
+        .help = "write the attribute after the name, as in 'counter #(static) := 0'",
+    },
+    [ERROR_CODE_GLOBAL_VALUE_NOT_CONSTANT] = {
+        .title = "the initial value of global variable '{subject}' is not known when the program "
+                 "is compiled",
+        .label = "not a constant expression",
+        .note = "the initial value of a global variable is a constant expression, such as a "
+                "number or 'LIMIT * 2', or a field of the information about a type",
+    },
+    [ERROR_CODE_FOREIGN_IMPORT_DUPLICATE] = {
+        .title = "the program already imports foreign procedures from this target",
+        .label = "imported again here",
+        .note = "a program imports foreign procedures once for each target",
+    },
+    [ERROR_CODE_FOREIGN_IMPORT_MISSING] = {
+        .title = "the foreign procedure '{subject}' has no 'import foreign' of its target above "
+                 "it",
+        .label = "needs the import of its target above it",
+        .help = "add the import of the target above the first foreign block of the target, such "
+                "as 'import foreign libc'",
+    },
+    [ERROR_CODE_BREAK_OUTSIDE_SCOPE] = {
+        .title = "'break' is not inside a loop or a scope",
+        .label = "nothing to break out of",
+    },
+    [ERROR_CODE_JUMP_OUTSIDE_LOOP] = {
+        .title = "'{subject}' is not inside a loop",
+        .label = "not inside a loop",
+    },
+    [ERROR_CODE_JUMP_OUT_OF_DEFER] = {
+        .title = "'{subject}' cannot leave the statement of a 'defer'",
+        .label = "leaves the deferred statement",
+        .note = "a deferred statement runs while its block is being left",
+    },
+    [ERROR_CODE_LABEL_DUPLICATE] = {
+        .title = "the label '{subject}' is already used by a statement around this one",
+        .label = "used again here",
+    },
+    [ERROR_CODE_LABEL_NOT_LOOP] = {
+        .title = "'{subject}' is not the label of a loop, so 'continue' cannot go on with it",
+        .label = "not the label of a loop",
+        .note = "'continue' goes on with a loop, and not with another statement",
+    },
+    [ERROR_CODE_LABEL_UNKNOWN] = {
+        .title = "'{subject}' is not the label of a statement around this 'break' or 'continue'",
+        .label = "no statement around this has the label",
+    },
+    [ERROR_CODE_DEFER_NESTED] = {
+        .title = "'defer' cannot be inside the statement of another 'defer'",
+        .label = "inside a deferred statement",
+    },
+    [ERROR_CODE_DEFER_STATEMENT_INVALID] = {
+        .title = "'defer' cannot take this statement",
+        .label = "cannot be deferred",
+        .note = "'defer' takes an assignment, a call, or an if, for or scope statement, and not a "
+                "variable definition, 'return', 'break' or 'continue'",
+    },
+    [ERROR_CODE_RETURN_IN_DEFER] = {
+        .title = "'return' cannot be inside the statement of a 'defer'",
+        .label = "inside a deferred statement",
+        .note = "a deferred statement runs while its block is being left, maybe by another "
+                "'return'",
+    },
+};
+
+// The code of each status of the analysis of names that has one in the catalog. A status that is not
+// in the table is zero, and is not reported here yet.
+static Error_Code const REPORT_SEMANTIC_CODES[] = {
+    [SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE] = ERROR_CODE_DEFINITION_NAME_DUPLICATE,
+    [SEMANTIC_STATUS_IDENTIFIER_UNKNOWN] = ERROR_CODE_IDENTIFIER_UNKNOWN,
+    [SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE] = ERROR_CODE_PARAMETER_NAME_DUPLICATE,
+    [SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS] = ERROR_CODE_PARAMETER_NAME_SHADOWS,
+    [SEMANTIC_STATUS_VARIABLE_NAME_DUPLICATE] = ERROR_CODE_VARIABLE_NAME_DUPLICATE,
+    [SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS] = ERROR_CODE_VARIABLE_NAME_SHADOWS,
+    [SEMANTIC_STATUS_FIELD_NAME_DUPLICATE] = ERROR_CODE_FIELD_NAME_DUPLICATE,
+    [SEMANTIC_STATUS_ENUM_MEMBER_DUPLICATE] = ERROR_CODE_ENUM_MEMBER_DUPLICATE,
+    [SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE] = ERROR_CODE_ASSIGNMENT_TARGET_NOT_VARIABLE,
+    [SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR] = ERROR_CODE_ASSIGNMENT_TARGET_ITERATOR,
+    [SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE] = ERROR_CODE_CALL_TARGET_NOT_PROCEDURE,
+    [SEMANTIC_STATUS_ATTRIBUTE_DUPLICATE] = ERROR_CODE_ATTRIBUTE_DUPLICATE,
+    [SEMANTIC_STATUS_ATTRIBUTE_UNKNOWN] = ERROR_CODE_ATTRIBUTE_UNKNOWN,
+    [SEMANTIC_STATUS_MATCH_ATTRIBUTE_UNKNOWN] = ERROR_CODE_MATCH_ATTRIBUTE_UNKNOWN,
+    [SEMANTIC_STATUS_GLOBAL_NOT_STATIC] = ERROR_CODE_GLOBAL_NOT_STATIC,
+    [SEMANTIC_STATUS_GLOBAL_VALUE_NOT_CONSTANT] = ERROR_CODE_GLOBAL_VALUE_NOT_CONSTANT,
+    [SEMANTIC_STATUS_FOREIGN_IMPORT_DUPLICATE] = ERROR_CODE_FOREIGN_IMPORT_DUPLICATE,
+    [SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING] = ERROR_CODE_FOREIGN_IMPORT_MISSING,
+    [SEMANTIC_STATUS_BREAK_OUTSIDE_SCOPE] = ERROR_CODE_BREAK_OUTSIDE_SCOPE,
+    [SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP] = ERROR_CODE_JUMP_OUTSIDE_LOOP,
+    [SEMANTIC_STATUS_JUMP_OUT_OF_DEFER] = ERROR_CODE_JUMP_OUT_OF_DEFER,
+    [SEMANTIC_STATUS_LABEL_DUPLICATE] = ERROR_CODE_LABEL_DUPLICATE,
+    [SEMANTIC_STATUS_LABEL_NOT_LOOP] = ERROR_CODE_LABEL_NOT_LOOP,
+    [SEMANTIC_STATUS_LABEL_UNKNOWN] = ERROR_CODE_LABEL_UNKNOWN,
+    [SEMANTIC_STATUS_DEFER_NESTED] = ERROR_CODE_DEFER_NESTED,
+    [SEMANTIC_STATUS_DEFER_STATEMENT_INVALID] = ERROR_CODE_DEFER_STATEMENT_INVALID,
+    [SEMANTIC_STATUS_RETURN_IN_DEFER] = ERROR_CODE_RETURN_IN_DEFER,
 };
 
 // The code of each status of putting the imports together that is about an import. The statuses of
@@ -569,6 +738,20 @@ void report_package_error(Reporter const *reporter, char const *path, Str source
         detail = str_make(limits, (size_t)length);
     }
     report_emit_at_subject(reporter, code, path, source, result.subject, detail, 0);
+}
+
+bool report_semantic_error(Reporter const *reporter, char const *path, Str source,
+                           Semantic_Result result) {
+    assert(reporter != NULL);
+    assert(path != NULL);
+    assert(result.status != SEMANTIC_STATUS_OK);
+
+    Error_Code code = REPORT_SEMANTIC_CODES[result.status];
+    if (code == 0) {
+        return false;
+    }
+    report_emit_at_subject(reporter, code, path, source, result.subject, STR_EMPTY, 0);
+    return true;
 }
 
 /**

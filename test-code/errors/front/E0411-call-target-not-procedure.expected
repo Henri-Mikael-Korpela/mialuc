@@ -1,0 +1,5 @@
+error[E0411]: 'LIMIT' is not a procedure, so it cannot be called
+ --> test-code/errors/front/E0411-call-target-not-procedure.mu:6:10
+  |
+6 |     x := LIMIT()
+  |          ^^^^^ not a procedure

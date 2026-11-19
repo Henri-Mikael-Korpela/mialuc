@@ -1,0 +1,8 @@
+error[E0404]: parameter 'LIMIT' has the name of a constant or a global variable
+ --> test-code/errors/front/E0404-parameter-name-shadows.mu:5:13
+  |
+5 | add :: proc(LIMIT: Int) Int ->
+  |             ^^^^^ this name is taken
+  |
+  = note: a parameter cannot have the name of a constant or a global variable, which it would hide
+  = help: choose another name

@@ -1,0 +1,7 @@
+error[E0413]: 'shared' is not an attribute of a global variable
+ --> test-code/errors/front/E0413-attribute-unknown.mu:3:19
+  |
+3 | counter #(static)(shared) := 0
+  |                   ^^^^^^ unknown attribute
+  |
+  = note: the only attribute of a global variable is 'static'

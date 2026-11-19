@@ -603,7 +603,9 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
                                                        packages->imported_end, buffers->bindings,
                                                        buffers->constants, buffers->text);
     if (semantic_result.status != SEMANTIC_STATUS_OK) {
-        main_run_command_report_semantic_error(path, source, semantic_result);
+        if (not report_semantic_error(&command.reporter, path, source, semantic_result)) {
+            main_run_command_report_semantic_error(path, source, semantic_result);
+        }
         return 1;
     }
 
@@ -2973,52 +2975,6 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
     // The cast is needed because `%.*s` takes an `int` precision.
     int subject_length = (int)result.subject.length;
     switch (result.status) {
-    case SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a variable, so it cannot be assigned to.\n",
-                path, position.line, position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is the iterator of a for loop, so it cannot be "
-                "assigned to.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_ATTRIBUTE_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: the attribute '%.*s' is given twice.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_ATTRIBUTE_UNKNOWN:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an attribute of a global variable. The only "
-                "one is 'static'.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_FIELD_NAME_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: the struct already has a field called '%.*s'.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_FOREIGN_IMPORT_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: the program already imports foreign procedures from "
-                "this target, and can do it once for each target.\n", path, position.line,
-                position.column);
-        break;
-    case SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING:
-        fprintf(stderr, "%s:%zu:%zu: the foreign procedure '%.*s' needs an 'import foreign' of "
-                "its target above it.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_GLOBAL_NOT_STATIC:
-        fprintf(stderr, "%s:%zu:%zu: global variable '%.*s' must have the attribute #(static).\n",
-                path, position.line, position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_GLOBAL_VALUE_NOT_CONSTANT:
-        fprintf(stderr, "%s:%zu:%zu: the initial value of global variable '%.*s' must be known "
-                "when the program is compiled: a constant expression, such as a number or "
-                "'LIMIT * 2', or a field of the information about a type.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a procedure, so it cannot be called.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes);
-        break;
     case SEMANTIC_STATUS_CONSTANT_CYCLE:
         fprintf(stderr, "%s:%zu:%zu: the constant '%.*s' is defined in terms of itself.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
@@ -3097,85 +3053,38 @@ static void main_run_command_report_semantic_error(char const *path, Str source,
                 "number from 0 to 255.\n", path, position.line, position.column, subject_length,
                 result.subject.bytes);
         break;
-    case SEMANTIC_STATUS_ENUM_MEMBER_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: the enum has the member '%.*s' twice.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_DEFER_NESTED:
-        fprintf(stderr, "%s:%zu:%zu: 'defer' cannot be inside the statement of another 'defer'.\n",
-                path, position.line, position.column);
-        break;
-    case SEMANTIC_STATUS_DEFER_STATEMENT_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: 'defer' takes an assignment, a call, or an if, for or scope "
-                "statement, and not a variable definition, 'return', 'break' or 'continue'.\n",
-                path, position.line, position.column);
-        break;
-    case SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is already defined.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_IDENTIFIER_UNKNOWN:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not a variable or parameter of the procedure, a "
-                "constant or a global variable.\n", path, position.line, position.column,
-                subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_JUMP_OUT_OF_DEFER:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' cannot leave the statement of a 'defer', which runs "
-                "while its block is being left.\n", path, position.line, position.column,
-                subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not inside a loop.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
-        break;
+    case SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR:
+    case SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE:
+    case SEMANTIC_STATUS_ATTRIBUTE_DUPLICATE:
+    case SEMANTIC_STATUS_ATTRIBUTE_UNKNOWN:
     case SEMANTIC_STATUS_BREAK_OUTSIDE_SCOPE:
-        fprintf(stderr, "%s:%zu:%zu: 'break' is not inside a loop or a scope.\n", path,
-                position.line, position.column);
-        break;
+    case SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE:
+    case SEMANTIC_STATUS_DEFER_NESTED:
+    case SEMANTIC_STATUS_DEFER_STATEMENT_INVALID:
+    case SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE:
+    case SEMANTIC_STATUS_ENUM_MEMBER_DUPLICATE:
+    case SEMANTIC_STATUS_FIELD_NAME_DUPLICATE:
+    case SEMANTIC_STATUS_FOREIGN_IMPORT_DUPLICATE:
+    case SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING:
+    case SEMANTIC_STATUS_GLOBAL_NOT_STATIC:
+    case SEMANTIC_STATUS_GLOBAL_VALUE_NOT_CONSTANT:
+    case SEMANTIC_STATUS_IDENTIFIER_UNKNOWN:
+    case SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP:
+    case SEMANTIC_STATUS_JUMP_OUT_OF_DEFER:
     case SEMANTIC_STATUS_LABEL_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: the label '%.*s' is already used by a statement around "
-                "this one.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
     case SEMANTIC_STATUS_LABEL_NOT_LOOP:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not the label of a loop, so 'continue' cannot go on "
-                "with it.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
     case SEMANTIC_STATUS_LABEL_UNKNOWN:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not the label of a statement around this "
-                "'break' or 'continue'.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
     case SEMANTIC_STATUS_MATCH_ATTRIBUTE_UNKNOWN:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' is not an attribute of a match statement. The only "
-                "one is 'partial'.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
+    case SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE:
+    case SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS:
+    case SEMANTIC_STATUS_RETURN_IN_DEFER:
+    case SEMANTIC_STATUS_VARIABLE_NAME_DUPLICATE:
+    case SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS:
+        // The catalog of `report.c` has these.
+        assert(false);
         break;
     case SEMANTIC_STATUS_OK:
         assert(false);
-        break;
-    case SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: parameter '%.*s' is declared twice.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_RETURN_IN_DEFER:
-        fprintf(stderr, "%s:%zu:%zu: 'return' cannot be inside the statement of a 'defer', which "
-                "runs while its block is being left.\n", path, position.line, position.column);
-        break;
-    case SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS:
-        fprintf(stderr, "%s:%zu:%zu: parameter '%.*s' has the name of a constant or a global "
-                "variable, which it would hide.\n", path, position.line, position.column,
-                subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_VARIABLE_NAME_DUPLICATE:
-        fprintf(stderr, "%s:%zu:%zu: variable '%.*s' is defined twice.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS:
-        fprintf(stderr, "%s:%zu:%zu: variable '%.*s' has the name of a constant, a global "
-                "variable or a parameter, which it would hide.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
         break;
     }
 }

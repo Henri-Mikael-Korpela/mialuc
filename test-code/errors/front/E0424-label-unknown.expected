@@ -1,0 +1,5 @@
+error[E0424]: 'missing' is not the label of a statement around this 'break' or 'continue'
+ --> test-code/errors/front/E0424-label-unknown.mu:5:15
+  |
+5 |         break missing
+  |               ^^^^^^^ no statement around this has the label

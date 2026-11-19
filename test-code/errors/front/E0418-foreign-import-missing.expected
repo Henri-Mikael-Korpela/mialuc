@@ -1,0 +1,8 @@
+error[E0418]: the foreign procedure 'puts' has no 'import foreign' of its target above it
+ --> test-code/errors/front/E0418-foreign-import-missing.mu:4:5
+  |
+4 |     puts :: proc(content: C_Str) Int -> ...
+  |     ^^^^ needs the import of its target above it
+  |
+  = help: add the import of the target above the first foreign block of the target, such as 'import
+          foreign libc'

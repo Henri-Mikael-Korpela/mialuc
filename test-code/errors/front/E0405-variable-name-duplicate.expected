@@ -1,0 +1,5 @@
+error[E0405]: variable 'x' is defined twice
+ --> test-code/errors/front/E0405-variable-name-duplicate.mu:5:5
+  |
+5 |     x := 2
+  |     ^ defined again here

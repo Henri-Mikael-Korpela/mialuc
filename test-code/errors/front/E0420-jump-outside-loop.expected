@@ -1,0 +1,5 @@
+error[E0420]: 'continue' is not inside a loop
+ --> test-code/errors/front/E0420-jump-outside-loop.mu:4:5
+  |
+4 |     continue
+  |     ^^^^^^^^ not inside a loop

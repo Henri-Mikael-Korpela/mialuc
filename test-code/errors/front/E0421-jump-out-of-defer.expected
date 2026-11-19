@@ -1,0 +1,7 @@
+error[E0421]: 'break' cannot leave the statement of a 'defer'
+ --> test-code/errors/front/E0421-jump-out-of-defer.mu:6:13
+  |
+6 |             break outer
+  |             ^^^^^ leaves the deferred statement
+  |
+  = note: a deferred statement runs while its block is being left

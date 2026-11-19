@@ -1,0 +1,5 @@
+error[E0403]: parameter 'a' is declared twice
+ --> test-code/errors/front/E0403-parameter-name-duplicate.mu:3:21
+  |
+3 | add :: proc(a: Int, a: Int) Int ->
+  |                     ^ declared again here

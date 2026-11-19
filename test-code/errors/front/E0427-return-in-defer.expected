@@ -1,0 +1,7 @@
+error[E0427]: 'return' cannot be inside the statement of a 'defer'
+ --> test-code/errors/front/E0427-return-in-defer.mu:5:9
+  |
+5 |         return 1
+  |         ^^^^^^ inside a deferred statement
+  |
+  = note: a deferred statement runs while its block is being left, maybe by another 'return'

@@ -1,0 +1,5 @@
+error[E0401]: 'LIMIT' is already defined
+ --> test-code/errors/front/E0401-definition-name-duplicate.mu:4:1
+  |
+4 | LIMIT :: 2
+  | ^^^^^ a definition with this name exists already
