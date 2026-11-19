@@ -197,9 +197,6 @@ static bool         main_type_text_write                   (Ast_Node const *node
 static int32_t      main_run_command_front                 (Command command,
                                                             Buffers const *buffers,
                                                             Packages *packages);
-static void         main_package_report                    (Reporter const *reporter,
-                                                            char const *path, Str source,
-                                                            Package_Result result);
 static void         main_subject_source                    (char const **path, Str *source,
                                                             Str subject);
 static int32_t      main_run_command                       (Command command,
@@ -585,7 +582,7 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
     Package_Result imported = packages_load(packages, &code_tokens, buffers->nodes,
                                             SOURCE_SIZE_BYTES_MAX, TOKEN_COUNT_MAX);
     if (imported.status != PACKAGE_STATUS_OK) {
-        main_package_report(&command.reporter, path, source, imported);
+        report_package_error(&command.reporter, path, source, imported);
         return 1;
     }
     Parse_Result parse_result = parse_at(code_tokens, buffers->nodes, packages->imported_end);
@@ -3197,79 +3194,6 @@ static void main_subject_source(char const **path, Str *source, Str subject) {
     if (packages_locate(main_packages, subject, &imported_path, &imported_source)) {
         *path = imported_path;
         *source = imported_source;
-    }
-}
-
-/**
- * Prints what is wrong with the files that the program imports, which `result` says. A tokenize or
- * parse error is told as the one of the file that has it.
- */
-static void main_package_report(Reporter const *reporter, char const *path, Str source,
-                                Package_Result result) {
-    assert(result.status != PACKAGE_STATUS_OK);
-
-    int subject_length = (int)result.subject.length;
-    switch (result.status) {
-    case PACKAGE_STATUS_TOKENIZE_ERROR:
-        report_tokenize_error(reporter, result.path, result.source, result.tokenize_result);
-        return;
-    case PACKAGE_STATUS_PARSE_ERROR:
-        report_parse_error(reporter, result.path, result.source, result.code_tokens,
-                           result.parse_result);
-        return;
-    case PACKAGE_STATUS_OK:
-        assert(false);
-        return;
-    default:
-        break;
-    }
-
-    // The others are about an import, or about a name, which is in the program or in an imported
-    // file.
-    main_subject_source(&path, &source, result.subject);
-    Str_Position position = main_subject_position(source, result.subject);
-    switch (result.status) {
-    case PACKAGE_STATUS_CYCLE:
-        fprintf(stderr, "%s:%zu:%zu: the import '%.*s' is a loop: the file imports itself, "
-                "directly or through the files that it imports.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
-        break;
-    case PACKAGE_STATUS_FILE_UNREADABLE:
-        fprintf(stderr, "%s:%zu:%zu: the import '%.*s' is a file that cannot be read: %s. The "
-                "standard library is in the directory 'lib' next to the compiler, or in "
-                "'src/mialu-std' of the project that the compiler was built from.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes,
-                result.path == NULL ? "no directory of the library is known" : result.path);
-        break;
-    case PACKAGE_STATUS_IMPORT_PATH_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: the import '%.*s' must be a vendor, a colon and a path of "
-                "names and slashes, such as \"mu:filesystem\".\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
-        break;
-    case PACKAGE_STATUS_LIMIT:
-        fprintf(stderr, "%s:%zu:%zu: the imports of '%.*s' are more than the program can put "
-                "together: at most %d files, %d imports below each other, and %d bytes of names.\n",
-                path, position.line, position.column, subject_length, result.subject.bytes,
-                PACKAGE_FILE_COUNT_MAX, PACKAGE_DEPTH_MAX, PACKAGE_NAMES_SIZE_BYTES_MAX);
-        break;
-    case PACKAGE_STATUS_OUT_OF_MEMORY:
-        fprintf(stderr, "Out of memory.\n");
-        break;
-    case PACKAGE_STATUS_SHADOWS:
-        fprintf(stderr, "%s:%zu:%zu: '%.*s' has the name of a definition of the same file, which "
-                "it would hide.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
-    case PACKAGE_STATUS_VENDOR_UNKNOWN:
-        fprintf(stderr, "%s:%zu:%zu: the vendor of the import '%.*s' is not known: 'mu' is the "
-                "standard library of Mialu.\n", path, position.line, position.column,
-                subject_length, result.subject.bytes);
-        break;
-    case PACKAGE_STATUS_OK:
-    case PACKAGE_STATUS_PARSE_ERROR:
-    case PACKAGE_STATUS_TOKENIZE_ERROR:
-        assert(false);
-        break;
     }
 }
 

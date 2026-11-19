@@ -1,0 +1,7 @@
+error[E0303]: the import 'nocolon' is not a path of a library file
+ --> test-code/errors/front/E0303-import-path-invalid.mu:3:9
+  |
+3 | import "nocolon"
+  |         ^^^^^^^ expected a vendor, a colon and a path
+  |
+  = help: write the vendor, a colon and a path of names and slashes, such as "mu:filesystem"

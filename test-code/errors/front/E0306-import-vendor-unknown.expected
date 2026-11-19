@@ -1,0 +1,7 @@
+error[E0306]: the vendor of the import 'other:thing' is not known
+ --> test-code/errors/front/E0306-import-vendor-unknown.mu:3:9
+  |
+3 | import "other:thing"
+  |         ^^^^^^^^^^^ unknown vendor
+  |
+  = help: 'mu' is the standard library of Mialu

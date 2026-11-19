@@ -9,6 +9,7 @@ The text of the errors is all in [report.c](../src/report.c), where each code is
 | E0001 - E0099 | the command, the files and the system |
 | E0101 - E0199 | the tokens: comments, indentation, numbers, runes and strings |
 | E0201 - E0299 | the syntax |
+| E0301 - E0399 | the files that a program imports |
 
 ## E0001 - E0099: the command, the files and the system
 
@@ -64,3 +65,16 @@ These are found when the tokens are put together into the syntax tree, see the [
 |---|---|---|
 | E0201 | more than 65536 syntax tree nodes | The program has more nodes than the compiler allocates. |
 | E0202 | unexpected `token` | The token is not what the grammar takes there. The label says what it takes. At the end of a line the token is the first one of the next line, and at the end of the file it is `end of the file`. |
+
+## E0301 - E0399: the files that a program imports
+
+These are found when the files that `import` names are read and put together, see [Imports](mialu-programming-language.md#imports). An error in an imported file, which does not tokenize or parse, is told by the code of that error, with the path and the lines of the file that has it.
+
+| Code | Title | When |
+|---|---|---|
+| E0301 | the import 'path' is a loop | The file imports itself, directly or through the files that it imports. |
+| E0302 | cannot read the file of the import 'path' | The file is not in the directory `lib` next to the compiler or in `src/mialu-std` of the project that the compiler was built from, or it is larger than a source can be. |
+| E0303 | the import 'path' is not a path of a library file | The text of an import is not a vendor, a colon and a path of names and slashes, such as `"mu:filesystem"`. |
+| E0304 | the imports of 'path' are more than the program can put together | At most 32 files, 8 imports below each other, and 262144 bytes of names. |
+| E0305 | 'name' has the name of a definition of the same file | A parameter, a variable or an iterator of an imported file has the name of a definition of that file, which it would hide. |
+| E0306 | the vendor of the import 'path' is not known | The text before the colon is not `mu`, which is the standard library of Mialu. |

@@ -1,0 +1,10 @@
+error[E0302]: cannot read the file of the import 'mu:missing'
+ --> test-code/errors/front/E0302-import-file-unreadable.mu:3:9
+  |
+3 | import "mu:missing"
+  |         ^^^^^^^^^^ this file cannot be read
+  |
+  = note: the file does not exist, cannot be read, or is larger than a source can be. Looked for:
+          <root>/src/mialu-std/missing.mu
+  = help: the standard library is in the directory 'lib' next to the compiler, or in 'src/mialu-std'
+          of the project that the compiler was built from

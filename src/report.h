@@ -24,6 +24,7 @@
  * E0001 - E0099   the command, the files and the system
  * E0101 - E0199   the tokens: comments, indentation, numbers, runes and strings
  * E0201 - E0299   the syntax
+ * E0301 - E0399   the files that a program imports
  * ```
  *
  * The enumeration is in the order of the numbers and not alphabetical, because the numbers are what
@@ -66,6 +67,13 @@ typedef enum {
 
     ERROR_CODE_NODE_LIMIT = 201,
     ERROR_CODE_UNEXPECTED_TOKEN = 202,
+
+    ERROR_CODE_IMPORT_CYCLE = 301,
+    ERROR_CODE_IMPORT_FILE_UNREADABLE = 302,
+    ERROR_CODE_IMPORT_PATH_INVALID = 303,
+    ERROR_CODE_IMPORT_LIMIT = 304,
+    ERROR_CODE_IMPORT_SHADOWS = 305,
+    ERROR_CODE_IMPORT_VENDOR_UNKNOWN = 306,
 } Error_Code;
 
 /**
@@ -98,5 +106,13 @@ void report_tokenize_error(Reporter const *reporter, char const *path, Str sourc
  */
 void report_parse_error(Reporter const *reporter, char const *path, Str source, Array_Slice tokens,
                         Parse_Result result);
+
+/**
+ * Reports what is wrong with the files that the program imports, which `result` says. A tokenize or
+ * parse error is told as the one of the file that has it, and the others are told with the import
+ * that `result` is about. `path` and `source` are the program, whose imports they are.
+ */
+void report_package_error(Reporter const *reporter, char const *path, Str source,
+                          Package_Result result);
 
 #endif

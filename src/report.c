@@ -251,6 +251,54 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .title = "unexpected {subject}",
         .label = "expected {detail}",
     },
+
+    // The files that a program imports.
+    [ERROR_CODE_IMPORT_CYCLE] = {
+        .title = "the import '{subject}' is a loop",
+        .label = "this import leads back to the file that has it",
+        .note = "a file cannot import itself, directly or through the files that it imports",
+    },
+    [ERROR_CODE_IMPORT_FILE_UNREADABLE] = {
+        .title = "cannot read the file of the import '{subject}'",
+        .label = "this file cannot be read",
+        .note = "the file does not exist, cannot be read, or is larger than a source can be. "
+                "Looked for: {detail}",
+        .help = "the standard library is in the directory 'lib' next to the compiler, or in "
+                "'src/mialu-std' of the project that the compiler was built from",
+    },
+    [ERROR_CODE_IMPORT_PATH_INVALID] = {
+        .title = "the import '{subject}' is not a path of a library file",
+        .label = "expected a vendor, a colon and a path",
+        .help = "write the vendor, a colon and a path of names and slashes, such as "
+                "\"mu:filesystem\"",
+    },
+    [ERROR_CODE_IMPORT_LIMIT] = {
+        .title = "the imports of '{subject}' are more than the program can put together",
+        .label = "this import is over the limit",
+        .note = "a program can put together {detail}",
+    },
+    [ERROR_CODE_IMPORT_SHADOWS] = {
+        .title = "'{subject}' has the name of a definition of the same file",
+        .label = "this would hide the definition",
+        .note = "a parameter, a variable or an iterator cannot have the name of a definition of the "
+                "file that it is in, which it would hide",
+    },
+    [ERROR_CODE_IMPORT_VENDOR_UNKNOWN] = {
+        .title = "the vendor of the import '{subject}' is not known",
+        .label = "unknown vendor",
+        .help = "'mu' is the standard library of Mialu",
+    },
+};
+
+// The code of each status of putting the imports together that is about an import. The statuses of
+// a file that does not tokenize or parse have the codes of those errors, and are told by them.
+static Error_Code const REPORT_PACKAGE_CODES[] = {
+    [PACKAGE_STATUS_CYCLE] = ERROR_CODE_IMPORT_CYCLE,
+    [PACKAGE_STATUS_FILE_UNREADABLE] = ERROR_CODE_IMPORT_FILE_UNREADABLE,
+    [PACKAGE_STATUS_IMPORT_PATH_INVALID] = ERROR_CODE_IMPORT_PATH_INVALID,
+    [PACKAGE_STATUS_LIMIT] = ERROR_CODE_IMPORT_LIMIT,
+    [PACKAGE_STATUS_SHADOWS] = ERROR_CODE_IMPORT_SHADOWS,
+    [PACKAGE_STATUS_VENDOR_UNKNOWN] = ERROR_CODE_IMPORT_VENDOR_UNKNOWN,
 };
 
 // The code of each status of the parser.
@@ -289,6 +337,8 @@ static Error_Code const REPORT_TOKENIZE_CODES[] = {
 };
 
 static void   report_emit(Reporter const *reporter, Report_Error const *error);
+static void   report_emit_at_subject(Reporter const *reporter, Error_Code code, char const *path,
+                                     Str source, Str subject, Str detail, int64_t number);
 static Str    report_expand(char const *template, Report_Error const *error, char *buffer,
                             size_t buffer_size_bytes);
 static bool   report_is_word_byte(char character);
@@ -472,6 +522,95 @@ void report_parse_error(Reporter const *reporter, char const *path, Str source, 
         .code = code,
         .has_span = true,
     };
+    report_emit(reporter, &error);
+}
+
+void report_package_error(Reporter const *reporter, char const *path, Str source,
+                          Package_Result result) {
+    assert(reporter != NULL);
+    assert(path != NULL);
+    assert(result.status != PACKAGE_STATUS_OK);
+
+    // A file that does not tokenize or parse is told by the error of the tokens or of the syntax,
+    // in that file.
+    if (result.status == PACKAGE_STATUS_TOKENIZE_ERROR) {
+        report_tokenize_error(reporter, result.path, result.source, result.tokenize_result);
+        return;
+    }
+    if (result.status == PACKAGE_STATUS_PARSE_ERROR) {
+        report_parse_error(reporter, result.path, result.source, result.code_tokens,
+                           result.parse_result);
+        return;
+    }
+    if (result.status == PACKAGE_STATUS_OUT_OF_MEMORY) {
+        report_general(reporter, ERROR_CODE_OUT_OF_MEMORY, NULL, 0);
+        return;
+    }
+
+    Error_Code code = REPORT_PACKAGE_CODES[result.status];
+    assert(code > 0);
+
+    char limits[160] = {0};
+    Str detail = STR_EMPTY;
+    if (result.status == PACKAGE_STATUS_FILE_UNREADABLE) {
+        // The file that was looked for, or why there was none to look for.
+        char const *looked_for = "no directory of the library is known";
+        if (result.path != NULL) {
+            looked_for = result.path;
+        }
+        detail = str_make(looked_for, strlen(looked_for));
+    }
+    if (result.status == PACKAGE_STATUS_LIMIT) {
+        int length = snprintf(limits, sizeof(limits),
+                              "at most %d files, %d imports below each other, and %d bytes of names",
+                              PACKAGE_FILE_COUNT_MAX, PACKAGE_DEPTH_MAX,
+                              PACKAGE_NAMES_SIZE_BYTES_MAX);
+        assert(length > 0);
+        detail = str_make(limits, (size_t)length);
+    }
+    report_emit_at_subject(reporter, code, path, source, result.subject, detail, 0);
+}
+
+/**
+ * Reports an error that is about `subject`, a view of a source, which is the text that the carets
+ * are under. The source is the one that `subject` is part of: the program, or a file that it
+ * imports, which `reporter` finds, and then the path and the lines are those of that file. A
+ * subject that is part of no source has an error without a place in it.
+ */
+static void report_emit_at_subject(Reporter const *reporter, Error_Code code, char const *path,
+                                   Str source, Str subject, Str detail, int64_t number) {
+    assert(reporter != NULL);
+    assert(path != NULL);
+
+    char const *file_path = path;
+    Str file_source = source;
+    if (reporter->packages != NULL && subject.bytes != NULL) {
+        char const *imported_path = NULL;
+        Str imported_source = STR_EMPTY;
+        if (packages_locate(reporter->packages, subject, &imported_path, &imported_source)) {
+            file_path = imported_path;
+            file_source = imported_source;
+        }
+    }
+
+    Report_Error error = {
+        .path = file_path,
+        .source = file_source,
+        .subject = subject,
+        .detail = detail,
+        .span_offset = 0,
+        .span_length = subject.length,
+        .number = number,
+        .code = code,
+        .has_span = false,
+    };
+    // The subject views the source, so its distance from the start is its offset. Something that
+    // the compiler adds, such as the built-in struct of `type_info_of`, is not in any source.
+    if (subject.bytes != NULL && subject.bytes >= file_source.bytes &&
+        subject.bytes <= file_source.bytes + file_source.length) {
+        error.has_span = true;
+        error.span_offset = (size_t)(subject.bytes - file_source.bytes);
+    }
     report_emit(reporter, &error);
 }
 

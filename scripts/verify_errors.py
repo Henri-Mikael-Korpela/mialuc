@@ -15,7 +15,8 @@ error. The name of a program starts with the code of the error that it has, such
     wasm    mialuc build --target wasm, which finds what the wasm target cannot build
 
 The paths in the errors are relative to the root of the project, which the compiler is run in, and
-are written with slashes, so that the files are the same on every system.
+are written with slashes, so that the files are the same on every system. The root of the project,
+where an error has an absolute path, is written `<root>`.
 
 The script also checks that the name of every program is in the catalog, that its output has the
 code in its name, and that every code of src/report.h has a program, except the codes that no
@@ -61,6 +62,9 @@ CODES_WITHOUT_PROGRAM = {
     "E0009": "run is only refused on a system other than Windows",
     "E0107": "a float literal has at most 128 characters, so it is never above 1.8e308",
     "E0122": "needs a source of 65536 tokens, which is too large to keep as a program",
+    "E0301": "needs a file of the standard library that imports itself, and a program cannot add one",
+    "E0304": "needs more imports than the standard library has files",
+    "E0305": "is about a file of the standard library, and a program cannot add one",
     "E0201": "needs a source of 65536 syntax tree nodes, which is too large to keep as a program",
 }
 
@@ -81,6 +85,9 @@ def run(compiler, directory, program):
         ]
         completed = subprocess.run([str(compiler)] + arguments, cwd=ROOT, capture_output=True)
     text = completed.stderr.decode("utf8", "replace").replace("\r\n", "\n")
+    # An error that names a file of the standard library has its absolute path, which is the
+    # machine's, so the root of the project is a placeholder.
+    text = text.replace(ROOT.as_posix(), "<root>").replace(str(ROOT), "<root>")
     return completed.returncode, text
 
 
