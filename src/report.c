@@ -33,9 +33,9 @@ enum {
 
 /**
  * The text of one kind of error, as templates. A part that the error has no use for is NULL. In a
- * template `{subject}` is the name, or the piece of the program, that the error is about, `{detail}`
- * is another piece of text, `{number}` is a number, such as a limit, and `{hex}` is the same number
- * in two hexadecimal digits.
+ * template `{subject}` is the name, or the piece of the program, that the error is about,
+ * `{detail}` is another piece of text, `{number}` is a number, such as a limit, and `{hex}` is the
+ * same number in two hexadecimal digits.
  *
  * The title says what is wrong, in a sentence that names the thing, without a full stop. The label
  * is for the place that the carets point at, and says what is wrong there, briefly. The note says
@@ -284,8 +284,8 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
     [ERROR_CODE_IMPORT_SHADOWS] = {
         .title = "'{subject}' has the name of a definition of the same file",
         .label = "this would hide the definition",
-        .note = "a parameter, a variable or an iterator cannot have the name of a definition of the "
-                "file that it is in, which it would hide",
+        .note = "a parameter, a variable or an iterator cannot have the name of a definition of "
+                "the file that it is in, which it would hide",
     },
     [ERROR_CODE_IMPORT_VENDOR_UNKNOWN] = {
         .title = "the vendor of the import '{subject}' is not known",
@@ -923,7 +923,8 @@ static Error_Code const REPORT_SEMANTIC_CODES[] = {
     [SEMANTIC_STATUS_CONSTANT_TOO_DEEP] = ERROR_CODE_CONSTANT_TOO_DEEP,
     [SEMANTIC_STATUS_CONSTANT_TYPE_INVALID] = ERROR_CODE_CONSTANT_TYPE_INVALID,
     [SEMANTIC_STATUS_CONSTANT_TYPE_MISMATCH] = ERROR_CODE_CONSTANT_TYPE_MISMATCH,
-    [SEMANTIC_STATUS_CONSTANT_VALUE_NOT_REPRESENTABLE] = ERROR_CODE_CONSTANT_VALUE_NOT_REPRESENTABLE,
+    [SEMANTIC_STATUS_CONSTANT_VALUE_NOT_REPRESENTABLE] =
+        ERROR_CODE_CONSTANT_VALUE_NOT_REPRESENTABLE,
     [SEMANTIC_STATUS_CONCATENATION_NOT_CONSTANT] = ERROR_CODE_CONCATENATION_NOT_CONSTANT,
     [SEMANTIC_STATUS_ARRAY_LENGTH_NOT_CONSTANT] = ERROR_CODE_ARRAY_LENGTH_NOT_CONSTANT,
     [SEMANTIC_STATUS_ARRAY_LENGTH_INVALID] = ERROR_CODE_ARRAY_LENGTH_INVALID,
@@ -1040,7 +1041,8 @@ static Error_Code const REPORT_X64_CODES[] = {
 
 // The code of each status of the wasm build.
 static Error_Code const REPORT_WASM_CODES[] = {
-    [WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID] = ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID,
+    [WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID] =
+        ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID,
     [WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH] = ERROR_CODE_ARRAY_ELEMENT_TYPE_MISMATCH,
     [WASM_BUILD_STATUS_ARRAY_EXPECTED] = ERROR_CODE_ARRAY_EXPECTED,
     [WASM_BUILD_STATUS_ARRAY_INITIALIZER_INVALID] = ERROR_CODE_ARRAY_INITIALIZER_INVALID,
@@ -1050,7 +1052,8 @@ static Error_Code const REPORT_WASM_CODES[] = {
     [WASM_BUILD_STATUS_CALL_RESULT_MISSING] = ERROR_CODE_CALL_RESULT_MISSING,
     [WASM_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE] = ERROR_CODE_CALL_TARGET_NOT_POINTER,
     [WASM_BUILD_STATUS_CAST_INVALID] = ERROR_CODE_CAST_INVALID,
-    [WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID] = ERROR_CODE_COMPARISON_OPERAND_TYPE_INVALID,
+    [WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID] =
+        ERROR_CODE_COMPARISON_OPERAND_TYPE_INVALID,
     [WASM_BUILD_STATUS_CONDITION_TYPE_INVALID] = ERROR_CODE_CONDITION_TYPE_INVALID,
     [WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN] = ERROR_CODE_ENUM_MEMBER_UNKNOWN,
     [WASM_BUILD_STATUS_ENUM_TYPE_UNKNOWN] = ERROR_CODE_ENUM_TYPE_UNKNOWN,
@@ -1324,7 +1327,8 @@ void report_package_error(Reporter const *reporter, char const *path, Str source
     }
     if (result.status == PACKAGE_STATUS_LIMIT) {
         int length = snprintf(limits, sizeof(limits),
-                              "at most %d files, %d imports below each other, and %d bytes of names",
+                              "at most %d files, %d imports below each other, and %d bytes of "
+                              "names",
                               PACKAGE_FILE_COUNT_MAX, PACKAGE_DEPTH_MAX,
                               PACKAGE_NAMES_SIZE_BYTES_MAX);
         assert(length > 0);
@@ -1557,14 +1561,16 @@ static size_t report_length_character(Str source, size_t offset) {
 }
 
 static bool report_is_word_byte(char character) {
-    bool is_letter = (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z');
+    bool is_lower = character >= 'a' && character <= 'z';
+    bool is_upper = character >= 'A' && character <= 'Z';
+    bool is_letter = is_lower || is_upper;
     bool is_digit = character >= '0' && character <= '9';
     return is_letter || is_digit || character == '_';
 }
 
 /**
- * Returns the length in bytes of the name that starts at `offset` in `source`, which is the letters,
- * digits and underscores that follow there. It may be zero.
+ * Returns the length in bytes of the name that starts at `offset` in `source`, which is the
+ * letters, digits and underscores that follow there. It may be zero.
  */
 static size_t report_length_word(Str source, size_t offset) {
     assert(offset <= source.length);
@@ -1577,9 +1583,9 @@ static size_t report_length_word(Str source, size_t offset) {
 }
 
 /**
- * Returns the length in bytes of the literal that starts at `offset` in `source`. A string or a rune
- * goes to its closing quote, or to the end of its line when it has none. A number is the letters,
- * digits, underscores and dots that follow.
+ * Returns the length in bytes of the literal that starts at `offset` in `source`. A string or a
+ * rune goes to its closing quote, or to the end of its line when it has none. A number is the
+ * letters, digits, underscores and dots that follow.
  */
 static size_t report_length_literal(Str source, size_t offset) {
     assert(offset < source.length);

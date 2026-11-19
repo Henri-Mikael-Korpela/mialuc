@@ -71,6 +71,7 @@
   - [Foreign procedures in WebAssembly](#foreign-procedures-in-webassembly)
   - [Foreign procedures in the libraries of the system](#foreign-procedures-in-the-libraries-of-the-system)
   - [Foreign procedures in the C library](#foreign-procedures-in-the-c-library)
+- [Errors](#errors)
 - [Compilation targets](#compilation-targets)
   - [WebAssembly](#webassembly)
   - [x64 for Windows](#x64-for-windows)
@@ -2463,6 +2464,14 @@ The types are the ones that the procedure has in the library, as for the C libra
 ### Foreign procedures in the C library
 
 A foreign procedure of `libc` is a function of the C library of the platform, which the program links to and calls by the name of the procedure, as C code does. A parameter or a result that is an `I64` is a `long long`, an `int64_t` or a `size_t` in C, so `_abs64 :: proc(number: I64) I64 -> ...` and `strlen :: proc(text: C_Str) I64 -> ...` are functions of the C library, and an `Int` is the same size, so either is passed the same way, but the declaration says which the function is. A parameter or a result that is an `I32` is an `int` in C, so `abs :: proc(number: I32) I32 -> ...` and `atoi :: proc(text: C_Str) I32 -> ...` are the functions of `stdlib.h`, and an `Int` is a `long long`, which is not the same size, so a function that returns an `int` is declared with an `I32`, since the other half of what it returns is not said. A parameter or a result that is an `F32` is a `float` in C, and one that is an `F64` is a `double`, so `sqrtf :: proc(x: F32) F32 -> ...` and `sqrt :: proc(x: F64) F64 -> ...` are the functions of `math.h`, and `printf :: proc(format: C_Str, value: F64) Int -> ...` takes a `double` for `%f`. C converts a `float` to a `double` when it is one of the variable number of arguments of a procedure like `printf`, and Mialu does not, so an `F32` is made an `F64` with `cast` first. See [x64-win32](build-target-x64-win32.md#foreign-procedures).
+
+## Errors
+
+A program that breaks a rule of this specification is rejected: the compiler tells the first error that it finds, builds nothing, and ends with a status that says it. Where this specification says that something is an error, that is what happens. The compiler checks a program in a fixed order, so the error that it tells is the first of the first kind that the program has: the [tokens](#source-code-representation), the syntax, the [imports](#imports), the names, what is known when the program is compiled, and then what the [target](#compilation-targets) can build.
+
+Every kind of error has a code, `E` and four digits, such as `E0402` for a name that cannot be found, and the code is the stable part of an error: its wording may be refined, but the code of a kind of error is never used for another, so it can be searched for. The error says where it is, as `file:line:column`, which an editor or a terminal takes as a link, and has a note that says why the rule is as it is and a help that says what to do, where there is more to say than the title says. Which codes there are and what they mean is in [Error codes](error-codes.md), and how they are laid out and colored is in [mialuc](mialu-cli.md#errors).
+
+The errors of the targets are the same mistake of the program for both: a type that does not fit, a call with the wrong number of arguments, or a match that leaves a member of an enum out has one code, for the `x64-win32` and for the `wasm` target. What a target does not build, or its limit, has a code of its own.
 
 ## Compilation targets
 

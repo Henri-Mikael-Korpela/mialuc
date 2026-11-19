@@ -1,5 +1,5 @@
-// `isatty` is POSIX, which the C99 mode of the compiler hides unless this says that it is wanted. It
-// must come before the first include.
+// `isatty` is POSIX, which the C99 mode of the compiler hides unless this says that it is wanted.
+// It must come before the first include.
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200112L
 #endif
@@ -24,7 +24,8 @@
 enum {
     // The longest path that the system functions below take, and room for the suffix that is added.
     PROCESS_PATH_SIZE_BYTES = MAX_PATH + 8,
-    // The longest command line that `CreateProcess` takes is 32767 characters and the zero after them.
+    // The longest command line that `CreateProcess` takes is 32767 characters and the zero after
+    // them.
     PROCESS_COMMAND_LINE_SIZE_BYTES = 32768,
 };
 

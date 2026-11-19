@@ -2,7 +2,7 @@
 
 The error messages of a compiler are the part of it that a programmer reads the most, so they are an interface, and they can be designed. This document collects the mistakes that people make most often when they write programs in other languages: C, C++, Java, Odin, C#, Python, Kotlin, TypeScript and JavaScript. It is the material for deciding what the Mialu compiler should say when a programmer makes the same mistake, and how it should help to fix it.
 
-Every entry has the mistake, a short example of it and what happens in that language. Below each is a **Mialu** line that is left to fill in. See [mialuc](mialu-cli.md) for how the compiler reports errors today, and the [language specification](mialu-programming-language.md) for what the language does.
+Every entry has the mistake, a short example of it and what happens in that language. Below each is a **Mialu** line that is left to fill in. See [mialuc](mialu-cli.md#errors) for how the compiler lays out an error, [Error codes](error-codes.md) for the errors that it has, and the [language specification](mialu-programming-language.md) for what the language does.
 
 ## How to fill in an entry
 
@@ -11,9 +11,9 @@ An entry is filled in when the Mialu line says what the compiler does, and what 
 ```
 **Mialu:**
 - Status: caught at compile time | caught at run time (trap) | not possible in the language | not caught
-- Message: the exact text of the error, with line and column
+- Message: the exact text of the error, with its code, line and column, as the compiler prints it
 - Fix: the suggestion that the message makes, or the fixed code
-- Test: the file in test-code that has the mistake, so that the message is tested
+- Test: the file in test-code/errors that has the mistake, so that the message is tested, see `scripts/verify_errors.py`
 ```
 
 A good message says what is wrong, where, why the rule exists, and what to write instead, and it names the thing in the program, not only its kind. The **Message** of an entry should follow that, and the **Fix** should be code that the programmer can copy. Not every mistake is to be caught: a mistake that the language makes impossible, such as pointer arithmetic, is a good answer, and the entry says which rule of the specification does it.

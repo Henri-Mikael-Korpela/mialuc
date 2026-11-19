@@ -214,8 +214,8 @@ typedef enum {
 
 /**
  * How the errors are reported. `packages` are the files that the program imports, which an error in
- * one of them is told with the path and the lines of, and it is NULL when there are none. `is_color`
- * says whether the standard error shows colors.
+ * one of them is told with the path and the lines of, and it is NULL when there are none.
+ * `is_color` says whether the standard error shows colors.
  */
 typedef struct {
     Packages const *packages;
@@ -237,8 +237,8 @@ void report_tokenize_error(Reporter const *reporter, char const *path, Str sourc
                            Tokenize_Result result);
 
 /**
- * Reports an error of `parse` in `source`, the text of the file at `path`, which is the program or a
- * file that it imports. `tokens` are the ones that were parsed, which hold `Token` elements.
+ * Reports an error of `parse` in `source`, the text of the file at `path`, which is the program or
+ * a file that it imports. `tokens` are the ones that were parsed, which hold `Token` elements.
  */
 void report_parse_error(Reporter const *reporter, char const *path, Str source, Array_Slice tokens,
                         Parse_Result result);
@@ -259,8 +259,8 @@ void report_semantic_error(Reporter const *reporter, char const *path, Str sourc
                            Semantic_Result result);
 
 /**
- * Reports an error of `x64_build`, in the program whose source is `source` and whose file is `path`,
- * or in a file that it imports.
+ * Reports an error of `x64_build`, in the program whose source is `source` and whose file is
+ * `path`, or in a file that it imports.
  */
 void report_x64_error(Reporter const *reporter, char const *path, Str source,
                       X64_Build_Result result);

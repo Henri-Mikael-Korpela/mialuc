@@ -25,7 +25,7 @@ Windows 10 x64 has been used as the primary operating system. It is required for
 The following are optional:
 
 - [Python](https://www.python.org/downloads/) 3
-    - For running `scripts/verify_grammar.py`, `scripts/update_language_spec_table_of_contents.py` and `serve.py`. See [Tooling](tooling.md).
+    - For running `scripts/verify_grammar.py`, `scripts/verify_errors.py`, `scripts/update_language_spec_table_of_contents.py` and `serve.py`. See [Tooling](tooling.md).
     - No dependencies, the standard library is enough.
     - Tested with Python 3.11.9.
 - [VS Code](https://code.visualstudio.com/)

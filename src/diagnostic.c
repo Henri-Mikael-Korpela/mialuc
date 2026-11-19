@@ -49,10 +49,10 @@ static size_t          diagnostic_character_count   (Str text);
 static size_t          diagnostic_digit_count       (size_t number);
 static Diagnostic_Line diagnostic_line_at           (Str source, size_t offset);
 static void            diagnostic_print_gutter      (FILE *output, size_t width, bool is_color);
-static void            diagnostic_print_hint        (FILE *output, size_t width, char const *kind,
-                                                     char const *style, Str text, bool is_color);
 static void            diagnostic_print_header      (FILE *output, Diagnostic const *diagnostic,
                                                      bool is_color);
+static void            diagnostic_print_hint        (FILE *output, size_t width, char const *kind,
+                                                     char const *style, Str text, bool is_color);
 static void            diagnostic_print_location    (FILE *output, Diagnostic const *diagnostic,
                                                      size_t width, Str_Position position,
                                                      bool is_color);
@@ -60,7 +60,8 @@ static void            diagnostic_print_snippet     (FILE *output, Diagnostic co
                                                      size_t width, Str_Position position,
                                                      bool is_color);
 static void            diagnostic_print_wrapped     (FILE *output, Str text, size_t indent_width);
-static void            diagnostic_style_begin       (FILE *output, char const *style, bool is_color);
+static void            diagnostic_style_begin       (FILE *output, char const *style,
+                                                     bool is_color);
 static void            diagnostic_style_end         (FILE *output, bool is_color);
 
 void diagnostic_print(FILE *output, Diagnostic const *diagnostic, bool is_color) {

@@ -47,7 +47,7 @@ The impact column says how much the feature matters for production readiness: **
 | [x] | WebAssembly target, with a playground | High | A second platform, in the browser. |
 | [x] | Debug information (DWARF for gdb), VS Code debugging | High | Rare at this age of a language. |
 | [x] | Compiler with fixed memory use and documented limits | Medium | Predictable, but the limits (65,536 tokens, 1 MiB source) rule out big programs. |
-| [x] | Errors with line and column, internal errors told apart | Medium | |
+| [x] | Errors with a code, a line and a column, laid out like those of Rust, in colors, with a link to the place in VS Code, internal errors told apart | Medium | Every error of the compiler has a [code](error-codes.md) and a test. |
 | [x] | Versioning (`VERSION`, `--version`) and a verified release workflow | Medium | Tagged, packaged releases for Windows. |
 | [x] | `run` command, arguments passed through | Low | |
 
@@ -67,7 +67,7 @@ The impact column says how much the feature matters for production readiness: **
 - **No memory allocation.** The language has manual memory management, but there is no allocator, no heap and no standard way to get one. Everything lives in frames of at most 512 KiB, in a 64 KiB temporary storage or in global variables of a few simple types, and a pointer to a local does not outlive its procedure. Without growable data (dynamic arrays, hash maps, strings built at run time) most real programs cannot be written. Calling `malloc` through `foreign libc` is the only route, and the standard library does not offer it.
 - **No generic code.** Parametric polymorphism is only a possible future feature. Every container would have to be written again for each type.
 - **Restrictions on values and types.** A procedure cannot take or return an array, a global variable can only be an `Int`, `Bool`, `Byte`, `Str` or enum, and the sized integer types `I8` to `U64` are partly reserved.
-- **No automated tests in CI.** The release workflow checks that the examples match the grammar and compile, but nothing runs a program and compares its output, and nothing checks the errors of the compiler. The WebAssembly examples have `.client.js` files that could be run with Node, but nothing does. A compiler of 40,000 lines of C that is not tested on every change will produce wrong code sooner or later.
+- **No automated tests in CI.** The release workflow checks that the examples match the grammar and compile, but nothing runs a program and compares its output, and nothing runs the check of the errors of the compiler, `scripts/verify_errors.py`. The WebAssembly examples have `.client.js` files that could be run with Node, but nothing does. A compiler of 40,000 lines of C that is not tested on every change will produce wrong code sooner or later.
 - **One native platform.** `x64-win32` is the only native target. There is no Linux, macOS or ARM executable.
 
 ### High
@@ -102,7 +102,7 @@ Each milestone has an exit criterion that can be checked, and its steps are in t
 
 1. Write a test runner script that builds each program of `test-code/x64` and runs it, and checks its exit code and output against an expected file next to it.
 2. Run each `test-code/wasm` program with Node and its `.client.js`, with no browser.
-3. Add negative tests: programs that must be rejected, with the expected error message, line and column, for each rule that the specification states.
+3. Add negative tests: programs that must be rejected, with the expected error message, line and column, for each rule that the specification states. (Done for every error code of the compiler, see `scripts/verify_errors.py` and `test-code/errors`. What is left is a test for each rule that the specification states, since an error code may cover more than one.)
 4. Run the grammar check, both runners and the negative tests on every push and pull request, not only on a release tag.
 5. Add the tests that today's examples lack: integer wrap-around, deep expressions at the limit, empty inputs, and the cases of the limits in the CLI document.
 6. Run the compiler under an address sanitizer and a fuzzer on the tokenizer and parser, and fix what they find.
@@ -154,7 +154,7 @@ Each milestone has an exit criterion that can be checked, and its steps are in t
 
 1. Freeze the language specification and write a policy for breaking changes, deprecation and versions of the standard library.
 2. Have a security review of the compiler and of the standard library, and fix what it finds.
-3. Document every error message of the compiler, and test each of them.
+3. Document every error message of the compiler, and test each of them. (Done: [Error codes](error-codes.md) and `scripts/verify_errors.py`. What is left is to keep it so for every new error.)
 4. Publish a language tour, a book-length guide and a reference of the standard library, generated from the `///` comments.
 5. Release with a long-term support promise for one version, and a place to report problems and a process for answering them.
 

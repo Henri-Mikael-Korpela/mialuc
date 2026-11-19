@@ -12,6 +12,16 @@ python scripts/verify_grammar.py test-code/wasm/main-function.mu
 
 The script uses only the Python standard library, so there is nothing to install. It prints `OK`, or the line and column where the file stops matching and what the grammar expected there. It exits with 0 when every file matches, 1 when a file does not, and 2 when the grammar or the arguments are wrong.
 
+## Errors
+
+[Error codes](error-codes.md) lists every error that the compiler reports. The programs in `test-code/errors`, each with one error, and the output that the compiler must print for them, in the file next to them with the suffix `.expected`, test the errors. To run the test:
+
+```
+python scripts/verify_errors.py
+```
+
+The compiler must be built first, see [Getting Started](getting-started.md#building-the-compiler); `--compiler` says where it is when it is not `build/mialuc.exe`. The script checks the output of each program, that each program has the code that its name starts with, and that every code of the compiler has a program, or a reason in the script that it cannot have one. After a change of an error on purpose, `--bless` writes the new output to the `.expected` files, and `git diff` shows what changed. It uses only the Python standard library. It exits with 0 when everything is as expected, and 1 when it is not.
+
 ## Language specification
 
 The table of contents of the [language specification](mialu-programming-language.md) is generated from its section titles. After adding or renaming a section, run:
