@@ -238,6 +238,15 @@ file_write :: proc(file: File, buffer: []Byte) (Int, File_Error) ->
         return 0, file_error_from(GetLastError())
     return cast(Int)bytes_written, .NONE
 
+/// Writes the one byte `value` to `file` like `file_write`, and gives `File_Error.NONE` when the
+/// system took it. A byte that the system took none of is `File_Error.OTHER`.
+file_write_byte :: proc(file: File, value: Byte) File_Error ->
+    bytes := [1]Byte { value }
+    count, error := file_write(file, bytes[:])
+    if error == .NONE and count == 0 ->
+        return .OTHER
+    return error
+
 /// Writes the whole of `buffer` to the file at `path`, which is made when it is not there and
 /// emptied when it is, and gives how many bytes were written with `File_Error.NONE`, or the error
 /// and the bytes that were written before it. The file is opened, written until nothing is left, and

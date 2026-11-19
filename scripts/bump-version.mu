@@ -43,9 +43,7 @@ write_line :: proc(path: Str, bytes: []Byte) Bool ->
     count, error := mu.file_write(file, bytes)
     if error not= .NONE or count not= length_of(bytes) ->
         return false
-    line_feed := [1]Byte { 10 }
-    written, line_feed_error := mu.file_write(file, line_feed[:])
-    return line_feed_error == .NONE and written == 1
+    return mu.file_write_byte(file, 10) == .NONE
 
 main :: proc() Int ->
     // The version is what follows the name of the program in its command line, the arguments as they
