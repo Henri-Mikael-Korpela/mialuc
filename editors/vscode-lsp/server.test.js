@@ -476,6 +476,7 @@ test("publishes the error of a document that does not compile and clears it when
         const first = await published(1);
         assert.strictEqual(first.uri, uri);
         assert.strictEqual(first.diagnostics.length, 1);
+        assert.strictEqual(first.diagnostics[0].code, "E0402");
         assert.strictEqual(first.diagnostics[0].range.start.line, 3);
         assert.strictEqual(first.diagnostics[0].range.start.character, 11);
         assert.strictEqual(first.diagnostics[0].range.end.character, 18);

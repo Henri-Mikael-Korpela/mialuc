@@ -275,9 +275,6 @@ function compilerRun(command, text) {
  * title, and the note and the help under it.
  */
 function diagnosticsFromErrors(errors, file, text) {
-    if (!/^error\[/m.test(errors)) {
-        return diagnosticsFromPlainErrors(errors, file, text);
-    }
     const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
     const rows = errors.split("\n").map((row) => row.replace(/\r$/, ""));
     const diagnostics = [];
@@ -337,50 +334,6 @@ function diagnosticsFromErrors(errors, file, text) {
             code: header[1],
             source: "mialuc",
             message: [header[2], ...hints].join("\n"),
-        });
-    }
-    return diagnostics;
-}
-
-/**
- * The errors that do not have the layout above yet, which are the ones of the parts of the compiler
- * that have not moved to it. An error has the form `<file>:<line>:<column>: <message>`, or
- * `<file>: <message>` when it is about the whole program. The range is the word at the place of the
- * error, or the character there when it is not on a word.
- */
-function diagnosticsFromPlainErrors(errors, file, text) {
-    const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
-    const escaped = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const located = new RegExp(`^${escaped}:(\\d+):(\\d+): (.*)$`);
-    const whole = new RegExp(`^${escaped}: (.*)$`);
-    const diagnostics = [];
-    for (const row of errors.split("\n")) {
-        const trimmed = row.replace(/\r$/, "");
-        let match = located.exec(trimmed);
-        let line = 0;
-        let column = 0;
-        let message;
-        if (match !== null) {
-            line = Math.min(Math.max(Number(match[1]), 1), lines.length) - 1;
-            column = Number(match[2]) - 1;
-            message = match[3];
-        } else if ((match = whole.exec(trimmed)) !== null) {
-            message = match[1];
-        } else {
-            continue;
-        }
-        const bytes = Buffer.from(lines[line], "utf8");
-        const start = bytes.toString("utf8", 0, Math.min(column, bytes.length)).length;
-        const word = /^\w+/.exec(lines[line].slice(start));
-        const end = Math.min(start + (word === null ? 1 : word[0].length), lines[line].length);
-        diagnostics.push({
-            range: {
-                start: { line, character: start },
-                end: { line, character: Math.max(end, start) },
-            },
-            severity: 1, // Error
-            source: "mialuc",
-            message,
         });
     }
     return diagnostics;
