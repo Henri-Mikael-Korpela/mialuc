@@ -1,6 +1,6 @@
 # Releasing
 
-The script for versioning is a program of Mialu, and the one for releasing uses PowerShell, so they need nothing to install on Windows but the compiler of this project.
+Both scripts, the one for versioning and the one for releasing, are programs of Mialu, so they need nothing to install on Windows but the compiler of this project, and git for releasing.
 
 ## Versioning
 
@@ -23,8 +23,11 @@ The file is not changed when what it is given is not a version of the form `MAJO
 
 ## Releasing
 
-After the version is bumped and committed, `scripts/deploy-release.ps1` reads the version from the file `VERSION`, tags the commit of main as `v<version>` and pushes it, which starts the release workflow in [.github/workflows/release.yml](../.github/workflows/release.yml). It refuses to run with uncommitted changes, off main, behind `origin/main`, or when the tag exists, and asks before pushing unless it is given `-Yes`.
+After the version is bumped and committed, `scripts/deploy-release.mu` reads the version from the file `VERSION`, tags the commit of main as `v<version>` and pushes it, which starts the release workflow in [.github/workflows/release.yml](../.github/workflows/release.yml). It refuses to run with uncommitted changes, off main, or behind `origin/main`, shows the commit and asks before pushing unless it is given `--yes`, and when the tag exists it asks whether to replace it, which is the only way that a tag is replaced. Like the script for versioning it is run with the compiler of this project, from the root of the project, and it runs `git`, which must be on the path:
 
 ```
-powershell -File scripts/deploy-release.ps1
+build\mialuc.exe run scripts/deploy-release.mu
+build\mialuc.exe run scripts/deploy-release.mu --yes
 ```
+
+The exit code is 0 when the release was pushed, 1 when it was cancelled or a check failed, and 2 when git or a file failed. The program has no way yet to read the output of a program that it runs, so it runs git through the shell of C with the output written to the file `deploy-release.tmp` in the directory it is run in, which it reads and deletes.

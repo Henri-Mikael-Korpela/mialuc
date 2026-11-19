@@ -1,6 +1,6 @@
 /// Sets the version of the compiler. The version is written once, in the file VERSION of the root
 /// of the project, as MAJOR.MINOR.PATCH, a semantic version such as 0.5.0 without leading zeros,
-/// which CMake gives to the compiler and scripts/deploy-release.ps1 releases. This program writes
+/// which CMake gives to the compiler and scripts/deploy-release.mu releases. This program writes
 /// the new version to that file. The version is the argument that is given to the program, and when
 /// there is none it is a line that the program asks for and reads from the standard input.
 ///
@@ -20,6 +20,7 @@ package bump_version
 
 import "mu:filesystem"
 import "mu:process"
+import "mu:version"
 import foreign libc
 
 foreign libc ->
@@ -29,34 +30,6 @@ foreign libc ->
 
 /// The path of the file of the version, relative to the root of the project.
 VERSION_PATH :: "VERSION"
-
-/// Whether `part` is a number of a version: one or more digits, and no zero at the start unless the
-/// number is only that, as semantic versioning says.
-is_version_part :: proc(part: Str) Bool ->
-    if length_of(part) == 0 ->
-        return false
-    for digit in part ->
-        if digit < '0' or digit > '9' ->
-            return false
-    if length_of(part) > 1 ->
-        if part[:1] == "0" ->
-            return false
-    return true
-
-/// Whether `text` is a version of the form MAJOR.MINOR.PATCH: three numbers, with a dot between
-/// each two. The characters of the text are gone through, and a `.` ends a number.
-is_version :: proc(text: Str) Bool ->
-    dots := 0
-    start := 0
-    index := 0
-    for character in text ->
-        if character == '.' ->
-            if not is_version_part(text[start:index]) ->
-                return false
-            dots += 1
-            start = index + 1
-        index += 1
-    return dots == 2 and is_version_part(text[start:])
 
 /// Writes `bytes` and then a line feed to the file at `path`, which is made when it is not there and
 /// emptied when it is. Gives whether all of it was written.
@@ -93,7 +66,7 @@ main :: proc() Int ->
         version_bytes = line[:line_length]
 
     version, is_text := utf8_decode(version_bytes)
-    if not is_text or not is_version(version) ->
+    if not is_text or not mu.is_version(version) ->
         puts("That is not a version of the form MAJOR.MINOR.PATCH, such as 0.5.0, without zeros at the start.")
         return 1
 

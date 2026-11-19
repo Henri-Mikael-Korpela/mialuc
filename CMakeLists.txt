@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 # The version of the compiler is written once, in the file VERSION, as MAJOR.MINOR.PATCH on one line.
 # The compilers get it as the macro MIALU_VERSION_STRING, see below, and scripts/bump-version.mu and
-# scripts/deploy-release.ps1 read the same file. A change of the file configures the project again.
+# scripts/deploy-release.mu read the same file. A change of the file configures the project again.
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION MIALU_VERSION LIMIT_COUNT 1)
 if(NOT MIALU_VERSION MATCHES "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")
     message(FATAL_ERROR "VERSION must be a version of the form MAJOR.MINOR.PATCH, such as 0.2.0, "
