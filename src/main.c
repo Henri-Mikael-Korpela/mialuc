@@ -61,7 +61,6 @@ typedef enum {
     COMMAND_MODE_BUILD,
     COMMAND_MODE_DUMP_ASM,
     COMMAND_MODE_DUMP_AST,
-    COMMAND_MODE_DUMP_ENUMS,
     COMMAND_MODE_DUMP_OUTLINE,
     COMMAND_MODE_DUMP_STRUCT_SIZES,
     COMMAND_MODE_DUMP_TYPES,
@@ -160,7 +159,6 @@ static void         main_type_row_print                    (Str source, Str name
                                                             char const *text, char const *note,
                                                             Str value, char const *plain_value,
                                                             Str doc);
-static void         main_value_print                       (Str value, size_t bytes_max);
 static Str          main_doc_comment_write                 (Str source, size_t offset, char *text,
                                                             size_t text_size_bytes);
 static Str          main_concatenated_value                (Ast_Node const *nodes,
@@ -212,8 +210,6 @@ static int32_t      main_run_command_build                 (Command command, Buf
 static int32_t      main_run_command_build_x64             (Command command, Buffers const *buffers,
                                                             Str source, Parse_Result parse_result,
                                                             Semantic_Result semantic_result);
-static void         main_run_command_print_enums           (Str source, Parse_Result parse_result,
-                                                            size_t first_node);
 static void         main_run_command_print_outline         (Str source, Parse_Result parse_result,
                                                             size_t first_node);
 static void         main_run_command_print_struct_sizes    (Str source, Parse_Result parse_result,
@@ -263,7 +259,6 @@ int main(int argc, char *argv[]) {
                 "Usage: %s run <source file>\n"
                 "       %s dump-ast <source file>\n"
                 "       %s dump-asm --target x64-win32 <source file>\n"
-                "       %s dump-enums <source file>\n"
                 "       %s dump-outline <source file>\n"
                 "       %s dump-struct-sizes <source file>\n"
                 "       %s dump-types <source file>\n"
@@ -272,7 +267,7 @@ int main(int argc, char *argv[]) {
                 "       %s build --target x64-win32 [--debug] -o <output file> <source file>\n"
                 "       %s --version\n",
                 argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0],
-                argv[0], argv[0], argv[0]);
+                argv[0], argv[0]);
         return 2;
     }
 
@@ -352,7 +347,6 @@ int main(int argc, char *argv[]) {
  *     mialuc run <source file>
  *     mialuc dump-ast <source file>
  *     mialuc dump-asm --target x64-win32 <source file>
- *     mialuc dump-enums <source file>
  *     mialuc dump-outline <source file>
  *     mialuc dump-struct-sizes <source file>
  *     mialuc dump-types <source file>
@@ -434,19 +428,6 @@ static Command main_command_parse(Array_Slice args) {
             .source_path = argv[2],
             .output_path = NULL,
             .mode = COMMAND_MODE_DUMP_OUTLINE,
-            .target = COMMAND_TARGET_NONE,
-            .is_debug = false,
-        };
-    }
-
-    if (strcmp(argv[1], "dump-enums") == 0) {
-        if (args.length != 3) {
-            return invalid;
-        }
-        return (Command){
-            .source_path = argv[2],
-            .output_path = NULL,
-            .mode = COMMAND_MODE_DUMP_ENUMS,
             .target = COMMAND_TARGET_NONE,
             .is_debug = false,
         };
@@ -635,9 +616,6 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
                                           semantic_result);
     case COMMAND_MODE_DUMP_AST:
         return 0;
-    case COMMAND_MODE_DUMP_ENUMS:
-        main_run_command_print_enums(source, parse_result, packages->imported_end);
-        return 0;
     case COMMAND_MODE_DUMP_OUTLINE:
         main_run_command_print_outline(source, parse_result, packages->imported_end);
         return 0;
@@ -657,56 +635,6 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
 
     assert(false);
     return 1;
-}
-
-/**
- * Prints a line for each member of each enum of the program, the ones of the imported files too, in
- * the order of the definitions: the name of the enum as the program writes it, which is the name
- * that the types in the output of `dump-types` have, such as `Color` or `mu.File_Error`, the name of
- * the member, and the documentation comment of the member as a string in double quotes, or nothing,
- * separated by tabs. This is what an editor suggests after a dot where the enum can be told, as in
- * `if error == .`.
- */
-static void main_run_command_print_enums(Str source, Parse_Result parse_result,
-                                         size_t first_node) {
-    assert(parse_result.status == PARSE_STATUS_OK);
-
-    Ast_Node const *nodes = parse_result.nodes.elements;
-    for (Ast_Node_Index definition = nodes[parse_result.root].first_child;
-         definition != AST_NODE_INDEX_NONE; definition = nodes[definition].next_sibling) {
-        if (nodes[definition].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
-            nodes[nodes[definition].first_child].node_type != AST_NODE_TYPE_ENUM_TYPE) {
-            continue;
-        }
-        Str enum_name = nodes[definition].payload.constant_definition.name;
-        for (Ast_Node_Index member = nodes[nodes[definition].first_child].first_child;
-             member != AST_NODE_INDEX_NONE; member = nodes[member].next_sibling) {
-            if (nodes[member].node_type != AST_NODE_TYPE_ENUM_MEMBER) {
-                continue;
-            }
-            Str name = nodes[member].payload.enum_member.name;
-            printf("%.*s\t%.*s", (int)enum_name.length, enum_name.bytes, (int)name.length,
-                   name.bytes);
-
-            // The offsets of an imported file are in its source.
-            Str doc_source = source;
-            bool has_source = member >= first_node;
-            if (not has_source && main_packages != NULL) {
-                has_source = packages_node_source(main_packages, member, &doc_source);
-            }
-            char doc_text[MAIN_DOC_BYTES_MAX + 1];
-            Str doc = STR_EMPTY;
-            if (has_source) {
-                doc = main_doc_comment_write(doc_source, nodes[member].source_offset, doc_text,
-                                             sizeof(doc_text));
-            }
-            if (doc.bytes != NULL) {
-                printf("\t");
-                main_value_print(doc, MAIN_DOC_BYTES_MAX);
-            }
-            printf("\n");
-        }
-    }
 }
 
 /**
