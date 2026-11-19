@@ -62,6 +62,12 @@ main :: proc() Int ->
     wrong += check("NUL is closed again: %lld", flag(mu.file_close(reader) == mu.File_Error.NONE), 1)
     after_close, after_error := mu.file_read(reader, data[:])
     wrong += check("a read of a closed file is FILE_INVALID, %lld", flag(after_error == mu.File_Error.FILE_INVALID), 1)
+    // A line of NUL: it has none, so there is no first byte of one.
+    nul_reader, nul_reader_error := mu.file_open("NUL", .READ, wide)
+    line_length, line_error := mu.file_read_line(nul_reader, data[:])
+    wrong += check("a line of NUL is %lld bytes", line_length, 0)
+    wrong += check("and the end of the file: %lld", flag(line_error == mu.File_Error.END_OF_FILE), 1)
+    wrong += check("NUL is closed once more: %lld", flag(mu.file_close(nul_reader) == mu.File_Error.NONE), 1)
     all_count, all_error := mu.file_read_all("no-such-directory/none.txt", wide, data[:])
     wrong += check("the whole of a missing file is NOT_FOUND: %lld", flag(all_error == mu.File_Error.NOT_FOUND), 1)
     nul_count, nul_error := mu.file_read_all("NUL", wide, data[:])

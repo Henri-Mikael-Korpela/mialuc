@@ -6,7 +6,6 @@
 #include <string.h>
 
 #include <mialu/semantic.h>
-#include <mialu/version.h>
 #include <mialu/constant.h>
 #include <mialu/x64.h>
 
@@ -15,6 +14,11 @@
 // the sections: `.rdata` holds what the program reads, which is the table of imports and the
 // strings, and `.text` holds the code. `.rdata` comes first, so that its address is known before
 // any code is written, and the code can refer to a string or to an import without being patched.
+// The version of the compiler is given by the build, from the file VERSION, see CMakeLists.txt.
+#ifndef MIALU_VERSION_STRING
+#error "MIALU_VERSION_STRING is not defined: build with CMake, which reads it from the file VERSION."
+#endif
+
 enum {
     // The sections and the headers start at multiples of this in the file. It is the smallest value
     // that the format allows, which keeps the file small.

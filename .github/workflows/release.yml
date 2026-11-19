@@ -1,5 +1,5 @@
 # Pushing a tag such as `v0.1.0` checks the tagged commit and, only if every check passes,
-# publishes a GitHub release with the compiler for Windows on x64. The version in src/version.h
+# publishes a GitHub release with the compiler for Windows on x64. The version in the file VERSION
 # is the single source of truth, and the tag has to match it.
 
 name: release
@@ -34,13 +34,12 @@ jobs:
             exit 1
           }
 
-      - name: Tag matches src/version.h
+      - name: Tag matches VERSION
         run: |
-          get() { sed -n "s/^#define MIALU_VERSION_$1 \([0-9][0-9]*\)\s*$/\1/p" src/version.h | tr -d '\r'; }
-          version="$(get MAJOR).$(get MINOR).$(get PATCH)"
-          echo "version.h says $version"
+          version="$(tr -d '\r\n' < VERSION)"
+          echo "VERSION says $version"
           [ "v$version" = "$GITHUB_REF_NAME" ] || {
-            echo "::error::Tag '$GITHUB_REF_NAME' does not match version.h ($version)"
+            echo "::error::Tag '$GITHUB_REF_NAME' does not match VERSION ($version)"
             exit 1
           }
 
@@ -59,7 +58,7 @@ jobs:
           }
 
       - name: Examples are accepted by the grammar
-        run: python scripts/verify_grammar.py test-code/wasm/*.mu test-code/x64/*.mu
+        run: python scripts/verify_grammar.py test-code/wasm/*.mu test-code/x64/*.mu scripts/*.mu
 
       - name: Examples build for every target
         run: |
@@ -69,7 +68,7 @@ jobs:
               ./build/mialuc.exe build --target $target -o out/x.$target "$f"
             done
           done
-          for f in test-code/x64/*.mu; do
+          for f in test-code/x64/*.mu scripts/*.mu; do
             ./build/mialuc.exe build --target x64-win32 -o out/x.exe "$f"
           done
 

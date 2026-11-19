@@ -1,18 +1,23 @@
 # Releasing
 
-The scripts for versioning and releasing use PowerShell, so they need nothing to install on Windows.
+The script for versioning is a program of Mialu, and the one for releasing uses PowerShell, so they need nothing to install on Windows but the compiler of this project.
 
 ## Versioning
 
-`scripts/bump-version.ps1 <version>` sets the version of the compiler, a semantic version such as `0.2.0`, in [src/version.h](../src/version.h) and in the example output of `mialuc --version` in [mialuc](mialu-cli.md#print-the-version-of-the-compiler).
+The version of the compiler is written once, in the file [VERSION](../VERSION) in the root of the project: a semantic version of the form `MAJOR.MINOR.PATCH`, such as `0.4.0`, without zeros at the start, on a line of its own. Nothing else has it. CMake reads the file when it configures the project, and it stops with an error when the file says anything else. It gives the version to the compiler as a definition of the command line of GCC and Clang, `-DMIALU_VERSION_STRING="0.4.0"`, which is also in `compile_commands.json` for the tools that read it, so there is no header to keep in step, and `mialuc --version` prints it. A change of the file configures the project again by itself, and the compiler has the new version when it is built again.
+
+`scripts/bump-version.mu` sets it. It is a program of Mialu, which uses the [standard library](mialu-programming-language.md#imports) to read a line of the standard input and to write the file, and it is run with the compiler of this project, from the root of the project, because the path of the file is relative to it. It asks for the new version, and it does not change the file when what it is given is not a version of that form.
 
 ```
-powershell -File scripts/bump-version.ps1 0.3.0
+build\mialuc.exe run scripts/bump-version.mu
+echo 0.5.0| build\mialuc.exe run scripts/bump-version.mu
 ```
+
+A program of Mialu has no arguments yet, which is why the version is read from the input and is not an argument of the script. Build the compiler again after the version is set, and commit the file.
 
 ## Releasing
 
-After the version is bumped and committed, `scripts/deploy-release.ps1` tags the commit of main as `v<version>` and pushes it, which starts the release workflow in [.github/workflows/release.yml](../.github/workflows/release.yml). It refuses to run with uncommitted changes, off main, behind `origin/main`, or when the tag exists, and asks before pushing unless it is given `-Yes`.
+After the version is bumped and committed, `scripts/deploy-release.ps1` reads the version from the file `VERSION`, tags the commit of main as `v<version>` and pushes it, which starts the release workflow in [.github/workflows/release.yml](../.github/workflows/release.yml). It refuses to run with uncommitted changes, off main, behind `origin/main`, or when the tag exists, and asks before pushing unless it is given `-Yes`.
 
 ```
 powershell -File scripts/deploy-release.ps1

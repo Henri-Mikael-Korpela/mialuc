@@ -185,10 +185,10 @@ mialuc --version
 Prints the name of the compiler and its version, which is a semantic version, such as:
 
 ```
-mialuc 0.3.0
+mialuc 0.4.0
 ```
 
-The flag works only on its own. The version is defined in `src/version.h`, and `scripts/bump-version.ps1` sets it, see [Releasing](releasing.md#versioning).
+The flag works only on its own. The version is the one in the file `VERSION` of the project, which CMake gives to the compiler when it is built, and `scripts/bump-version.mu` sets it, see [Releasing](releasing.md#versioning).
 
 ## Targets
 

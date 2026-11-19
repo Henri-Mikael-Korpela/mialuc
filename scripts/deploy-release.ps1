@@ -1,4 +1,4 @@
-# Releases the compiler: reads the version from src/version.h, tags the current commit of main as
+# Releases the compiler: reads the version from the file VERSION, tags the current commit of main as
 # v<version>, and pushes main and the tag to GitHub. Pushing the tag starts the release workflow in
 # .github/workflows/release.yml, which checks the commit and publishes the release.
 #
@@ -8,7 +8,7 @@
 # When the tag exists already, the script asks whether to replace it, which moves the tag to the
 # current commit, also on GitHub. `-Yes` does not answer that question, because it cannot be undone.
 #
-# Set the version first with scripts/bump-version.ps1 and commit it.
+# Set the version first with scripts/bump-version.mu and commit it.
 
 param(
     [switch]$Yes
@@ -29,16 +29,11 @@ function Invoke-Git {
     return $output
 }
 
-function Get-VersionPart([string]$Text, [string]$Name) {
-    $match = [regex]::Match($Text, "(?m)^#define MIALU_VERSION_$Name (\d+)\s*$")
-    if ($match.Success -eq $false) {
-        throw "src/version.h has no MIALU_VERSION_$Name."
-    }
-    return $match.Groups[1].Value
+# The version is the one line of the file VERSION, a semantic version of the form MAJOR.MINOR.PATCH.
+$version = (Get-Content -Raw (Join-Path $root 'VERSION')).Trim()
+if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+    throw "VERSION says '$version', which is not of the form MAJOR.MINOR.PATCH, such as 0.2.0."
 }
-
-$header = Get-Content -Raw (Join-Path $root 'src/version.h')
-$version = "$(Get-VersionPart $header 'MAJOR').$(Get-VersionPart $header 'MINOR').$(Get-VersionPart $header 'PATCH')"
 $tag = "v$version"
 
 # The workflow only releases a tag that is on main.
@@ -67,7 +62,7 @@ if (Invoke-Git tag --list $tag) {
     Write-Host "The tag $tag already exists, on: $tagCommit"
     $answer = Read-Host "Replace the tag with a new release of the current commit? [y/n]"
     if ($answer -notmatch '^[yY]') {
-        Write-Host 'Cancelled. To release a new version, bump it first with scripts/bump-version.ps1.'
+        Write-Host 'Cancelled. To release a new version, bump it first with scripts/bump-version.mu.'
         exit 1
     }
     $isReplacing = $true

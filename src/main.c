@@ -18,11 +18,15 @@
 #include <mialu/semantic.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
-#include <mialu/version.h>
 #include <mialu/wasm-text.h>
 #include <mialu/wasm.h>
 #include <mialu/x64-text.h>
 #include <mialu/x64.h>
+
+// The version of the compiler is given by the build, from the file VERSION, see CMakeLists.txt.
+#ifndef MIALU_VERSION_STRING
+#error "MIALU_VERSION_STRING is not defined: build with CMake, which reads it from the file VERSION."
+#endif
 
 enum {
     // Larger sources are rejected. The tokenizer works on one buffer that is allocated once at

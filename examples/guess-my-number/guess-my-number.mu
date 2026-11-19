@@ -45,33 +45,13 @@ think_of_number :: proc() Int ->
     value := cast(Int)rand()
     return LOWEST + value - value / count * count
 
-/// Reads a line from `input` into `buffer`, which the caller owns, and gives how many bytes the line
-/// has, without its end, and whether there was a line. There is none when the input ended before a
-/// byte of it. The file has no buffer of its own, so the line is read one byte at a time, and no
-/// byte of the line after it is taken. A line that does not fit in the buffer is cut where the
-/// buffer ends, which no guess is long enough to be.
-read_line :: proc(input: mu.File, buffer: []Byte) (Int, Bool) ->
-    length := 0
-    for length < length_of(buffer) ->
-        count, error := mu.file_read(input, buffer[length:][:1])
-        if count == 0 or error not= .NONE ->
-            return length, length > 0
-        if buffer[length] == '\n' ->
-            break
-        length += 1
-
-    // The end of the line is a line feed, with a carriage return before it on Windows.
-    if length > 0 ->
-        if buffer[length - 1] == '\r' ->
-            length -= 1
-    return length, true
-
 /// Reads a line from `input` and gives the number that is written on it, or END_OF_INPUT when there
-/// is no line left, or NOT_A_NUMBER when the line is not a number.
+/// is no line left, or NOT_A_NUMBER when the line is not a number. A line that does not fit in the
+/// buffer is cut where the buffer ends, which no guess is long enough to be.
 read_guess :: proc(input: mu.File) Int ->
     buffer := [64]Byte { .. = 0 }
-    length, is_line := read_line(input, buffer[:])
-    if not is_line ->
+    length, error := mu.file_read_line(input, buffer[:])
+    if error not= .NONE ->
         return END_OF_INPUT
 
     text, is_text := utf8_decode(buffer[:length])

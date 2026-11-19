@@ -17,6 +17,7 @@ foreign kernel32 #(default_calling_convention("system")) ->
     GetStdHandle        :: proc(standard_handle: I32) Int -> ...
     MultiByteToWideChar :: proc(code_page: U32, flags: U32, text: C_Str, text_length: I32, wide_text: ^Byte, wide_length: I32) I32 -> ...
     ReadFile            :: proc(file: Int, buffer: ^Byte, bytes_to_read: I32, bytes_read: ^U32, overlapped: ^Byte) I32 -> ...
+    WriteFile           :: proc(file: Int, buffer: ^Byte, bytes_to_write: I32, bytes_written: ^U32, overlapped: ^Byte) I32 -> ...
 
 CP_UTF8 : U32 : 65001
 MB_ERR_INVALID_CHARS : U32 : 8
@@ -43,8 +44,8 @@ ERROR_INSUFFICIENT_BUFFER : U32 : 122
 /// it as an `I32`, which has the same bits.
 STD_INPUT_HANDLE :: -10
 
-/// The most bytes that one read asks the system for, which is a `DWORD` that is passed as an `I32`,
-/// so it is below 2 GiB. A buffer that is larger is read in parts.
+/// The most bytes that one read or write asks the system for, which is a `DWORD` that is passed as an `I32`,
+/// so it is below 2 GiB. A buffer that is larger is read or written in parts.
 READ_BYTES_MAX :: 1073741824
 
 /// What the system gives for a file that could not be opened. The handle is -1, which is not a
@@ -88,6 +89,8 @@ File_Error :: enum Int ->
     BUFFER_TOO_SMALL
     /// The file given is not an open one, or is one that was closed.
     FILE_INVALID
+    /// There is nothing more to read: the file ended before the first byte of a line.
+    END_OF_FILE
     /// Anything else that the system says.
     OTHER
 
@@ -215,3 +218,69 @@ file_read_all :: proc(path: Str, wide_path: []Byte, buffer: []Byte) (Int, File_E
             break
         total += count
     return total, .NONE
+
+/// Writes `buffer`, which the caller owns, to `file`, as many bytes as the system takes at once,
+/// which is at most as many as the buffer has, and gives how many with `File_Error.NONE`. Writing
+/// goes on from where the last write of the file stopped, or at the end of a file that is opened
+/// to append, and the file has no buffer of its own, so what the system took is written. A buffer
+/// with no bytes writes none.
+file_write :: proc(file: File, buffer: []Byte) (Int, File_Error) ->
+    if file.handle == INVALID_HANDLE_VALUE ->
+        return 0, .FILE_INVALID
+    if length_of(buffer) == 0 ->
+        return 0, .NONE
+
+    bytes_to_write := length_of(buffer)
+    if bytes_to_write > READ_BYTES_MAX ->
+        bytes_to_write = READ_BYTES_MAX
+    bytes_written : U32 = 0
+    if WriteFile(file.handle, %buffer[0], int_to_i32(bytes_to_write), %bytes_written, nil) == 0 ->
+        return 0, file_error_from(GetLastError())
+    return cast(Int)bytes_written, .NONE
+
+/// Writes the whole of `buffer` to the file at `path`, which is made when it is not there and
+/// emptied when it is, and gives how many bytes were written with `File_Error.NONE`, or the error
+/// and the bytes that were written before it. The file is opened, written until nothing is left, and
+/// closed. `wide_path` is the memory that `file_open` needs for the path.
+file_write_all :: proc(path: Str, wide_path: []Byte, buffer: []Byte) (Int, File_Error) ->
+    file, open_error := file_open(path, .WRITE, wide_path)
+    if open_error not= .NONE ->
+        return 0, open_error
+    defer file_close(file)
+
+    total := 0
+    for total < length_of(buffer) ->
+        count, error := file_write(file, buffer[total:])
+        if error not= .NONE ->
+            return total, error
+        if count == 0 ->
+            break
+        total += count
+    return total, .NONE
+
+/// Reads a line from `file` into `buffer`, which the caller owns, and gives how many bytes the line
+/// has, without its end, with `File_Error.NONE`. The end of a line is a line feed, and a carriage
+/// return before it, as on Windows, is not part of the line. A line that is empty has no bytes. A line
+/// that does not fit in the buffer is cut where the buffer ends, and the rest of it is the start of
+/// the next line. When the file ends before the first byte of a line the answer is
+/// `File_Error.END_OF_FILE`, and a last line that has no line feed is a line. The file has no buffer
+/// of its own, so the line is read one byte at a time, which takes no byte of the next line, and a
+/// console or a pipe gives each line as it comes.
+file_read_line :: proc(file: File, buffer: []Byte) (Int, File_Error) ->
+    length := 0
+    for length < length_of(buffer) ->
+        count, error := file_read(file, buffer[length:][:1])
+        if error not= .NONE ->
+            return length, error
+        if count == 0 ->
+            if length == 0 ->
+                return 0, .END_OF_FILE
+            break
+        if buffer[length] == '\n' ->
+            break
+        length += 1
+
+    if length > 0 ->
+        if buffer[length - 1] == '\r' ->
+            length -= 1
+    return length, .NONE
