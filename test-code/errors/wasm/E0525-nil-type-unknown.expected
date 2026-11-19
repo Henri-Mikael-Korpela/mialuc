@@ -1,0 +1,7 @@
+error[E0525]: 'nil' does not say what 'p' points to
+ --> test-code/errors/wasm/E0525-nil-type-unknown.mu:4:5
+  |
+4 |     p := nil
+  |     ^ the type of this is not known
+  |
+  = help: write the type of the variable, as in 'p : ^Int = nil'

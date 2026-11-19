@@ -1,0 +1,5 @@
+error[E0534]: the value of the field 'x' is not of the type of the field
+ --> test-code/errors/wasm/E0534-struct-field-type-mismatch.mu:8:18
+  |
+8 |     p := Point { x = "a", y = 1 }
+  |                  ^

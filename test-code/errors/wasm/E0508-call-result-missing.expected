@@ -1,0 +1,5 @@
+error[E0508]: the procedure 'nothing' returns no value, so its call cannot be used as one
+ --> test-code/errors/wasm/E0508-call-result-missing.mu:7:10
+  |
+7 |     x := nothing()
+  |          ^^^^^^^

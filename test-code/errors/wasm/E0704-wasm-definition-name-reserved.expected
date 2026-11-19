@@ -1,0 +1,7 @@
+error[E0704]: 'memory' is reserved for the memory of the wasm module
+ --> test-code/errors/wasm/E0704-wasm-definition-name-reserved.mu:3:1
+  |
+3 | memory :: 1
+  | ^^^^^^ this name is reserved
+  |
+  = help: choose another name

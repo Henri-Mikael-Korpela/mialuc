@@ -1,0 +1,5 @@
+error[E0527]: the value assigned through 'p' is not of the type that it points to
+ --> test-code/errors/wasm/E0527-pointer-target-type-mismatch.mu:6:5
+  |
+6 |     p^ = "a"
+  |     ^

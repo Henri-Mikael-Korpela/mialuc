@@ -1,0 +1,5 @@
+error[E0710]: 'n' is not a struct or a pointer to one, so it has no fields
+ --> test-code/errors/wasm/E0710-wasm-struct-expected.mu:5:10
+  |
+5 |     x := n.field
+  |          ^ not a struct

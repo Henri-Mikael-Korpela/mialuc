@@ -1,0 +1,5 @@
+error[E0519]: this case matches a value that a case above it matches already
+ --> test-code/errors/wasm/E0519-match-case-duplicate.mu:8:9
+  |
+8 |         case 1 ->
+  |         ^^^^ it could never run for that value

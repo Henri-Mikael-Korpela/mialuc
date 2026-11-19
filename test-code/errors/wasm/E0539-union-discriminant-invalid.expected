@@ -1,0 +1,8 @@
+error[E0539]: 'kind' cannot be matched by a union
+ --> test-code/errors/wasm/E0539-union-discriminant-invalid.mu:5:17
+  |
+5 |     union match kind ->
+  |                 ^^^^
+  |
+  = note: the field that a union is matched against is a field of the struct, outside of the cases,
+          and of an enum type

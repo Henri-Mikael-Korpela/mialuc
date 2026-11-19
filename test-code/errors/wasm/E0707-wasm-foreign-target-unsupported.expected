@@ -1,0 +1,7 @@
+error[E0707]: the foreign procedure 'puts' is declared in a 'foreign libc' block or in one of a library of the system
+ --> test-code/errors/wasm/E0707-wasm-foreign-target-unsupported.mu:6:5
+  |
+6 |     puts :: proc(content: C_Str) Int -> ...
+  |     ^^^^ the wasm target cannot import from this
+  |
+  = note: the wasm target imports from 'foreign js'

@@ -1,0 +1,5 @@
+error[E0713]: the wasm target has information about enums only, and 'Point' is not one
+ --> test-code/errors/wasm/E0713-wasm-type-info-unsupported.mu:7:32
+  |
+7 | info #(static) := type_info_of(Point).members
+  |                                ^^^^^

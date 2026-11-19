@@ -1,0 +1,8 @@
+error[E0514]: the enum of 'RED' is not known here
+ --> test-code/errors/wasm/E0514-enum-type-unknown.mu:8:11
+  |
+8 |     c := .RED
+  |           ^^^ nothing says what enum this is of
+  |
+  = help: write the member with its enum, as in 'Color.RED', or give it to something that has an
+          enum type

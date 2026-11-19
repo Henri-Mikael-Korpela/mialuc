@@ -1,0 +1,5 @@
+error[E0517]: 'i' is not an Int, so it cannot be an index
+ --> test-code/errors/wasm/E0517-index-type-invalid.mu:5:13
+  |
+5 |     x := a["i"]
+  |             ^ not an Int

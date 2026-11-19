@@ -14,6 +14,7 @@ The text of the errors is all in [report.c](../src/report.c), where each code is
 | E0451 - E0499 | what is known when the program is compiled: constants and array lengths |
 | E0501 - E0599 | what both targets reject: types, calls, structs, matches and unions |
 | E0601 - E0699 | what the x64 target rejects, and its limits |
+| E0701 - E0799 | what the wasm target rejects, and its limits |
 
 ## E0001 - E0099: the command, the files and the system
 
@@ -210,3 +211,23 @@ These are about the `x64-win32` target, see [x64-win32](build-target-x64-win32.m
 | E0614 | the information about 'name' is not a value | Read a field of it right away, such as '.members' or '.name'. |
 | E0615 | 'type_info_of' at 'name' is about a type that the x64 target gives no information about | The x64 target gives information about an enum only. |
 | E0616 | 'name' has something that the x64 target does not build yet |  |
+
+## E0701 - E0799: what the wasm target rejects
+
+These are about the `wasm` and `wat` targets, see [WebAssembly](build-target-wasm.md): what they do not build, and their limits. A mistake that both targets reject is in [E0501 - E0599](#e0501---e0599-what-both-targets-reject).
+
+| Code | Title | Details |
+|---|---|---|
+| E0701 | cannot take the address of 'name' | Only a variable of a procedure, a field or an element of one, and what a pointer points to have an address, and not a parameter, an iterator, a global variable, a value, an array or an array slice. |
+| E0702 | an array of 'name' cannot be the type here | A parameter can be an array slice, as in []name, and a global variable can be neither. |
+| E0703 | the built-in procedure 'name' is not supported by the wasm target |  |
+| E0704 | 'name' is reserved for the memory of the wasm module | Choose another name. |
+| E0705 | an expression in 'name' has too many nested operators |  |
+| E0706 | the field 'name' is read or assigned through a value that is not a variable, a parameter or an element of an array |  |
+| E0707 | the foreign procedure 'name' is declared in a 'foreign libc' block or in one of a library of the system | The wasm target imports from 'foreign js'. |
+| E0708 | the match has no case for the member 'name' of the enum | Add a case for it, a default case 'case ->', or write 'match #(partial)' to leave members out. |
+| E0709 | the WebAssembly module is larger than N bytes | The compiler allocates the memory for the module once, when it starts. |
+| E0710 | 'name' is not a struct or a pointer to one, so it has no fields | Not a struct. |
+| E0711 | the field 'name' is not given a value | Either every field is given a value, or the braces are empty and every field has its default value. |
+| E0712 | type_info_of('name') exists only when the program is compiled | A global variable can be given that and nothing more. Write a field after it right away, as in type_info_of(name).members. |
+| E0713 | the wasm target has information about enums only, and 'name' is not one |  |

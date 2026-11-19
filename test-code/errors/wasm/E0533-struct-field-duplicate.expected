@@ -1,0 +1,5 @@
+error[E0533]: the field 'x' is given a value twice
+ --> test-code/errors/wasm/E0533-struct-field-duplicate.mu:8:25
+  |
+8 |     p := Point { x = 1, x = 2, y = 3 }
+  |                         ^ given again here

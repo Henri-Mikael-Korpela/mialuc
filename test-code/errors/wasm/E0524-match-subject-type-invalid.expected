@@ -1,0 +1,7 @@
+error[E0524]: 'p' cannot be matched
+ --> test-code/errors/wasm/E0524-match-subject-type-invalid.mu:9:11
+  |
+9 |     match p ->
+  |           ^ not an integer, a Str or an enum
+  |
+  = note: a match takes an integer, a Str or an enum

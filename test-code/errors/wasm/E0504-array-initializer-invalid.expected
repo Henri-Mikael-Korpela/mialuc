@@ -1,0 +1,9 @@
+error[E0504]: the array 'b' must be given an array literal
+ --> test-code/errors/wasm/E0504-array-initializer-invalid.mu:5:5
+  |
+5 |     b : [2]Int = a
+  |     ^ not an array literal
+  |
+  = note: an array is not copied, so it is defined with an array literal and is not assigned to as a
+          whole
+  = help: write an array literal, such as [const]Int { 1, 2 }

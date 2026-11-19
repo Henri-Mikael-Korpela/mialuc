@@ -1,0 +1,7 @@
+error[E0521]: the pattern of the case is not known when the program is compiled
+ --> test-code/errors/wasm/E0521-match-pattern-not-constant.mu:7:9
+  |
+7 |         case m ->
+  |         ^^^^ not a constant
+  |
+  = help: the pattern is a literal, a constant or a member of an enum

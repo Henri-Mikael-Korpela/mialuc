@@ -63,6 +63,8 @@ CODES_WITHOUT_PROGRAM = {
     "E0107": "a float literal has at most 128 characters, so it is never above 1.8e308",
     "E0122": "needs a source of 65536 tokens, which is too large to keep as a program",
     "E0611": "needs a program of more than 1 MiB of code, which is too large to keep as a program",
+    "E0705": "needs an expression nested deeper than the analysis of constants takes, which stops first",
+    "E0709": "needs a module of more than 1 MiB, which is too large to keep as a program",
     "E0301": "needs a file of the standard library that imports itself, and a program cannot add one",
     "E0304": "needs more imports than the standard library has files",
     "E0305": "is about a file of the standard library, and a program cannot add one",

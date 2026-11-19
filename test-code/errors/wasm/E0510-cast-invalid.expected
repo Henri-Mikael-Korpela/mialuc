@@ -1,0 +1,10 @@
+error[E0510]: the value cannot be cast to 'Str'
+ --> test-code/errors/wasm/E0510-cast-invalid.mu:4:15
+  |
+4 |     x := cast(Str)1
+  |               ^^^
+  |
+  = note: a Byte, a Bool, an I32, an I64, a U32, a U64, an Int, a Rune or a float can be cast to Int
+          or I64, an integer or a Rune to a U64, a Byte, a Bool, a U32 or a Rune to a U32, a Byte, a
+          Bool, an I32 or a Rune to an I32, a Byte, an I32, an I64, a U32, an Int or a float to a
+          float, a Byte or a Rune to Rune, and a Rune to [4]Byte

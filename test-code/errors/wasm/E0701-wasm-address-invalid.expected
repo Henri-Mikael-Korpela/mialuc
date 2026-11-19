@@ -1,0 +1,9 @@
+error[E0701]: cannot take the address of 'p'
+ --> test-code/errors/wasm/E0701-wasm-address-invalid.mu:8:11
+  |
+8 |     q := %p.x
+  |           ^ no address
+  |
+  = note: only a variable of a procedure, a field or an element of one, and what a pointer points to
+          have an address, and not a parameter, an iterator, a global variable, a value, an array or
+          an array slice

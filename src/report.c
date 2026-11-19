@@ -784,6 +784,68 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
     [ERROR_CODE_X64_UNSUPPORTED] = {
         .title = "'{subject}' has something that the x64 target does not build yet",
     },
+
+    // What the wasm target rejects.
+    [ERROR_CODE_WASM_ADDRESS_INVALID] = {
+        .title = "cannot take the address of '{subject}'",
+        .label = "no address",
+        .note = "only a variable of a procedure, a field or an element of one, and what a pointer "
+                "points to have an address, and not a parameter, an iterator, a global variable, "
+                "a value, an array or an array slice",
+    },
+    [ERROR_CODE_WASM_ARRAY_TYPE_MISPLACED] = {
+        .title = "an array of '{subject}' cannot be the type here",
+        .label = "an array here",
+        .note = "a parameter can be an array slice, as in []{subject}, and a global variable can "
+                "be neither",
+    },
+    [ERROR_CODE_WASM_BUILT_IN_UNSUPPORTED] = {
+        .title = "the built-in procedure '{subject}' is not supported by the wasm target",
+    },
+    [ERROR_CODE_WASM_DEFINITION_NAME_RESERVED] = {
+        .title = "'{subject}' is reserved for the memory of the wasm module",
+        .label = "this name is reserved",
+        .help = "choose another name",
+    },
+    [ERROR_CODE_WASM_EXPRESSION_TOO_DEEP] = {
+        .title = "an expression in '{subject}' has too many nested operators",
+    },
+    [ERROR_CODE_WASM_FIELD_BASE_INVALID] = {
+        .title = "the field '{subject}' is read or assigned through a value that is not a "
+                 "variable, a parameter or an element of an array",
+    },
+    [ERROR_CODE_WASM_FOREIGN_TARGET_UNSUPPORTED] = {
+        .title = "the foreign procedure '{subject}' is declared in a 'foreign libc' block or in "
+                 "one of a library of the system",
+        .label = "the wasm target cannot import from this",
+        .note = "the wasm target imports from 'foreign js'",
+    },
+    [ERROR_CODE_WASM_MATCH_NOT_EXHAUSTIVE] = {
+        .title = "the match has no case for the member '{subject}' of the enum",
+        .help = "add a case for it, a default case 'case ->', or write 'match #(partial)' to "
+                "leave members out",
+    },
+    [ERROR_CODE_WASM_OUTPUT_TOO_LARGE] = {
+        .title = "the WebAssembly module is larger than {number} bytes",
+        .note = "the compiler allocates the memory for the module once, when it starts",
+    },
+    [ERROR_CODE_WASM_STRUCT_EXPECTED] = {
+        .title = "'{subject}' is not a struct or a pointer to one, so it has no fields",
+        .label = "not a struct",
+    },
+    [ERROR_CODE_WASM_STRUCT_FIELD_MISSING] = {
+        .title = "the field '{subject}' is not given a value",
+        .note = "either every field is given a value, or the braces are empty and every field has "
+                "its default value",
+    },
+    [ERROR_CODE_WASM_TYPE_INFO_MISPLACED] = {
+        .title = "type_info_of('{subject}') exists only when the program is compiled",
+        .note = "a global variable can be given that and nothing more",
+        .help = "write a field after it right away, as in type_info_of({subject}).members",
+    },
+    [ERROR_CODE_WASM_TYPE_INFO_UNSUPPORTED] = {
+        .title = "the wasm target has information about enums only, and '{subject}' is not one",
+    },
 };
 
 // The code of each status of the analysis.
@@ -937,6 +999,66 @@ static Error_Code const REPORT_X64_CODES[] = {
     [X64_BUILD_STATUS_TYPE_INFO_MISPLACED] = ERROR_CODE_X64_TYPE_INFO_MISPLACED,
     [X64_BUILD_STATUS_TYPE_INFO_UNSUPPORTED] = ERROR_CODE_X64_TYPE_INFO_UNSUPPORTED,
     [X64_BUILD_STATUS_UNSUPPORTED] = ERROR_CODE_X64_UNSUPPORTED,
+};
+
+// The code of each status of the wasm build.
+static Error_Code const REPORT_WASM_CODES[] = {
+    [WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID] = ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID,
+    [WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH] = ERROR_CODE_ARRAY_ELEMENT_TYPE_MISMATCH,
+    [WASM_BUILD_STATUS_ARRAY_EXPECTED] = ERROR_CODE_ARRAY_EXPECTED,
+    [WASM_BUILD_STATUS_ARRAY_INITIALIZER_INVALID] = ERROR_CODE_ARRAY_INITIALIZER_INVALID,
+    [WASM_BUILD_STATUS_ARRAY_LENGTH_MISMATCH] = ERROR_CODE_ARRAY_LENGTH_MISMATCH,
+    [WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH] = ERROR_CODE_CALL_ARGUMENT_COUNT_MISMATCH,
+    [WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH] = ERROR_CODE_CALL_ARGUMENT_TYPE_MISMATCH,
+    [WASM_BUILD_STATUS_CALL_RESULT_MISSING] = ERROR_CODE_CALL_RESULT_MISSING,
+    [WASM_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE] = ERROR_CODE_CALL_TARGET_NOT_POINTER,
+    [WASM_BUILD_STATUS_CAST_INVALID] = ERROR_CODE_CAST_INVALID,
+    [WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID] = ERROR_CODE_COMPARISON_OPERAND_TYPE_INVALID,
+    [WASM_BUILD_STATUS_CONDITION_TYPE_INVALID] = ERROR_CODE_CONDITION_TYPE_INVALID,
+    [WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN] = ERROR_CODE_ENUM_MEMBER_UNKNOWN,
+    [WASM_BUILD_STATUS_ENUM_TYPE_UNKNOWN] = ERROR_CODE_ENUM_TYPE_UNKNOWN,
+    [WASM_BUILD_STATUS_FIELD_TARGET_READ_ONLY] = ERROR_CODE_FIELD_TARGET_READ_ONLY,
+    [WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE] = ERROR_CODE_IDENTIFIER_NOT_VALUE,
+    [WASM_BUILD_STATUS_INDEX_TYPE_INVALID] = ERROR_CODE_INDEX_TYPE_INVALID,
+    [WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID] = ERROR_CODE_LOGICAL_OPERAND_TYPE_INVALID,
+    [WASM_BUILD_STATUS_MATCH_CASE_DUPLICATE] = ERROR_CODE_MATCH_CASE_DUPLICATE,
+    [WASM_BUILD_STATUS_MATCH_PARTIAL_INVALID] = ERROR_CODE_MATCH_PARTIAL_INVALID,
+    [WASM_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT] = ERROR_CODE_MATCH_PATTERN_NOT_CONSTANT,
+    [WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH] = ERROR_CODE_MATCH_PATTERN_TYPE_MISMATCH,
+    [WASM_BUILD_STATUS_MATCH_RANGE_EMPTY] = ERROR_CODE_MATCH_RANGE_EMPTY,
+    [WASM_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID] = ERROR_CODE_MATCH_SUBJECT_TYPE_INVALID,
+    [WASM_BUILD_STATUS_NIL_TYPE_UNKNOWN] = ERROR_CODE_NIL_TYPE_UNKNOWN,
+    [WASM_BUILD_STATUS_POINTER_EXPECTED] = ERROR_CODE_POINTER_EXPECTED,
+    [WASM_BUILD_STATUS_POINTER_TARGET_TYPE_MISMATCH] = ERROR_CODE_POINTER_TARGET_TYPE_MISMATCH,
+    [WASM_BUILD_STATUS_RANGE_TYPE_INVALID] = ERROR_CODE_RANGE_TYPE_INVALID,
+    [WASM_BUILD_STATUS_RESULT_COUNT_MISMATCH] = ERROR_CODE_RESULT_COUNT_MISMATCH,
+    [WASM_BUILD_STATUS_RETURN_COUNT_MISMATCH] = ERROR_CODE_RETURN_COUNT_MISMATCH,
+    [WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH] = ERROR_CODE_RETURN_TYPE_MISMATCH,
+    [WASM_BUILD_STATUS_RETURN_TYPE_MISSING] = ERROR_CODE_RETURN_TYPE_MISSING,
+    [WASM_BUILD_STATUS_STRUCT_FIELD_DUPLICATE] = ERROR_CODE_STRUCT_FIELD_DUPLICATE,
+    [WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH] = ERROR_CODE_STRUCT_FIELD_TYPE_MISMATCH,
+    [WASM_BUILD_STATUS_STRUCT_FIELD_UNKNOWN] = ERROR_CODE_STRUCT_FIELD_UNKNOWN,
+    [WASM_BUILD_STATUS_STRUCT_RECURSIVE] = ERROR_CODE_STRUCT_RECURSIVE,
+    [WASM_BUILD_STATUS_TYPE_UNSUPPORTED] = ERROR_CODE_TYPE_UNSUPPORTED,
+    [WASM_BUILD_STATUS_UNION_CASE_UNKNOWN] = ERROR_CODE_UNION_CASE_UNKNOWN,
+    [WASM_BUILD_STATUS_UNION_DISCRIMINANT_INVALID] = ERROR_CODE_UNION_DISCRIMINANT_INVALID,
+    [WASM_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH] = ERROR_CODE_UNION_FIELD_KIND_MISMATCH,
+    [WASM_BUILD_STATUS_UNION_FIELD_UNMATCHED] = ERROR_CODE_UNION_FIELD_UNMATCHED,
+    [WASM_BUILD_STATUS_UNION_KIND_NOT_CONSTANT] = ERROR_CODE_UNION_KIND_NOT_CONSTANT,
+    [WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH] = ERROR_CODE_VARIABLE_TYPE_MISMATCH,
+    [WASM_BUILD_STATUS_ADDRESS_INVALID] = ERROR_CODE_WASM_ADDRESS_INVALID,
+    [WASM_BUILD_STATUS_ARRAY_TYPE_MISPLACED] = ERROR_CODE_WASM_ARRAY_TYPE_MISPLACED,
+    [WASM_BUILD_STATUS_BUILT_IN_UNSUPPORTED] = ERROR_CODE_WASM_BUILT_IN_UNSUPPORTED,
+    [WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED] = ERROR_CODE_WASM_DEFINITION_NAME_RESERVED,
+    [WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP] = ERROR_CODE_WASM_EXPRESSION_TOO_DEEP,
+    [WASM_BUILD_STATUS_FIELD_BASE_INVALID] = ERROR_CODE_WASM_FIELD_BASE_INVALID,
+    [WASM_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED] = ERROR_CODE_WASM_FOREIGN_TARGET_UNSUPPORTED,
+    [WASM_BUILD_STATUS_MATCH_NOT_EXHAUSTIVE] = ERROR_CODE_WASM_MATCH_NOT_EXHAUSTIVE,
+    [WASM_BUILD_STATUS_OUTPUT_TOO_LARGE] = ERROR_CODE_WASM_OUTPUT_TOO_LARGE,
+    [WASM_BUILD_STATUS_STRUCT_EXPECTED] = ERROR_CODE_WASM_STRUCT_EXPECTED,
+    [WASM_BUILD_STATUS_STRUCT_FIELD_MISSING] = ERROR_CODE_WASM_STRUCT_FIELD_MISSING,
+    [WASM_BUILD_STATUS_TYPE_INFO_MISPLACED] = ERROR_CODE_WASM_TYPE_INFO_MISPLACED,
+    [WASM_BUILD_STATUS_TYPE_INFO_UNSUPPORTED] = ERROR_CODE_WASM_TYPE_INFO_UNSUPPORTED,
 };
 
 static void   report_emit(Reporter const *reporter, Report_Error const *error);
@@ -1222,6 +1344,23 @@ void report_x64_error(Reporter const *reporter, char const *path, Str source,
         number = X64_EXPRESSION_DEPTH_MAX;
     }
     report_emit_at_subject(reporter, code, path, source, result.subject, STR("x64"), number);
+}
+
+void report_wasm_error(Reporter const *reporter, char const *path, Str source,
+                       Wasm_Build_Result result) {
+    assert(reporter != NULL);
+    assert(path != NULL);
+    assert(result.status != WASM_BUILD_STATUS_OK);
+
+    Error_Code code = REPORT_WASM_CODES[result.status];
+    assert(code > 0);
+
+    // The output being too large is about the whole program, so it has no place in the source.
+    if (result.status == WASM_BUILD_STATUS_OUTPUT_TOO_LARGE) {
+        report_general(reporter, code, path, OUTPUT_SIZE_BYTES_MAX);
+        return;
+    }
+    report_emit_at_subject(reporter, code, path, source, result.subject, STR("wasm"), 0);
 }
 
 /**

@@ -11,6 +11,7 @@
 #include <mialu/x64.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
+#include <mialu/wasm.h>
 
 /**
  * The errors of the compiler, all in one place. The stages of the compiler find an error and say
@@ -31,6 +32,7 @@
  * E0451 - E0499   what is known when the program is compiled: constants and array lengths
  * E0501 - E0599   what both targets reject: types, calls, structs, matches and unions
  * E0601 - E0699   what the x64 target rejects, and its limits
+ * E0701 - E0799   what the wasm target rejects, and its limits
  * ```
  *
  * The enumeration is in the order of the numbers and not alphabetical, because the numbers are what
@@ -184,6 +186,20 @@ typedef enum {
     ERROR_CODE_X64_TYPE_INFO_MISPLACED = 614,
     ERROR_CODE_X64_TYPE_INFO_UNSUPPORTED = 615,
     ERROR_CODE_X64_UNSUPPORTED = 616,
+
+    ERROR_CODE_WASM_ADDRESS_INVALID = 701,
+    ERROR_CODE_WASM_ARRAY_TYPE_MISPLACED = 702,
+    ERROR_CODE_WASM_BUILT_IN_UNSUPPORTED = 703,
+    ERROR_CODE_WASM_DEFINITION_NAME_RESERVED = 704,
+    ERROR_CODE_WASM_EXPRESSION_TOO_DEEP = 705,
+    ERROR_CODE_WASM_FIELD_BASE_INVALID = 706,
+    ERROR_CODE_WASM_FOREIGN_TARGET_UNSUPPORTED = 707,
+    ERROR_CODE_WASM_MATCH_NOT_EXHAUSTIVE = 708,
+    ERROR_CODE_WASM_OUTPUT_TOO_LARGE = 709,
+    ERROR_CODE_WASM_STRUCT_EXPECTED = 710,
+    ERROR_CODE_WASM_STRUCT_FIELD_MISSING = 711,
+    ERROR_CODE_WASM_TYPE_INFO_MISPLACED = 712,
+    ERROR_CODE_WASM_TYPE_INFO_UNSUPPORTED = 713,
 } Error_Code;
 
 /**
@@ -238,5 +254,12 @@ void report_semantic_error(Reporter const *reporter, char const *path, Str sourc
  */
 void report_x64_error(Reporter const *reporter, char const *path, Str source,
                       X64_Build_Result result);
+
+/**
+ * Reports an error of `wasm_build`, in the program whose source is `source` and whose file is
+ * `path`, or in a file that it imports.
+ */
+void report_wasm_error(Reporter const *reporter, char const *path, Str source,
+                       Wasm_Build_Result result);
 
 #endif
