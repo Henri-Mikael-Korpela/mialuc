@@ -27,6 +27,7 @@
  * E0201 - E0299   the syntax
  * E0301 - E0399   the files that a program imports
  * E0401 - E0449   names, attributes, labels and the statements that jump
+ * E0451 - E0499   what is known when the program is compiled: constants and array lengths
  * ```
  *
  * The enumeration is in the order of the numbers and not alphabetical, because the numbers are what
@@ -104,6 +105,21 @@ typedef enum {
     ERROR_CODE_DEFER_NESTED = 425,
     ERROR_CODE_DEFER_STATEMENT_INVALID = 426,
     ERROR_CODE_RETURN_IN_DEFER = 427,
+
+    ERROR_CODE_CONSTANT_CYCLE = 451,
+    ERROR_CODE_CONSTANT_DIVISION_BY_ZERO = 452,
+    ERROR_CODE_CONSTANT_NOT_CONSTANT = 453,
+    ERROR_CODE_CONSTANT_OPERAND_TYPE_INVALID = 454,
+    ERROR_CODE_CONSTANT_OVERFLOW = 455,
+    ERROR_CODE_CONSTANT_TEXT_TOO_LONG = 456,
+    ERROR_CODE_CONSTANT_TOO_DEEP = 457,
+    ERROR_CODE_CONSTANT_TYPE_INVALID = 458,
+    ERROR_CODE_CONSTANT_TYPE_MISMATCH = 459,
+    ERROR_CODE_CONSTANT_VALUE_NOT_REPRESENTABLE = 460,
+    ERROR_CODE_CONCATENATION_NOT_CONSTANT = 461,
+    ERROR_CODE_ARRAY_LENGTH_NOT_CONSTANT = 462,
+    ERROR_CODE_ARRAY_LENGTH_INVALID = 463,
+    ERROR_CODE_INT_TO_STR_NOT_CONSTANT = 464,
 } Error_Code;
 
 /**
@@ -146,11 +162,10 @@ void report_package_error(Reporter const *reporter, char const *path, Str source
                           Package_Result result);
 
 /**
- * Reports an error of `semantic_analyze` that has a code in the catalog, in the program whose source
- * is `source` and whose file is `path`, or in a file that it imports. Returns false, and prints
- * nothing, for an error that does not have one yet.
+ * Reports an error of `semantic_analyze`, in the program whose source is `source` and whose file is
+ * `path`, or in a file that it imports.
  */
-bool report_semantic_error(Reporter const *reporter, char const *path, Str source,
+void report_semantic_error(Reporter const *reporter, char const *path, Str source,
                            Semantic_Result result);
 
 #endif

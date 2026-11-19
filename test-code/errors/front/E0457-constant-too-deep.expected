@@ -1,0 +1,5 @@
+error[E0457]: the constant expression at 'X' has more than 1024 nested operators and constants
+ --> test-code/errors/front/E0457-constant-too-deep.mu:3:1
+  |
+3 | X :: 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +...
+  | ^

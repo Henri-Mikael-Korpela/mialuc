@@ -31,10 +31,6 @@
 #endif
 
 enum {
-    // Bounds the text of the strings that `++` makes when the program is compiled, which is
-    // allocated once at startup. The text is part of the program, so it is never larger than the
-    // module that the build mode writes.
-    CONSTANT_TEXT_SIZE_BYTES_MAX = OUTPUT_SIZE_BYTES_MAX,
     // Bounds the text of a string that `dump-types` prints as the value of a constant, in bytes.
     // The rest is left out, so that an editor is not given the whole of a long string for each use
     // of the constant.
@@ -216,8 +212,6 @@ static void         main_run_command_print_types           (Str source, Parse_Re
                                                             Semantic_Result semantic_result,
                                                             size_t first_node);
 static Str          main_run_command_read_file             (char const *path, Array_Slice buffer);
-static void         main_run_command_report_semantic_error (char const *path, Str source,
-                                                            Semantic_Result result);
 static void         main_run_command_report_wasm_error     (char const *path, Str source,
                                                             Wasm_Build_Result result);
 static void         main_run_command_report_x64_error      (char const *path, Str source,
@@ -603,9 +597,7 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
                                                        packages->imported_end, buffers->bindings,
                                                        buffers->constants, buffers->text);
     if (semantic_result.status != SEMANTIC_STATUS_OK) {
-        if (not report_semantic_error(&command.reporter, path, source, semantic_result)) {
-            main_run_command_report_semantic_error(path, source, semantic_result);
-        }
+        report_semantic_error(&command.reporter, path, source, semantic_result);
         return 1;
     }
 
@@ -2961,130 +2953,6 @@ static void main_run_command_report_wasm_error(char const *path, Str source,
                 "object must give the field that the union is matched against a member of the "
                 "enum that is written out, such as '.MEMBER', and not another value.\n", path,
                 position.line, position.column, subject_length, result.subject.bytes);
-        break;
-    }
-}
-
-static void main_run_command_report_semantic_error(char const *path, Str source,
-                                                   Semantic_Result result) {
-    assert(result.status != SEMANTIC_STATUS_OK);
-
-    main_subject_source(&path, &source, result.subject);
-    Str_Position position = main_subject_position(source, result.subject);
-
-    // The cast is needed because `%.*s` takes an `int` precision.
-    int subject_length = (int)result.subject.length;
-    switch (result.status) {
-    case SEMANTIC_STATUS_CONSTANT_CYCLE:
-        fprintf(stderr, "%s:%zu:%zu: the constant '%.*s' is defined in terms of itself.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_CONSTANT_DIVISION_BY_ZERO:
-        fprintf(stderr, "%s:%zu:%zu: the constant expression at '%.*s' divides by zero.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_CONSTANT_NOT_CONSTANT:
-        fprintf(stderr, "%s:%zu:%zu: the value of the constant '%.*s' must be known when the "
-                "program is compiled: a number, 'true', 'false', a string, another such constant, "
-                "or an operator of them.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_CONSTANT_OPERAND_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: an operator of the constant expression at '%.*s' is given "
-                "operands that it does not take: arithmetic takes integers that are untyped or "
-                "Int, I32 or I64, or floats, but not both, 'and', 'or' and 'not' take truth values, a Byte is "
-                "compared with a Byte or a number from 0 to 255, a Rune with a Rune, strings are "
-                "compared with '==' and 'not=' only, and '++' takes a string and a string or a "
-                "rune, and 'int_to_str' takes one integer.\n", path,
-                position.line, position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_CONSTANT_OVERFLOW:
-        fprintf(stderr, "%s:%zu:%zu: the constant expression at '%.*s' has a value that does not "
-                "fit in an Int, which goes from -9223372036854775808 to 9223372036854775807, or "
-                "in a float, which is finite.\n",
-                path, position.line, position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_CONCATENATION_NOT_CONSTANT:
-        fprintf(stderr, "%s:%zu:%zu: the operands of '++' at '%.*s' must be known when the "
-                "program is compiled: strings, runes, or constants of them, because the text is "
-                "joined then.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_ARRAY_LENGTH_NOT_CONSTANT:
-        fprintf(stderr, "%s:%zu:%zu: the length of an array at '%.*s' must be known when the "
-                "program is compiled: an integer literal, or a constant, or arithmetic of "
-                "them.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_ARRAY_LENGTH_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: the length of an array at '%.*s' must be an integer that is "
-                "not below zero.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_INT_TO_STR_NOT_CONSTANT:
-        fprintf(stderr, "%s:%zu:%zu: the argument of 'int_to_str' at '%.*s' must be known when "
-                "the program is compiled: an integer, or a constant of one, because the text is "
-                "made then.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_CONSTANT_TEXT_TOO_LONG:
-        fprintf(stderr, "%s:%zu:%zu: the strings that '++' joins in the constants of the program, "
-                "at '%.*s', have more than %d bytes together.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes,
-                CONSTANT_TEXT_SIZE_BYTES_MAX);
-        break;
-    case SEMANTIC_STATUS_CONSTANT_TOO_DEEP:
-        fprintf(stderr, "%s:%zu:%zu: the constant expression at '%.*s' has more than %d nested "
-                "operators and constants.\n", path, position.line, position.column,
-                subject_length, result.subject.bytes, CONSTANT_EXPRESSION_DEPTH_MAX);
-        break;
-    case SEMANTIC_STATUS_CONSTANT_TYPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: the constant '%.*s' has a type that a constant cannot have. "
-                "A constant is an Int, a Byte, a Bool or a Str.\n", path, position.line,
-                position.column, subject_length, result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_CONSTANT_TYPE_MISMATCH:
-        fprintf(stderr, "%s:%zu:%zu: the value of the constant '%.*s' is not of the type of the "
-                "constant.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_CONSTANT_VALUE_NOT_REPRESENTABLE:
-        fprintf(stderr, "%s:%zu:%zu: the number at '%.*s' does not fit in a Byte, which is a "
-                "number from 0 to 255.\n", path, position.line, position.column, subject_length,
-                result.subject.bytes);
-        break;
-    case SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR:
-    case SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE:
-    case SEMANTIC_STATUS_ATTRIBUTE_DUPLICATE:
-    case SEMANTIC_STATUS_ATTRIBUTE_UNKNOWN:
-    case SEMANTIC_STATUS_BREAK_OUTSIDE_SCOPE:
-    case SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE:
-    case SEMANTIC_STATUS_DEFER_NESTED:
-    case SEMANTIC_STATUS_DEFER_STATEMENT_INVALID:
-    case SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE:
-    case SEMANTIC_STATUS_ENUM_MEMBER_DUPLICATE:
-    case SEMANTIC_STATUS_FIELD_NAME_DUPLICATE:
-    case SEMANTIC_STATUS_FOREIGN_IMPORT_DUPLICATE:
-    case SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING:
-    case SEMANTIC_STATUS_GLOBAL_NOT_STATIC:
-    case SEMANTIC_STATUS_GLOBAL_VALUE_NOT_CONSTANT:
-    case SEMANTIC_STATUS_IDENTIFIER_UNKNOWN:
-    case SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP:
-    case SEMANTIC_STATUS_JUMP_OUT_OF_DEFER:
-    case SEMANTIC_STATUS_LABEL_DUPLICATE:
-    case SEMANTIC_STATUS_LABEL_NOT_LOOP:
-    case SEMANTIC_STATUS_LABEL_UNKNOWN:
-    case SEMANTIC_STATUS_MATCH_ATTRIBUTE_UNKNOWN:
-    case SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE:
-    case SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS:
-    case SEMANTIC_STATUS_RETURN_IN_DEFER:
-    case SEMANTIC_STATUS_VARIABLE_NAME_DUPLICATE:
-    case SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS:
-        // The catalog of `report.c` has these.
-        assert(false);
-        break;
-    case SEMANTIC_STATUS_OK:
-        assert(false);
         break;
     }
 }

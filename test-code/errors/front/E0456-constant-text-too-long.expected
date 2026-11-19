@@ -1,0 +1,8 @@
+error[E0456]: the strings that '++' joins in the constants of the program, at 'T15', are too long together
+  --> test-code/errors/front/E0456-constant-text-too-long.mu:19:8
+   |
+19 | T16 :: T15 ++ T15
+   |        ^^^
+   |
+   = note: the strings that '++' joins in the constants of a program have at most 1048576 bytes
+           together

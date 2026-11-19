@@ -1,0 +1,8 @@
+error[E0461]: the operands of '++' at 'a' are not known when the program is compiled
+ --> test-code/errors/front/E0461-concatenation-not-constant.mu:5:11
+  |
+5 |     s := "a" ++ y
+  |           ^
+  |
+  = note: the operands of '++' are strings, runes, or constants of them, because the text is joined
+          when the program is compiled

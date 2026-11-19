@@ -1,0 +1,8 @@
+error[E0453]: the value of the constant 'X' is not known when the program is compiled
+ --> test-code/errors/front/E0453-constant-not-constant.mu:6:1
+  |
+6 | X :: base()
+  | ^ not a constant expression
+  |
+  = note: the value of a constant is a number, 'true', 'false', a string, another such constant, or
+          an operator of them

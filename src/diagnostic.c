@@ -28,6 +28,11 @@ enum {
     // The width of the gutter, which is the width of the line number, when there is no line
     // number, as in an error about a file as a whole: it has room for the `=` of a note.
     DIAGNOSTIC_GUTTER_WIDTH_MIN = 1,
+    // The most characters of a line of the source that are shown. A longer line shows this many
+    // around the span, and the span is `DIAGNOSTIC_SOURCE_LEAD` characters from the start of them
+    // when there is text before it.
+    DIAGNOSTIC_SOURCE_WIDTH_MAX = 100,
+    DIAGNOSTIC_SOURCE_LEAD = 30,
 };
 
 /**
@@ -145,21 +150,6 @@ static void diagnostic_print_snippet(FILE *output, Diagnostic const *diagnostic,
     diagnostic_print_gutter(output, width, is_color);
     fputc('\n', output);
 
-    // The line number, right-aligned in the width of the gutter, which is that of this number.
-    diagnostic_style_begin(output, DIAGNOSTIC_STYLE_FRAME, is_color);
-    fprintf(output, "%*zu |", (int)width, position.line);
-    diagnostic_style_end(output, is_color);
-    fputc(' ', output);
-    // A tab is one space, so that a character is one column, which the carets rely on.
-    for (size_t i = line.start; i < line.end; i += 1) {
-        char character = source.bytes[i];
-        if (character == '\t') {
-            character = ' ';
-        }
-        fputc(character, output);
-    }
-    fputc('\n', output);
-
     // The carets start under the first byte of the span, and run to the end of the span or of the
     // line, whichever is first. A span at the end of a line, or an empty one, has one caret.
     size_t span_end = diagnostic->span_offset + diagnostic->span_length;
@@ -178,9 +168,68 @@ static void diagnostic_print_snippet(FILE *output, Diagnostic const *diagnostic,
             str_make(source.bytes + offset_start, span_end - offset_start));
     }
 
+    // A line that is wider than a screen shows the part of it around the span, with `...` where the
+    // rest is, because a line that wraps would take the carets away from what they point at.
+    size_t line_count = diagnostic_character_count(
+        str_make(source.bytes + line.start, line.end - line.start));
+    size_t window_start = 0;
+    size_t window_end = line_count;
+    if (line_count > DIAGNOSTIC_SOURCE_WIDTH_MAX) {
+        if (indent_count > DIAGNOSTIC_SOURCE_LEAD) {
+            window_start = indent_count - DIAGNOSTIC_SOURCE_LEAD;
+        }
+        if (window_start + DIAGNOSTIC_SOURCE_WIDTH_MAX > line_count) {
+            window_start = line_count - DIAGNOSTIC_SOURCE_WIDTH_MAX;
+        }
+        window_end = window_start + DIAGNOSTIC_SOURCE_WIDTH_MAX;
+    }
+    bool has_prefix = window_start > 0;
+    bool has_suffix = window_end < line_count;
+
+    // The line number, right-aligned in the width of the gutter, which is that of this number.
+    diagnostic_style_begin(output, DIAGNOSTIC_STYLE_FRAME, is_color);
+    fprintf(output, "%*zu |", (int)width, position.line);
+    diagnostic_style_end(output, is_color);
+    fputc(' ', output);
+    if (has_prefix) {
+        fputs("...", output);
+    }
+    // A tab is one space, so that a character is one column, which the carets rely on.
+    size_t character_index = 0;
+    size_t character_current = 0;
+    for (size_t i = line.start; i < line.end; i += 1) {
+        char character = source.bytes[i];
+        // The bytes that continue a character are 0b10xxxxxx, and belong to the one before them.
+        if (((byte)character & 0xC0) != 0x80) {
+            character_current = character_index;
+            character_index += 1;
+        }
+        if (character_current >= window_start && character_current < window_end) {
+            if (character == '\t') {
+                character = ' ';
+            }
+            fputc(character, output);
+        }
+    }
+    if (has_suffix) {
+        fputs("...", output);
+    }
+    fputc('\n', output);
+
+    // The carets are under the span, which may be partly or wholly out of the part that is shown.
+    size_t caret_indent = indent_count - window_start;
+    if (has_prefix) {
+        caret_indent += sizeof("...") - 1;
+    }
+    if (indent_count + caret_count > window_end) {
+        caret_count = window_end - indent_count;
+        if (indent_count >= window_end) {
+            caret_count = 1;
+        }
+    }
     diagnostic_print_gutter(output, width, is_color);
     fputc(' ', output);
-    for (size_t i = 0; i < indent_count; i += 1) {
+    for (size_t i = 0; i < caret_indent; i += 1) {
         fputc(' ', output);
     }
     diagnostic_style_begin(output, DIAGNOSTIC_STYLE_ERROR, is_color);

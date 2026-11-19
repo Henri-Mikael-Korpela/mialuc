@@ -1,0 +1,5 @@
+error[E0459]: the value of the constant 'X' is not of the type of the constant
+ --> test-code/errors/front/E0459-constant-type-mismatch.mu:3:1
+  |
+3 | X : Int : "text"
+  | ^ not of the type of the constant

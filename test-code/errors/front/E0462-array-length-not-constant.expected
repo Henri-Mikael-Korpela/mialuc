@@ -1,0 +1,7 @@
+error[E0462]: the length of an array at 'n' is not known when the program is compiled
+ --> test-code/errors/front/E0462-array-length-not-constant.mu:5:10
+  |
+5 |     a : [n]Int = [n]Int { .. = 0 }
+  |          ^
+  |
+  = note: the length of an array is an integer literal, or a constant, or arithmetic of them

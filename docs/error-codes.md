@@ -11,6 +11,7 @@ The text of the errors is all in [report.c](../src/report.c), where each code is
 | E0201 - E0299 | the syntax |
 | E0301 - E0399 | the files that a program imports |
 | E0401 - E0449 | names, attributes, labels and the statements that jump |
+| E0451 - E0499 | what is known when the program is compiled: constants and array lengths |
 
 ## E0001 - E0099: the command, the files and the system
 
@@ -113,3 +114,24 @@ These are found when the names of the program are resolved, see [Scope resolutio
 | E0425 | 'defer' cannot be inside the statement of another 'defer' | |
 | E0426 | 'defer' cannot take this statement | It takes an assignment, a call, or an if, for or scope statement. |
 | E0427 | 'return' cannot be inside the statement of a 'defer' | |
+
+## E0451 - E0499: what is known when the program is compiled
+
+These are found when the values of [constants](mialu-programming-language.md#constants) are worked out, and when a place needs a value that is known then, such as the length of an array. The place of the error is the name of the definition, or the first name or string of the expression, which is the closest that the syntax tree knows, so the titles that are about an expression say that it is *at* that name.
+
+| Code | Title | When |
+|---|---|---|
+| E0451 | the constant 'name' is defined in terms of itself | Through any number of other constants. |
+| E0452 | the constant expression at 'name' divides by zero | Also for floats, which have an infinity for it in a running program but not in a constant. |
+| E0453 | the value of the constant 'name' is not known when the program is compiled | A variable or a call is in the value of a constant. |
+| E0454 | an operator of the constant expression at 'name' is given operands that it does not take | Such as `true + 1`, a typed `Byte` in arithmetic, or two strings in a comparison with `<`. |
+| E0455 | the constant expression at 'name' has a value that does not fit | An Int overflows, or a float is infinite. Constant arithmetic does not wrap around. |
+| E0456 | the strings that '++' joins in the constants of the program, at 'name', are too long together | At most 1 MiB together. |
+| E0457 | the constant expression at 'name' has more than 1024 nested operators and constants | |
+| E0458 | the constant 'name' has a type that a constant cannot have | A constant is an Int, an I32, an I64, a U32, a U64, a Byte, a Rune, an F32, an F64, a Bool or a Str. |
+| E0459 | the value of the constant 'name' is not of the type of the constant | |
+| E0460 | the number at 'name' does not fit in a Byte | A Byte is a number from 0 to 255. |
+| E0461 | the operands of '++' at 'name' are not known when the program is compiled | `++` joins strings and runes when the program is compiled. |
+| E0462 | the length of an array at 'name' is not known when the program is compiled | |
+| E0463 | the length of an array at 'name' must be an integer that is not below zero | |
+| E0464 | the argument of 'int_to_str' at 'name' is not known when the program is compiled | |

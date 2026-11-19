@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include <mialu/common_types.h>
+#include <mialu/constant.h>
 #include <mialu/diagnostic.h>
 #include <mialu/limits.h>
 #include <mialu/report.h>
@@ -425,10 +426,87 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .note = "a deferred statement runs while its block is being left, maybe by another "
                 "'return'",
     },
+
+    // What is known when the program is compiled.
+    [ERROR_CODE_CONSTANT_CYCLE] = {
+        .title = "the constant '{subject}' is defined in terms of itself",
+        .label = "this constant uses itself",
+        .note = "the value of a constant is worked out when the program is compiled, and a "
+                "constant that uses itself has no value to start from",
+    },
+    [ERROR_CODE_CONSTANT_DIVISION_BY_ZERO] = {
+        .title = "the constant expression at '{subject}' divides by zero",
+        .note = "a division by zero has no value, also of floats, which have an infinity for it "
+                "in a running program but not in a constant",
+    },
+    [ERROR_CODE_CONSTANT_NOT_CONSTANT] = {
+        .title = "the value of the constant '{subject}' is not known when the program is compiled",
+        .label = "not a constant expression",
+        .note = "the value of a constant is a number, 'true', 'false', a string, another such "
+                "constant, or an operator of them",
+    },
+    [ERROR_CODE_CONSTANT_OPERAND_TYPE_INVALID] = {
+        .title = "an operator of the constant expression at '{subject}' is given operands that it "
+                 "does not take",
+        .note = "arithmetic takes integers that are untyped or Int, I32 or I64, or floats, but "
+                "not both, 'and', 'or' and 'not' take truth values, a Byte is compared with a "
+                "Byte or a number from 0 to 255, a Rune with a Rune, strings are compared with "
+                "'==' and 'not=' only, '++' takes a string and a string or a rune, and "
+                "'int_to_str' takes one integer",
+    },
+    [ERROR_CODE_CONSTANT_OVERFLOW] = {
+        .title = "the constant expression at '{subject}' has a value that does not fit",
+        .note = "an Int goes from -9223372036854775808 to 9223372036854775807, and a float must "
+                "be finite. Constant arithmetic does not wrap around as the arithmetic of a "
+                "running program does, because the number is wrong as soon as it would",
+    },
+    [ERROR_CODE_CONSTANT_TEXT_TOO_LONG] = {
+        .title = "the strings that '++' joins in the constants of the program, at '{subject}', "
+                 "are too long together",
+        .note = "the strings that '++' joins in the constants of a program have at most {number} "
+                "bytes together",
+    },
+    [ERROR_CODE_CONSTANT_TOO_DEEP] = {
+        .title = "the constant expression at '{subject}' has more than {number} nested operators "
+                 "and constants",
+    },
+    [ERROR_CODE_CONSTANT_TYPE_INVALID] = {
+        .title = "the constant '{subject}' has a type that a constant cannot have",
+        .label = "not the type of a constant",
+        .note = "a constant is an Int, an I32, an I64, a U32, a U64, a Byte, a Rune, an F32, an "
+                "F64, a Bool or a Str",
+    },
+    [ERROR_CODE_CONSTANT_TYPE_MISMATCH] = {
+        .title = "the value of the constant '{subject}' is not of the type of the constant",
+        .label = "not of the type of the constant",
+    },
+    [ERROR_CODE_CONSTANT_VALUE_NOT_REPRESENTABLE] = {
+        .title = "the number at '{subject}' does not fit in a Byte",
+        .note = "an untyped integer must fit in the Byte that it becomes, which is a number from "
+                "0 to 255",
+    },
+    [ERROR_CODE_CONCATENATION_NOT_CONSTANT] = {
+        .title = "the operands of '++' at '{subject}' are not known when the program is compiled",
+        .note = "the operands of '++' are strings, runes, or constants of them, because the text "
+                "is joined when the program is compiled",
+    },
+    [ERROR_CODE_ARRAY_LENGTH_NOT_CONSTANT] = {
+        .title = "the length of an array at '{subject}' is not known when the program is compiled",
+        .note = "the length of an array is an integer literal, or a constant, or arithmetic of "
+                "them",
+    },
+    [ERROR_CODE_ARRAY_LENGTH_INVALID] = {
+        .title = "the length of an array at '{subject}' must be an integer that is not below zero",
+    },
+    [ERROR_CODE_INT_TO_STR_NOT_CONSTANT] = {
+        .title = "the argument of 'int_to_str' at '{subject}' is not known when the program is "
+                 "compiled",
+        .note = "the argument of 'int_to_str' is an integer, or a constant of one, because the "
+                "text is made when the program is compiled",
+    },
 };
 
-// The code of each status of the analysis of names that has one in the catalog. A status that is not
-// in the table is zero, and is not reported here yet.
+// The code of each status of the analysis.
 static Error_Code const REPORT_SEMANTIC_CODES[] = {
     [SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE] = ERROR_CODE_DEFINITION_NAME_DUPLICATE,
     [SEMANTIC_STATUS_IDENTIFIER_UNKNOWN] = ERROR_CODE_IDENTIFIER_UNKNOWN,
@@ -457,6 +535,20 @@ static Error_Code const REPORT_SEMANTIC_CODES[] = {
     [SEMANTIC_STATUS_DEFER_NESTED] = ERROR_CODE_DEFER_NESTED,
     [SEMANTIC_STATUS_DEFER_STATEMENT_INVALID] = ERROR_CODE_DEFER_STATEMENT_INVALID,
     [SEMANTIC_STATUS_RETURN_IN_DEFER] = ERROR_CODE_RETURN_IN_DEFER,
+    [SEMANTIC_STATUS_CONSTANT_CYCLE] = ERROR_CODE_CONSTANT_CYCLE,
+    [SEMANTIC_STATUS_CONSTANT_DIVISION_BY_ZERO] = ERROR_CODE_CONSTANT_DIVISION_BY_ZERO,
+    [SEMANTIC_STATUS_CONSTANT_NOT_CONSTANT] = ERROR_CODE_CONSTANT_NOT_CONSTANT,
+    [SEMANTIC_STATUS_CONSTANT_OPERAND_TYPE_INVALID] = ERROR_CODE_CONSTANT_OPERAND_TYPE_INVALID,
+    [SEMANTIC_STATUS_CONSTANT_OVERFLOW] = ERROR_CODE_CONSTANT_OVERFLOW,
+    [SEMANTIC_STATUS_CONSTANT_TEXT_TOO_LONG] = ERROR_CODE_CONSTANT_TEXT_TOO_LONG,
+    [SEMANTIC_STATUS_CONSTANT_TOO_DEEP] = ERROR_CODE_CONSTANT_TOO_DEEP,
+    [SEMANTIC_STATUS_CONSTANT_TYPE_INVALID] = ERROR_CODE_CONSTANT_TYPE_INVALID,
+    [SEMANTIC_STATUS_CONSTANT_TYPE_MISMATCH] = ERROR_CODE_CONSTANT_TYPE_MISMATCH,
+    [SEMANTIC_STATUS_CONSTANT_VALUE_NOT_REPRESENTABLE] = ERROR_CODE_CONSTANT_VALUE_NOT_REPRESENTABLE,
+    [SEMANTIC_STATUS_CONCATENATION_NOT_CONSTANT] = ERROR_CODE_CONCATENATION_NOT_CONSTANT,
+    [SEMANTIC_STATUS_ARRAY_LENGTH_NOT_CONSTANT] = ERROR_CODE_ARRAY_LENGTH_NOT_CONSTANT,
+    [SEMANTIC_STATUS_ARRAY_LENGTH_INVALID] = ERROR_CODE_ARRAY_LENGTH_INVALID,
+    [SEMANTIC_STATUS_INT_TO_STR_NOT_CONSTANT] = ERROR_CODE_INT_TO_STR_NOT_CONSTANT,
 };
 
 // The code of each status of putting the imports together that is about an import. The statuses of
@@ -740,18 +832,24 @@ void report_package_error(Reporter const *reporter, char const *path, Str source
     report_emit_at_subject(reporter, code, path, source, result.subject, detail, 0);
 }
 
-bool report_semantic_error(Reporter const *reporter, char const *path, Str source,
+void report_semantic_error(Reporter const *reporter, char const *path, Str source,
                            Semantic_Result result) {
     assert(reporter != NULL);
     assert(path != NULL);
     assert(result.status != SEMANTIC_STATUS_OK);
 
     Error_Code code = REPORT_SEMANTIC_CODES[result.status];
-    if (code == 0) {
-        return false;
+    assert(code > 0);
+
+    // The limits that two of the errors tell.
+    int64_t number = 0;
+    if (result.status == SEMANTIC_STATUS_CONSTANT_TEXT_TOO_LONG) {
+        number = CONSTANT_TEXT_SIZE_BYTES_MAX;
     }
-    report_emit_at_subject(reporter, code, path, source, result.subject, STR_EMPTY, 0);
-    return true;
+    if (result.status == SEMANTIC_STATUS_CONSTANT_TOO_DEEP) {
+        number = CONSTANT_EXPRESSION_DEPTH_MAX;
+    }
+    report_emit_at_subject(reporter, code, path, source, result.subject, STR_EMPTY, number);
 }
 
 /**

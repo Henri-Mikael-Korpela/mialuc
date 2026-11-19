@@ -10,7 +10,7 @@ the same name and the suffix `.expected` is exactly what the compiler must print
 error. The name of a program starts with the code of the error that it has, such as
 `E0112-integer-literal-too-large.mu`. The directory that a program is in says how it is compiled:
 
-    front   mialuc dump-ast, which finds the errors of the tokens, the syntax and the names
+    front   mialuc dump-types, which finds the errors of the tokens, the syntax and the names
     x64     mialuc build --target x64-win32, which finds what the x64 target cannot build
     wasm    mialuc build --target wasm, which finds what the wasm target cannot build
 
@@ -42,7 +42,7 @@ ERRORS_DIRECTORY = ROOT / "test-code" / "errors"
 # How each directory is compiled. `{output}` is a file that the build may write, and `{source}` is
 # the program.
 COMMANDS = {
-    "front": ["dump-ast", "{source}"],
+    "front": ["dump-types", "{source}"],
     "wasm": ["build", "--target", "wasm", "-o", "{output}", "{source}"],
     "x64": ["build", "--target", "x64-win32", "-o", "{output}", "{source}"],
 }

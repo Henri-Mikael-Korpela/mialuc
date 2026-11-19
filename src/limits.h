@@ -18,6 +18,10 @@ enum {
     // is mostly a few bytes per token, so this is far more than a source of the maximum size is
     // likely to need.
     OUTPUT_SIZE_BYTES_MAX = 1024 * 1024,
+    // Bounds the text of the strings that `++` makes when the program is compiled, which is
+    // allocated once at startup. The text is part of the program, so it is never larger than the
+    // module that the build mode writes.
+    CONSTANT_TEXT_SIZE_BYTES_MAX = OUTPUT_SIZE_BYTES_MAX,
     // Bounds the text that the `wat` target writes. The text is allocated once at startup. The
     // largest growth is `i64.add`, one byte of the module that becomes 12 bytes of text, so 16
     // bytes of text per byte of the module is enough.

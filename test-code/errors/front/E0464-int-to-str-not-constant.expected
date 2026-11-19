@@ -1,0 +1,8 @@
+error[E0464]: the argument of 'int_to_str' at 'n' is not known when the program is compiled
+ --> test-code/errors/front/E0464-int-to-str-not-constant.mu:5:21
+  |
+5 |     s := int_to_str(n)
+  |                     ^
+  |
+  = note: the argument of 'int_to_str' is an integer, or a constant of one, because the text is made
+          when the program is compiled
