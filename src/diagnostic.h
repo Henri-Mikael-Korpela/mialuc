@@ -47,9 +47,15 @@ typedef struct {
     // `span_length` long. The part of it that is on the first line is underlined.
     size_t span_offset;
     size_t span_length;
+    // A second place in the same source, which the error is also about, such as the value that
+    // does not fit where the first place is. It is shown below the first, with its own label.
+    Str second_label;
+    size_t second_offset;
+    size_t second_length;
     // The number of the error, which is printed as `E` and four digits, such as `E0101`. Every kind
     // of error has one, and no other has the same.
     uint32_t code;
+    bool has_second;
     bool has_span;
 } Diagnostic;
 

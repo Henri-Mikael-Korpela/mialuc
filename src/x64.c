@@ -487,6 +487,7 @@ typedef struct {
     // The types of a mismatch, see `X64_Build_Result`.
     Str type_expected;
     Str type_found;
+    uint32_t value_offset;
     // What the debug information needs, or NULL when the file has none.
     X64_Debug const *debug;
     X64_Debug_Row *rows;
@@ -1123,6 +1124,7 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
         .subject = STR_EMPTY,
         .type_expected = STR_EMPTY,
         .type_found = STR_EMPTY,
+        .value_offset = 0,
         .debug = debug,
         .rows = rows,
         .layout = {0},
@@ -1230,6 +1232,7 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
         .subject = builder.subject,
         .type_expected = builder.type_expected,
         .type_found = builder.type_found,
+        .value_offset = builder.value_offset,
         .status = builder.status,
     };
 }
@@ -3241,6 +3244,7 @@ static bool x64_return_one_write(X64_Builder *builder, Ast_Node_Index value,
         x64_fail(builder, X64_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
         builder->type_expected = x64_type_text(builder, return_type);
         builder->type_found = x64_type_text(builder, value_type);
+        builder->value_offset = builder->nodes[value].source_offset;
         return false;
     }
     // The temporary strings are given back by the return, so a pointer to one must not leave. A

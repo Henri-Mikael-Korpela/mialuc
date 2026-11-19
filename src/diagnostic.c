@@ -36,6 +36,15 @@ enum {
 };
 
 /**
+ * A place in the source that is underlined, with what is said about it.
+ */
+typedef struct {
+    Str label;
+    size_t offset;
+    size_t length;
+} Diagnostic_Span;
+
+/**
  * Where the line that has a byte of the source starts and ends, as offsets in the source. The end
  * is the offset of the line break, or of the end of the source, and a carriage return before the
  * line break is not part of the line.
@@ -56,9 +65,9 @@ static void            diagnostic_print_hint        (FILE *output, size_t width,
 static void            diagnostic_print_location    (FILE *output, Diagnostic const *diagnostic,
                                                      size_t width, Str_Position position,
                                                      bool is_color);
-static void            diagnostic_print_snippet     (FILE *output, Diagnostic const *diagnostic,
-                                                     size_t width, Str_Position position,
-                                                     bool is_color);
+static void            diagnostic_print_snippet     (FILE *output, Str source,
+                                                     Diagnostic_Span span, size_t width,
+                                                     Str_Position position, bool is_color);
 static void            diagnostic_print_wrapped     (FILE *output, Str text, size_t indent_width);
 static void            diagnostic_style_begin       (FILE *output, char const *style,
                                                      bool is_color);
@@ -74,9 +83,20 @@ void diagnostic_print(FILE *output, Diagnostic const *diagnostic, bool is_color)
 
     Str_Position position = {.line = 0, .column = 0};
     size_t width = DIAGNOSTIC_GUTTER_WIDTH_MIN;
+    Str_Position second_position = {.line = 0, .column = 0};
     if (diagnostic->has_span) {
         position = str_position_at(diagnostic->source, diagnostic->span_offset);
         width = diagnostic_digit_count(position.line);
+    }
+    if (diagnostic->has_second) {
+        assert(diagnostic->has_span);
+        assert(diagnostic->second_offset <= diagnostic->source.length);
+
+        second_position = str_position_at(diagnostic->source, diagnostic->second_offset);
+        size_t second_width = diagnostic_digit_count(second_position.line);
+        if (second_width > width) {
+            width = second_width;
+        }
     }
 
     diagnostic_print_header(output, diagnostic, is_color);
@@ -84,7 +104,28 @@ void diagnostic_print(FILE *output, Diagnostic const *diagnostic, bool is_color)
         diagnostic_print_location(output, diagnostic, width, position, is_color);
     }
     if (diagnostic->has_span) {
-        diagnostic_print_snippet(output, diagnostic, width, position, is_color);
+        Diagnostic_Span span = {
+            .label = diagnostic->label,
+            .offset = diagnostic->span_offset,
+            .length = diagnostic->span_length,
+        };
+        diagnostic_print_gutter(output, width, is_color);
+        fputc('\n', output);
+        diagnostic_print_snippet(output, diagnostic->source, span, width, position, is_color);
+    }
+    if (diagnostic->has_second) {
+        Diagnostic_Span span = {
+            .label = diagnostic->second_label,
+            .offset = diagnostic->second_offset,
+            .length = diagnostic->second_length,
+        };
+        // Lines that are not next to each other have `...` between them, as the lines that are
+        // left out would show.
+        if (second_position.line > position.line + 1 || second_position.line < position.line) {
+            fputs("...\n", output);
+        }
+        diagnostic_print_snippet(output, diagnostic->source, span, width, second_position,
+                                 is_color);
     }
 
     // A blank line of the gutter separates what points at the source from what is said about it.
@@ -141,23 +182,19 @@ static void diagnostic_print_location(FILE *output, Diagnostic const *diagnostic
  * Prints the line of the source that has the start of the span, and under it the carets that
  * underline the span, with the label after them.
  */
-static void diagnostic_print_snippet(FILE *output, Diagnostic const *diagnostic, size_t width,
-                                     Str_Position position, bool is_color) {
-    Str source = diagnostic->source;
-    Diagnostic_Line line = diagnostic_line_at(source, diagnostic->span_offset);
-    assert(line.start <= diagnostic->span_offset);
-    assert(diagnostic->span_offset <= line.end + 1);
-
-    diagnostic_print_gutter(output, width, is_color);
-    fputc('\n', output);
+static void diagnostic_print_snippet(FILE *output, Str source, Diagnostic_Span span,
+                                     size_t width, Str_Position position, bool is_color) {
+    Diagnostic_Line line = diagnostic_line_at(source, span.offset);
+    assert(line.start <= span.offset);
+    assert(span.offset <= line.end + 1);
 
     // The carets start under the first byte of the span, and run to the end of the span or of the
     // line, whichever is first. A span at the end of a line, or an empty one, has one caret.
-    size_t span_end = diagnostic->span_offset + diagnostic->span_length;
+    size_t span_end = span.offset + span.length;
     if (span_end > line.end) {
         span_end = line.end;
     }
-    size_t offset_start = diagnostic->span_offset;
+    size_t offset_start = span.offset;
     if (offset_start > line.end) {
         offset_start = line.end;
     }
@@ -237,8 +274,8 @@ static void diagnostic_print_snippet(FILE *output, Diagnostic const *diagnostic,
     for (size_t i = 0; i < caret_count; i += 1) {
         fputc('^', output);
     }
-    if (diagnostic->label.bytes != NULL) {
-        fprintf(output, " %.*s", (int)diagnostic->label.length, diagnostic->label.bytes);
+    if (span.label.bytes != NULL) {
+        fprintf(output, " %.*s", (int)span.label.length, span.label.bytes);
     }
     diagnostic_style_end(output, is_color);
     fputc('\n', output);

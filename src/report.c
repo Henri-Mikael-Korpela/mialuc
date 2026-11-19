@@ -48,6 +48,7 @@ typedef struct {
     char const *label;
     char const *note;
     char const *help;
+    char const *second_label;
 } Report_Entry;
 
 /**
@@ -60,6 +61,10 @@ typedef struct {
     Str other;
     Str target;
     int64_t number;
+    // A second place in the same source, as an offset, for an error that is about two. It is only
+    // given when `has_second` is set.
+    size_t second_offset;
+    bool has_second;
 } Report_Texts;
 
 /**
@@ -76,7 +81,9 @@ typedef struct {
     size_t span_offset;
     size_t span_length;
     int64_t number;
+    size_t second_offset;
     Error_Code code;
+    bool has_second;
     bool has_span;
 } Report_Error;
 
@@ -664,7 +671,8 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
     },
     [ERROR_CODE_RETURN_TYPE_MISMATCH] = {
         .title = "'{subject}' returns {other}, but its return type is {detail}",
-        .label = "expected {detail}, found {other}",
+        .label = "this procedure returns {detail}",
+        .second_label = "this is {other}",
     },
     [ERROR_CODE_RETURN_TYPE_MISSING] = {
         .title = "'{subject}' returns a value but has no return type",
@@ -1357,7 +1365,8 @@ void report_package_error(Reporter const *reporter, char const *path, Str source
         assert(length > 0);
         detail = str_make(limits, (size_t)length);
     }
-    Report_Texts texts = {.detail = detail, .other = STR_EMPTY, .target = STR_EMPTY, .number = 0};
+    Report_Texts texts = {.detail = detail, .other = STR_EMPTY, .target = STR_EMPTY, .number = 0,
+                          .second_offset = 0, .has_second = false};
     report_emit_at_subject(reporter, code, path, source, result.subject, texts);
 }
 
@@ -1383,6 +1392,8 @@ void report_semantic_error(Reporter const *reporter, char const *path, Str sourc
         .other = STR_EMPTY,
         .target = STR_EMPTY,
         .number = number,
+        .second_offset = 0,
+        .has_second = false,
     };
     report_emit_at_subject(reporter, code, path, source, result.subject, texts);
 }
@@ -1419,10 +1430,14 @@ void report_x64_error(Reporter const *reporter, char const *path, Str source,
         .other = STR_EMPTY,
         .target = STR("x64"),
         .number = number,
+        .second_offset = 0,
+        .has_second = false,
     };
     if (result.status == X64_BUILD_STATUS_RETURN_TYPE_MISMATCH) {
         texts.detail = result.type_expected;
         texts.other = result.type_found;
+        texts.second_offset = result.value_offset;
+        texts.has_second = true;
     }
     report_emit_at_subject(reporter, code, path, source, result.subject, texts);
 }
@@ -1446,10 +1461,14 @@ void report_wasm_error(Reporter const *reporter, char const *path, Str source,
         .other = STR_EMPTY,
         .target = STR("wasm"),
         .number = 0,
+        .second_offset = 0,
+        .has_second = false,
     };
     if (result.status == WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH) {
         texts.detail = result.type_expected;
         texts.other = result.type_found;
+        texts.second_offset = result.value_offset;
+        texts.has_second = true;
     }
     report_emit_at_subject(reporter, code, path, source, result.subject, texts);
 }
@@ -1535,7 +1554,9 @@ static void report_emit_at_subject(Reporter const *reporter, Error_Code code, ch
         .span_offset = 0,
         .span_length = subject.length,
         .number = texts.number,
+        .second_offset = texts.second_offset,
         .code = code,
+        .has_second = false,
         .has_span = false,
     };
     // The subject views the source, so its distance from the start is its offset. Something that
@@ -1544,6 +1565,7 @@ static void report_emit_at_subject(Reporter const *reporter, Error_Code code, ch
         subject.bytes <= file_source.bytes + file_source.length) {
         error.has_span = true;
         error.span_offset = (size_t)(subject.bytes - file_source.bytes);
+        error.has_second = texts.has_second;
     }
     report_emit(reporter, &error);
 }
@@ -1688,6 +1710,13 @@ static void report_emit(Reporter const *reporter, Report_Error const *error) {
     char label[REPORT_PART_SIZE_BYTES] = {0};
     char note[REPORT_PART_SIZE_BYTES] = {0};
     char help[REPORT_PART_SIZE_BYTES] = {0};
+    char second[REPORT_PART_SIZE_BYTES] = {0};
+    // The second place is underlined as the token that starts there.
+    size_t second_length = 1;
+    if (error->has_second && error->second_offset < error->source.length) {
+        second_length = report_length_token(error->source, error->second_offset,
+                                            TOKEN_KIND_IDENTIFIER);
+    }
     Diagnostic diagnostic = {
         .path = STR_EMPTY,
         .source = error->source,
@@ -1697,7 +1726,11 @@ static void report_emit(Reporter const *reporter, Report_Error const *error) {
         .help = report_expand(entry->help, error, help, sizeof(help)),
         .span_offset = error->span_offset,
         .span_length = error->span_length,
+        .second_label = report_expand(entry->second_label, error, second, sizeof(second)),
+        .second_offset = error->second_offset,
+        .second_length = second_length,
         .code = (uint32_t)error->code,
+        .has_second = error->has_second,
         .has_span = error->has_span,
     };
     if (error->path != NULL) {

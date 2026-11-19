@@ -235,6 +235,7 @@ typedef struct {
     // The types of a mismatch, see `Wasm_Build_Result`.
     Str type_expected;
     Str type_found;
+    uint32_t value_offset;
     size_t node_count;
     Ast_Node_Index module;
     // The number of foreign procedures. They are imported functions, which come before the
@@ -886,6 +887,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slic
         .detail = STR_EMPTY,
         .type_expected = STR_EMPTY,
         .type_found = STR_EMPTY,
+        .value_offset = 0,
         .node_count = nodes.length,
         .module = root,
         .foreign_count = 0,
@@ -979,6 +981,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slic
         .detail = builder.detail,
         .type_expected = builder.type_expected,
         .type_found = builder.type_found,
+        .value_offset = builder.value_offset,
         .status = builder.status,
     };
 }
@@ -3339,6 +3342,7 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
             wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
             builder->type_expected = wasm_type_text(builder, return_type);
             builder->type_found = wasm_type_text(builder, value_type);
+            builder->value_offset = builder->nodes[value].source_offset;
             return false;
         }
         value = builder->nodes[value].next_sibling;

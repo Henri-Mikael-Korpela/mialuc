@@ -354,6 +354,8 @@ typedef struct {
     // status.
     Str type_expected;
     Str type_found;
+    // The byte offset in the source of the value that is returned, for the same status.
+    uint32_t value_offset;
     X64_Build_Status status;
 } X64_Build_Result;
 
