@@ -256,14 +256,99 @@ function compilerRun(command, text) {
 }
 
 /**
- * Turns what the compiler printed to the standard error into diagnostics of `text`. An error has the
- * form `<file>:<line>:<column>: <message>`, with the line and the column counted from 1, the column
- * in bytes, or `<file>: <message>` when it is about the whole program, which is shown on the first
- * line. The compiler stops at the first error, so there is one. The range is the word at the place of
- * the error, or the character there when it is not on a word, and the columns are converted from
- * bytes of UTF-8 to UTF-16 code units.
+ * Turns what the compiler printed to the standard error into diagnostics of `text`. An error is
+ * laid out like an error of Rust:
+ *
+ *     error[E0101]: the title
+ *      --> <file>:<line>:<column>
+ *       |
+ *     3 |     the line of the source
+ *       |     ^^^^ the label
+ *       |
+ *       = note: the note
+ *       = help: the help
+ *
+ * The line and the column are counted from 1, the column in bytes. An error that is about the whole
+ * program has the file only, and is shown on the first line. The compiler stops at the first error,
+ * so there is one. The range is the carets, or the word at the place of the error when there are
+ * none, and the columns are converted from bytes of UTF-8 to UTF-16 code units. The message is the
+ * title, and the note and the help under it.
  */
 function diagnosticsFromErrors(errors, file, text) {
+    if (!/^error\[/m.test(errors)) {
+        return diagnosticsFromPlainErrors(errors, file, text);
+    }
+    const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
+    const rows = errors.split("\n").map((row) => row.replace(/\r$/, ""));
+    const diagnostics = [];
+    for (let i = 0; i < rows.length; i += 1) {
+        const header = /^error\[(E\d+)\]: (.*)$/.exec(rows[i]);
+        if (header === null) {
+            continue;
+        }
+        let end = i + 1;
+        while (end < rows.length && !/^error\[/.test(rows[end])) {
+            end += 1;
+        }
+        const block = rows.slice(i + 1, end);
+        i = end - 1;
+
+        // The path ends with the line and the column, and may have colons itself, as in C:\dir.
+        const arrow = block.map((row) => /^\s*--> (.+?)(?::(\d+):(\d+))?$/.exec(row))
+            .find((match) => match !== null);
+        // An error in another file, which this document imports, is not one of this document.
+        if (arrow === undefined || arrow[1] !== file) {
+            continue;
+        }
+        let line = 0;
+        let column = 0;
+        if (arrow[2] !== undefined) {
+            line = Math.min(Math.max(Number(arrow[2]), 1), lines.length) - 1;
+            column = Number(arrow[3]) - 1;
+        }
+        const carets = block.map((row) => /^\s*\|\s*(\^+)/.exec(row)).find((match) => match !== null);
+
+        const hints = [];
+        for (const row of block) {
+            const hint = /^\s*= (note|help): (.*)$/.exec(row);
+            if (hint !== null) {
+                hints.push(`${hint[1]}: ${hint[2]}`);
+            } else if (hints.length > 0 && /^\s+\S/.test(row) && !/^\s*[|=]|-->/.test(row)) {
+                // The text of a note that is broken into lines.
+                hints[hints.length - 1] += ` ${row.trim()}`;
+            }
+        }
+
+        const bytes = Buffer.from(lines[line], "utf8");
+        const start = bytes.toString("utf8", 0, Math.min(column, bytes.length)).length;
+        let length = 1;
+        if (carets !== undefined) {
+            length = carets[1].length;
+        } else {
+            const word = /^\w+/.exec(lines[line].slice(start));
+            length = word === null ? 1 : word[0].length;
+        }
+        diagnostics.push({
+            range: {
+                start: { line, character: start },
+                end: { line, character: Math.max(Math.min(start + length, lines[line].length), start) },
+            },
+            severity: 1, // Error
+            code: header[1],
+            source: "mialuc",
+            message: [header[2], ...hints].join("\n"),
+        });
+    }
+    return diagnostics;
+}
+
+/**
+ * The errors that do not have the layout above yet, which are the ones of the parts of the compiler
+ * that have not moved to it. An error has the form `<file>:<line>:<column>: <message>`, or
+ * `<file>: <message>` when it is about the whole program. The range is the word at the place of the
+ * error, or the character there when it is not on a word.
+ */
+function diagnosticsFromPlainErrors(errors, file, text) {
     const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
     const escaped = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const located = new RegExp(`^${escaped}:(\\d+):(\\d+): (.*)$`);

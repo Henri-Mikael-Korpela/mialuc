@@ -1,9 +1,16 @@
+// `isatty` is POSIX, which the C99 mode of the compiler hides unless this says that it is wanted. It
+// must come before the first include.
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200112L
+#endif
+
 #include <assert.h>
 #include <iso646.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <mialu/common_types.h>
@@ -216,6 +223,24 @@ Str process_path_absolute(char const *path, Array_Slice buffer) {
     return str_make(buffer.elements, length);
 }
 
+bool process_standard_error_has_color(void) {
+    char const *no_color = getenv("NO_COLOR");
+    if (no_color != NULL && no_color[0] != '\0') {
+        return false;
+    }
+    HANDLE handle = GetStdHandle(STD_ERROR_HANDLE);
+    DWORD mode = 0;
+    // A pipe or a file is not a console, and has no use for colors.
+    if (handle == INVALID_HANDLE_VALUE || handle == NULL || not GetConsoleMode(handle, &mode)) {
+        return false;
+    }
+    // The console of Windows shows the escape sequences of colors only when it is asked to. The
+    // mode stays for the rest of the run, which is fine because the compiler prints its errors
+    // and ends, and does not run the program after one.
+    DWORD const virtual_terminal_processing = 0x0004;
+    return SetConsoleMode(handle, mode | virtual_terminal_processing) != 0;
+}
+
 Str process_executable_directory(Array_Slice buffer) {
     assert(buffer.elements != NULL);
 
@@ -241,6 +266,21 @@ Str process_executable_directory(Array_Slice buffer) {
 }
 
 #else
+
+#include <unistd.h>
+
+bool process_standard_error_has_color(void) {
+    char const *no_color = getenv("NO_COLOR");
+    if (no_color != NULL && no_color[0] != '\0') {
+        return false;
+    }
+    // A terminal that says that it is "dumb" does not take escape sequences.
+    char const *terminal = getenv("TERM");
+    if (terminal == NULL || strcmp(terminal, "dumb") == 0) {
+        return false;
+    }
+    return isatty(STDERR_FILENO) != 0;
+}
 
 Str process_executable_directory(Array_Slice buffer) {
     assert(buffer.elements != NULL);

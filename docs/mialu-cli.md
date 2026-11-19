@@ -229,13 +229,26 @@ The exception is `run`, which ends with the exit status of the program when it s
 
 ## Errors
 
-An error is printed to the standard error, and has the form:
+An error is printed to the standard error, and is laid out like an error of Rust:
 
 ```
-<source file>:<line>:<column>: <message>
+error[E0101]: integer literal is larger than the largest Int
+ --> main.mu:3:10
+  |
+3 |     x := 9223372036854775808
+  |          ^^^^^^^^^^^^^^^^^^^ the largest Int is 9223372036854775807
+  |
+  = help: use an I64 or a U64 for a larger number
 ```
 
-The line and the column are counted from 1, and they point at the place in the source that the error is about. An error that is about the whole program, such as a program that has no procedure `main`, or one that is too large, has no line and column: `<source file>: <message>`. The compiler stops at the first error.
+- The first line has the **code** of the error, `E` and four digits, and its **title**, which says what is wrong. Every kind of error has a code of its own, which never changes and is not used for anything else, so it can be searched for. The codes, and what each error means, are in [Error codes](error-codes.md).
+- The second line has the **place** of the error: the file, the line and the column, which are counted from 1, the column in bytes. It is written as `file:line:column` and nothing after it, which is what a terminal needs to take it as a link, so that in the terminal of VS Code Ctrl and a click opens the file at the place. An error in a file that the program [imports](mialu-programming-language.md#imports) has the path of that file, and its line and its column. An error that is about a whole file, such as a source that cannot be read, or about no file, has no line and column, or no place.
+- Below it is the line of the source, with carets under the part of it that the error is about, and the **label**, which says what is wrong there. When that part is more than one line, the carets are under the first line.
+- The **note** says why, which is the rule of the language that is broken, and the **help** says what to do. They are left out when they would say what the title says.
+
+The compiler stops at the first error.
+
+When the standard error is a terminal, the parts have colors, so that they are easy to tell apart: the code and the carets are red, the title is bold, the frame around the source and the place are blue, and `help` is cyan. There are no colors when the standard error is a file or a pipe, which is what the tools that read the errors get, and none when the environment variable `NO_COLOR` is set to anything.
 
 An error that says `internal error` is about the compiler and not about the program, because the compiler cannot read what it wrote itself. It should be reported as a bug.
 

@@ -21,6 +21,7 @@ Mialu is a procedural language with manual memory management. It is influenced b
 - [Language specification](docs/mialu-programming-language.md): the most up-to-date description of the language.
 - [How production ready is Mialu?](docs/how-production-ready.md): what the language and its compiler can and cannot do yet, a checklist of what is present and how much it matters, what is missing, and the milestones to get there.
 - [mialuc](docs/mialu-cli.md): the command line of the compiler: its commands, targets, exit status and errors.
+- [Error codes](docs/error-codes.md): every error of the compiler has a code, such as `E0101`, and this says what each one means.
 - [Errors as interface](docs/errors-as-interface.md): the most common mistakes in C, C++, Java, Odin, C#, Python, Kotlin, TypeScript and JavaScript, as the material for the error messages and fixes of the compiler.
 
 ### Build targets

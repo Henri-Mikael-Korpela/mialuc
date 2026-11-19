@@ -1,6 +1,7 @@
 #ifndef MIALU_PROCESS_H
 #define MIALU_PROCESS_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include <mialu/array_slice.h>
@@ -61,5 +62,14 @@ Str process_path_absolute(char const *path, Array_Slice buffer);
  * than Windows.
  */
 Str process_executable_directory(Array_Slice buffer);
+
+/**
+ * Returns whether the standard error is a terminal that shows colors, so that the errors of the
+ * compiler can have them. It is false when the standard error is a file or a pipe, which is where
+ * the tools that read the errors get them, and when the environment variable `NO_COLOR` is set to
+ * something, which is how a person asks for none. On Windows it also turns on the escape sequences
+ * in the console, which it does not show by itself.
+ */
+bool process_standard_error_has_color(void);
 
 #endif

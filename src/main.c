@@ -15,6 +15,7 @@
 #include <mialu/package.h>
 #include <mialu/parser.h>
 #include <mialu/process.h>
+#include <mialu/report.h>
 #include <mialu/semantic.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
@@ -88,9 +89,12 @@ typedef enum {
  * this machine. The paths are the C strings of `argv`, because they are only handed to `fopen`.
  * `is_debug` is set for a build that has debug information, which only the target `x64-win32` has.
  * The mode run has the arguments that are given to the program, which come after the source file:
- * `argument_count` C strings from `arguments`, which are the ones of `argv`.
+ * `argument_count` C strings from `arguments`, which are the ones of `argv`. `reporter` is how the
+ * errors of the command are reported, and goes where the command goes, so that every function that
+ * finds an error can report it.
  */
 typedef struct {
+    Reporter reporter;
     char const *const *arguments;
     size_t argument_count;
     char const *source_path;
@@ -262,6 +266,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
     Command command = main_command_parse(args);
+    command.reporter.is_color = process_standard_error_has_color();
     if (command.mode == COMMAND_MODE_INVALID) {
         fprintf(stderr,
                 "Usage: %s run <source file> [arguments of the program]\n"
@@ -327,7 +332,7 @@ int main(int argc, char *argv[]) {
         buffers.layouts.elements == NULL || buffers.symbols.elements == NULL ||
         buffers.debug_rows.elements == NULL ||
         buffers.source_path.elements == NULL) {
-        fprintf(stderr, "Out of memory.\n");
+        report_general(&command.reporter, ERROR_CODE_OUT_OF_MEMORY, NULL, 0);
     } else {
         exit_code = main_run_command(command, &buffers);
     }
@@ -552,6 +557,7 @@ static int32_t main_run_command(Command command, Buffers const *buffers) {
     // compiler instead, see `packages_make`.
     Packages packages = packages_make(MIALU_STD_DIRECTORY);
     main_packages = &packages;
+    command.reporter.packages = &packages;
     int32_t exit_code = main_run_command_front(command, buffers, &packages);
     main_packages = NULL;
     packages_free(&packages);
@@ -570,8 +576,8 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
     // An unreadable source is `bytes == NULL`. An empty file gives a non-NULL `Str` of length
     // zero.
     if (source.bytes == NULL) {
-        fprintf(stderr, "%s: cannot read file, or file is larger than %d bytes.\n", path,
-                SOURCE_SIZE_BYTES_MAX);
+        report_general(&command.reporter, ERROR_CODE_SOURCE_UNREADABLE, path,
+                       SOURCE_SIZE_BYTES_MAX);
         return 1;
     }
 
@@ -1988,7 +1994,7 @@ static int32_t main_run_command_build(Command command, Buffers const *buffers, S
     }
 
     if (not main_run_command_write_file(command.output_path, output)) {
-        fprintf(stderr, "%s: cannot write file.\n", command.output_path);
+        report_general(&command.reporter, ERROR_CODE_OUTPUT_UNWRITABLE, command.output_path, 0);
         return 1;
     }
     return 0;
@@ -2019,7 +2025,7 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
     if (command.is_debug) {
         debug.source_path = process_path_absolute(path, buffers->source_path);
         if (debug.source_path.bytes == NULL) {
-            fprintf(stderr, "%s: cannot find the absolute path of the file.\n", path);
+            report_general(&command.reporter, ERROR_CODE_PATH_ABSOLUTE_UNKNOWN, path, 0);
             return 1;
         }
     }
@@ -2047,7 +2053,7 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
         }
         if (fwrite(text_result.text.bytes, sizeof(byte), text_result.text.length, stdout) !=
             text_result.text.length) {
-            fprintf(stderr, "Cannot write the assembly to the standard output.\n");
+            report_general(&command.reporter, ERROR_CODE_ASSEMBLY_WRITE_FAILED, path, 0);
             return 1;
         }
         return 0;
@@ -2068,20 +2074,18 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
         process_run_executable(build_result.bytes, command.arguments, command.argument_count);
     switch (process_result.status) {
     case PROCESS_STATUS_FILE_FAILED:
-        fprintf(stderr, "%s: cannot write the program to the directory for temporary files.\n",
-                path);
+        report_general(&command.reporter, ERROR_CODE_PROGRAM_FILE_FAILED, path, 0);
         return 1;
     case PROCESS_STATUS_OK:
         return process_result.exit_code;
     case PROCESS_STATUS_START_FAILED:
-        fprintf(stderr, "%s: the system cannot start the program.\n", path);
+        report_general(&command.reporter, ERROR_CODE_PROGRAM_START_FAILED, path, 0);
         return 1;
     case PROCESS_STATUS_ARGUMENTS_TOO_LONG:
-        fprintf(stderr, "%s: the arguments of the program are longer than the system takes, which "
-                "is 32767 characters with the name of the program.\n", path);
+        report_general(&command.reporter, ERROR_CODE_PROGRAM_ARGUMENTS_TOO_LONG, path, 0);
         return 1;
     case PROCESS_STATUS_UNSUPPORTED:
-        fprintf(stderr, "%s: running a program is only supported on Windows.\n", path);
+        report_general(&command.reporter, ERROR_CODE_RUN_UNSUPPORTED, path, 0);
         return 1;
     }
 
