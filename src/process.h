@@ -14,6 +14,9 @@ typedef enum {
     // The program could not be started: the system refused the file, for example because it is not
     // a program for this machine.
     PROCESS_STATUS_START_FAILED,
+    // The command line of the program, which is the path of the file and the arguments, is longer
+    // than the system takes, which is 32767 characters.
+    PROCESS_STATUS_ARGUMENTS_TOO_LONG,
     // Running a program built by the compiler is only done on Windows for now.
     PROCESS_STATUS_UNSUPPORTED,
 } Process_Status;
@@ -31,8 +34,14 @@ typedef struct {
  * file is written to the directory for temporary files, run with the standard input, output and
  * error of this process, and deleted afterwards. Nothing of the program is kept in this process, so
  * whatever it does can only harm itself and the system, not the compiler.
+ *
+ * The program is called as if it had been given `argument_count` arguments, the C strings of
+ * `arguments`, after its name: its command line is the path of the file and the arguments, each one
+ * quoted where the program needs it to read it back as the one argument, as the runtime of C does
+ * for `argv`.
  */
-Process_Result process_run_executable(Array_Slice program);
+Process_Result process_run_executable(Array_Slice program, char const *const *arguments,
+                                      size_t argument_count);
 
 /**
  * Returns the absolute path of the file at `path`, as the system resolves it against the current

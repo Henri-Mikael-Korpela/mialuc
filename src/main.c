@@ -87,8 +87,12 @@ typedef enum {
  * shows the assembly of. The target of run is the one that runs on
  * this machine. The paths are the C strings of `argv`, because they are only handed to `fopen`.
  * `is_debug` is set for a build that has debug information, which only the target `x64-win32` has.
+ * The mode run has the arguments that are given to the program, which come after the source file:
+ * `argument_count` C strings from `arguments`, which are the ones of `argv`.
  */
 typedef struct {
+    char const *const *arguments;
+    size_t argument_count;
     char const *source_path;
     char const *output_path;
     Command_Mode mode;
@@ -260,7 +264,7 @@ int main(int argc, char *argv[]) {
     Command command = main_command_parse(args);
     if (command.mode == COMMAND_MODE_INVALID) {
         fprintf(stderr,
-                "Usage: %s run <source file>\n"
+                "Usage: %s run <source file> [arguments of the program]\n"
                 "       %s dump-ast <source file>\n"
                 "       %s dump-asm --target x64-win32 <source file>\n"
                 "       %s dump-outline <source file>\n"
@@ -348,7 +352,7 @@ int main(int argc, char *argv[]) {
 /**
  * Understands the command line:
  *
- *     mialuc run <source file>
+ *     mialuc run <source file> [arguments of the program]
  *     mialuc dump-ast <source file>
  *     mialuc dump-asm --target x64-win32 <source file>
  *     mialuc dump-outline <source file>
@@ -371,6 +375,8 @@ static Command main_command_parse(Array_Slice args) {
     char const *const *argv = args.elements;
 
     Command invalid = {
+        .arguments = NULL,
+        .argument_count = 0,
         .source_path = NULL,
         .output_path = NULL,
         .mode = COMMAND_MODE_INVALID,
@@ -382,12 +388,15 @@ static Command main_command_parse(Array_Slice args) {
     }
 
     if (strcmp(argv[1], "run") == 0) {
-        if (args.length != 3) {
+        if (args.length < 3) {
             return invalid;
         }
         // Only a program for the processor can be run, and it is not run in WebAssembly. Windows
-        // on x64 is the only machine that a program can run on for now.
+        // on x64 is the only machine that a program can run on for now. What comes after the source
+        // file is for the program, as if it had been called with them after its name.
         return (Command){
+            .arguments = argv + 3,
+            .argument_count = args.length - 3,
             .source_path = argv[2],
             .output_path = NULL,
             .mode = COMMAND_MODE_RUN,
@@ -2055,7 +2064,8 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
     assert(command.mode == COMMAND_MODE_RUN);
     // The program writes through the C library, which buffers, and the compiler may too.
     (void)fflush(stdout);
-    Process_Result process_result = process_run_executable(build_result.bytes);
+    Process_Result process_result =
+        process_run_executable(build_result.bytes, command.arguments, command.argument_count);
     switch (process_result.status) {
     case PROCESS_STATUS_FILE_FAILED:
         fprintf(stderr, "%s: cannot write the program to the directory for temporary files.\n",
@@ -2065,6 +2075,10 @@ static int32_t main_run_command_build_x64(Command command, Buffers const *buffer
         return process_result.exit_code;
     case PROCESS_STATUS_START_FAILED:
         fprintf(stderr, "%s: the system cannot start the program.\n", path);
+        return 1;
+    case PROCESS_STATUS_ARGUMENTS_TOO_LONG:
+        fprintf(stderr, "%s: the arguments of the program are longer than the system takes, which "
+                "is 32767 characters with the name of the program.\n", path);
         return 1;
     case PROCESS_STATUS_UNSUPPORTED:
         fprintf(stderr, "%s: running a program is only supported on Windows.\n", path);

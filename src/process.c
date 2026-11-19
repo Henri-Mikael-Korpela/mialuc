@@ -17,6 +17,8 @@
 enum {
     // The longest path that the system functions below take, and room for the suffix that is added.
     PROCESS_PATH_SIZE_BYTES = MAX_PATH + 8,
+    // The longest command line that `CreateProcess` takes is 32767 characters and the zero after them.
+    PROCESS_COMMAND_LINE_SIZE_BYTES = 32768,
 };
 
 /**
@@ -58,14 +60,108 @@ static bool process_file_write(char const *path, Array_Slice program) {
     return written == program.length && not is_close_error;
 }
 
-Process_Result process_run_executable(Array_Slice program) {
+/**
+ * Appends `text` to the command line `line`, which has room for `capacity` characters with the zero
+ * after them, at `*length`, quoted so that the runtime of C reads it back as one argument: it is
+ * between double quotes when it is empty or has a space, a tab or a double quote, a double quote in
+ * it has a backslash before it, and so do the backslashes before a double quote or before the quote
+ * that ends it, doubled. A space separates it from what is before it, unless it is the first.
+ * Returns false when it does not fit.
+ */
+static bool process_argument_append(char *line, size_t capacity, size_t *length, char const *text) {
+    bool is_quoted = text[0] == '\0';
+    for (size_t i = 0; text[i] != '\0'; i += 1) {
+        is_quoted = is_quoted || text[i] == ' ' || text[i] == '\t' || text[i] == '"';
+    }
+
+    size_t needed = 0;
+    size_t backslashes = 0;
+    for (size_t i = 0; text[i] != '\0'; i += 1) {
+        if (text[i] == '\\') {
+            backslashes += 1;
+            needed += 1;
+        } else if (text[i] == '"') {
+            // The backslashes before a double quote are doubled, and the quote has one of its own.
+            needed += backslashes + 2;
+            backslashes = 0;
+        } else {
+            backslashes = 0;
+            needed += 1;
+        }
+    }
+    if (is_quoted) {
+        needed += 2 + backslashes;
+    }
+    size_t separator = *length > 0 ? 1 : 0;
+    if (needed + separator > capacity - *length) {
+        return false;
+    }
+
+    if (separator == 1) {
+        line[*length] = ' ';
+        *length += 1;
+    }
+    if (is_quoted) {
+        line[*length] = '"';
+        *length += 1;
+    }
+    backslashes = 0;
+    for (size_t i = 0; text[i] != '\0'; i += 1) {
+        if (text[i] == '\\') {
+            backslashes += 1;
+        } else if (text[i] == '"') {
+            for (size_t j = 0; j < backslashes; j += 1) {
+                line[*length] = '\\';
+                *length += 1;
+            }
+            line[*length] = '\\';
+            *length += 1;
+            backslashes = 0;
+        } else {
+            backslashes = 0;
+        }
+        line[*length] = text[i];
+        *length += 1;
+    }
+    if (is_quoted) {
+        for (size_t j = 0; j < backslashes; j += 1) {
+            line[*length] = '\\';
+            *length += 1;
+        }
+        line[*length] = '"';
+        *length += 1;
+    }
+    line[*length] = '\0';
+    return true;
+}
+
+Process_Result process_run_executable(Array_Slice program, char const *const *arguments,
+                                      size_t argument_count) {
     assert(program.elements != NULL);
     assert(program.length > 0);
+    assert(arguments != NULL || argument_count == 0);
 
     Process_Result result = {.exit_code = 0, .status = PROCESS_STATUS_FILE_FAILED};
     char path[PROCESS_PATH_SIZE_BYTES] = {0};
     char placeholder[PROCESS_PATH_SIZE_BYTES] = {0};
     if (not process_temporary_path_make(path, placeholder)) {
+        return result;
+    }
+
+    // The command line is the name of the program and the arguments. The system takes at most 32767
+    // characters, and writes to the memory of what it is given.
+    static char command_line[PROCESS_COMMAND_LINE_SIZE_BYTES];
+    size_t command_line_length = 0;
+    command_line[0] = '\0';
+    bool is_command_line_made =
+        process_argument_append(command_line, sizeof(command_line) - 1, &command_line_length, path);
+    for (size_t i = 0; i < argument_count && is_command_line_made; i += 1) {
+        is_command_line_made = process_argument_append(command_line, sizeof(command_line) - 1,
+                                                       &command_line_length, arguments[i]);
+    }
+    if (not is_command_line_made) {
+        result.status = PROCESS_STATUS_ARGUMENTS_TOO_LONG;
+        (void)DeleteFileA(placeholder);
         return result;
     }
 
@@ -81,7 +177,8 @@ Process_Result process_run_executable(Array_Slice program) {
         PROCESS_INFORMATION process = {0};
 
         result.status = PROCESS_STATUS_START_FAILED;
-        if (CreateProcessA(path, NULL, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process)) {
+        if (CreateProcessA(path, command_line, NULL, NULL, TRUE, 0, NULL, NULL, &startup,
+                           &process)) {
             DWORD exit_code = 0;
             if (WaitForSingleObject(process.hProcess, INFINITE) == WAIT_OBJECT_0 &&
                 GetExitCodeProcess(process.hProcess, &exit_code)) {
@@ -151,9 +248,12 @@ Str process_executable_directory(Array_Slice buffer) {
     return STR_EMPTY;
 }
 
-Process_Result process_run_executable(Array_Slice program) {
+Process_Result process_run_executable(Array_Slice program, char const *const *arguments,
+                                      size_t argument_count) {
     assert(program.elements != NULL);
     assert(program.length > 0);
+    (void)arguments;
+    (void)argument_count;
 
     return (Process_Result){.exit_code = 0, .status = PROCESS_STATUS_UNSUPPORTED};
 }

@@ -157,12 +157,14 @@ Every command that reads a source file also reads the files that it [imports](mi
 Usage:
 
 ```
-mialuc run <source file>
+mialuc run <source file> [arguments of the program]
 ```
 
 Run compiles the source file for the machine that it is run on, and runs the program, which has the standard input, output and error of the compiler. The compiler waits for the program to end, and then ends with the exit status of the program, which is the result of its procedure `main`. The compiler itself prints nothing.
 
 Windows on x64 is the only machine that can run a program for now, so run builds for the `x64-win32` target. On another system it ends with an error that says that running a program is only supported on Windows. Build the `wasm` target to run a program elsewhere, see [Playground](playground.md).
+
+What comes after the source file is for the program: it is called as if the built program had been called with those arguments after its name, so `mialuc run program.mu one "two words"` gives it the command line of the path of the program, `one` and `"two words"`, where an argument that has a space, a tab or a double quote, or none at all, is between double quotes, with a backslash before each double quote in it, as the runtime of C reads the arguments back. A program of Mialu has no arguments of its own yet, so it reads its command line with the standard library, [`mu:process`](../test-code/x64/command-line-arguments.mu), which gives the command line and where the arguments start in it. The command line is at most 32767 characters, with the path of the program, which the system takes, and the compiler says so when it is longer.
 
 The program is written to a file in the directory for temporary files, and the file is deleted when the program ends. Nothing of the program stays in the compiler, so whatever the program does can only harm itself and the system.
 
@@ -170,6 +172,7 @@ For example:
 
 ```
 mialuc run test-code/x64/foreign-functions-libc.mu
+mialuc run test-code/x64/command-line-arguments.mu one "two words" 3
 ```
 
 Because the exit status of the program is the exit status of the compiler, a status of 1 or 2 can also be the status of the program, and not an error of the compiler. The compiler prints a message for its own errors.
