@@ -4,7 +4,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <mialu/array_slice.h>
 #include <mialu/package.h>
+#include <mialu/parser.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
 
@@ -21,6 +23,7 @@
  * ```
  * E0001 - E0099   the command, the files and the system
  * E0101 - E0199   the tokens: comments, indentation, numbers, runes and strings
+ * E0201 - E0299   the syntax
  * ```
  *
  * The enumeration is in the order of the numbers and not alphabetical, because the numbers are what
@@ -60,6 +63,9 @@ typedef enum {
     ERROR_CODE_STRING_LITERAL_UNTERMINATED = 121,
     ERROR_CODE_TOKEN_LIMIT = 122,
     ERROR_CODE_UNEXPECTED_CHARACTER = 123,
+
+    ERROR_CODE_NODE_LIMIT = 201,
+    ERROR_CODE_UNEXPECTED_TOKEN = 202,
 } Error_Code;
 
 /**
@@ -85,5 +91,12 @@ void report_general(Reporter const *reporter, Error_Code code, char const *path,
  */
 void report_tokenize_error(Reporter const *reporter, char const *path, Str source,
                            Tokenize_Result result);
+
+/**
+ * Reports an error of `parse` in `source`, the text of the file at `path`, which is the program or a
+ * file that it imports. `tokens` are the ones that were parsed, which hold `Token` elements.
+ */
+void report_parse_error(Reporter const *reporter, char const *path, Str source, Array_Slice tokens,
+                        Parse_Result result);
 
 #endif

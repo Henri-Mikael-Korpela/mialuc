@@ -12,6 +12,7 @@
 #include <mialu/limits.h>
 #include <mialu/report.h>
 #include <mialu/str.h>
+#include <mialu/tokenizer.h>
 
 enum {
     // The codes are numbers below this, and the catalog has a place for each of them, so that the
@@ -238,6 +239,24 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .title = "unexpected character '{detail}' (0x{hex})",
         .label = "this cannot start a token",
     },
+
+    // The syntax.
+    [ERROR_CODE_NODE_LIMIT] = {
+        .title = "more than {number} syntax tree nodes",
+        .label = "the nodes end here",
+        .note = "the compiler builds at most {number} nodes of the syntax tree for a program, so "
+                "that the memory that it needs is known when it starts",
+    },
+    [ERROR_CODE_UNEXPECTED_TOKEN] = {
+        .title = "unexpected {subject}",
+        .label = "expected {detail}",
+    },
+};
+
+// The code of each status of the parser.
+static Error_Code const REPORT_PARSE_CODES[] = {
+    [PARSE_STATUS_NODE_LIMIT] = ERROR_CODE_NODE_LIMIT,
+    [PARSE_STATUS_UNEXPECTED_TOKEN] = ERROR_CODE_UNEXPECTED_TOKEN,
 };
 
 // The code of each status of the tokenizer. A status that is not in the table is not an error.
@@ -275,6 +294,7 @@ static Str    report_expand(char const *template, Report_Error const *error, cha
 static bool   report_is_word_byte(char character);
 static size_t report_length_character(Str source, size_t offset);
 static size_t report_length_literal(Str source, size_t offset);
+static size_t report_length_token(Str source, size_t offset, Token_Kind kind);
 static size_t report_length_word(Str source, size_t offset);
 static void   report_text_append(Report_Text *text, Str part);
 static void   report_text_append_subject(Report_Text *text, Str subject);
@@ -384,6 +404,116 @@ void report_tokenize_error(Reporter const *reporter, char const *path, Str sourc
         .has_span = true,
     };
     report_emit(reporter, &error);
+}
+
+void report_parse_error(Reporter const *reporter, char const *path, Str source, Array_Slice tokens,
+                        Parse_Result result) {
+    assert(reporter != NULL);
+    assert(path != NULL);
+    assert(result.status != PARSE_STATUS_OK);
+    assert(result.error_token_index < tokens.length);
+
+    Token const *token_elements = tokens.elements;
+    size_t token_index = result.error_token_index;
+    // A line starts with an indentation token, which has no text. What the parser found there is
+    // the first token of the line, which is the next one.
+    if (token_elements[token_index].kind == TOKEN_KIND_INDENTATION &&
+        token_index + 1 < tokens.length) {
+        token_index += 1;
+    }
+    Token const *token = &token_elements[token_index];
+    size_t offset = token->source_offset;
+    size_t length = report_length_token(source, offset, token->kind);
+    Str subject = STR_EMPTY;
+    // What the parser found is the text of the token, or the thing that the token stands for when
+    // it has no text of its own.
+    char found[REPORT_SUBJECT_LENGTH_MAX + 8] = {0};
+    if (token->kind == TOKEN_KIND_END || token->kind == TOKEN_KIND_INDENTATION) {
+        // The end of the file is after the last line break, which is a line of its own that has
+        // nothing on it. The error is at the end of the last line that has something on it.
+        while (offset > 0 && (source.bytes[offset - 1] == '\n' ||
+                              source.bytes[offset - 1] == '\r' ||
+                              source.bytes[offset - 1] == ' ')) {
+            offset -= 1;
+        }
+        length = 1;
+        subject = STR("end of the file");
+        if (token->kind == TOKEN_KIND_INDENTATION) {
+            subject = STR("end of the line");
+        }
+    } else {
+        // The text goes between quotes, so that a name or a symbol is told from the words around
+        // it.
+        size_t shown = length;
+        if (shown > REPORT_SUBJECT_LENGTH_MAX) {
+            shown = REPORT_SUBJECT_LENGTH_MAX;
+        }
+        int found_length = snprintf(found, sizeof(found), "'%.*s'", (int)shown,
+                                    source.bytes + offset);
+        assert(found_length > 0);
+        subject = str_make(found, (size_t)found_length);
+    }
+    // Only the end of the file is at the end of the source, which is not a byte of it.
+    if (source.length > 0 && offset >= source.length) {
+        offset = source.length - 1;
+    }
+
+    Error_Code code = REPORT_PARSE_CODES[result.status];
+    assert(code > 0);
+
+    Report_Error error = {
+        .path = path,
+        .source = source,
+        .subject = subject,
+        .detail = result.expected,
+        .span_offset = offset,
+        .span_length = length,
+        .number = TOKEN_COUNT_MAX,
+        .code = code,
+        .has_span = true,
+    };
+    report_emit(reporter, &error);
+}
+
+/**
+ * Returns the length in bytes of the token of kind `kind` that starts at `offset` in `source`,
+ * which is at least one. A name is its letters, a number and a string are like a literal, a label
+ * is the colon and the name, and a symbol is the characters of operators that run together, such as
+ * `->` and `::=`.
+ */
+static size_t report_length_token(Str source, size_t offset, Token_Kind kind) {
+    assert(offset <= source.length);
+
+    if (offset == source.length) {
+        return 1;
+    }
+    char first = source.bytes[offset];
+    if (kind == TOKEN_KIND_LABEL) {
+        return 1 + report_length_word(source, offset + 1);
+    }
+    if (first == '"' || first == '\'' || (first >= '0' && first <= '9')) {
+        return report_length_literal(source, offset);
+    }
+    if (report_is_word_byte(first)) {
+        return report_length_word(source, offset);
+    }
+    if (first == ' ') {
+        // An indentation is the spaces.
+        size_t length = 0;
+        while (offset + length < source.length && source.bytes[offset + length] == ' ') {
+            length += 1;
+        }
+        return length;
+    }
+    // A symbol is up to four characters of the ones that operators are made of, such as `..<=`.
+    size_t length = 1;
+    char const operators[] = "-:=.<>+*/%!";
+    while (length < 4 && offset + length < source.length &&
+           strchr(operators, source.bytes[offset + length]) != NULL &&
+           strchr(operators, first) != NULL) {
+        length += 1;
+    }
+    return length;
 }
 
 /**
@@ -528,7 +658,7 @@ static Str report_expand(char const *template, Report_Error const *error, char *
             report_text_append_subject(&text, error->subject);
             index += sizeof("{subject}") - 1;
         } else if (strncmp(rest, "{detail}", sizeof("{detail}") - 1) == 0) {
-            report_text_append_subject(&text, error->detail);
+            report_text_append(&text, error->detail);
             index += sizeof("{detail}") - 1;
         } else if (strncmp(rest, "{number}", sizeof("{number}") - 1) == 0) {
             int length = snprintf(number_text, sizeof(number_text), "%" PRId64, error->number);

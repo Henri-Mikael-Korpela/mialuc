@@ -7,6 +7,8 @@ The text of the errors is all in [report.c](../src/report.c), where each code is
 | Range | What the errors are about |
 |---|---|
 | E0001 - E0099 | the command, the files and the system |
+| E0101 - E0199 | the tokens: comments, indentation, numbers, runes and strings |
+| E0201 - E0299 | the syntax |
 
 ## E0001 - E0099: the command, the files and the system
 
@@ -53,3 +55,12 @@ These are found first, when the source is split into tokens. See the [specificat
 | E0121 | string has no closing quote | The string does not end on its line. |
 | E0122 | more than 65536 tokens | The compiler reads at most 65536 tokens of a file. |
 | E0123 | unexpected character 'c' | A character that cannot start a token. |
+
+## E0201 - E0299: the syntax
+
+These are found when the tokens are put together into the syntax tree, see the [grammar](../grammar.ebnf). The compiler stops at the first one, so the syntax error is the first place where the source does not fit the grammar, which is not always the place of the mistake: a missing operand is found at the next token.
+
+| Code | Title | When |
+|---|---|---|
+| E0201 | more than 65536 syntax tree nodes | The program has more nodes than the compiler allocates. |
+| E0202 | unexpected `token` | The token is not what the grammar takes there. The label says what it takes. At the end of a line the token is the first one of the next line, and at the end of the file it is `end of the file`. |

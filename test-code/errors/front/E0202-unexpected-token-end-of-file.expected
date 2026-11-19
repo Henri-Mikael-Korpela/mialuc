@@ -1,0 +1,5 @@
+error[E0202]: unexpected end of the file
+ --> test-code/errors/front/E0202-unexpected-token-end-of-file.mu:3:22
+  |
+3 | main :: proc() Int -> 
+  |                      ^ expected an indented procedure body

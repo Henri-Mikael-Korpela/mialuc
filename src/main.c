@@ -219,9 +219,6 @@ static void         main_run_command_print_types           (Str source, Parse_Re
                                                             Semantic_Result semantic_result,
                                                             size_t first_node);
 static Str          main_run_command_read_file             (char const *path, Array_Slice buffer);
-static void         main_run_command_report_parse_error    (char const *path, Str source,
-                                                            Array_Slice tokens,
-                                                            Parse_Result parse_result);
 static void         main_run_command_report_semantic_error (char const *path, Str source,
                                                             Semantic_Result result);
 static void         main_run_command_report_wasm_error     (char const *path, Str source,
@@ -593,7 +590,7 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
     }
     Parse_Result parse_result = parse_at(code_tokens, buffers->nodes, packages->imported_end);
     if (parse_result.status != PARSE_STATUS_OK) {
-        main_run_command_report_parse_error(path, source, code_tokens, parse_result);
+        report_parse_error(&command.reporter, path, source, code_tokens, parse_result);
         return 1;
     }
 
@@ -2356,30 +2353,6 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
     }
 }
 
-static void main_run_command_report_parse_error(char const *path, Str source, Array_Slice tokens,
-                                    Parse_Result parse_result) {
-    assert(parse_result.status != PARSE_STATUS_OK);
-    assert(parse_result.error_token_index < tokens.length);
-
-    Token const *token_elements = tokens.elements;
-    size_t error_offset = token_elements[parse_result.error_token_index].source_offset;
-    Str_Position position = str_position_at(source, error_offset);
-
-    switch (parse_result.status) {
-    case PARSE_STATUS_OK:
-        assert(false);
-        break;
-    case PARSE_STATUS_NODE_LIMIT:
-        fprintf(stderr, "%s:%zu:%zu: more than %d syntax tree nodes.\n", path, position.line,
-                position.column, TOKEN_COUNT_MAX);
-        break;
-    case PARSE_STATUS_UNEXPECTED_TOKEN:
-        fprintf(stderr, "%s:%zu:%zu: expected %.*s.\n", path, position.line, position.column,
-                (int)parse_result.expected.length, parse_result.expected.bytes);
-        break;
-    }
-}
-
 static void main_run_command_report_x64_error(char const *path, Str source,
                                               X64_Build_Result result) {
     assert(result.status != X64_BUILD_STATUS_OK);
@@ -3241,8 +3214,8 @@ static void main_package_report(Reporter const *reporter, char const *path, Str 
         report_tokenize_error(reporter, result.path, result.source, result.tokenize_result);
         return;
     case PACKAGE_STATUS_PARSE_ERROR:
-        main_run_command_report_parse_error(result.path, result.source, result.code_tokens,
-                                            result.parse_result);
+        report_parse_error(reporter, result.path, result.source, result.code_tokens,
+                           result.parse_result);
         return;
     case PACKAGE_STATUS_OK:
         assert(false);

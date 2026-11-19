@@ -1,0 +1,5 @@
+error[E0202]: unexpected 'main'
+ --> test-code/errors/front/E0202-unexpected-token-package-missing.mu:1:1
+  |
+1 | main :: proc() Int ->
+  | ^^^^ expected the package definition, `package name`, to start the source
