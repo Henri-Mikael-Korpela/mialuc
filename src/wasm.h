@@ -340,6 +340,11 @@ typedef struct {
     Array_Slice bytes;
     Str subject;
     Str detail;
+    // The two types of `WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH`, as a message names them: the return
+    // type, and the type of the value that is returned. They have `bytes` NULL for every other
+    // status.
+    Str type_expected;
+    Str type_found;
     Wasm_Build_Status status;
 } Wasm_Build_Result;
 

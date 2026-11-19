@@ -34,8 +34,9 @@ enum {
 /**
  * The text of one kind of error, as templates. A part that the error has no use for is NULL. In a
  * template `{subject}` is the name, or the piece of the program, that the error is about,
- * `{detail}` is another piece of text, `{number}` is a number, such as a limit, and `{hex}` is the
- * same number in two hexadecimal digits.
+ * `{detail}` and `{other}` are two more pieces of text, `{target}` is the name of the target,
+ * `{number}` is a number, such as a limit, and `{hex}` is the same number in two hexadecimal
+ * digits.
  *
  * The title says what is wrong, in a sentence that names the thing, without a full stop. The label
  * is for the place that the carets point at, and says what is wrong there, briefly. The note says
@@ -50,6 +51,18 @@ typedef struct {
 } Report_Entry;
 
 /**
+ * The texts and the number that an error is told with besides its subject: `{detail}` and `{other}`
+ * are two more pieces of text, `{target}` is the name of the target that built the program, and
+ * `{number}` is a number, such as a limit. A text that an error does not have is empty.
+ */
+typedef struct {
+    Str detail;
+    Str other;
+    Str target;
+    int64_t number;
+} Report_Texts;
+
+/**
  * Everything that the text of one error is made of.
  */
 typedef struct {
@@ -58,6 +71,8 @@ typedef struct {
     Str source;
     Str subject;
     Str detail;
+    Str other;
+    Str target;
     size_t span_offset;
     size_t span_length;
     int64_t number;
@@ -648,7 +663,8 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
                  "types",
     },
     [ERROR_CODE_RETURN_TYPE_MISMATCH] = {
-        .title = "'{subject}' returns a value that is not of its return type",
+        .title = "'{subject}' returns {other}, but its return type is {detail}",
+        .label = "expected {detail}, found {other}",
     },
     [ERROR_CODE_RETURN_TYPE_MISSING] = {
         .title = "'{subject}' returns a value but has no return type",
@@ -672,7 +688,7 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .help = "give it a pointer to itself instead",
     },
     [ERROR_CODE_TYPE_UNSUPPORTED] = {
-        .title = "type '{subject}' is not supported by the {detail} target",
+        .title = "type '{subject}' is not supported by the {target} target",
         .label = "not supported",
     },
     [ERROR_CODE_UNION_CASE_UNKNOWN] = {
@@ -823,7 +839,8 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .note = "the wasm target imports from 'foreign js'",
     },
     [ERROR_CODE_WASM_MATCH_NOT_EXHAUSTIVE] = {
-        .title = "the match has no case for the member '{subject}' of the enum",
+        .title = "the match has no case for the member '{detail}' of the enum",
+        .label = "this match leaves '{detail}' out",
         .help = "add a case for it, a default case 'case ->', or write 'match #(partial)' to "
                 "leave members out",
     },
@@ -1103,7 +1120,7 @@ static Error_Code const REPORT_WASM_CODES[] = {
 
 static void   report_emit(Reporter const *reporter, Report_Error const *error);
 static void   report_emit_at_subject(Reporter const *reporter, Error_Code code, char const *path,
-                                     Str source, Str subject, Str detail, int64_t number);
+                                     Str source, Str subject, Report_Texts texts);
 static Str    report_expand(char const *template, Report_Error const *error, char *buffer,
                             size_t buffer_size_bytes);
 static bool   report_is_word_byte(char character);
@@ -1124,6 +1141,8 @@ void report_general(Reporter const *reporter, Error_Code code, char const *path,
         .source = STR_EMPTY,
         .subject = STR_EMPTY,
         .detail = STR_EMPTY,
+        .other = STR_EMPTY,
+        .target = STR_EMPTY,
         .span_offset = 0,
         .span_length = 0,
         .number = number,
@@ -1212,6 +1231,8 @@ void report_tokenize_error(Reporter const *reporter, char const *path, Str sourc
         .source = source,
         .subject = str_make(source.bytes + offset, length),
         .detail = detail,
+        .other = STR_EMPTY,
+        .target = STR_EMPTY,
         .span_offset = offset,
         .span_length = length,
         .number = number,
@@ -1281,6 +1302,8 @@ void report_parse_error(Reporter const *reporter, char const *path, Str source, 
         .source = source,
         .subject = subject,
         .detail = result.expected,
+        .other = STR_EMPTY,
+        .target = STR_EMPTY,
         .span_offset = offset,
         .span_length = length,
         .number = TOKEN_COUNT_MAX,
@@ -1334,7 +1357,8 @@ void report_package_error(Reporter const *reporter, char const *path, Str source
         assert(length > 0);
         detail = str_make(limits, (size_t)length);
     }
-    report_emit_at_subject(reporter, code, path, source, result.subject, detail, 0);
+    Report_Texts texts = {.detail = detail, .other = STR_EMPTY, .target = STR_EMPTY, .number = 0};
+    report_emit_at_subject(reporter, code, path, source, result.subject, texts);
 }
 
 void report_semantic_error(Reporter const *reporter, char const *path, Str source,
@@ -1354,7 +1378,13 @@ void report_semantic_error(Reporter const *reporter, char const *path, Str sourc
     if (result.status == SEMANTIC_STATUS_CONSTANT_TOO_DEEP) {
         number = CONSTANT_EXPRESSION_DEPTH_MAX;
     }
-    report_emit_at_subject(reporter, code, path, source, result.subject, STR_EMPTY, number);
+    Report_Texts texts = {
+        .detail = STR_EMPTY,
+        .other = STR_EMPTY,
+        .target = STR_EMPTY,
+        .number = number,
+    };
+    report_emit_at_subject(reporter, code, path, source, result.subject, texts);
 }
 
 void report_x64_error(Reporter const *reporter, char const *path, Str source,
@@ -1384,7 +1414,17 @@ void report_x64_error(Reporter const *reporter, char const *path, Str source,
     if (result.status == X64_BUILD_STATUS_EXPRESSION_TOO_DEEP) {
         number = X64_EXPRESSION_DEPTH_MAX;
     }
-    report_emit_at_subject(reporter, code, path, source, result.subject, STR("x64"), number);
+    Report_Texts texts = {
+        .detail = STR_EMPTY,
+        .other = STR_EMPTY,
+        .target = STR("x64"),
+        .number = number,
+    };
+    if (result.status == X64_BUILD_STATUS_RETURN_TYPE_MISMATCH) {
+        texts.detail = result.type_expected;
+        texts.other = result.type_found;
+    }
+    report_emit_at_subject(reporter, code, path, source, result.subject, texts);
 }
 
 void report_wasm_error(Reporter const *reporter, char const *path, Str source,
@@ -1401,7 +1441,17 @@ void report_wasm_error(Reporter const *reporter, char const *path, Str source,
         report_general(reporter, code, path, OUTPUT_SIZE_BYTES_MAX);
         return;
     }
-    report_emit_at_subject(reporter, code, path, source, result.subject, STR("wasm"), 0);
+    Report_Texts texts = {
+        .detail = result.detail,
+        .other = STR_EMPTY,
+        .target = STR("wasm"),
+        .number = 0,
+    };
+    if (result.status == WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH) {
+        texts.detail = result.type_expected;
+        texts.other = result.type_found;
+    }
+    report_emit_at_subject(reporter, code, path, source, result.subject, texts);
 }
 
 void report_wasm_text_error(Reporter const *reporter, char const *path,
@@ -1460,7 +1510,7 @@ void report_x64_text_error(Reporter const *reporter, char const *path, X64_Text_
  * subject that is part of no source has an error without a place in it.
  */
 static void report_emit_at_subject(Reporter const *reporter, Error_Code code, char const *path,
-                                   Str source, Str subject, Str detail, int64_t number) {
+                                   Str source, Str subject, Report_Texts texts) {
     assert(reporter != NULL);
     assert(path != NULL);
 
@@ -1479,10 +1529,12 @@ static void report_emit_at_subject(Reporter const *reporter, Error_Code code, ch
         .path = file_path,
         .source = file_source,
         .subject = subject,
-        .detail = detail,
+        .detail = texts.detail,
+        .other = texts.other,
+        .target = texts.target,
         .span_offset = 0,
         .span_length = subject.length,
-        .number = number,
+        .number = texts.number,
         .code = code,
         .has_span = false,
     };
@@ -1687,6 +1739,12 @@ static Str report_expand(char const *template, Report_Error const *error, char *
         } else if (strncmp(rest, "{detail}", sizeof("{detail}") - 1) == 0) {
             report_text_append(&text, error->detail);
             index += sizeof("{detail}") - 1;
+        } else if (strncmp(rest, "{other}", sizeof("{other}") - 1) == 0) {
+            report_text_append(&text, error->other);
+            index += sizeof("{other}") - 1;
+        } else if (strncmp(rest, "{target}", sizeof("{target}") - 1) == 0) {
+            report_text_append(&text, error->target);
+            index += sizeof("{target}") - 1;
         } else if (strncmp(rest, "{number}", sizeof("{number}") - 1) == 0) {
             int length = snprintf(number_text, sizeof(number_text), "%" PRId64, error->number);
             assert(length > 0);

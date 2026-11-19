@@ -484,6 +484,9 @@ typedef struct {
     // What the build works out about each node, see `X64_Node_Layout`.
     X64_Node_Layout *layouts;
     Str subject;
+    // The types of a mismatch, see `X64_Build_Result`.
+    Str type_expected;
+    Str type_found;
     // What the debug information needs, or NULL when the file has none.
     X64_Debug const *debug;
     X64_Debug_Row *rows;
@@ -826,6 +829,7 @@ static X64_Type     x64_type_sequence_of         (X64_Type element, X64_Type_Kin
 static size_t       x64_type_stride_bytes        (X64_Builder const *builder,
                                                   X64_Type type);
 static Str          x64_type_subject             (X64_Builder const *builder, Ast_Node_Index type);
+static Str          x64_type_text                (X64_Builder const *builder, X64_Type type);
 static size_t       x64_type_word_count          (X64_Builder const *builder, X64_Type type);
 static bool         x64_union_block_changes      (X64_Builder const *builder, Ast_Node_Index block,
                                                   Ast_Node_Index container, Str discriminant);
@@ -1117,6 +1121,8 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
         .constant_values = constants.elements,
         .layouts = layouts,
         .subject = STR_EMPTY,
+        .type_expected = STR_EMPTY,
+        .type_found = STR_EMPTY,
         .debug = debug,
         .rows = rows,
         .layout = {0},
@@ -1222,6 +1228,8 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
         .bytes = array_slice_make(output_buffer.elements, length_bytes),
         .symbols = array_slice_make(symbol_buffer.elements, symbol_count),
         .subject = builder.subject,
+        .type_expected = builder.type_expected,
+        .type_found = builder.type_found,
         .status = builder.status,
     };
 }
@@ -3230,7 +3238,10 @@ static bool x64_return_one_write(X64_Builder *builder, Ast_Node_Index value,
     }
     if (not x64_type_accepts(builder, return_type, value)) {
         // The call of a procedure that returns nothing is in here too.
-        return x64_fail(builder, X64_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
+        x64_fail(builder, X64_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
+        builder->type_expected = x64_type_text(builder, return_type);
+        builder->type_found = x64_type_text(builder, value_type);
+        return false;
     }
     // The temporary strings are given back by the return, so a pointer to one must not leave. A
     // string that is a `C_Str` is one, and a `C_Str` variable may hold one, so neither can be
@@ -7830,6 +7841,69 @@ static bool x64_fail_unsupported(X64_Builder *builder) {
 
     return x64_fail(builder, X64_BUILD_STATUS_UNSUPPORTED,
                     ast_definition_name(&builder->nodes[builder->definition]));
+}
+
+/**
+ * Returns how a message names `type`: a type that has a name in the program is called by it, and
+ * the others by what they are. The text is a literal or a view of the source, so it lives on.
+ */
+static Str x64_type_text(X64_Builder const *builder, X64_Type type) {
+    switch (type.kind) {
+    case X64_TYPE_KIND_ARRAY:
+        return STR("an array");
+    case X64_TYPE_KIND_BOOL:
+        return STR("Bool");
+    case X64_TYPE_KIND_BYTE:
+        return STR("Byte");
+    case X64_TYPE_KIND_C_STR:
+        return STR("C_Str");
+    case X64_TYPE_KIND_ENUM:
+    case X64_TYPE_KIND_STRUCT:
+        // The definition of the type is the node of the struct or the enum, whose name is that of
+        // the constant that it is the value of.
+        for (size_t i = 0; i < builder->node_count && type.definition != AST_NODE_INDEX_NONE;
+             i += 1) {
+            if (builder->nodes[i].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION &&
+                builder->nodes[i].first_child == type.definition) {
+                return ast_definition_name(&builder->nodes[i]);
+            }
+        }
+        return STR("a struct or an enum");
+    case X64_TYPE_KIND_ENUM_LITERAL:
+        return STR("an enum member");
+    case X64_TYPE_KIND_F32:
+        return STR("F32");
+    case X64_TYPE_KIND_F64:
+        return STR("F64");
+    case X64_TYPE_KIND_I32:
+        return STR("I32");
+    case X64_TYPE_KIND_I64:
+        return STR("I64");
+    case X64_TYPE_KIND_INT:
+        return STR("Int");
+    case X64_TYPE_KIND_NIL:
+        return STR("nil");
+    case X64_TYPE_KIND_NONE:
+        return STR("no value");
+    case X64_TYPE_KIND_POINTER:
+        return STR("a pointer");
+    case X64_TYPE_KIND_PROCEDURE:
+        return STR("a pointer to a procedure");
+    case X64_TYPE_KIND_RUNE:
+        return STR("Rune");
+    case X64_TYPE_KIND_SLICE:
+        return STR("an array slice");
+    case X64_TYPE_KIND_STR:
+        return STR("Str");
+    case X64_TYPE_KIND_TUPLE:
+        return STR("several values");
+    case X64_TYPE_KIND_U32:
+        return STR("U32");
+    case X64_TYPE_KIND_U64:
+        return STR("U64");
+    }
+    assert(false);
+    return STR_EMPTY;
 }
 
 /**

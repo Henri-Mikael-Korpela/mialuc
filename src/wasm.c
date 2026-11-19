@@ -232,6 +232,9 @@ typedef struct {
     Str subject;
     // The second text of an error, see `Wasm_Build_Result`.
     Str detail;
+    // The types of a mismatch, see `Wasm_Build_Result`.
+    Str type_expected;
+    Str type_found;
     size_t node_count;
     Ast_Node_Index module;
     // The number of foreign procedures. They are imported functions, which come before the
@@ -685,6 +688,8 @@ static size_t          wasm_type_stride_bytes                 (Wasm_Builder cons
 static bool            wasm_type_accepts                      (Wasm_Type target, Wasm_Type value);
 static bool            wasm_type_equals                       (Wasm_Type first, Wasm_Type second);
 static bool            wasm_type_is_sequence                  (Wasm_Type type);
+static Str             wasm_type_text                         (Wasm_Builder const *builder,
+                                                               Wasm_Type type);
 static void            wasm_write_type                        (Wasm_Builder *builder,
                                                                Wasm_Type type);
 static size_t          wasm_type_group_count                  (Wasm_Builder const *builder,
@@ -879,6 +884,8 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slic
         .constants = constants.elements,
         .subject = STR_EMPTY,
         .detail = STR_EMPTY,
+        .type_expected = STR_EMPTY,
+        .type_found = STR_EMPTY,
         .node_count = nodes.length,
         .module = root,
         .foreign_count = 0,
@@ -970,6 +977,8 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slic
         .bytes = array_slice_make(output_buffer.elements, length_bytes),
         .subject = builder.subject,
         .detail = builder.detail,
+        .type_expected = builder.type_expected,
+        .type_found = builder.type_found,
         .status = builder.status,
     };
 }
@@ -3323,7 +3332,14 @@ static bool wasm_build_code_section_body_return(Wasm_Builder *builder, Ast_Node_
         // was written already, so every name in it is known.
         Wasm_Type return_type = wasm_signature_return_type(builder, procedure, i);
         if (not wasm_value_is_accepted(builder, return_type, value)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
+            Wasm_Type value_type = wasm_expression_type(builder, value);
+            if (wasm_is_constant(builder, value)) {
+                value_type = wasm_constant_type(builder->constants[value].type);
+            }
+            wasm_fail(builder, WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH, name);
+            builder->type_expected = wasm_type_text(builder, return_type);
+            builder->type_found = wasm_type_text(builder, value_type);
+            return false;
         }
         value = builder->nodes[value].next_sibling;
     }
@@ -10581,6 +10597,67 @@ static bool wasm_build_code_section_body_struct_literal(Wasm_Builder *builder,
     }
 
     return true;
+}
+
+/**
+ * Returns how a message names `type`: a type that has a name in the program is called by it, and
+ * the others by what they are. The text is a literal or a view of the source, so it lives on.
+ */
+static Str wasm_type_text(Wasm_Builder const *builder, Wasm_Type type) {
+    switch (type.kind) {
+    case WASM_VALUE_TYPE_ARRAY:
+        return STR("an array");
+    case WASM_VALUE_TYPE_BOOL:
+        return STR("Bool");
+    case WASM_VALUE_TYPE_BYTE:
+        return STR("Byte");
+    case WASM_VALUE_TYPE_C_STR:
+        return STR("C_Str");
+    case WASM_VALUE_TYPE_ENUM:
+    case WASM_VALUE_TYPE_STRUCT:
+        // The definition of the type is the node of the struct or the enum, whose name is that of
+        // the constant that it is the value of.
+        for (size_t i = 0; i < builder->node_count && type.definition != AST_NODE_INDEX_NONE;
+             i += 1) {
+            if (builder->nodes[i].node_type == AST_NODE_TYPE_CONSTANT_DEFINITION &&
+                builder->nodes[i].first_child == type.definition) {
+                return ast_definition_name(&builder->nodes[i]);
+            }
+        }
+        return STR("a struct or an enum");
+    case WASM_VALUE_TYPE_ENUM_LITERAL:
+        return STR("an enum member");
+    case WASM_VALUE_TYPE_F32:
+        return STR("F32");
+    case WASM_VALUE_TYPE_F64:
+        return STR("F64");
+    case WASM_VALUE_TYPE_I32:
+        return STR("I32");
+    case WASM_VALUE_TYPE_I64:
+        return STR("I64");
+    case WASM_VALUE_TYPE_INT:
+        return STR("Int");
+    case WASM_VALUE_TYPE_NIL:
+        return STR("nil");
+    case WASM_VALUE_TYPE_NONE:
+        return STR("no value");
+    case WASM_VALUE_TYPE_POINTER:
+        return STR("a pointer");
+    case WASM_VALUE_TYPE_PROCEDURE:
+        return STR("a pointer to a procedure");
+    case WASM_VALUE_TYPE_RUNE:
+        return STR("Rune");
+    case WASM_VALUE_TYPE_SLICE:
+        return STR("an array slice");
+    case WASM_VALUE_TYPE_STR:
+        return STR("Str");
+    case WASM_VALUE_TYPE_U32:
+        return STR("U32");
+    case WASM_VALUE_TYPE_U64:
+        return STR("U64");
+    }
+    assert(false);
+    return STR_EMPTY;
 }
 
 /**

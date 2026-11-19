@@ -176,7 +176,7 @@ These are found when a target builds the program, and are the same mistake in th
 | E0528 | 'name' is not an Int, so it cannot be the start or the end of a range | Not an Int. |
 | E0529 | the number of names of 'name' is not the number of values that the call gives |  |
 | E0530 | 'name' returns a number of values that is not the number of its return types |  |
-| E0531 | 'name' returns a value that is not of its return type |  |
+| E0531 | 'name' returns T, but its return type is U | The title names both types, and the label says which was expected and which was found. A call of a procedure that returns nothing is `no value`. |
 | E0532 | 'name' returns a value but has no return type | This has no return type. |
 | E0533 | the field 'name' is given a value twice | Given again here. |
 | E0534 | the value of the field 'name' is not of the type of the field |  |

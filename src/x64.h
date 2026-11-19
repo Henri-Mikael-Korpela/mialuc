@@ -349,6 +349,11 @@ typedef struct {
     Array_Slice bytes;
     Array_Slice symbols;
     Str subject;
+    // The two types of `X64_BUILD_STATUS_RETURN_TYPE_MISMATCH`, as a message names them: the return
+    // type, and the type of the value that is returned. They have `bytes` NULL for every other
+    // status.
+    Str type_expected;
+    Str type_found;
     X64_Build_Status status;
 } X64_Build_Result;
 
