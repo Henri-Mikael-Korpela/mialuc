@@ -19,6 +19,7 @@ Mialu is a procedural language with manual memory management. It is influenced b
 
 - [Grammar](grammar.ebnf): what the compiler accepts, in EBNF.
 - [Language specification](docs/mialu-programming-language.md): the most up-to-date description of the language.
+- [How production ready is Mialu?](docs/how-production-ready.md): what the language and its compiler can and cannot do yet, a checklist of what is present and how much it matters, what is missing, and the milestones to get there.
 - [mialuc](docs/mialu-cli.md): the command line of the compiler: its commands, targets, exit status and errors.
 
 ### Build targets
