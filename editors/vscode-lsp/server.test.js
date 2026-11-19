@@ -487,3 +487,58 @@ test("publishes the error of a document that does not compile and clears it when
         assert.strictEqual((await request("shutdown", null)).result, null);
     });
 });
+
+test("the value of a constant is shown inline after its operator", async () => {
+    await withServer(async (request, notify) => {
+        const initialized = await request("initialize", {
+            processId: null, rootUri: null, capabilities: {},
+            initializationOptions: { compilerPath: COMPILER },
+        });
+        assert.strictEqual(initialized.result.capabilities.inlayHintProvider, true);
+        notify("initialized", {});
+
+        const source = [
+            "package values",
+            "",
+            "VERSION_MAJOR :: 0",
+            "VERSION_MINOR :: 3",
+            "VERSION_STRING :: int_to_str(VERSION_MAJOR) ++ '.' ++ int_to_str(VERSION_MINOR)",
+            "SIZE :: 64 * 64",
+            "MASK : U32 : 0x80000000",
+            "LIMIT :: 100",
+            "ENABLED :: SIZE > 1",
+            "GREETING :: \"hi\"",
+            "",
+            "main :: proc() Int ->",
+            "    return SIZE + VERSION_MAJOR",
+            "",
+        ].join("\n");
+        const uri = "file:///values.mu";
+        notify("textDocument/didOpen", {
+            textDocument: { uri, languageId: "mialu", version: 1, text: source },
+        });
+        const hints = (await request("textDocument/inlayHint", {
+            textDocument: { uri },
+            range: { start: { line: 0, character: 0 }, end: { line: 20, character: 0 } },
+        })).result;
+        const lines = source.split("\n");
+        // Each hint is where the operator ends, and says the value that was worked out.
+        const shown = hints.map((hint) => [
+            lines[hint.position.line].slice(0, hint.position.character), hint.label]);
+        assert.deepStrictEqual(shown, [
+            ["VERSION_STRING ::", "⇒ \"0.3\""],
+            ["SIZE ::", "⇒ 4096 (0x1000)"],
+            ["MASK : U32 :", "⇒ 2147483648 (0x80000000)"],
+            ["ENABLED ::", "⇒ true"],
+        ]);
+        assert.strictEqual(hints[0].paddingRight, true);
+
+        // Only the lines of the range have hints.
+        const part = (await request("textDocument/inlayHint", {
+            textDocument: { uri },
+            range: { start: { line: 5, character: 0 }, end: { line: 5, character: 20 } },
+        })).result;
+        assert.deepStrictEqual(part.map((hint) => hint.label), ["⇒ 4096 (0x1000)"]);
+        assert.strictEqual((await request("shutdown", null)).result, null);
+    });
+});

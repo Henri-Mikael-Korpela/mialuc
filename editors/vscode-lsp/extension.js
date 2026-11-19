@@ -108,7 +108,7 @@ class Connection {
 }
 
 /**
- * Starts the server and the sync of the documents, and registers the code lens, hover and document symbol providers.
+ * Starts the server and the sync of the documents, and registers the code lens, hover, inline hint and document symbol providers.
  */
 async function activate(context) {
     const output = vscode.window.createOutputChannel("Mialu Language Server");
@@ -149,6 +149,7 @@ async function activate(context) {
     connection.notify("initialized", {});
 
     const lensesChanged = new vscode.EventEmitter();
+    const hintsChanged = new vscode.EventEmitter();
     const isMialu = (document) => document.languageId === LANGUAGE_ID;
     const open = (document) => {
         if (isMialu(document)) {
@@ -166,6 +167,7 @@ async function activate(context) {
 
     context.subscriptions.push(
         lensesChanged,
+        hintsChanged,
         vscode.workspace.onDidOpenTextDocument(open),
         vscode.workspace.onDidChangeTextDocument(({ document }) => {
             if (isMialu(document)) {
@@ -174,6 +176,7 @@ async function activate(context) {
                     contentChanges: [{ text: document.getText() }],
                 });
                 lensesChanged.fire();
+                hintsChanged.fire();
             }
         }),
         vscode.workspace.onDidCloseTextDocument((document) => {
@@ -186,6 +189,9 @@ async function activate(context) {
         vscode.workspace.onDidChangeConfiguration((event) => {
             if (event.affectsConfiguration("mialu.lsp.structSizes")) {
                 lensesChanged.fire();
+            }
+            if (event.affectsConfiguration("mialu.lsp.constantValues")) {
+                hintsChanged.fire();
             }
         }),
         vscode.languages.registerCodeLensProvider({ language: LANGUAGE_ID }, {
@@ -229,6 +235,36 @@ async function activate(context) {
                 } catch (error) {
                     output.appendLine(String(error.message ?? error));
                     return undefined;
+                }
+            },
+        }),
+        // The value of a constant is shown after its `::`, as an inline hint.
+        vscode.languages.registerInlayHintsProvider({ language: LANGUAGE_ID }, {
+            onDidChangeInlayHints: hintsChanged.event,
+            async provideInlayHints(document, range) {
+                if (!vscode.workspace.getConfiguration("mialu.lsp").get("constantValues", true)) {
+                    return [];
+                }
+                try {
+                    const hints = await connection.request("textDocument/inlayHint", {
+                        textDocument: { uri: document.uri.toString() },
+                        range: {
+                            start: { line: range.start.line, character: range.start.character },
+                            end: { line: range.end.line, character: range.end.character },
+                        },
+                    });
+                    return hints.map((hint) => {
+                        const result = new vscode.InlayHint(
+                            new vscode.Position(hint.position.line, hint.position.character),
+                            hint.label);
+                        result.tooltip = hint.tooltip;
+                        result.paddingLeft = hint.paddingLeft;
+                        result.paddingRight = hint.paddingRight;
+                        return result;
+                    });
+                } catch (error) {
+                    output.appendLine(String(error.message ?? error));
+                    return [];
                 }
             },
         }),

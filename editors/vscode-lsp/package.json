@@ -31,6 +31,11 @@
                     "default": true,
                     "description": "Show the size and the alignment of a struct above its definition."
                 },
+                "mialu.lsp.constantValues": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show the value that the compiler worked out for a constant inline, after the :: of its definition, when it is not written as the value."
+                },
                 "mialu.lsp.typeHover": {
                     "type": "boolean",
                     "default": true,

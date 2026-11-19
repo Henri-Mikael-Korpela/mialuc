@@ -11,6 +11,9 @@
 // A third feature is the outline of a document, the definitions with the fields and the members
 // below them, from `mialuc dump-outline`.
 //
+// A fifth is an inline hint after the `::` of a constant that shows the value that the compiler
+// worked out for it, from the same `dump-types`.
+//
 // A fourth is diagnostics: a moment after a document is opened or changed, the server checks it with
 // the compiler and publishes the error, with `textDocument/publishDiagnostics`, so that the editor
 // marks it in the code and lists it as a problem while it is typed, without a build.
@@ -444,6 +447,61 @@ async function hover(uri, position) {
     return null;
 }
 
+/** The most characters of a value that an inline hint shows, which is cut with an ellipsis. */
+const INLAY_VALUE_CHARACTERS_MAX = 80;
+
+/**
+ * Answers a request for the inline hints of the lines of `range`: after the `::` of a constant, or
+ * the second `:` of a typed one, the value that the compiler worked out for it, such as the text
+ * that `VERSION_STRING :: int_to_str(MAJOR) ++ '.' ++ int_to_str(MINOR)` makes. A constant that is
+ * written as its value, such as `LIMIT :: 100`, has no hint, since it would say the same. The
+ * names are the ones of the last text that compiled while the text does not.
+ */
+async function inlayHints(uri, range) {
+    const document = documents.get(uri);
+    if (document === undefined) {
+        return [];
+    }
+    const text = document.text;
+    const names = await namesCompute(text);
+    if (names !== null && document.text === text) {
+        document.names = names;
+    }
+
+    const lines = document.text.split("\n").map((line) => line.replace(/\r$/, ""));
+    const hints = [];
+    for (const entry of document.names) {
+        if (entry.value === "" || entry.line < range.start.line || entry.line > range.end.line ||
+            entry.line >= lines.length) {
+            continue;
+        }
+        const lineText = lines[entry.line];
+        const bytes = Buffer.from(lineText, "utf8");
+        if (bytes.toString("utf8", entry.column, entry.column + entry.length) !== entry.name) {
+            continue;
+        }
+        // Only a definition has the operator right after its name, and a use does not.
+        const start = bytes.toString("utf8", 0, entry.column).length + entry.name.length;
+        const operator = /^(?:\s*::|\s*:[^:=]+:)/.exec(lineText.slice(start));
+        if (operator === null) {
+            continue;
+        }
+        if (lineText.slice(start + operator[0].length).trim() === entry.value) {
+            continue;
+        }
+        const shown = entry.value.length > INLAY_VALUE_CHARACTERS_MAX ?
+            entry.value.slice(0, INLAY_VALUE_CHARACTERS_MAX) + "…" : entry.value;
+        hints.push({
+            position: { line: entry.line, character: start + operator[0].length },
+            label: `⇒ ${shown}`,
+            tooltip: `The value of ${entry.name}, worked out when the program is compiled`,
+            paddingLeft: false,
+            paddingRight: true,
+        });
+    }
+    return hints;
+}
+
 async function codeLens(uri) {
     const document = documents.get(uri);
     if (document === undefined) {
@@ -504,6 +562,7 @@ async function handle(message) {
                 textDocumentSync: { openClose: true, change: TEXT_DOCUMENT_SYNC_FULL },
                 codeLensProvider: { resolveProvider: false },
                 hoverProvider: true,
+                inlayHintProvider: true,
                 documentSymbolProvider: true,
             },
             serverInfo: { name: "mialu-lsp", version: "0.0.1" },
@@ -550,6 +609,9 @@ async function handle(message) {
         break;
     case "textDocument/documentSymbol":
         reply(id, await documentSymbol(params.textDocument.uri));
+        break;
+    case "textDocument/inlayHint":
+        reply(id, await inlayHints(params.textDocument.uri, params.range));
         break;
     default:
         // A request must be answered, and a notification that is not known is ignored.
