@@ -12,6 +12,8 @@ The text of the errors is all in [report.c](../src/report.c), where each code is
 | E0301 - E0399 | the files that a program imports |
 | E0401 - E0449 | names, attributes, labels and the statements that jump |
 | E0451 - E0499 | what is known when the program is compiled: constants and array lengths |
+| E0501 - E0599 | what both targets reject: types, calls, structs, matches and unions |
+| E0601 - E0699 | what the x64 target rejects, and its limits |
 
 ## E0001 - E0099: the command, the files and the system
 
@@ -135,3 +137,76 @@ These are found when the values of [constants](mialu-programming-language.md#con
 | E0462 | the length of an array at 'name' is not known when the program is compiled | |
 | E0463 | the length of an array at 'name' must be an integer that is not below zero | |
 | E0464 | the argument of 'int_to_str' at 'name' is not known when the program is compiled | |
+
+## E0501 - E0599: what both targets reject
+
+These are found when a target builds the program, and are the same mistake in the program for the `x64-win32` and the `wasm` targets, which is why they have one code. They are about the types of the values, see [Primitive data types](mialu-programming-language.md#primitive-data-types), and about calls, structs, matches and unions. The place of an error is the name that the syntax tree knows, as for [the constants](#e0451---e0499-what-is-known-when-the-program-is-compiled), and the title says so with *at*.
+
+| Code | Title | Details |
+|---|---|---|
+| E0501 | an operand of arithmetic at 'name' is not of a type that it takes | An operand of arithmetic is an Int, an I32, an I64, a U32, a U64 or a float, and is of the type of the other operand. |
+| E0502 | the element at 'name' is not of the type of the elements of the array |  |
+| E0503 | 'name' is not an array or an array slice | Not an array or an array slice. |
+| E0504 | the array 'name' must be given an array literal | An array is not copied, so it is defined with an array literal and is not assigned to as a whole. Write an array literal, such as [const]Int { 1, 2 }. |
+| E0505 | the array of 'name' has a different number of elements than the length in its type |  |
+| E0506 | the call of 'name' has a different number of arguments than the procedure has parameters | A different number of arguments. |
+| E0507 | an argument of the call of 'name' is not of the type of its parameter |  |
+| E0508 | the procedure 'name' returns no value, so its call cannot be used as one |  |
+| E0509 | 'name' does not hold a pointer to a procedure, so it cannot be called |  |
+| E0510 | the value cannot be cast to 'name' | A Byte, a Bool, an I32, an I64, a U32, a U64, an Int, a Rune or a float can be cast to Int or I64, an integer or a Rune to a U64, a Byte, a Bool, a U32 or a Rune to a U32, a Byte, a Bool, an I32 or a Rune to an I32, a Byte, an I32, an I64, a U32, an Int or a float to a float, a Byte or a Rune to Rune, and a Rune to [4]Byte. |
+| E0511 | 'name' cannot be compared here | Both operands of a comparison must be Int, or both must be I32, or both must be I64, or both must be U32, or both must be U64, or both must be floats of one type, or both must be Bool, Str, arrays or array slices of Byte, or a Byte and an ASCII rune for == and not=, or pointers of one type for == and not=. |
+| E0512 | the condition at 'name' is not a Bool | An Int is not converted to a Bool. |
+| E0513 | the enum has no member 'name' | Not a member of the enum. |
+| E0514 | the enum of 'name' is not known here | Write the member with its enum, as in 'Color.RED', or give it to something that has an enum type. |
+| E0515 | a field of 'name' cannot be assigned to | 'name' is a parameter or an iterator, which cannot be assigned to, so neither can its fields. A field of what a pointer points to can be. |
+| E0516 | 'name' is a type and not a value | This is a type. |
+| E0517 | 'name' is not an Int, so it cannot be an index | Not an Int. |
+| E0518 | 'name' is not a Bool, so it cannot be used with 'and', 'or' or 'not' | Not a Bool. |
+| E0519 | this case matches a value that a case above it matches already | It could never run for that value. |
+| E0520 | 'name' only means something for a match of an enum that has no default case | A match of an enum that has no default case is the only match that must have a case for every value. |
+| E0521 | the pattern of the case is not known when the program is compiled | The pattern is a literal, a constant or a member of an enum. |
+| E0522 | the pattern of the case is not of the type of what is matched | A string is not an Int, a member is of one enum only, a Byte is from 0 to 255 and a range is only for an Int or a Byte. |
+| E0523 | the range of the case has no numbers in it, so it could never match | An empty range. |
+| E0524 | 'name' cannot be matched | A match takes an integer, a Str or an enum. |
+| E0525 | 'nil' does not say what 'name' points to | Write the type of the variable, as in 'p : ^Int = nil'. |
+| E0526 | 'name' is not a pointer, so '^' cannot follow it | Not a pointer. |
+| E0527 | the value assigned through 'name' is not of the type that it points to |  |
+| E0528 | 'name' is not an Int, so it cannot be the start or the end of a range | Not an Int. |
+| E0529 | the number of names of 'name' is not the number of values that the call gives |  |
+| E0530 | 'name' returns a number of values that is not the number of its return types |  |
+| E0531 | 'name' returns a value that is not of its return type |  |
+| E0532 | 'name' returns a value but has no return type | This has no return type. |
+| E0533 | the field 'name' is given a value twice | Given again here. |
+| E0534 | the value of the field 'name' is not of the type of the field |  |
+| E0535 | the struct has no field called 'name' | Not a field of the struct. |
+| E0536 | the struct with the field 'name' contains itself | A struct that contains itself would never end. Give it a pointer to itself instead. |
+| E0537 | type 'name' is not supported by the x64 or wasm target | Not supported. |
+| E0538 | the case 'name' is not a member of the enum of the field that the union is matched against | Not a member of the enum. |
+| E0539 | 'name' cannot be matched by a union | The field that a union is matched against is a field of the struct, outside of the cases, and of an enum type. |
+| E0540 | the field 'name' is in a case of a union, but the struct object is given another member for the field that the union is matched against | This field does not exist there. |
+| E0541 | the field 'name' is in a case of a union, so it can only be used where the field that the union is matched against is known to be the member of the case | Use it inside 'if x.kind == .MEMBER ->', and do not change 'x' or 'x.kind' in it. |
+| E0542 | the field 'name' is in a case of a union, so the struct object must give the field that the union is matched against a member of the enum that is written out | Write the member, such as '.MEMBER', and not another value. |
+| E0543 | variable 'name' is given a value that is not of its type |  |
+
+## E0601 - E0699: what the x64 target rejects
+
+These are about the `x64-win32` target, see [x64-win32](build-target-x64-win32.md): what it does not build, and its limits. A mistake that both targets reject is in [E0501 - E0599](#e0501---e0599-what-both-targets-reject).
+
+| Code | Title | Details |
+|---|---|---|
+| E0601 | 'name' has no address | A variable, an element and what a pointer points to have an address, but not a parameter, an iterator, a value that is computed, or an array. |
+| E0602 | the parameter 'name' cannot be an array | An array is in the frame of its procedure, so a parameter takes an array slice. Write the type as '[]Type'. |
+| E0603 | more than N constants, procedures and strings | The x64 target keeps at most N of them, so that the memory that it needs is known when it starts. |
+| E0604 | 'name' has an expression nested deeper than N |  |
+| E0605 | the field 'name' is accessed on something that is not a struct or a pointer to one | A struct is held by a variable, a parameter, an element or a pointer. |
+| E0606 | the foreign procedure 'name' is declared in a 'foreign js' block | The x64 target imports from 'foreign libc' and from the libraries of the system that an 'import foreign' names. |
+| E0607 | the library of the foreign procedure 'name' is not written as a library of the system | There is room for a few libraries. Write it as "system:Name.lib" in its import. |
+| E0608 | 'name' must be 'main :: proc() Int ->' | 'main' is a procedure without parameters that returns an Int, which is the exit code. |
+| E0609 | a program needs a procedure 'main' to start with | Define it, as in 'main :: proc() Int ->'. |
+| E0610 | the match has no case for a member of the enum, and no default case | Add a case for each member, or a default case 'case ->', or write 'match #(partial)' to leave members out. |
+| E0611 | the program is larger than N bytes | The compiler allocates the memory for the program once, when it starts. |
+| E0612 | 'name' is not a struct that is defined, or the literal without a name is not where a struct is wanted |  |
+| E0613 | the literal of 'name' gives some fields and not all of them | A literal gives either every field or none. |
+| E0614 | the information about 'name' is not a value | Read a field of it right away, such as '.members' or '.name'. |
+| E0615 | 'type_info_of' at 'name' is about a type that the x64 target gives no information about | The x64 target gives information about an enum only. |
+| E0616 | 'name' has something that the x64 target does not build yet |  |

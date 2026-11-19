@@ -1,0 +1,5 @@
+error[E0516]: 'Point' is a type and not a value
+  --> test-code/errors/x64/E0516-identifier-not-value.mu:11:14
+   |
+11 |     y := add(Point, 1)
+   |              ^^^^^ this is a type

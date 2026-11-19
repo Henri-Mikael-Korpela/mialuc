@@ -1,0 +1,7 @@
+error[E0542]: the field 'identifier' is in a case of a union, so the struct object must give the field that the union is matched against a member of the enum that is written out
+  --> test-code/errors/x64/E0542-union-kind-not-constant.mu:19:28
+   |
+19 |     t := Token { kind = k, identifier = { text = "a" } }
+   |                            ^^^^^^^^^^
+   |
+   = help: write the member, such as '.MEMBER', and not another value

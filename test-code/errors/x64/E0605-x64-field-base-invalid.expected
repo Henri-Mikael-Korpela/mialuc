@@ -1,0 +1,7 @@
+error[E0605]: the field 'x' is accessed on something that is not a struct or a pointer to one
+ --> test-code/errors/x64/E0605-x64-field-base-invalid.mu:5:7
+  |
+5 |     n.x = 1
+  |       ^ not a struct
+  |
+  = note: a struct is held by a variable, a parameter, an element or a pointer

@@ -1,0 +1,8 @@
+error[E0520]: 'partial' only means something for a match of an enum that has no default case
+ --> test-code/errors/x64/E0520-match-partial-invalid.mu:5:13
+  |
+5 |     match #(partial) n ->
+  |             ^^^^^^^
+  |
+  = note: a match of an enum that has no default case is the only match that must have a case for
+          every value

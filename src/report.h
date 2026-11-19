@@ -8,6 +8,7 @@
 #include <mialu/package.h>
 #include <mialu/parser.h>
 #include <mialu/semantic.h>
+#include <mialu/x64.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
 
@@ -28,6 +29,8 @@
  * E0301 - E0399   the files that a program imports
  * E0401 - E0449   names, attributes, labels and the statements that jump
  * E0451 - E0499   what is known when the program is compiled: constants and array lengths
+ * E0501 - E0599   what both targets reject: types, calls, structs, matches and unions
+ * E0601 - E0699   what the x64 target rejects, and its limits
  * ```
  *
  * The enumeration is in the order of the numbers and not alphabetical, because the numbers are what
@@ -120,6 +123,67 @@ typedef enum {
     ERROR_CODE_ARRAY_LENGTH_NOT_CONSTANT = 462,
     ERROR_CODE_ARRAY_LENGTH_INVALID = 463,
     ERROR_CODE_INT_TO_STR_NOT_CONSTANT = 464,
+
+    ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID = 501,
+    ERROR_CODE_ARRAY_ELEMENT_TYPE_MISMATCH = 502,
+    ERROR_CODE_ARRAY_EXPECTED = 503,
+    ERROR_CODE_ARRAY_INITIALIZER_INVALID = 504,
+    ERROR_CODE_ARRAY_LENGTH_MISMATCH = 505,
+    ERROR_CODE_CALL_ARGUMENT_COUNT_MISMATCH = 506,
+    ERROR_CODE_CALL_ARGUMENT_TYPE_MISMATCH = 507,
+    ERROR_CODE_CALL_RESULT_MISSING = 508,
+    ERROR_CODE_CALL_TARGET_NOT_POINTER = 509,
+    ERROR_CODE_CAST_INVALID = 510,
+    ERROR_CODE_COMPARISON_OPERAND_TYPE_INVALID = 511,
+    ERROR_CODE_CONDITION_TYPE_INVALID = 512,
+    ERROR_CODE_ENUM_MEMBER_UNKNOWN = 513,
+    ERROR_CODE_ENUM_TYPE_UNKNOWN = 514,
+    ERROR_CODE_FIELD_TARGET_READ_ONLY = 515,
+    ERROR_CODE_IDENTIFIER_NOT_VALUE = 516,
+    ERROR_CODE_INDEX_TYPE_INVALID = 517,
+    ERROR_CODE_LOGICAL_OPERAND_TYPE_INVALID = 518,
+    ERROR_CODE_MATCH_CASE_DUPLICATE = 519,
+    ERROR_CODE_MATCH_PARTIAL_INVALID = 520,
+    ERROR_CODE_MATCH_PATTERN_NOT_CONSTANT = 521,
+    ERROR_CODE_MATCH_PATTERN_TYPE_MISMATCH = 522,
+    ERROR_CODE_MATCH_RANGE_EMPTY = 523,
+    ERROR_CODE_MATCH_SUBJECT_TYPE_INVALID = 524,
+    ERROR_CODE_NIL_TYPE_UNKNOWN = 525,
+    ERROR_CODE_POINTER_EXPECTED = 526,
+    ERROR_CODE_POINTER_TARGET_TYPE_MISMATCH = 527,
+    ERROR_CODE_RANGE_TYPE_INVALID = 528,
+    ERROR_CODE_RESULT_COUNT_MISMATCH = 529,
+    ERROR_CODE_RETURN_COUNT_MISMATCH = 530,
+    ERROR_CODE_RETURN_TYPE_MISMATCH = 531,
+    ERROR_CODE_RETURN_TYPE_MISSING = 532,
+    ERROR_CODE_STRUCT_FIELD_DUPLICATE = 533,
+    ERROR_CODE_STRUCT_FIELD_TYPE_MISMATCH = 534,
+    ERROR_CODE_STRUCT_FIELD_UNKNOWN = 535,
+    ERROR_CODE_STRUCT_RECURSIVE = 536,
+    ERROR_CODE_TYPE_UNSUPPORTED = 537,
+    ERROR_CODE_UNION_CASE_UNKNOWN = 538,
+    ERROR_CODE_UNION_DISCRIMINANT_INVALID = 539,
+    ERROR_CODE_UNION_FIELD_KIND_MISMATCH = 540,
+    ERROR_CODE_UNION_FIELD_UNMATCHED = 541,
+    ERROR_CODE_UNION_KIND_NOT_CONSTANT = 542,
+    ERROR_CODE_VARIABLE_TYPE_MISMATCH = 543,
+
+    ERROR_CODE_X64_ADDRESS_INVALID = 601,
+    ERROR_CODE_X64_ARRAY_TYPE_MISPLACED = 602,
+    ERROR_CODE_X64_CONSTANT_COUNT_EXCEEDED = 603,
+    ERROR_CODE_X64_EXPRESSION_TOO_DEEP = 604,
+    ERROR_CODE_X64_FIELD_BASE_INVALID = 605,
+    ERROR_CODE_X64_FOREIGN_TARGET_UNSUPPORTED = 606,
+    ERROR_CODE_X64_LIBRARY_INVALID = 607,
+    ERROR_CODE_X64_MAIN_INVALID = 608,
+    ERROR_CODE_X64_MAIN_MISSING = 609,
+    ERROR_CODE_X64_MATCH_NOT_EXHAUSTIVE = 610,
+    ERROR_CODE_X64_OUTPUT_TOO_LARGE = 611,
+    ERROR_CODE_X64_STRUCT_EXPECTED = 612,
+    ERROR_CODE_X64_STRUCT_FIELD_MISSING = 613,
+    ERROR_CODE_X64_TYPE_INFO_MISPLACED = 614,
+    ERROR_CODE_X64_TYPE_INFO_UNSUPPORTED = 615,
+    ERROR_CODE_X64_UNSUPPORTED = 616,
 } Error_Code;
 
 /**
@@ -167,5 +231,12 @@ void report_package_error(Reporter const *reporter, char const *path, Str source
  */
 void report_semantic_error(Reporter const *reporter, char const *path, Str source,
                            Semantic_Result result);
+
+/**
+ * Reports an error of `x64_build`, in the program whose source is `source` and whose file is `path`,
+ * or in a file that it imports.
+ */
+void report_x64_error(Reporter const *reporter, char const *path, Str source,
+                      X64_Build_Result result);
 
 #endif

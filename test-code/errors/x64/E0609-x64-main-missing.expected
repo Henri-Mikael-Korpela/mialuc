@@ -1,0 +1,4 @@
+error[E0609]: a program needs a procedure 'main' to start with
+ --> test-code/errors/x64/E0609-x64-main-missing.mu
+  |
+  = help: define it, as in 'main :: proc() Int ->'

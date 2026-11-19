@@ -1,0 +1,5 @@
+error[E0506]: the call of 'add' has a different number of arguments than the procedure has parameters
+ --> test-code/errors/x64/E0506-call-argument-count-mismatch.mu:7:10
+  |
+7 |     x := add(1)
+  |          ^^^ a different number of arguments

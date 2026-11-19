@@ -1,0 +1,5 @@
+error[E0612]: 'p' is not a struct that is defined, or the literal without a name is not where a struct is wanted
+ --> test-code/errors/x64/E0612-x64-struct-expected.mu:4:5
+  |
+4 |     p := Missing { x = 1 }
+  |     ^

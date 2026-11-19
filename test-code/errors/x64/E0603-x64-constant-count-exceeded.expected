@@ -1,0 +1,8 @@
+error[E0603]: more than 1024 constants, procedures and strings
+    --> test-code/errors/x64/E0603-x64-constant-count-exceeded.mu:1027:1
+     |
+1027 | C1024 :: 1024
+     | ^^^^^ the limit is passed here
+     |
+     = note: the x64 target keeps at most 1024 of them, so that the memory that it needs is known
+             when it starts

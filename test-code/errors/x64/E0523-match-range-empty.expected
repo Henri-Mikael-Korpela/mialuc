@@ -1,0 +1,5 @@
+error[E0523]: the range of the case has no numbers in it, so it could never match
+ --> test-code/errors/x64/E0523-match-range-empty.mu:6:9
+  |
+6 |         case 5..<5 ->
+  |         ^^^^ an empty range

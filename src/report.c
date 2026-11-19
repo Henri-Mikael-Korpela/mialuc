@@ -14,6 +14,7 @@
 #include <mialu/report.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
+#include <mialu/x64.h>
 
 enum {
     // The codes are numbers below this, and the catalog has a place for each of them, so that the
@@ -504,6 +505,285 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .note = "the argument of 'int_to_str' is an integer, or a constant of one, because the "
                 "text is made when the program is compiled",
     },
+
+    // What both targets reject.
+    [ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID] = {
+        .title = "an operand of arithmetic at '{subject}' is not of a type that it takes",
+        .note = "an operand of arithmetic is an Int, an I32, an I64, a U32, a U64 or a float, and "
+                "is of the type of the other operand",
+    },
+    [ERROR_CODE_ARRAY_ELEMENT_TYPE_MISMATCH] = {
+        .title = "the element at '{subject}' is not of the type of the elements of the array",
+    },
+    [ERROR_CODE_ARRAY_EXPECTED] = {
+        .title = "'{subject}' is not an array or an array slice",
+        .label = "not an array or an array slice",
+    },
+    [ERROR_CODE_ARRAY_INITIALIZER_INVALID] = {
+        .title = "the array '{subject}' must be given an array literal",
+        .label = "not an array literal",
+        .note = "an array is not copied, so it is defined with an array literal and is not "
+                "assigned to as a whole",
+        .help = "write an array literal, such as [const]Int {{ 1, 2 }",
+    },
+    [ERROR_CODE_ARRAY_LENGTH_MISMATCH] = {
+        .title = "the array of '{subject}' has a different number of elements than the length in "
+                 "its type",
+    },
+    [ERROR_CODE_CALL_ARGUMENT_COUNT_MISMATCH] = {
+        .title = "the call of '{subject}' has a different number of arguments than the procedure "
+                 "has parameters",
+        .label = "a different number of arguments",
+    },
+    [ERROR_CODE_CALL_ARGUMENT_TYPE_MISMATCH] = {
+        .title = "an argument of the call of '{subject}' is not of the type of its parameter",
+    },
+    [ERROR_CODE_CALL_RESULT_MISSING] = {
+        .title = "the procedure '{subject}' returns no value, so its call cannot be used as one",
+    },
+    [ERROR_CODE_CALL_TARGET_NOT_POINTER] = {
+        .title = "'{subject}' does not hold a pointer to a procedure, so it cannot be called",
+    },
+    [ERROR_CODE_CAST_INVALID] = {
+        .title = "the value cannot be cast to '{subject}'",
+        .note = "a Byte, a Bool, an I32, an I64, a U32, a U64, an Int, a Rune or a float can be "
+                "cast to Int or I64, an integer or a Rune to a U64, a Byte, a Bool, a U32 or a "
+                "Rune to a U32, a Byte, a Bool, an I32 or a Rune to an I32, a Byte, an I32, an "
+                "I64, a U32, an Int or a float to a float, a Byte or a Rune to Rune, and a Rune "
+                "to [4]Byte",
+    },
+    [ERROR_CODE_COMPARISON_OPERAND_TYPE_INVALID] = {
+        .title = "'{subject}' cannot be compared here",
+        .note = "both operands of a comparison must be Int, or both must be I32, or both must be "
+                "I64, or both must be U32, or both must be U64, or both must be floats of one "
+                "type, or both must be Bool, Str, arrays or array slices of Byte, or a Byte and "
+                "an ASCII rune for == and not=, or pointers of one type for == and not=",
+    },
+    [ERROR_CODE_CONDITION_TYPE_INVALID] = {
+        .title = "the condition at '{subject}' is not a Bool",
+        .label = "not a Bool",
+        .note = "an Int is not converted to a Bool",
+    },
+    [ERROR_CODE_ENUM_MEMBER_UNKNOWN] = {
+        .title = "the enum has no member '{subject}'",
+        .label = "not a member of the enum",
+    },
+    [ERROR_CODE_ENUM_TYPE_UNKNOWN] = {
+        .title = "the enum of '{subject}' is not known here",
+        .label = "nothing says what enum this is of",
+        .help = "write the member with its enum, as in 'Color.RED', or give it to something that "
+                "has an enum type",
+    },
+    [ERROR_CODE_FIELD_TARGET_READ_ONLY] = {
+        .title = "a field of '{subject}' cannot be assigned to",
+        .note = "'{subject}' is a parameter or an iterator, which cannot be assigned to, so "
+                "neither can its fields. A field of what a pointer points to can be",
+    },
+    [ERROR_CODE_IDENTIFIER_NOT_VALUE] = {
+        .title = "'{subject}' is a type and not a value",
+        .label = "this is a type",
+    },
+    [ERROR_CODE_INDEX_TYPE_INVALID] = {
+        .title = "'{subject}' is not an Int, so it cannot be an index",
+        .label = "not an Int",
+    },
+    [ERROR_CODE_LOGICAL_OPERAND_TYPE_INVALID] = {
+        .title = "'{subject}' is not a Bool, so it cannot be used with 'and', 'or' or 'not'",
+        .label = "not a Bool",
+    },
+    [ERROR_CODE_MATCH_CASE_DUPLICATE] = {
+        .title = "this case matches a value that a case above it matches already",
+        .label = "it could never run for that value",
+    },
+    [ERROR_CODE_MATCH_PARTIAL_INVALID] = {
+        .title = "'{subject}' only means something for a match of an enum that has no default "
+                 "case",
+        .note = "a match of an enum that has no default case is the only match that must have a "
+                "case for every value",
+    },
+    [ERROR_CODE_MATCH_PATTERN_NOT_CONSTANT] = {
+        .title = "the pattern of the case is not known when the program is compiled",
+        .label = "not a constant",
+        .help = "the pattern is a literal, a constant or a member of an enum",
+    },
+    [ERROR_CODE_MATCH_PATTERN_TYPE_MISMATCH] = {
+        .title = "the pattern of the case is not of the type of what is matched",
+        .label = "not of the type of the match",
+        .note = "a string is not an Int, a member is of one enum only, a Byte is from 0 to 255 "
+                "and a range is only for an Int or a Byte",
+    },
+    [ERROR_CODE_MATCH_RANGE_EMPTY] = {
+        .title = "the range of the case has no numbers in it, so it could never match",
+        .label = "an empty range",
+    },
+    [ERROR_CODE_MATCH_SUBJECT_TYPE_INVALID] = {
+        .title = "'{subject}' cannot be matched",
+        .label = "not an integer, a Str or an enum",
+        .note = "a match takes an integer, a Str or an enum",
+    },
+    [ERROR_CODE_NIL_TYPE_UNKNOWN] = {
+        .title = "'nil' does not say what '{subject}' points to",
+        .label = "the type of this is not known",
+        .help = "write the type of the variable, as in 'p : ^Int = nil'",
+    },
+    [ERROR_CODE_POINTER_EXPECTED] = {
+        .title = "'{subject}' is not a pointer, so '^' cannot follow it",
+        .label = "not a pointer",
+    },
+    [ERROR_CODE_POINTER_TARGET_TYPE_MISMATCH] = {
+        .title = "the value assigned through '{subject}' is not of the type that it points to",
+    },
+    [ERROR_CODE_RANGE_TYPE_INVALID] = {
+        .title = "'{subject}' is not an Int, so it cannot be the start or the end of a range",
+        .label = "not an Int",
+    },
+    [ERROR_CODE_RESULT_COUNT_MISMATCH] = {
+        .title = "the number of names of '{subject}' is not the number of values that the call "
+                 "gives",
+    },
+    [ERROR_CODE_RETURN_COUNT_MISMATCH] = {
+        .title = "'{subject}' returns a number of values that is not the number of its return "
+                 "types",
+    },
+    [ERROR_CODE_RETURN_TYPE_MISMATCH] = {
+        .title = "'{subject}' returns a value that is not of its return type",
+    },
+    [ERROR_CODE_RETURN_TYPE_MISSING] = {
+        .title = "'{subject}' returns a value but has no return type",
+        .label = "this has no return type",
+    },
+    [ERROR_CODE_STRUCT_FIELD_DUPLICATE] = {
+        .title = "the field '{subject}' is given a value twice",
+        .label = "given again here",
+    },
+    [ERROR_CODE_STRUCT_FIELD_TYPE_MISMATCH] = {
+        .title = "the value of the field '{subject}' is not of the type of the field",
+    },
+    [ERROR_CODE_STRUCT_FIELD_UNKNOWN] = {
+        .title = "the struct has no field called '{subject}'",
+        .label = "not a field of the struct",
+    },
+    [ERROR_CODE_STRUCT_RECURSIVE] = {
+        .title = "the struct with the field '{subject}' contains itself",
+        .label = "this field makes it infinitely large",
+        .note = "a struct that contains itself would never end",
+        .help = "give it a pointer to itself instead",
+    },
+    [ERROR_CODE_TYPE_UNSUPPORTED] = {
+        .title = "type '{subject}' is not supported by the {detail} target",
+        .label = "not supported",
+    },
+    [ERROR_CODE_UNION_CASE_UNKNOWN] = {
+        .title = "the case '{subject}' is not a member of the enum of the field that the union is "
+                 "matched against",
+        .label = "not a member of the enum",
+    },
+    [ERROR_CODE_UNION_DISCRIMINANT_INVALID] = {
+        .title = "'{subject}' cannot be matched by a union",
+        .note = "the field that a union is matched against is a field of the struct, outside of "
+                "the cases, and of an enum type",
+    },
+    [ERROR_CODE_UNION_FIELD_KIND_MISMATCH] = {
+        .title = "the field '{subject}' is in a case of a union, but the struct object is given "
+                 "another member for the field that the union is matched against",
+        .label = "this field does not exist there",
+    },
+    [ERROR_CODE_UNION_FIELD_UNMATCHED] = {
+        .title = "the field '{subject}' is in a case of a union, so it can only be used where the "
+                 "field that the union is matched against is known to be the member of the case",
+        .label = "used outside of its case",
+        .help = "use it inside 'if x.kind == .MEMBER ->', and do not change 'x' or 'x.kind' in it",
+    },
+    [ERROR_CODE_UNION_KIND_NOT_CONSTANT] = {
+        .title = "the field '{subject}' is in a case of a union, so the struct object must give "
+                 "the field that the union is matched against a member of the enum that is "
+                 "written out",
+        .help = "write the member, such as '.MEMBER', and not another value",
+    },
+    [ERROR_CODE_VARIABLE_TYPE_MISMATCH] = {
+        .title = "variable '{subject}' is given a value that is not of its type",
+    },
+
+    // What the x64 target rejects.
+    [ERROR_CODE_X64_ADDRESS_INVALID] = {
+        .title = "'{subject}' has no address",
+        .label = "no address",
+        .note = "a variable, an element and what a pointer points to have an address, but not a "
+                "parameter, an iterator, a value that is computed, or an array",
+    },
+    [ERROR_CODE_X64_ARRAY_TYPE_MISPLACED] = {
+        .title = "the parameter '{subject}' cannot be an array",
+        .label = "an array here",
+        .note = "an array is in the frame of its procedure, so a parameter takes an array slice",
+        .help = "write the type as '[]Type'",
+    },
+    [ERROR_CODE_X64_CONSTANT_COUNT_EXCEEDED] = {
+        .title = "more than {number} constants, procedures and strings",
+        .label = "the limit is passed here",
+        .note = "the x64 target keeps at most {number} of them, so that the memory that it needs "
+                "is known when it starts",
+    },
+    [ERROR_CODE_X64_EXPRESSION_TOO_DEEP] = {
+        .title = "'{subject}' has an expression nested deeper than {number}",
+    },
+    [ERROR_CODE_X64_FIELD_BASE_INVALID] = {
+        .title = "the field '{subject}' is accessed on something that is not a struct or a "
+                 "pointer to one",
+        .label = "not a struct",
+        .note = "a struct is held by a variable, a parameter, an element or a pointer",
+    },
+    [ERROR_CODE_X64_FOREIGN_TARGET_UNSUPPORTED] = {
+        .title = "the foreign procedure '{subject}' is declared in a 'foreign js' block",
+        .label = "the x64 target cannot import from 'foreign js'",
+        .note = "the x64 target imports from 'foreign libc' and from the libraries of the system "
+                "that an 'import foreign' names",
+    },
+    [ERROR_CODE_X64_LIBRARY_INVALID] = {
+        .title = "the library of the foreign procedure '{subject}' is not written as a library of "
+                 "the system",
+        .note = "there is room for a few libraries",
+        .help = "write it as \"system:Name.lib\" in its import",
+    },
+    [ERROR_CODE_X64_MAIN_INVALID] = {
+        .title = "'{subject}' must be 'main :: proc() Int ->'",
+        .label = "not the procedure that starts the program",
+        .note = "'main' is a procedure without parameters that returns an Int, which is the exit "
+                "code",
+    },
+    [ERROR_CODE_X64_MAIN_MISSING] = {
+        .title = "a program needs a procedure 'main' to start with",
+        .help = "define it, as in 'main :: proc() Int ->'",
+    },
+    [ERROR_CODE_X64_MATCH_NOT_EXHAUSTIVE] = {
+        .title = "the match has no case for a member of the enum, and no default case",
+        .label = "this match leaves a member out",
+        .help = "add a case for each member, or a default case 'case ->', or write 'match "
+                "#(partial)' to leave members out",
+    },
+    [ERROR_CODE_X64_OUTPUT_TOO_LARGE] = {
+        .title = "the program is larger than {number} bytes",
+        .note = "the compiler allocates the memory for the program once, when it starts",
+    },
+    [ERROR_CODE_X64_STRUCT_EXPECTED] = {
+        .title = "'{subject}' is not a struct that is defined, or the literal without a name is "
+                 "not where a struct is wanted",
+    },
+    [ERROR_CODE_X64_STRUCT_FIELD_MISSING] = {
+        .title = "the literal of '{subject}' gives some fields and not all of them",
+        .note = "a literal gives either every field or none",
+    },
+    [ERROR_CODE_X64_TYPE_INFO_MISPLACED] = {
+        .title = "the information about '{subject}' is not a value",
+        .help = "read a field of it right away, such as '.members' or '.name'",
+    },
+    [ERROR_CODE_X64_TYPE_INFO_UNSUPPORTED] = {
+        .title = "'type_info_of' at '{subject}' is about a type that the x64 target gives no "
+                 "information about",
+        .note = "the x64 target gives information about an enum only",
+    },
+    [ERROR_CODE_X64_UNSUPPORTED] = {
+        .title = "'{subject}' has something that the x64 target does not build yet",
+    },
 };
 
 // The code of each status of the analysis.
@@ -595,6 +875,68 @@ static Error_Code const REPORT_TOKENIZE_CODES[] = {
     [TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED] = ERROR_CODE_STRING_LITERAL_UNTERMINATED,
     [TOKENIZE_STATUS_TOKEN_LIMIT] = ERROR_CODE_TOKEN_LIMIT,
     [TOKENIZE_STATUS_UNEXPECTED_CHARACTER] = ERROR_CODE_UNEXPECTED_CHARACTER,
+};
+
+// The code of each status of the x64 build.
+static Error_Code const REPORT_X64_CODES[] = {
+    [X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID] = ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID,
+    [X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH] = ERROR_CODE_ARRAY_ELEMENT_TYPE_MISMATCH,
+    [X64_BUILD_STATUS_ARRAY_EXPECTED] = ERROR_CODE_ARRAY_EXPECTED,
+    [X64_BUILD_STATUS_ARRAY_INITIALIZER_INVALID] = ERROR_CODE_ARRAY_INITIALIZER_INVALID,
+    [X64_BUILD_STATUS_ARRAY_LENGTH_MISMATCH] = ERROR_CODE_ARRAY_LENGTH_MISMATCH,
+    [X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH] = ERROR_CODE_CALL_ARGUMENT_COUNT_MISMATCH,
+    [X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH] = ERROR_CODE_CALL_ARGUMENT_TYPE_MISMATCH,
+    [X64_BUILD_STATUS_CALL_RESULT_MISSING] = ERROR_CODE_CALL_RESULT_MISSING,
+    [X64_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE] = ERROR_CODE_CALL_TARGET_NOT_POINTER,
+    [X64_BUILD_STATUS_CAST_INVALID] = ERROR_CODE_CAST_INVALID,
+    [X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID] = ERROR_CODE_COMPARISON_OPERAND_TYPE_INVALID,
+    [X64_BUILD_STATUS_CONDITION_TYPE_INVALID] = ERROR_CODE_CONDITION_TYPE_INVALID,
+    [X64_BUILD_STATUS_ENUM_MEMBER_UNKNOWN] = ERROR_CODE_ENUM_MEMBER_UNKNOWN,
+    [X64_BUILD_STATUS_ENUM_TYPE_UNKNOWN] = ERROR_CODE_ENUM_TYPE_UNKNOWN,
+    [X64_BUILD_STATUS_FIELD_TARGET_READ_ONLY] = ERROR_CODE_FIELD_TARGET_READ_ONLY,
+    [X64_BUILD_STATUS_IDENTIFIER_NOT_VALUE] = ERROR_CODE_IDENTIFIER_NOT_VALUE,
+    [X64_BUILD_STATUS_INDEX_TYPE_INVALID] = ERROR_CODE_INDEX_TYPE_INVALID,
+    [X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID] = ERROR_CODE_LOGICAL_OPERAND_TYPE_INVALID,
+    [X64_BUILD_STATUS_MATCH_CASE_DUPLICATE] = ERROR_CODE_MATCH_CASE_DUPLICATE,
+    [X64_BUILD_STATUS_MATCH_PARTIAL_INVALID] = ERROR_CODE_MATCH_PARTIAL_INVALID,
+    [X64_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT] = ERROR_CODE_MATCH_PATTERN_NOT_CONSTANT,
+    [X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH] = ERROR_CODE_MATCH_PATTERN_TYPE_MISMATCH,
+    [X64_BUILD_STATUS_MATCH_RANGE_EMPTY] = ERROR_CODE_MATCH_RANGE_EMPTY,
+    [X64_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID] = ERROR_CODE_MATCH_SUBJECT_TYPE_INVALID,
+    [X64_BUILD_STATUS_NIL_TYPE_UNKNOWN] = ERROR_CODE_NIL_TYPE_UNKNOWN,
+    [X64_BUILD_STATUS_POINTER_EXPECTED] = ERROR_CODE_POINTER_EXPECTED,
+    [X64_BUILD_STATUS_POINTER_TARGET_TYPE_MISMATCH] = ERROR_CODE_POINTER_TARGET_TYPE_MISMATCH,
+    [X64_BUILD_STATUS_RANGE_TYPE_INVALID] = ERROR_CODE_RANGE_TYPE_INVALID,
+    [X64_BUILD_STATUS_RESULT_COUNT_MISMATCH] = ERROR_CODE_RESULT_COUNT_MISMATCH,
+    [X64_BUILD_STATUS_RETURN_COUNT_MISMATCH] = ERROR_CODE_RETURN_COUNT_MISMATCH,
+    [X64_BUILD_STATUS_RETURN_TYPE_MISMATCH] = ERROR_CODE_RETURN_TYPE_MISMATCH,
+    [X64_BUILD_STATUS_RETURN_TYPE_MISSING] = ERROR_CODE_RETURN_TYPE_MISSING,
+    [X64_BUILD_STATUS_STRUCT_FIELD_DUPLICATE] = ERROR_CODE_STRUCT_FIELD_DUPLICATE,
+    [X64_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH] = ERROR_CODE_STRUCT_FIELD_TYPE_MISMATCH,
+    [X64_BUILD_STATUS_STRUCT_FIELD_UNKNOWN] = ERROR_CODE_STRUCT_FIELD_UNKNOWN,
+    [X64_BUILD_STATUS_STRUCT_RECURSIVE] = ERROR_CODE_STRUCT_RECURSIVE,
+    [X64_BUILD_STATUS_TYPE_UNSUPPORTED] = ERROR_CODE_TYPE_UNSUPPORTED,
+    [X64_BUILD_STATUS_UNION_CASE_UNKNOWN] = ERROR_CODE_UNION_CASE_UNKNOWN,
+    [X64_BUILD_STATUS_UNION_DISCRIMINANT_INVALID] = ERROR_CODE_UNION_DISCRIMINANT_INVALID,
+    [X64_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH] = ERROR_CODE_UNION_FIELD_KIND_MISMATCH,
+    [X64_BUILD_STATUS_UNION_FIELD_UNMATCHED] = ERROR_CODE_UNION_FIELD_UNMATCHED,
+    [X64_BUILD_STATUS_UNION_KIND_NOT_CONSTANT] = ERROR_CODE_UNION_KIND_NOT_CONSTANT,
+    [X64_BUILD_STATUS_VARIABLE_TYPE_MISMATCH] = ERROR_CODE_VARIABLE_TYPE_MISMATCH,
+    [X64_BUILD_STATUS_ADDRESS_INVALID] = ERROR_CODE_X64_ADDRESS_INVALID,
+    [X64_BUILD_STATUS_ARRAY_TYPE_MISPLACED] = ERROR_CODE_X64_ARRAY_TYPE_MISPLACED,
+    [X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED] = ERROR_CODE_X64_CONSTANT_COUNT_EXCEEDED,
+    [X64_BUILD_STATUS_EXPRESSION_TOO_DEEP] = ERROR_CODE_X64_EXPRESSION_TOO_DEEP,
+    [X64_BUILD_STATUS_FIELD_BASE_INVALID] = ERROR_CODE_X64_FIELD_BASE_INVALID,
+    [X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED] = ERROR_CODE_X64_FOREIGN_TARGET_UNSUPPORTED,
+    [X64_BUILD_STATUS_LIBRARY_INVALID] = ERROR_CODE_X64_LIBRARY_INVALID,
+    [X64_BUILD_STATUS_MAIN_INVALID] = ERROR_CODE_X64_MAIN_INVALID,
+    [X64_BUILD_STATUS_MATCH_NOT_EXHAUSTIVE] = ERROR_CODE_X64_MATCH_NOT_EXHAUSTIVE,
+    [X64_BUILD_STATUS_OUTPUT_TOO_LARGE] = ERROR_CODE_X64_OUTPUT_TOO_LARGE,
+    [X64_BUILD_STATUS_STRUCT_EXPECTED] = ERROR_CODE_X64_STRUCT_EXPECTED,
+    [X64_BUILD_STATUS_STRUCT_FIELD_MISSING] = ERROR_CODE_X64_STRUCT_FIELD_MISSING,
+    [X64_BUILD_STATUS_TYPE_INFO_MISPLACED] = ERROR_CODE_X64_TYPE_INFO_MISPLACED,
+    [X64_BUILD_STATUS_TYPE_INFO_UNSUPPORTED] = ERROR_CODE_X64_TYPE_INFO_UNSUPPORTED,
+    [X64_BUILD_STATUS_UNSUPPORTED] = ERROR_CODE_X64_UNSUPPORTED,
 };
 
 static void   report_emit(Reporter const *reporter, Report_Error const *error);
@@ -852,6 +1194,36 @@ void report_semantic_error(Reporter const *reporter, char const *path, Str sourc
     report_emit_at_subject(reporter, code, path, source, result.subject, STR_EMPTY, number);
 }
 
+void report_x64_error(Reporter const *reporter, char const *path, Str source,
+                      X64_Build_Result result) {
+    assert(reporter != NULL);
+    assert(path != NULL);
+    assert(result.status != X64_BUILD_STATUS_OK);
+
+    Error_Code code = REPORT_X64_CODES[result.status];
+    assert(code > 0);
+
+    // These are about the whole program, so they have no place in the source.
+    if (result.status == X64_BUILD_STATUS_OUTPUT_TOO_LARGE) {
+        report_general(reporter, code, path, OUTPUT_SIZE_BYTES_MAX);
+        return;
+    }
+    if (result.status == X64_BUILD_STATUS_MAIN_INVALID && result.subject.bytes == NULL) {
+        report_general(reporter, ERROR_CODE_X64_MAIN_MISSING, path, 0);
+        return;
+    }
+
+    // The limits that two of the errors tell.
+    int64_t number = 0;
+    if (result.status == X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED) {
+        number = X64_CONSTANT_COUNT_MAX;
+    }
+    if (result.status == X64_BUILD_STATUS_EXPRESSION_TOO_DEEP) {
+        number = X64_EXPRESSION_DEPTH_MAX;
+    }
+    report_emit_at_subject(reporter, code, path, source, result.subject, STR("x64"), number);
+}
+
 /**
  * Reports an error that is about `subject`, a view of a source, which is the text that the carets
  * are under. The source is the one that `subject` is part of: the program, or a file that it
@@ -1074,7 +1446,11 @@ static Str report_expand(char const *template, Report_Error const *error, char *
         }
         char const *rest = &template[index];
         char number_text[32] = {0};
-        if (strncmp(rest, "{subject}", sizeof("{subject}") - 1) == 0) {
+        if (strncmp(rest, "{{", sizeof("{{") - 1) == 0) {
+            // Two braces are one, for text that has a brace in it.
+            report_text_append(&text, STR("{"));
+            index += sizeof("{{") - 1;
+        } else if (strncmp(rest, "{subject}", sizeof("{subject}") - 1) == 0) {
             report_text_append_subject(&text, error->subject);
             index += sizeof("{subject}") - 1;
         } else if (strncmp(rest, "{detail}", sizeof("{detail}") - 1) == 0) {

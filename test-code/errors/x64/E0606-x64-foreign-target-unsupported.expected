@@ -1,0 +1,8 @@
+error[E0606]: the foreign procedure 'alert' is declared in a 'foreign js' block
+ --> test-code/errors/x64/E0606-x64-foreign-target-unsupported.mu:6:5
+  |
+6 |     alert :: proc(msg: Str) -> ...
+  |     ^^^^^ the x64 target cannot import from 'foreign js'
+  |
+  = note: the x64 target imports from 'foreign libc' and from the libraries of the system that an
+          'import foreign' names

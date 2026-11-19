@@ -1,0 +1,5 @@
+error[E0513]: the enum has no member 'PURPLE'
+ --> test-code/errors/x64/E0513-enum-member-unknown.mu:8:16
+  |
+8 |     c := Color.PURPLE
+  |                ^^^^^^ not a member of the enum

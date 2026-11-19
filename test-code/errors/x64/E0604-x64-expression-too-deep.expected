@@ -1,0 +1,5 @@
+error[E0604]: 'main' has an expression nested deeper than 1024
+ --> test-code/errors/x64/E0604-x64-expression-too-deep.mu:6:1
+  |
+6 | main :: proc() Int ->
+  | ^^^^

@@ -1,0 +1,8 @@
+error[E0610]: the match has no case for a member of the enum, and no default case
+ --> test-code/errors/x64/E0610-x64-match-not-exhaustive.mu:9:5
+  |
+9 |     match c ->
+  |     ^^^^^ this match leaves a member out
+  |
+  = help: add a case for each member, or a default case 'case ->', or write 'match #(partial)' to
+          leave members out

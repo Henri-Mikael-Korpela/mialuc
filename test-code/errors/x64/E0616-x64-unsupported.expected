@@ -1,0 +1,5 @@
+error[E0616]: 'main' has something that the x64 target does not build yet
+ --> test-code/errors/x64/E0616-x64-unsupported.mu:3:1
+  |
+3 | main :: proc() Int ->
+  | ^^^^
