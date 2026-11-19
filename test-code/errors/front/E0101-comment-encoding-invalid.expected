@@ -1,0 +1,7 @@
+error[E0101]: a comment must be valid UTF-8
+ --> test-code/errors/front/E0101-comment-encoding-invalid.mu:1:25
+  |
+1 | // A comment with a bad � byte.
+  |                         ^ this byte is not valid UTF-8
+  |
+  = note: source code is UTF-8 text, and comments are part of it

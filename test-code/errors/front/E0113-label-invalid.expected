@@ -1,0 +1,7 @@
+error[E0113]: a label cannot be a reserved word
+ --> test-code/errors/front/E0113-label-invalid.mu:2:5
+  |
+2 |     :return
+  |     ^^^^^^^ this is a reserved word
+  |
+  = note: a label is a ':' directly followed by a name, and the name is not a reserved word

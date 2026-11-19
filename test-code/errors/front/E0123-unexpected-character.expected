@@ -1,0 +1,5 @@
+error[E0123]: unexpected character '$' (0x24)
+ --> test-code/errors/front/E0123-unexpected-character.mu:2:12
+  |
+2 |     x := 1 $ 2
+  |            ^ this cannot start a token

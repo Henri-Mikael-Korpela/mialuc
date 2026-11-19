@@ -1,0 +1,9 @@
+error[E0102]: a documentation comment must be on lines of its own
+ --> test-code/errors/front/E0102-documentation-comment-trailing.mu:1:23
+  |
+1 | main :: proc() Int -> /// Documents.
+  |                       ^^^ this '///' comes after code on its line
+  |
+  = note: a documentation comment documents the code after it, so it cannot follow code on the same
+          line
+  = help: use '//' for a note after code on a line

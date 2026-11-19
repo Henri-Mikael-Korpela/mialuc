@@ -9,6 +9,7 @@
 
 #include <mialu/common_types.h>
 #include <mialu/diagnostic.h>
+#include <mialu/limits.h>
 #include <mialu/report.h>
 #include <mialu/str.h>
 
@@ -113,13 +114,170 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .title = "running a program is only supported on Windows",
         .help = "build the wasm target to run a program elsewhere, see docs/playground.md",
     },
+
+    // The tokens.
+    [ERROR_CODE_COMMENT_ENCODING_INVALID] = {
+        .title = "a comment must be valid UTF-8",
+        .label = "this byte is not valid UTF-8",
+        .note = "source code is UTF-8 text, and comments are part of it",
+    },
+    [ERROR_CODE_DOCUMENTATION_COMMENT_TRAILING] = {
+        .title = "a documentation comment must be on lines of its own",
+        .label = "this '///' comes after code on its line",
+        .note = "a documentation comment documents the code after it, so it cannot follow code on "
+                "the same line",
+        .help = "use '//' for a note after code on a line",
+    },
+    [ERROR_CODE_INDENTATION_TAB] = {
+        .title = "indentation must use spaces, not tabs",
+        .label = "this is a tab",
+        .help = "indent with four spaces for each level",
+    },
+    [ERROR_CODE_INDENTATION_WIDTH_INVALID] = {
+        .title = "indentation must be a multiple of 4 spaces",
+        .label = "indented by {number} spaces",
+        .help = "indent with four spaces for each level",
+    },
+    [ERROR_CODE_FLOAT_LITERAL_DIGIT_INVALID] = {
+        .title = "'{detail}' is not a digit of a float literal",
+        .label = "not a digit",
+        .note = "a float literal has the digits 0 to 9 and nothing else after its dot, since there "
+                "is no exponent and no suffix",
+    },
+    [ERROR_CODE_FLOAT_LITERAL_SEPARATOR_INVALID] = {
+        .title = "a digit separator '_' must be between two digits",
+        .label = "this '_' is not between two digits",
+        .help = "put a digit on each side of it, as in 1_000.5, or remove it",
+    },
+    [ERROR_CODE_FLOAT_LITERAL_TOO_LARGE] = {
+        .title = "float literal is larger than the largest F64",
+        .label = "the largest F64 is about 1.8e308",
+    },
+    [ERROR_CODE_FLOAT_LITERAL_TOO_LONG] = {
+        .title = "float literal has more than 128 characters",
+        .label = "too long",
+    },
+    [ERROR_CODE_INTEGER_LITERAL_DIGIT_INVALID] = {
+        .title = "'{detail}' is not a digit of an integer literal",
+        .label = "not a digit",
+        .note = "an integer literal has the digits 0 to 9, or 0 and 1 after '0b', or 0 to 9 and a "
+                "to f after '0x'",
+    },
+    [ERROR_CODE_INTEGER_LITERAL_DIGITS_MISSING] = {
+        .title = "integer literal has no digits after its prefix",
+        .label = "needs a digit after the prefix",
+        .note = "'0b' is followed by binary digits and '0x' by hexadecimal digits",
+    },
+    [ERROR_CODE_INTEGER_LITERAL_SEPARATOR_INVALID] = {
+        .title = "a digit separator '_' must be between two digits",
+        .label = "this '_' is not between two digits",
+        .help = "put a digit on each side of it, as in 1_000, or remove it",
+    },
+    [ERROR_CODE_INTEGER_LITERAL_TOO_LARGE] = {
+        .title = "integer literal is larger than the largest Int",
+        .label = "the largest Int is 9223372036854775807",
+    },
+    [ERROR_CODE_LABEL_INVALID] = {
+        .title = "a label cannot be a reserved word",
+        .label = "this is a reserved word",
+        .note = "a label is a ':' directly followed by a name, and the name is not a reserved word",
+    },
+    [ERROR_CODE_RUNE_LITERAL_EMPTY] = {
+        .title = "a rune literal has no character",
+        .label = "there is no character between the quotes",
+        .note = "a rune literal has a character between its quotes",
+    },
+    [ERROR_CODE_RUNE_LITERAL_ESCAPE_INVALID] = {
+        .title = "this is not an escape sequence of a rune",
+        .label = "not an escape sequence",
+        .note = "an escape sequence is a backslash and one of a, b, e, f, n, r, t, v, \\, ' or \", "
+                "three octal digits up to 377, x and two hexadecimal digits, u and four, or U and "
+                "eight, with a number that is a Unicode character, which is at most 10FFFF and not "
+                "D800 to DFFF",
+    },
+    [ERROR_CODE_RUNE_LITERAL_ENCODING_INVALID] = {
+        .title = "the character of a rune must be valid UTF-8",
+        .label = "this byte is not valid UTF-8",
+        .note = "source code is UTF-8 text",
+    },
+    [ERROR_CODE_RUNE_LITERAL_TOO_LONG] = {
+        .title = "a rune literal has more than one character",
+        .label = "more than one character between the quotes",
+        .note = "a rune literal has one character between its quotes",
+        .help = "write more than one character as a string, between double quotes",
+    },
+    [ERROR_CODE_RUNE_LITERAL_UNTERMINATED] = {
+        .title = "a rune literal has no closing quote",
+        .label = "no closing quote on this line",
+        .note = "a rune literal ends on the line where it starts",
+    },
+    [ERROR_CODE_STRING_LITERAL_BACKSLASH] = {
+        .title = "a string cannot contain a backslash",
+        .label = "this backslash",
+        .note = "escape sequences are not supported in strings yet, and the backslash is kept for "
+                "them, so that strings that are written today keep their meaning when the "
+                "language gets them",
+    },
+    [ERROR_CODE_STRING_LITERAL_ENCODING_INVALID] = {
+        .title = "a string must be valid UTF-8",
+        .label = "this byte is not valid UTF-8",
+        .note = "source code is UTF-8 text",
+    },
+    [ERROR_CODE_STRING_LITERAL_UNTERMINATED] = {
+        .title = "string has no closing quote",
+        .label = "no closing quote on this line",
+        .note = "a string ends on the line where it starts",
+    },
+    [ERROR_CODE_TOKEN_LIMIT] = {
+        .title = "more than {number} tokens",
+        .label = "the tokens end here",
+        .note = "the compiler reads at most {number} tokens of a file, so that the memory that it "
+                "needs is known when it starts",
+    },
+    [ERROR_CODE_UNEXPECTED_CHARACTER] = {
+        .title = "unexpected character '{detail}' (0x{hex})",
+        .label = "this cannot start a token",
+    },
 };
 
-static void report_emit(Reporter const *reporter, Report_Error const *error);
-static Str  report_expand(char const *template, Report_Error const *error, char *buffer,
-                          size_t buffer_size_bytes);
-static void report_text_append(Report_Text *text, Str part);
-static void report_text_append_subject(Report_Text *text, Str subject);
+// The code of each status of the tokenizer. A status that is not in the table is not an error.
+static Error_Code const REPORT_TOKENIZE_CODES[] = {
+    [TOKENIZE_STATUS_COMMENT_ENCODING_INVALID] = ERROR_CODE_COMMENT_ENCODING_INVALID,
+    [TOKENIZE_STATUS_DOCUMENTATION_COMMENT_TRAILING] = ERROR_CODE_DOCUMENTATION_COMMENT_TRAILING,
+    [TOKENIZE_STATUS_FLOAT_LITERAL_DIGIT_INVALID] = ERROR_CODE_FLOAT_LITERAL_DIGIT_INVALID,
+    [TOKENIZE_STATUS_FLOAT_LITERAL_SEPARATOR_INVALID] =
+        ERROR_CODE_FLOAT_LITERAL_SEPARATOR_INVALID,
+    [TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LARGE] = ERROR_CODE_FLOAT_LITERAL_TOO_LARGE,
+    [TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LONG] = ERROR_CODE_FLOAT_LITERAL_TOO_LONG,
+    [TOKENIZE_STATUS_INDENTATION_TAB] = ERROR_CODE_INDENTATION_TAB,
+    [TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID] = ERROR_CODE_INDENTATION_WIDTH_INVALID,
+    [TOKENIZE_STATUS_INTEGER_LITERAL_DIGIT_INVALID] = ERROR_CODE_INTEGER_LITERAL_DIGIT_INVALID,
+    [TOKENIZE_STATUS_INTEGER_LITERAL_DIGITS_MISSING] = ERROR_CODE_INTEGER_LITERAL_DIGITS_MISSING,
+    [TOKENIZE_STATUS_INTEGER_LITERAL_SEPARATOR_INVALID] =
+        ERROR_CODE_INTEGER_LITERAL_SEPARATOR_INVALID,
+    [TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE] = ERROR_CODE_INTEGER_LITERAL_TOO_LARGE,
+    [TOKENIZE_STATUS_LABEL_INVALID] = ERROR_CODE_LABEL_INVALID,
+    [TOKENIZE_STATUS_RUNE_LITERAL_EMPTY] = ERROR_CODE_RUNE_LITERAL_EMPTY,
+    [TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID] = ERROR_CODE_RUNE_LITERAL_ENCODING_INVALID,
+    [TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID] = ERROR_CODE_RUNE_LITERAL_ESCAPE_INVALID,
+    [TOKENIZE_STATUS_RUNE_LITERAL_TOO_LONG] = ERROR_CODE_RUNE_LITERAL_TOO_LONG,
+    [TOKENIZE_STATUS_RUNE_LITERAL_UNTERMINATED] = ERROR_CODE_RUNE_LITERAL_UNTERMINATED,
+    [TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH] = ERROR_CODE_STRING_LITERAL_BACKSLASH,
+    [TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID] = ERROR_CODE_STRING_LITERAL_ENCODING_INVALID,
+    [TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED] = ERROR_CODE_STRING_LITERAL_UNTERMINATED,
+    [TOKENIZE_STATUS_TOKEN_LIMIT] = ERROR_CODE_TOKEN_LIMIT,
+    [TOKENIZE_STATUS_UNEXPECTED_CHARACTER] = ERROR_CODE_UNEXPECTED_CHARACTER,
+};
+
+static void   report_emit(Reporter const *reporter, Report_Error const *error);
+static Str    report_expand(char const *template, Report_Error const *error, char *buffer,
+                            size_t buffer_size_bytes);
+static bool   report_is_word_byte(char character);
+static size_t report_length_character(Str source, size_t offset);
+static size_t report_length_literal(Str source, size_t offset);
+static size_t report_length_word(Str source, size_t offset);
+static void   report_text_append(Report_Text *text, Str part);
+static void   report_text_append_subject(Report_Text *text, Str subject);
 
 void report_general(Reporter const *reporter, Error_Code code, char const *path,
                     int64_t number) {
@@ -138,6 +296,174 @@ void report_general(Reporter const *reporter, Error_Code code, char const *path,
         .has_span = false,
     };
     report_emit(reporter, &error);
+}
+
+void report_tokenize_error(Reporter const *reporter, char const *path, Str source,
+                           Tokenize_Result result) {
+    assert(reporter != NULL);
+    assert(path != NULL);
+    assert(result.status != TOKENIZE_STATUS_OK);
+    assert(result.error_offset < source.length);
+
+    size_t offset = result.error_offset;
+    size_t length = 1;
+    Str detail = STR_EMPTY;
+    int64_t number = 0;
+    // How much of the source the error is about depends on what the tokenizer found. Some are
+    // about one character, some about a whole literal.
+    switch (result.status) {
+    case TOKENIZE_STATUS_OK:
+        assert(false);
+        break;
+    case TOKENIZE_STATUS_COMMENT_ENCODING_INVALID:
+    case TOKENIZE_STATUS_FLOAT_LITERAL_SEPARATOR_INVALID:
+    case TOKENIZE_STATUS_INDENTATION_TAB:
+    case TOKENIZE_STATUS_INTEGER_LITERAL_SEPARATOR_INVALID:
+    case TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID:
+    case TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH:
+    case TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID:
+        break;
+    case TOKENIZE_STATUS_DOCUMENTATION_COMMENT_TRAILING:
+        length = sizeof("///") - 1;
+        break;
+    case TOKENIZE_STATUS_FLOAT_LITERAL_DIGIT_INVALID:
+    case TOKENIZE_STATUS_INTEGER_LITERAL_DIGIT_INVALID:
+        detail = str_make(source.bytes + offset, 1);
+        break;
+    case TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LARGE:
+    case TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LONG:
+    case TOKENIZE_STATUS_INTEGER_LITERAL_DIGITS_MISSING:
+    case TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE:
+    case TOKENIZE_STATUS_RUNE_LITERAL_EMPTY:
+    case TOKENIZE_STATUS_RUNE_LITERAL_TOO_LONG:
+    case TOKENIZE_STATUS_RUNE_LITERAL_UNTERMINATED:
+    case TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED:
+        length = report_length_literal(source, offset);
+        break;
+    case TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID:
+        // The error is where the indentation ends, so the spaces before it are what is wrong.
+        while (offset > 0 && source.bytes[offset - 1] == ' ') {
+            offset -= 1;
+        }
+        length = result.error_offset - offset;
+        number = (int64_t)length;
+        break;
+    case TOKENIZE_STATUS_LABEL_INVALID:
+        // The colon and the name.
+        length = 1 + report_length_word(source, offset + 1);
+        detail = str_make(source.bytes + offset + 1, length - 1);
+        break;
+    case TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID:
+        // The backslash and what follows it, if that is on the line.
+        if (offset + 1 < source.length && source.bytes[offset + 1] != '\n') {
+            length = 2;
+        }
+        break;
+    case TOKENIZE_STATUS_TOKEN_LIMIT:
+        number = TOKEN_COUNT_MAX;
+        break;
+    case TOKENIZE_STATUS_UNEXPECTED_CHARACTER:
+        length = report_length_character(source, offset);
+        detail = str_make(source.bytes + offset, length);
+        number = (int64_t)(byte)source.bytes[offset];
+        break;
+    }
+
+    Error_Code code = REPORT_TOKENIZE_CODES[result.status];
+    assert(code > 0);
+
+    Report_Error error = {
+        .path = path,
+        .source = source,
+        .subject = str_make(source.bytes + offset, length),
+        .detail = detail,
+        .span_offset = offset,
+        .span_length = length,
+        .number = number,
+        .code = code,
+        .has_span = true,
+    };
+    report_emit(reporter, &error);
+}
+
+/**
+ * Returns the length in bytes of the character that starts at `offset` in `source`, which is the
+ * one byte of an ASCII character, or the bytes that a lead byte of UTF-8 says, as far as the source
+ * goes. A byte that is not a lead byte is a character of its own.
+ */
+static size_t report_length_character(Str source, size_t offset) {
+    assert(offset < source.length);
+
+    byte lead = (byte)source.bytes[offset];
+    size_t length = 1;
+    if (lead >= 0xF0) {
+        length = 4;
+    } else if (lead >= 0xE0) {
+        length = 3;
+    } else if (lead >= 0xC0) {
+        length = 2;
+    }
+    if (offset + length > source.length) {
+        length = source.length - offset;
+    }
+    return length;
+}
+
+static bool report_is_word_byte(char character) {
+    bool is_letter = (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z');
+    bool is_digit = character >= '0' && character <= '9';
+    return is_letter || is_digit || character == '_';
+}
+
+/**
+ * Returns the length in bytes of the name that starts at `offset` in `source`, which is the letters,
+ * digits and underscores that follow there. It may be zero.
+ */
+static size_t report_length_word(Str source, size_t offset) {
+    assert(offset <= source.length);
+
+    size_t length = 0;
+    while (offset + length < source.length && report_is_word_byte(source.bytes[offset + length])) {
+        length += 1;
+    }
+    return length;
+}
+
+/**
+ * Returns the length in bytes of the literal that starts at `offset` in `source`. A string or a rune
+ * goes to its closing quote, or to the end of its line when it has none. A number is the letters,
+ * digits, underscores and dots that follow.
+ */
+static size_t report_length_literal(Str source, size_t offset) {
+    assert(offset < source.length);
+
+    char first = source.bytes[offset];
+    size_t index = offset;
+    if (first == '"' || first == '\'') {
+        index += 1;
+        while (index < source.length && source.bytes[index] != '\n' &&
+               source.bytes[index] != '\r') {
+            // A backslash in a rune takes the character after it, so that `'\''` is one literal.
+            // A string has no escape sequences.
+            if (first == '\'' && source.bytes[index] == '\\' && index + 1 < source.length &&
+                source.bytes[index + 1] != '\n') {
+                index += 2;
+            } else if (source.bytes[index] == first) {
+                return index + 1 - offset;
+            } else {
+                index += 1;
+            }
+        }
+        return index - offset;
+    }
+    while (index < source.length &&
+           (report_is_word_byte(source.bytes[index]) || source.bytes[index] == '.')) {
+        index += 1;
+    }
+    if (index == offset) {
+        return 1;
+    }
+    return index - offset;
 }
 
 /**

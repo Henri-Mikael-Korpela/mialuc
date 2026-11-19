@@ -1,0 +1,7 @@
+error[E0118]: a rune literal has no closing quote
+ --> test-code/errors/front/E0118-rune-literal-unterminated.mu:2:10
+  |
+2 |     x := 'a
+  |          ^^ no closing quote on this line
+  |
+  = note: a rune literal ends on the line where it starts

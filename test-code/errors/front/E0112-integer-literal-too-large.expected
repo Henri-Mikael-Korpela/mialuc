@@ -1,0 +1,5 @@
+error[E0112]: integer literal is larger than the largest Int
+ --> test-code/errors/front/E0112-integer-literal-too-large.mu:2:10
+  |
+2 |     x := 9223372036854775808
+  |          ^^^^^^^^^^^^^^^^^^^ the largest Int is 9223372036854775807

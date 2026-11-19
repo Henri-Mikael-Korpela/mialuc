@@ -1,0 +1,8 @@
+error[E0105]: 'f' is not a digit of a float literal
+ --> test-code/errors/front/E0105-float-literal-digit-invalid.mu:2:13
+  |
+2 |     x := 1.5f
+  |             ^ not a digit
+  |
+  = note: a float literal has the digits 0 to 9 and nothing else after its dot, since there is no
+          exponent and no suffix

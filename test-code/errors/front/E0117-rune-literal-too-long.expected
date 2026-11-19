@@ -1,0 +1,8 @@
+error[E0117]: a rune literal has more than one character
+ --> test-code/errors/front/E0117-rune-literal-too-long.mu:2:10
+  |
+2 |     x := 'ab'
+  |          ^^^^ more than one character between the quotes
+  |
+  = note: a rune literal has one character between its quotes
+  = help: write more than one character as a string, between double quotes

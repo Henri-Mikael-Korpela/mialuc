@@ -1,0 +1,7 @@
+error[E0121]: string has no closing quote
+ --> test-code/errors/front/E0121-string-literal-unterminated.mu:2:10
+  |
+2 |     x := "abc
+  |          ^^^^ no closing quote on this line
+  |
+  = note: a string ends on the line where it starts

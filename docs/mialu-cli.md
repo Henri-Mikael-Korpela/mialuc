@@ -232,13 +232,15 @@ The exception is `run`, which ends with the exit status of the program when it s
 An error is printed to the standard error, and is laid out like an error of Rust:
 
 ```
-error[E0101]: integer literal is larger than the largest Int
- --> main.mu:3:10
+error[E0102]: a documentation comment must be on lines of its own
+ --> main.mu:1:23
   |
-3 |     x := 9223372036854775808
-  |          ^^^^^^^^^^^^^^^^^^^ the largest Int is 9223372036854775807
+1 | main :: proc() Int -> /// Documents.
+  |                       ^^^ this '///' comes after code on its line
   |
-  = help: use an I64 or a U64 for a larger number
+  = note: a documentation comment documents the code after it, so it cannot follow code on the same
+          line
+  = help: use '//' for a note after code on a line
 ```
 
 - The first line has the **code** of the error, `E` and four digits, and its **title**, which says what is wrong. Every kind of error has a code of its own, which never changes and is not used for anything else, so it can be searched for. The codes, and what each error means, are in [Error codes](error-codes.md).

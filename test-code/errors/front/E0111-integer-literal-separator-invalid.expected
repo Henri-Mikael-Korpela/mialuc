@@ -1,0 +1,7 @@
+error[E0111]: a digit separator '_' must be between two digits
+ --> test-code/errors/front/E0111-integer-literal-separator-invalid.mu:2:11
+  |
+2 |     x := 1__000
+  |           ^ this '_' is not between two digits
+  |
+  = help: put a digit on each side of it, as in 1_000, or remove it

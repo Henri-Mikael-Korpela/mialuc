@@ -12,6 +12,7 @@
 #include <mialu/ast.h>
 #include <mialu/common_types.h>
 #include <mialu/constant.h>
+#include <mialu/limits.h>
 #include <mialu/package.h>
 #include <mialu/parser.h>
 #include <mialu/process.h>
@@ -30,16 +31,6 @@
 #endif
 
 enum {
-    // Larger sources are rejected. The tokenizer works on one buffer that is allocated once at
-    // startup, so a bound keeps memory use predictable.
-    SOURCE_SIZE_BYTES_MAX = 1024 * 1024,
-    // Bounds the token buffer, which is allocated once at startup. A token is at least one byte,
-    // so this is far more tokens than a source of the maximum size is likely to contain.
-    TOKEN_COUNT_MAX = 64 * 1024,
-    // Bounds the module that the build mode writes. The module is allocated once at startup. It
-    // is mostly a few bytes per token, so this is far more than a source of the maximum size is
-    // likely to need.
-    OUTPUT_SIZE_BYTES_MAX = 1024 * 1024,
     // Bounds the text of the strings that `++` makes when the program is compiled, which is
     // allocated once at startup. The text is part of the program, so it is never larger than the
     // module that the build mode writes.
@@ -51,10 +42,6 @@ enum {
     // Bounds the text of the documentation comment that `dump-types` prints for a name, in bytes. The
     // rest is left out, like that of a value.
     MAIN_DOC_BYTES_MAX = 4000,
-    // Bounds the text that the `wat` target writes. The text is allocated once at startup. The
-    // largest growth is `i64.add`, one byte of the module that becomes 12 bytes of text, so 16
-    // bytes of text per byte of the module is enough.
-    OUTPUT_TEXT_SIZE_BYTES_MAX = 16 * OUTPUT_SIZE_BYTES_MAX,
     // Bounds the absolute path of the source file that a debug build writes into the program. It
     // is the longest path that Windows has, so any path that the system resolves fits.
     SOURCE_PATH_SIZE_BYTES_MAX = 32 * 1024,
@@ -210,7 +197,8 @@ static bool         main_type_text_write                   (Ast_Node const *node
 static int32_t      main_run_command_front                 (Command command,
                                                             Buffers const *buffers,
                                                             Packages *packages);
-static void         main_package_report                    (char const *path, Str source,
+static void         main_package_report                    (Reporter const *reporter,
+                                                            char const *path, Str source,
                                                             Package_Result result);
 static void         main_subject_source                    (char const **path, Str *source,
                                                             Str subject);
@@ -236,8 +224,6 @@ static void         main_run_command_report_parse_error    (char const *path, St
                                                             Parse_Result parse_result);
 static void         main_run_command_report_semantic_error (char const *path, Str source,
                                                             Semantic_Result result);
-static void         main_run_command_report_tokenize_error (char const *path, Str source,
-                                                            Tokenize_Result result);
 static void         main_run_command_report_wasm_error     (char const *path, Str source,
                                                             Wasm_Build_Result result);
 static void         main_run_command_report_x64_error      (char const *path, Str source,
@@ -583,7 +569,7 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
 
     Tokenize_Result result = tokenize(source, buffers->tokens);
     if (result.status != TOKENIZE_STATUS_OK) {
-        main_run_command_report_tokenize_error(path, source, result);
+        report_tokenize_error(&command.reporter, path, source, result);
         return 1;
     }
     assert(result.tokens.length <= TOKEN_COUNT_MAX);
@@ -602,7 +588,7 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
     Package_Result imported = packages_load(packages, &code_tokens, buffers->nodes,
                                             SOURCE_SIZE_BYTES_MAX, TOKEN_COUNT_MAX);
     if (imported.status != PACKAGE_STATUS_OK) {
-        main_package_report(path, source, imported);
+        main_package_report(&command.reporter, path, source, imported);
         return 1;
     }
     Parse_Result parse_result = parse_at(code_tokens, buffers->nodes, packages->imported_end);
@@ -2370,121 +2356,6 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
     }
 }
 
-static void main_run_command_report_tokenize_error(char const *path, Str source,
-                                                   Tokenize_Result result) {
-    assert(result.status != TOKENIZE_STATUS_OK);
-    assert(result.error_offset < source.length);
-
-    // Line and column are only needed for the message, so they are computed here rather than
-    // tracked for every byte while tokenizing.
-    Str_Position position = str_position_at(source, result.error_offset);
-    size_t line = position.line;
-    size_t column = position.column;
-
-    switch (result.status) {
-    case TOKENIZE_STATUS_OK:
-        assert(false);
-        break;
-    case TOKENIZE_STATUS_COMMENT_ENCODING_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: a comment must be valid UTF-8.\n", path, line, column);
-        break;
-    case TOKENIZE_STATUS_DOCUMENTATION_COMMENT_TRAILING:
-        fprintf(stderr, "%s:%zu:%zu: a documentation comment '///' must be on lines of its own, "
-                "after code on a line use '//'.\n", path, line, column);
-        break;
-    case TOKENIZE_STATUS_INDENTATION_TAB:
-        fprintf(stderr, "%s:%zu:%zu: indentation must use spaces, not tabs.\n", path, line,
-                column);
-        break;
-    case TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: indentation must be a multiple of 4 spaces.\n", path, line,
-                column);
-        break;
-    case TOKENIZE_STATUS_FLOAT_LITERAL_DIGIT_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: '%c' is not a digit of the float literal, which has the "
-                "digits 0 to 9 and nothing else after the dot, since there is no exponent and no "
-                "suffix.\n", path, line, column, source.bytes[result.error_offset]);
-        break;
-    case TOKENIZE_STATUS_FLOAT_LITERAL_SEPARATOR_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: a digit separator '_' must be between two digits.\n", path,
-                line, column);
-        break;
-    case TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LARGE:
-        fprintf(stderr, "%s:%zu:%zu: float literal is larger than the largest F64, about "
-                "1.8e308.\n", path, line, column);
-        break;
-    case TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LONG:
-        fprintf(stderr, "%s:%zu:%zu: float literal has more than 128 characters.\n", path, line,
-                column);
-        break;
-    case TOKENIZE_STATUS_INTEGER_LITERAL_DIGIT_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: '%c' is not a digit of the integer literal, which has the "
-                "digits 0 to 9, or 0 and 1 after '0b', or 0 to 9 and a to f after '0x'.\n",
-                path, line, column, source.bytes[result.error_offset]);
-        break;
-    case TOKENIZE_STATUS_INTEGER_LITERAL_DIGITS_MISSING:
-        fprintf(stderr, "%s:%zu:%zu: integer literal has no digits after its prefix.\n", path,
-                line, column);
-        break;
-    case TOKENIZE_STATUS_INTEGER_LITERAL_SEPARATOR_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: a digit separator '_' must be between two digits.\n", path,
-                line, column);
-        break;
-    case TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE:
-        fprintf(stderr, "%s:%zu:%zu: integer literal is larger than the largest Int, "
-                "9223372036854775807.\n", path, line, column);
-        break;
-    case TOKENIZE_STATUS_LABEL_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: a label is ':' directly followed by a name that is not a "
-                "reserved word.\n", path, line, column);
-        break;
-    case TOKENIZE_STATUS_RUNE_LITERAL_EMPTY:
-        fprintf(stderr, "%s:%zu:%zu: a rune literal has a character between its quotes, and "
-                "this has none.\n", path, line, column);
-        break;
-    case TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: this is not an escape sequence of a rune: a backslash and "
-                "one of a, b, e, f, n, r, t, v, \\, ' or \", three octal digits up to 377, x and "
-                "two hexadecimal digits, u and four, or U and eight, with a number that is a "
-                "Unicode character, which is at most 10FFFF and not D800 to DFFF.\n", path, line,
-                column);
-        break;
-    case TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: the character of a rune must be valid UTF-8.\n", path, line,
-                column);
-        break;
-    case TOKENIZE_STATUS_RUNE_LITERAL_TOO_LONG:
-        fprintf(stderr, "%s:%zu:%zu: a rune literal has one character between its quotes, and "
-                "this has more.\n", path, line, column);
-        break;
-    case TOKENIZE_STATUS_RUNE_LITERAL_UNTERMINATED:
-        fprintf(stderr, "%s:%zu:%zu: a rune literal has no closing quote on its line.\n", path,
-                line, column);
-        break;
-    case TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH:
-        fprintf(stderr, "%s:%zu:%zu: a string cannot contain a backslash, because escape "
-                "sequences are not supported.\n", path, line, column);
-        break;
-    case TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID:
-        fprintf(stderr, "%s:%zu:%zu: a string must be valid UTF-8.\n", path, line, column);
-        break;
-    case TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED:
-        fprintf(stderr, "%s:%zu:%zu: string has no closing quote on its line.\n", path, line,
-                column);
-        break;
-    case TOKENIZE_STATUS_TOKEN_LIMIT:
-        fprintf(stderr, "%s:%zu:%zu: more than %d tokens.\n", path, line, column, TOKEN_COUNT_MAX);
-        break;
-    case TOKENIZE_STATUS_UNEXPECTED_CHARACTER: {
-        char character = source.bytes[result.error_offset];
-        // The cast is needed because `%x` takes an `unsigned`, and a plain `char` may be signed.
-        fprintf(stderr, "%s:%zu:%zu: unexpected character '%c' (0x%02x).\n", path, line, column,
-                character, (unsigned)(byte)character);
-        break;
-    }
-    }
-}
-
 static void main_run_command_report_parse_error(char const *path, Str source, Array_Slice tokens,
                                     Parse_Result parse_result) {
     assert(parse_result.status != PARSE_STATUS_OK);
@@ -3360,14 +3231,14 @@ static void main_subject_source(char const **path, Str *source, Str subject) {
  * Prints what is wrong with the files that the program imports, which `result` says. A tokenize or
  * parse error is told as the one of the file that has it.
  */
-static void main_package_report(char const *path, Str source, Package_Result result) {
+static void main_package_report(Reporter const *reporter, char const *path, Str source,
+                                Package_Result result) {
     assert(result.status != PACKAGE_STATUS_OK);
 
     int subject_length = (int)result.subject.length;
     switch (result.status) {
     case PACKAGE_STATUS_TOKENIZE_ERROR:
-        main_run_command_report_tokenize_error(result.path, result.source,
-                                               result.tokenize_result);
+        report_tokenize_error(reporter, result.path, result.source, result.tokenize_result);
         return;
     case PACKAGE_STATUS_PARSE_ERROR:
         main_run_command_report_parse_error(result.path, result.source, result.code_tokens,
