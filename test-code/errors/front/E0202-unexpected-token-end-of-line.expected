@@ -1,0 +1,5 @@
+error[E0202]: unexpected end of the line
+ --> test-code/errors/front/E0202-unexpected-token-end-of-line.mu:4:13
+  |
+4 |     x := 3 +
+  |             ^ expected an integer literal, a float literal, a rune literal, a string literal, 'true', 'false', 'nil', a name, a call, an array literal, a struct literal, 'cast', 'type_info_of' or a member of an enum such as '.RED'

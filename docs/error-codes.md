@@ -71,7 +71,7 @@ These are found when the tokens are put together into the syntax tree, see the [
 | Code | Title | When |
 |---|---|---|
 | E0201 | more than 65536 syntax tree nodes | The program has more nodes than the compiler allocates. |
-| E0202 | unexpected `token` | The token is not what the grammar takes there. The label says what it takes. At the end of a line the token is the first one of the next line, and at the end of the file it is `end of the file`. |
+| E0202 | unexpected `token` | The token is not what the grammar takes there. The label says what it takes. When the line ends where the grammar wants more, as when a foreign procedure has no `->` and `...`, the token is `end of the line` and the error is at the end of that line, and at the end of the file it is `end of the file`. |
 
 ## E0301 - E0399: the files that a program imports
 

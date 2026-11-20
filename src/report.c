@@ -1140,6 +1140,7 @@ static size_t report_length_token(Str source, size_t offset, Token_Kind kind);
 static size_t report_length_word(Str source, size_t offset);
 static void   report_text_append(Report_Text *text, Str part);
 static void   report_text_append_subject(Report_Text *text, Str subject);
+static bool   report_text_contains(Str text, Str part);
 
 void report_general(Reporter const *reporter, Error_Code code, char const *path,
                     int64_t number) {
@@ -1263,7 +1264,14 @@ void report_parse_error(Reporter const *reporter, char const *path, Str source, 
     size_t token_index = result.error_token_index;
     // A line starts with an indentation token, which has no text. What the parser found there is
     // the first token of the line, which is the next one.
+    // When the parser wants something about the indentation, that line is what is wrong. When it
+    // wants something else, such as an arrow, the line before it ended too soon, and the error is
+    // at its end.
+    bool is_indentation_wanted = report_text_contains(result.expected, STR("indent")) ||
+                                 report_text_contains(result.expected, STR("start of a line"));
+    bool is_first_line = token_elements[token_index].source_offset == 0;
     if (token_elements[token_index].kind == TOKEN_KIND_INDENTATION &&
+        (is_indentation_wanted || is_first_line) &&
         token_index + 1 < tokens.length) {
         token_index += 1;
     }
@@ -1634,6 +1642,23 @@ static size_t report_length_character(Str source, size_t offset) {
         length = source.length - offset;
     }
     return length;
+}
+
+/**
+ * Returns whether `part` is somewhere in `text`.
+ */
+static bool report_text_contains(Str text, Str part) {
+    assert(text.bytes != NULL || text.length == 0);
+
+    if (part.length > text.length) {
+        return false;
+    }
+    for (size_t i = 0; i + part.length <= text.length; i += 1) {
+        if (memcmp(text.bytes + i, part.bytes, part.length) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static bool report_is_word_byte(char character) {

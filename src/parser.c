@@ -966,7 +966,14 @@ static Ast_Node_Index parse_procedure(Parser *parser, uint32_t indentation_level
         return AST_NODE_INDEX_NONE;
     }
 
-    if (not parse_token_expect(parser, TOKEN_KIND_ARROW, STR("'->'"))) {
+    // The body of a foreign procedure is defined elsewhere, which is what `...` says, so what is
+    // missing is told with its reason.
+    Str arrow_expected = STR("'->'");
+    if (is_foreign) {
+        arrow_expected = STR("'->' and '...', because the body of a foreign procedure is defined "
+                             "elsewhere");
+    }
+    if (not parse_token_expect(parser, TOKEN_KIND_ARROW, arrow_expected)) {
         return AST_NODE_INDEX_NONE;
     }
     if (is_foreign) {
