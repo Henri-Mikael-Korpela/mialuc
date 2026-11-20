@@ -80,7 +80,7 @@
         },
         "strings": {
             "name": "string.quoted.double.mialu",
-            "comment": "A string has no escape sequences, so a backslash is invalid, and it ends with its line.",
+            "comment": "A string can have the escape sequences of a rune literal: a backslash and one of a b e f n r t v \\ ' or \", three octal digits, x and two hexadecimal digits, u and four, or U and eight. Any other backslash is invalid, and the string ends with its line.",
             "begin": "\"",
             "beginCaptures": {
                 "0": {
@@ -94,6 +94,10 @@
                 }
             },
             "patterns": [
+                {
+                    "name": "constant.character.escape.mialu",
+                    "match": "\\\\(?:[abefnrtv\\\\'\"]|[0-7]{3}|x\\h{2}|u\\h{4}|U\\h{8})"
+                },
                 {
                     "name": "invalid.illegal.backslash.mialu",
                     "match": "\\\\"

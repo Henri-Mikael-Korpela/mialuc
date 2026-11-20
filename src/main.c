@@ -94,6 +94,8 @@ typedef struct {
 typedef struct {
     Array_Slice source;
     Array_Slice tokens;
+    // The text of the strings that have escape sequences, which the tokens view.
+    Array_Slice string_text;
     // The tokens without the comments, which is what the parser takes.
     Array_Slice code_tokens;
     Array_Slice nodes;
@@ -252,6 +254,9 @@ int main(int argc, char *argv[]) {
         .source = array_slice_make(malloc(SOURCE_SIZE_BYTES_MAX * sizeof(byte)),
                                    SOURCE_SIZE_BYTES_MAX),
         .tokens = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Token)), TOKEN_COUNT_MAX),
+        // An escape sequence is never longer than the text that it stands for is written.
+        .string_text = array_slice_make(malloc(SOURCE_SIZE_BYTES_MAX * sizeof(char)),
+                                        SOURCE_SIZE_BYTES_MAX),
         .code_tokens = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Token)), TOKEN_COUNT_MAX),
         // A node needs at least one token, so as many nodes as tokens suffice, except that `++`
         // makes two, which a source that is made of little else can run out of, and the parser then
@@ -287,7 +292,7 @@ int main(int argc, char *argv[]) {
 
     int32_t exit_code = 1;
     if (buffers.source.elements == NULL || buffers.tokens.elements == NULL ||
-        buffers.code_tokens.elements == NULL || buffers.nodes.elements == NULL ||
+        buffers.string_text.elements == NULL || buffers.code_tokens.elements == NULL || buffers.nodes.elements == NULL ||
         buffers.bindings.elements == NULL || buffers.constants.elements == NULL ||
         buffers.text.elements == NULL ||
         buffers.output.elements == NULL || buffers.output_text.elements == NULL ||
@@ -312,6 +317,7 @@ int main(int argc, char *argv[]) {
     free(buffers.bindings.elements);
     free(buffers.nodes.elements);
     free(buffers.code_tokens.elements);
+    free(buffers.string_text.elements);
     free(buffers.tokens.elements);
     free(buffers.source.elements);
     return exit_code;
@@ -544,7 +550,7 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
         return 1;
     }
 
-    Tokenize_Result result = tokenize(source, buffers->tokens);
+    Tokenize_Result result = tokenize(source, buffers->tokens, buffers->string_text);
     if (result.status != TOKENIZE_STATUS_OK) {
         report_tokenize_error(&command.reporter, path, source, result);
         return 1;

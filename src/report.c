@@ -238,12 +238,14 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .label = "no closing quote on this line",
         .note = "a rune literal ends on the line where it starts",
     },
-    [ERROR_CODE_STRING_LITERAL_BACKSLASH] = {
-        .title = "a string cannot contain a backslash",
-        .label = "this backslash",
-        .note = "escape sequences are not supported in strings yet, and the backslash is kept for "
-                "them, so that strings that are written today keep their meaning when the "
-                "language gets them",
+    [ERROR_CODE_STRING_LITERAL_ESCAPE_INVALID] = {
+        .title = "this is not an escape sequence of a string",
+        .label = "not an escape sequence",
+        .note = "an escape sequence is a backslash and one of a, b, e, f, n, r, t, v, \\, ' or \", "
+                "three octal digits up to 377, x and two hexadecimal digits, u and four, or U and "
+                "eight, with a number that is a Unicode character, which is at most 10FFFF and not "
+                "D800 to DFFF",
+        .help = "write a backslash that is not the start of one as two backslashes",
     },
     [ERROR_CODE_STRING_LITERAL_ENCODING_INVALID] = {
         .title = "a string must be valid UTF-8",
@@ -995,7 +997,7 @@ static Error_Code const REPORT_TOKENIZE_CODES[] = {
     [TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID] = ERROR_CODE_RUNE_LITERAL_ESCAPE_INVALID,
     [TOKENIZE_STATUS_RUNE_LITERAL_TOO_LONG] = ERROR_CODE_RUNE_LITERAL_TOO_LONG,
     [TOKENIZE_STATUS_RUNE_LITERAL_UNTERMINATED] = ERROR_CODE_RUNE_LITERAL_UNTERMINATED,
-    [TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH] = ERROR_CODE_STRING_LITERAL_BACKSLASH,
+    [TOKENIZE_STATUS_STRING_LITERAL_ESCAPE_INVALID] = ERROR_CODE_STRING_LITERAL_ESCAPE_INVALID,
     [TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID] = ERROR_CODE_STRING_LITERAL_ENCODING_INVALID,
     [TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED] = ERROR_CODE_STRING_LITERAL_UNTERMINATED,
     [TOKENIZE_STATUS_TOKEN_LIMIT] = ERROR_CODE_TOKEN_LIMIT,
@@ -1182,7 +1184,6 @@ void report_tokenize_error(Reporter const *reporter, char const *path, Str sourc
     case TOKENIZE_STATUS_INDENTATION_TAB:
     case TOKENIZE_STATUS_INTEGER_LITERAL_SEPARATOR_INVALID:
     case TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID:
-    case TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH:
     case TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID:
         break;
     case TOKENIZE_STATUS_DOCUMENTATION_COMMENT_TRAILING:
@@ -1216,6 +1217,7 @@ void report_tokenize_error(Reporter const *reporter, char const *path, Str sourc
         detail = str_make(source.bytes + offset + 1, length - 1);
         break;
     case TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID:
+    case TOKENIZE_STATUS_STRING_LITERAL_ESCAPE_INVALID:
         // The backslash and what follows it, if that is on the line.
         if (offset + 1 < source.length && source.bytes[offset + 1] != '\n') {
             length = 2;

@@ -519,7 +519,11 @@ A string is length-based, not null-terminated. It is its bytes together with the
 
 > **Lessons learnt from C** In C, a string is a pointer to bytes that end with a zero, so its length is found by walking over it every time, a string cannot hold a zero byte, and a function that copies or appends to one has to be trusted to have enough room, which is the source of a great many buffer overflows. A missing terminator makes code read on past the end of the string. In Mialu a `Str` knows its length, so none of that is needed, and the null-terminated form exists only as the separate type `C_Str`, for interoperating with C code.
 
-The compiler rejects a string literal that is not valid UTF-8. A string cannot contain a double quote or a line break, because they would end it, and cannot contain a backslash. There are no escape sequences.
+The compiler rejects a string literal that is not valid UTF-8. A string cannot contain a double quote or a line break as they are, because they would end it, and cannot contain a backslash as it is, because it starts an escape sequence.
+
+A string can have the [escape sequences](#characters) of a rune literal, and they are the same ones: `"one\ttwo\nthree"` has a tab and a new line, `"say \"hi\""` has the double quotes, `"C:\\dir"` has one backslash, and `"\u00e9\U0001F680"` is `"é🚀"`. An escape sequence stands for a character, which is part of the string as its UTF-8 bytes, so `"\xe9"` is the two bytes of `é`, and not one byte with the number 233, and the string is valid UTF-8 whatever escape sequences it has. The character with the code point 0 is `"\000"` or `"\x00"`, and the string has a zero byte. `length_of` and the subscript of a string count the characters that the escape sequences stand for. An escape sequence that is not one of the table, such as `"\q"`, or one that is not a Unicode character, such as `"\ud800"`, is an error. The single quote can be written `"\'"` or as it is, and the double quote has to be `"\""`.
+
+Escape sequences are worked out when the program is compiled, so a string constant that has them is the same as one that has the characters, and `++` joins the characters that they stand for.
 
 A `C_Str` (short for "C string") represents a null-terminated string. Unlike `Str`, it doesn't store length, it must determined by a null-terminator, which is a byte with value `0`.
 

@@ -73,6 +73,7 @@ static bool   tokenizer_comment_line_end(Str source, size_t offset, size_t *end)
 static Tokenize_Float_Literal tokenizer_float_literal(Str source, size_t offset);
 static Tokenize_Rune_Literal tokenizer_rune_literal(Str source, size_t offset);
 static uint32_t utf8_decode(Str text, size_t offset, size_t sequence_size);
+static size_t   utf8_encode(uint32_t code_point, char *bytes);
 static bool   tokenizer_escape_read(Str source, size_t offset, uint32_t *value, size_t *length);
 static Tokenize_Integer_Literal tokenizer_integer_literal(Str source, size_t offset);
 static Token_Kind tokenizer_keyword_type(Str text);
@@ -274,6 +275,37 @@ static uint32_t utf8_decode(Str text, size_t offset, size_t sequence_size) {
         code_point = (code_point << 6) | ((byte)text.bytes[offset + i] & 0x3Fu);
     }
     return code_point;
+}
+
+/**
+ * Writes the UTF-8 encoding of `code_point`, which must be a Unicode character, to `bytes`, which
+ * has room for four, and returns the number of bytes that it took: the fewest that can hold it, as
+ * RFC 3629 says.
+ */
+static size_t utf8_encode(uint32_t code_point, char *bytes) {
+    assert(code_point <= 0x10FFFF);
+    assert(code_point < 0xD800 || code_point > 0xDFFF);
+
+    if (code_point < 0x80) {
+        bytes[0] = (char)code_point;
+        return 1;
+    }
+    if (code_point < 0x800) {
+        bytes[0] = (char)(0xC0 | (code_point >> 6));
+        bytes[1] = (char)(0x80 | (code_point & 0x3F));
+        return 2;
+    }
+    if (code_point < 0x10000) {
+        bytes[0] = (char)(0xE0 | (code_point >> 12));
+        bytes[1] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+        bytes[2] = (char)(0x80 | (code_point & 0x3F));
+        return 3;
+    }
+    bytes[0] = (char)(0xF0 | (code_point >> 18));
+    bytes[1] = (char)(0x80 | ((code_point >> 12) & 0x3F));
+    bytes[2] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+    bytes[3] = (char)(0x80 | (code_point & 0x3F));
+    return 4;
 }
 
 /**
@@ -681,8 +713,10 @@ static Token_Kind tokenizer_keyword_type(Str text) {
     return TOKEN_KIND_IDENTIFIER;
 }
 
-Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
+Tokenize_Result tokenize(Str source, Array_Slice token_buffer, Array_Slice text_buffer) {
     assert(token_buffer.elements != NULL);
+    assert(text_buffer.elements != NULL);
+    assert(text_buffer.length >= source.length);
     assert(source.bytes != NULL || source.length == 0);
 
     // Offsets are stored in 32 bits, see `Token`.
@@ -694,6 +728,8 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         .error_offset = 0,
         .status = TOKENIZE_STATUS_OK,
     };
+    // How much of `text_buffer` the strings with escape sequences have taken.
+    size_t text_length = 0;
 
     // One slot is kept free for the `END` token, so that it can always be added at the end.
     assert(token_buffer.length >= 1);
@@ -847,13 +883,27 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
         else if (character == '"') {
             // Bounded by `source.length`, since each iteration consumes at least one byte. A
             // character that is not ASCII takes several bytes, which are checked together, so
-            // that the string is valid UTF-8 as a whole.
+            // that the string is valid UTF-8 as a whole. An escape sequence is read as a whole too.
             size_t end = offset + 1;
+            bool has_escape = false;
             while (end < source.length) {
                 char part = source.bytes[end];
 
-                if (part == '"' || part == '\\' || part == '\n' || part == '\r') {
+                if (part == '"' || part == '\n' || part == '\r') {
                     break;
+                }
+
+                if (part == '\\') {
+                    uint32_t escaped = 0;
+                    size_t escape_size = 0;
+                    if (not tokenizer_escape_read(source, end, &escaped, &escape_size)) {
+                        result.status = TOKENIZE_STATUS_STRING_LITERAL_ESCAPE_INVALID;
+                        result.error_offset = end;
+                        return result;
+                    }
+                    has_escape = true;
+                    end += escape_size;
+                    continue;
                 }
 
                 size_t sequence_size = utf8_sequence_size(source, end);
@@ -873,18 +923,39 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer) {
                 result.error_offset = offset;
                 return result;
             }
-            if (source.bytes[end] == '\\') {
-                result.status = TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH;
-                result.error_offset = end;
-                return result;
-            }
 
             assert(source.bytes[end] == '"');
+            Str text = str_make(source.bytes + offset + 1, end - offset - 1);
+            if (has_escape) {
+                // The text is what the escape sequences stand for, which is not in the source, so
+                // it is written to the buffer. It is never longer than the source of the string,
+                // so the buffer, which is as long as the source, has room for it.
+                char *decoded = (char *)text_buffer.elements + text_length;
+                size_t decoded_length = 0;
+                size_t index = offset + 1;
+                while (index < end) {
+                    if (source.bytes[index] == '\\') {
+                        uint32_t escaped = 0;
+                        size_t escape_size = 0;
+                        bool is_escape = tokenizer_escape_read(source, index, &escaped,
+                                                               &escape_size);
+                        assert(is_escape);
+                        decoded_length += utf8_encode(escaped, decoded + decoded_length);
+                        index += escape_size;
+                    } else {
+                        decoded[decoded_length] = source.bytes[index];
+                        decoded_length += 1;
+                        index += 1;
+                    }
+                }
+                text_length += decoded_length;
+                assert(text_length <= text_buffer.length);
+                text = str_make(decoded, decoded_length);
+            }
             token_elements[result.tokens.length] = (Token){
                 .kind = TOKEN_KIND_STRING_LITERAL,
                 .source_offset = (uint32_t)offset,
-                .payload.string_literal.text = str_make(source.bytes + offset + 1,
-                                                        end - offset - 1),
+                .payload.string_literal.text = text,
             };
             result.tokens.length += 1;
             offset = end + 1;

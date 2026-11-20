@@ -79,6 +79,8 @@ typedef struct {
     char *path;
     Str import_text;
     Str source;
+    // The text of the strings of the file that have escape sequences, which its tokens view.
+    char *text;
     Str package_name;
     size_t node_start;
     size_t node_end;

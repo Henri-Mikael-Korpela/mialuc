@@ -775,10 +775,11 @@ bool_literal = "true" | "false" ;
 (* `nil` is the null pointer. *)
 nil_literal = "nil" ;
 
-(* Text between quotes, on one line. It is taken as it is: there are no escape sequences yet, so a
-   backslash is not allowed, to keep it free for them. Any other character is, including a tab
-   and characters that are not ASCII. The grammar works on characters, so it only sees text that
-   is valid UTF-8; the compiler works on bytes and rejects a string that is not. *)
+(* Text between quotes, on one line. A character is taken as it is, including a tab and characters
+   that are not ASCII, except the double quote, the backslash and a line break, which are written
+   with an escape sequence, the same ones as of a rune literal. The grammar works on characters,
+   so it only sees text that is valid UTF-8; the compiler works on bytes and rejects a string that
+   is not. *)
 (* A rune literal is one character between single quotes, which can be any character that is valid
    UTF-8, such as `'A'`, `'芋'` and `'🚀'`, or an escape sequence that stands for one, such as `'\n'`
    and `'\u0123'`. The quote, the backslash and a line break are not characters of a literal as they
@@ -800,7 +801,7 @@ escape_sequence =
 
 octal_digit = "0" .. "7" ;
 
-string_literal = '"' , { string_character } , '"' ;
+string_literal = '"' , { string_character | escape_sequence } , '"' ;
 
 string_character = any_character - ( '"' | "\\" | "\n" | "\r" ) ;
 

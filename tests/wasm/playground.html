@@ -368,6 +368,7 @@
             "scope resolution": "scope-resolution",
             "string comparison": "string-comparison",
             "string constant": "string-constant",
+            "string escapes": "string-escapes",
             "string iteration": "string-iteration",
             "string slices": "string-slices",
             "string subscript": "string-subscript",
@@ -403,7 +404,7 @@
         const HIGHLIGHT_RULES = {
             mialu: [
                 ["comment", /\/\/.*/],
-                ["string", /"[^"\\\n]*"|'(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|[^'\\\n]|\\(?:[abefnrtv\\'"]|[0-7]{3}|x[\dA-Fa-f]{2}|u[\dA-Fa-f]{4}|U[\dA-Fa-f]{8}))'/],
+                ["string", /"(?:[^"\\\n]|\\(?:[abefnrtv\\'"]|[0-7]{3}|x[\dA-Fa-f]{2}|u[\dA-Fa-f]{4}|U[\dA-Fa-f]{8}))*"|'(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|[^'\\\n]|\\(?:[abefnrtv\\'"]|[0-7]{3}|x[\dA-Fa-f]{2}|u[\dA-Fa-f]{4}|U[\dA-Fa-f]{8}))'/],
                 ["attribute", /#(?:[ \t]*\([ \t]*[A-Za-z_]\w*[ \t]*\))+/],
                 ["label", /(?<=(?:^|\n)[ \t]*|defer[ \t]+):[A-Za-z_]\w*/],
                 ["keyword", /\b(?:proc|return|if|else|for|in|break|case|cast|const|continue|defer|enum|match|struct|type_info_of|union|foreign|import|package|and|or)\b|\bnot\b(?!=)/],

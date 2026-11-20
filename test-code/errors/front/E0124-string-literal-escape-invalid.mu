@@ -1,3 +1,5 @@
+package errors
+
 main :: proc() Int ->
-    x := "a\nb"
+    x := "a\qb"
     return 0

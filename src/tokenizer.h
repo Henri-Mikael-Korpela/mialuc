@@ -201,9 +201,10 @@ typedef enum {
     TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE,
     // A label, a `:` and a name at the start of a statement, whose name is a reserved word.
     TOKENIZE_STATUS_LABEL_INVALID,
-    // A backslash in a string. It is kept for escape sequences, which the language does not have
-    // yet, so that strings written today keep their meaning when it gets them.
-    TOKENIZE_STATUS_STRING_LITERAL_BACKSLASH,
+    // An escape sequence of a string that is not one of the language, which are those of a rune
+    // literal, see `TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID`. `error_offset` is where the
+    // backslash is.
+    TOKENIZE_STATUS_STRING_LITERAL_ESCAPE_INVALID,
     // The string has bytes that are not valid UTF-8. `error_offset` is where the first bad
     // character starts.
     TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID,
@@ -250,8 +251,14 @@ typedef struct {
  * so
  * at most `token_buffer.length - 1` other tokens fit, and the buffer must hold at least one
  * element.
+ *
+ * The text of a string literal is a view of the source, unless the string has an escape sequence,
+ * which stands for a character that is not the text as it is written. Then the text is written to
+ * `text_buffer`, which holds `char` elements and has at least as many as the source has bytes,
+ * because the text of an escape sequence is never longer than it is, and the text of the token is
+ * a view of it. So the buffer must live as long as the tokens are used.
  */
-Tokenize_Result tokenize(Str source, Array_Slice token_buffer);
+Tokenize_Result tokenize(Str source, Array_Slice token_buffer, Array_Slice text_buffer);
 
 /**
  * Copies the tokens of `tokens`, which holds `Token` elements, to `code_buffer` in the same order

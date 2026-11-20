@@ -57,11 +57,12 @@ These are found first, when the source is split into tokens. See the [specificat
 | E0116 | the character of a rune must be valid UTF-8 | |
 | E0117 | a rune literal has more than one character | `'ab'`. Write more than one character as a string. |
 | E0118 | a rune literal has no closing quote | The rune does not end on its line. |
-| E0119 | a string cannot contain a backslash | Escape sequences are not supported in strings yet, and the backslash is kept for them. |
+| E0119 | | Not used any more: a backslash in a string was an error before strings had escape sequences, and a code is never used again. |
 | E0120 | a string must be valid UTF-8 | |
 | E0121 | string has no closing quote | The string does not end on its line. |
 | E0122 | more than 65536 tokens | The compiler reads at most 65536 tokens of a file. |
 | E0123 | unexpected character 'c' | A character that cannot start a token. |
+| E0124 | this is not an escape sequence of a string | A backslash in a string that does not make an escape sequence, such as `"a\qb"`, or one with a number that is not a Unicode character. A backslash is written `\\`. |
 
 ## E0201 - E0299: the syntax
 

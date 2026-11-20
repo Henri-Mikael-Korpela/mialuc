@@ -100,6 +100,7 @@ void packages_free(Packages *packages) {
     for (size_t i = 0; i < packages->file_count; i += 1) {
         free(packages->files[i].path);
         free((void *)packages->files[i].source.bytes);
+        free(packages->files[i].text);
     }
     free(packages->names);
     free(packages->executable_library);
@@ -305,6 +306,7 @@ static Package_Result package_import(Packages *packages, Str import_text, size_t
         .path = NULL,
         .import_text = import_text,
         .source = STR_EMPTY,
+        .text = NULL,
         .package_name = STR_EMPTY,
         .node_start = 0,
         .node_end = 0,
@@ -341,7 +343,17 @@ static Package_Result package_import(Packages *packages, Str import_text, size_t
         result.status = PACKAGE_STATUS_OUT_OF_MEMORY;
         return result;
     }
-    Tokenize_Result tokenized = tokenize(file->source, array_slice_make(tokens, token_count_max));
+    // The text of the strings that have escape sequences, which the tokens view, so it stays with
+    // the file. It is as long as the source, which is as long as the text can be.
+    file->text = malloc(file->source.length + 1);
+    if (file->text == NULL) {
+        free(tokens);
+        free(code_tokens);
+        result.status = PACKAGE_STATUS_OUT_OF_MEMORY;
+        return result;
+    }
+    Tokenize_Result tokenized = tokenize(file->source, array_slice_make(tokens, token_count_max),
+                                         array_slice_make(file->text, file->source.length + 1));
     if (tokenized.status != TOKENIZE_STATUS_OK) {
         free(packages->error_tokens);
         packages->error_tokens = tokens;

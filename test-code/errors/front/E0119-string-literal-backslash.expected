@@ -1,8 +1,0 @@
-error[E0119]: a string cannot contain a backslash
- --> test-code/errors/front/E0119-string-literal-backslash.mu:2:12
-  |
-2 |     x := "a\nb"
-  |            ^ this backslash
-  |
-  = note: escape sequences are not supported in strings yet, and the backslash is kept for them, so
-          that strings that are written today keep their meaning when the language gets them

@@ -1,0 +1,10 @@
+error[E0124]: this is not an escape sequence of a string
+ --> test-code/errors/front/E0124-string-literal-escape-invalid.mu:4:12
+  |
+4 |     x := "a\qb"
+  |            ^^ not an escape sequence
+  |
+  = note: an escape sequence is a backslash and one of a, b, e, f, n, r, t, v, \, ' or ", three
+          octal digits up to 377, x and two hexadecimal digits, u and four, or U and eight, with a
+          number that is a Unicode character, which is at most 10FFFF and not D800 to DFFF
+  = help: write a backslash that is not the start of one as two backslashes
