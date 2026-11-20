@@ -10,6 +10,10 @@
 typedef enum {
     PARSE_STATUS_OK,
     PARSE_STATUS_NODE_LIMIT,
+    // A `return` without a value in a procedure that has a return type. `expected` is the return
+    // type, as the source writes it, which is a view of the source, and `error_token_index` is the
+    // token after the `return`.
+    PARSE_STATUS_RETURN_VALUE_MISSING,
     PARSE_STATUS_UNEXPECTED_TOKEN,
 } Parse_Status;
 
@@ -18,7 +22,8 @@ typedef enum {
  * and `root` is the index in it of the `AST_NODE_TYPE_MODULE` node. Otherwise `root` is
  * `AST_NODE_INDEX_NONE`, `error_token_index` is the index of the token where parsing stopped and,
  * for `PARSE_STATUS_UNEXPECTED_TOKEN`, `expected` describes what the parser wanted there. The
- * text of `expected` is a string literal and stays valid.
+ * text of `expected` is a string literal and stays valid, and for
+ * `PARSE_STATUS_RETURN_VALUE_MISSING` it is a view of the source.
  */
 typedef struct {
     Array_Slice nodes;

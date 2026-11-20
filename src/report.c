@@ -275,6 +275,11 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .note = "the compiler builds at most {number} nodes of the syntax tree for a program, so "
                 "that the memory that it needs is known when it starts",
     },
+    [ERROR_CODE_RETURN_VALUE_MISSING] = {
+        .title = "'return' has no value, but the procedure returns {detail}",
+        .label = "expected a return value of type {detail}, but none was given",
+        .note = "a procedure that has a return type returns a value of it with every 'return'",
+    },
     [ERROR_CODE_UNEXPECTED_TOKEN] = {
         .title = "unexpected {subject}",
         .label = "expected {detail}",
@@ -972,6 +977,7 @@ static Error_Code const REPORT_PACKAGE_CODES[] = {
 // The code of each status of the parser.
 static Error_Code const REPORT_PARSE_CODES[] = {
     [PARSE_STATUS_NODE_LIMIT] = ERROR_CODE_NODE_LIMIT,
+    [PARSE_STATUS_RETURN_VALUE_MISSING] = ERROR_CODE_RETURN_VALUE_MISSING,
     [PARSE_STATUS_UNEXPECTED_TOKEN] = ERROR_CODE_UNEXPECTED_TOKEN,
 };
 
@@ -1267,8 +1273,10 @@ void report_parse_error(Reporter const *reporter, char const *path, Str source, 
     // When the parser wants something about the indentation, that line is what is wrong. When it
     // wants something else, such as an arrow, the line before it ended too soon, and the error is
     // at its end.
-    bool is_indentation_wanted = report_text_contains(result.expected, STR("indent")) ||
-                                 report_text_contains(result.expected, STR("start of a line"));
+    bool is_indentation_wanted =
+        result.status == PARSE_STATUS_UNEXPECTED_TOKEN &&
+        (report_text_contains(result.expected, STR("indent")) ||
+         report_text_contains(result.expected, STR("start of a line")));
     bool is_first_line = token_elements[token_index].source_offset == 0;
     if (token_elements[token_index].kind == TOKEN_KIND_INDENTATION &&
         (is_indentation_wanted || is_first_line) &&

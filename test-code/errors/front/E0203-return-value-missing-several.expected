@@ -1,0 +1,11 @@
+error[E0203]: 'return' has no value, but the procedure returns Int, Str
+ --> test-code/errors/front/E0203-return-value-missing-several.mu:4:11
+  |
+2 |
+3 | pair :: proc() (Int, Str) ->
+4 |     return
+  |           ^ expected a return value of type Int, Str, but none was given
+5 |
+6 | main :: proc() Int ->
+  |
+  = note: a procedure that has a return type returns a value of it with every 'return'

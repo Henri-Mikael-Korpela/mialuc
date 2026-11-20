@@ -68,6 +68,8 @@ typedef struct {
     Token const *tokens;
     Ast_Node *nodes;
     Str expected;
+    // The procedure whose body is being parsed, which is where a `return` gets what it returns.
+    Ast_Node_Index procedure;
     // How many array literals and struct literals are open, which are inside each other because
     // their elements and fields are expressions. It is bounded by `AST_BLOCK_DEPTH_MAX`, so that
     // the recursion that this needs cannot go on without end.
@@ -190,6 +192,7 @@ Parse_Result parse_at(Array_Slice tokens, Array_Slice node_buffer, size_t node_s
         .expected = STR(""),
         .literal_depth = 0,
         .has_type_info = false,
+        .procedure = AST_NODE_INDEX_NONE,
         .system_aliases = {{0}},
         .system_libraries = {{0}},
         .system_library_count = 0,
@@ -1135,6 +1138,8 @@ static bool parse_procedure_body(Parser *parser, Ast_Node_Index procedure,
                                  uint32_t indentation_level) {
     assert(procedure < parser->node_count);
     assert(indentation_level < UINT32_MAX);
+
+    parser->procedure = procedure;
 
     // The first one is the body of the procedure, and the others are inside each other.
     Parse_Block blocks[AST_BLOCK_DEPTH_MAX + 1];
@@ -2223,6 +2228,25 @@ static Ast_Node_Index parse_return_statement(Parser *parser) {
 
     if (not parse_token_expect(parser, TOKEN_KIND_KEYWORD_RETURN, STR("'return'"))) {
         return AST_NODE_INDEX_NONE;
+    }
+
+    // A procedure that has a return type is given a value, so a line that ends here lacks it. The
+    // return type is told, which is what is wanted, and not the expressions that could start one.
+    Token const *after = parse_token_current(parser);
+    bool is_line_end = after->kind == TOKEN_KIND_INDENTATION || after->kind == TOKEN_KIND_END;
+    if (is_line_end && parser->procedure != AST_NODE_INDEX_NONE) {
+        Ast_Node const *procedure = &parser->nodes[parser->procedure];
+        size_t return_count = ast_procedure_return_count(procedure);
+        if (return_count > 0) {
+            // The types are written one after the other in the source, so from the first to the end
+            // of the last is the text that the source has for all of them.
+            Str first = ast_procedure_return_type_at(procedure, 0);
+            Str last = ast_procedure_return_type_at(procedure, return_count - 1);
+            parser->status = PARSE_STATUS_RETURN_VALUE_MISSING;
+            parser->expected = str_make(first.bytes, (size_t)(last.bytes - first.bytes) + last.length);
+            parser->error_token_index = parser->token_index;
+            return AST_NODE_INDEX_NONE;
+        }
     }
 
     // Every value consumes a token, so there are fewer values than tokens, which bounds the loop.
