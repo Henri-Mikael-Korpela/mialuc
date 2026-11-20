@@ -1,7 +1,11 @@
 error[E0460]: the number at 'X' does not fit in a Byte
  --> test-code/errors/front/E0460-constant-value-not-representable.mu:3:1
   |
+1 | package errors
+2 |
 3 | X : Byte : 300
   | ^
+4 |
+5 | main :: proc() Int ->
   |
   = note: an untyped integer must fit in the Byte that it becomes, which is a number from 0 to 255

@@ -1,5 +1,9 @@
 error[E0407]: the struct already has a field called 'x'
  --> test-code/errors/front/E0407-field-name-duplicate.mu:5:5
   |
+3 | Point :: struct ->
+4 |     x: Int
 5 |     x: Int
   |     ^ defined again here
+6 |
+7 | main :: proc() Int ->

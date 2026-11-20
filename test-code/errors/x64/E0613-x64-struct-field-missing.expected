@@ -1,7 +1,11 @@
 error[E0613]: the literal of 'y' gives some fields and not all of them
  --> test-code/errors/x64/E0613-x64-struct-field-missing.mu:5:5
   |
+3 | Point :: struct ->
+4 |     x: Int
 5 |     y: Int
   |     ^
+6 |
+7 | main :: proc() Int ->
   |
   = note: a literal gives either every field or none

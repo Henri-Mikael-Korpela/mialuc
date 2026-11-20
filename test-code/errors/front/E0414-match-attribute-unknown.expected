@@ -1,7 +1,11 @@
 error[E0414]: 'loose' is not an attribute of a match statement
- --> test-code/errors/front/E0414-match-attribute-unknown.mu:8:13
-  |
-8 |     match #(loose) c ->
-  |             ^^^^^ unknown attribute
-  |
-  = note: the only attribute of a match statement is 'partial'
+  --> test-code/errors/front/E0414-match-attribute-unknown.mu:8:13
+   |
+ 6 | main :: proc() Int ->
+ 7 |     c := Color.RED
+ 8 |     match #(loose) c ->
+   |             ^^^^^ unknown attribute
+ 9 |         case .RED ->
+10 |             c = Color.RED
+   |
+   = note: the only attribute of a match statement is 'partial'

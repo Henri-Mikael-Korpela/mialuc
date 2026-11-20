@@ -1,8 +1,12 @@
 error[E0451]: the constant 'A' is defined in terms of itself
  --> test-code/errors/front/E0451-constant-cycle.mu:4:6
   |
+2 |
+3 | A :: B
 4 | B :: A
   |      ^ this constant uses itself
+5 |
+6 | main :: proc() Int ->
   |
   = note: the value of a constant is worked out when the program is compiled, and a constant that
           uses itself has no value to start from

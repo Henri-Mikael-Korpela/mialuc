@@ -1,5 +1,9 @@
 error[E0528]: 'a' is not an Int, so it cannot be the start or the end of a range
  --> test-code/errors/wasm/E0528-range-type-invalid.mu:4:15
   |
+2 |
+3 | main :: proc() Int ->
 4 |     for i in "a"..<3 ->
   |               ^ not an Int
+5 |         return i
+6 |     return 0

@@ -1,7 +1,9 @@
 error[E0120]: a string must be valid UTF-8
  --> test-code/errors/front/E0120-string-literal-encoding-invalid.mu:2:12
   |
+1 | main :: proc() Int ->
 2 |     x := "a�b"
   |            ^ this byte is not valid UTF-8
+3 |     return 0
   |
   = note: source code is UTF-8 text

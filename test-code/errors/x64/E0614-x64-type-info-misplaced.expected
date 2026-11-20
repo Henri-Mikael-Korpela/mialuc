@@ -1,7 +1,10 @@
 error[E0614]: the information about 'Color' is not a value
  --> test-code/errors/x64/E0614-x64-type-info-misplaced.mu:8:23
   |
+6 |
+7 | main :: proc() Int ->
 8 |     n := type_info_of(Color) == type_info_of(Color)
   |                       ^^^^^
+9 |     return 0
   |
   = help: read a field of it right away, such as '.members' or '.name'

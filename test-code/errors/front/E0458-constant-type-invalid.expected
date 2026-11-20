@@ -1,8 +1,12 @@
 error[E0458]: the constant 'X' has a type that a constant cannot have
  --> test-code/errors/front/E0458-constant-type-invalid.mu:6:1
   |
+4 |     x: Int
+5 |
 6 | X : Point : 1
   | ^ not the type of a constant
+7 |
+8 | main :: proc() Int ->
   |
   = note: a constant is an Int, an I32, an I64, a U32, a U64, a Byte, a Rune, an F32, an F64, a Bool
           or a Str

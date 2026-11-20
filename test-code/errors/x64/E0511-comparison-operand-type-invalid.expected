@@ -1,8 +1,11 @@
 error[E0511]: 'n' cannot be compared here
  --> test-code/errors/x64/E0511-comparison-operand-type-invalid.mu:5:10
   |
+3 | main :: proc() Int ->
+4 |     n := 1
 5 |     x := n == "a"
   |          ^
+6 |     return 0
   |
   = note: both operands of a comparison must be Int, or both must be I32, or both must be I64, or
           both must be U32, or both must be U64, or both must be floats of one type, or both must be

@@ -1,7 +1,9 @@
 error[E0116]: the character of a rune must be valid UTF-8
  --> test-code/errors/front/E0116-rune-literal-encoding-invalid.mu:2:11
   |
+1 | main :: proc() Int ->
 2 |     x := '�'
   |           ^ this byte is not valid UTF-8
+3 |     return 0
   |
   = note: source code is UTF-8 text

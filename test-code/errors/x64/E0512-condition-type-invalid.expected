@@ -1,7 +1,11 @@
 error[E0512]: the condition at 'a' is not a Bool
  --> test-code/errors/x64/E0512-condition-type-invalid.mu:4:9
   |
+2 |
+3 | main :: proc() Int ->
 4 |     if "a" ->
   |         ^ not a Bool
+5 |         return 1
+6 |     return 0
   |
   = note: an Int is not converted to a Bool

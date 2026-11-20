@@ -1,8 +1,12 @@
 error[E0302]: cannot read the file of the import 'mu:missing'
  --> test-code/errors/front/E0302-import-file-unreadable.mu:3:9
   |
+1 | package errors
+2 |
 3 | import "mu:missing"
   |         ^^^^^^^^^^ this file cannot be read
+4 |
+5 | main :: proc() Int ->
   |
   = note: the file does not exist, cannot be read, or is larger than a source can be. Looked for:
           <root>/src/mialu-std/missing.mu

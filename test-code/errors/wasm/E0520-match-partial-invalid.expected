@@ -1,8 +1,12 @@
 error[E0520]: 'partial' only means something for a match of an enum that has no default case
  --> test-code/errors/wasm/E0520-match-partial-invalid.mu:5:13
   |
+3 | main :: proc() Int ->
+4 |     n := 1
 5 |     match #(partial) n ->
   |             ^^^^^^^
+6 |         case 1 ->
+7 |             n = 2
   |
   = note: a match of an enum that has no default case is the only match that must have a case for
           every value

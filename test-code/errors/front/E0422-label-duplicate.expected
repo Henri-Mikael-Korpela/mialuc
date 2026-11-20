@@ -1,5 +1,9 @@
 error[E0422]: the label 'outer' is already used by a statement around this one
  --> test-code/errors/front/E0422-label-duplicate.mu:5:10
   |
+3 | main :: proc() Int ->
+4 |     :outer ->
 5 |         :outer ->
   |          ^^^^^ used again here
+6 |             break outer
+7 |     return 0

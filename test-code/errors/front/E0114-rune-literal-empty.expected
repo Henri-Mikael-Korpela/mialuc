@@ -1,7 +1,9 @@
 error[E0114]: a rune literal has no character
  --> test-code/errors/front/E0114-rune-literal-empty.mu:2:10
   |
+1 | main :: proc() Int ->
 2 |     x := ''
   |          ^^ there is no character between the quotes
+3 |     return 0
   |
   = note: a rune literal has a character between its quotes

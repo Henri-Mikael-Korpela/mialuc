@@ -1,8 +1,12 @@
 error[E0454]: an operator of the constant expression at 'X' is given operands that it does not take
  --> test-code/errors/front/E0454-constant-operand-type-invalid.mu:3:1
   |
+1 | package errors
+2 |
 3 | X :: 1 + true
   | ^
+4 |
+5 | main :: proc() Int ->
   |
   = note: arithmetic takes integers that are untyped or Int, I32 or I64, or floats, but not both,
           'and', 'or' and 'not' take truth values, a Byte is compared with a Byte or a number from 0

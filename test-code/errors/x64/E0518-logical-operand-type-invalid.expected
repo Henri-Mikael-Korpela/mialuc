@@ -1,5 +1,8 @@
 error[E0518]: 'n' is not a Bool, so it cannot be used with 'and', 'or' or 'not'
  --> test-code/errors/x64/E0518-logical-operand-type-invalid.mu:5:10
   |
+3 | main :: proc() Int ->
+4 |     n := 1
 5 |     x := n and 2
   |          ^ not a Bool
+6 |     return 0

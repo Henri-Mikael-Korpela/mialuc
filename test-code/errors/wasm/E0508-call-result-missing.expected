@@ -1,5 +1,8 @@
 error[E0508]: the procedure 'nothing' returns no value, so its call cannot be used as one
  --> test-code/errors/wasm/E0508-call-result-missing.mu:7:10
   |
+5 |
+6 | main :: proc() Int ->
 7 |     x := nothing()
   |          ^^^^^^^
+8 |     return 0

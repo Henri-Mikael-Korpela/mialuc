@@ -1,5 +1,9 @@
 error[E0412]: the attribute 'static' is given twice
  --> test-code/errors/front/E0412-attribute-duplicate.mu:3:19
   |
+1 | package errors
+2 |
 3 | counter #(static)(static) := 0
   |                   ^^^^^^ given again here
+4 |
+5 | main :: proc() Int ->

@@ -1,5 +1,9 @@
 error[E0523]: the range of the case has no numbers in it, so it could never match
  --> test-code/errors/wasm/E0523-match-range-empty.mu:6:9
   |
+4 |     n := 1
+5 |     match n ->
 6 |         case 5..<5 ->
   |         ^^^^ an empty range
+7 |             n = 2
+8 |         case ->

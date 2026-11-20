@@ -1,5 +1,8 @@
 error[E0410]: 'i' is the iterator of a for loop, so it cannot be assigned to
  --> test-code/errors/front/E0410-assignment-target-iterator.mu:5:9
   |
+3 | main :: proc() Int ->
+4 |     for i in 0..<3 ->
 5 |         i = 5
   |         ^ cannot be assigned to
+6 |     return 0

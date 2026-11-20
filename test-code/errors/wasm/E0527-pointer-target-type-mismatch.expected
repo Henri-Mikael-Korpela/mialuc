@@ -1,5 +1,8 @@
 error[E0527]: the value assigned through 'p' is not of the type that it points to
  --> test-code/errors/wasm/E0527-pointer-target-type-mismatch.mu:6:5
   |
+4 |     x := 3
+5 |     p := %x
 6 |     p^ = "a"
   |     ^
+7 |     return 0

@@ -1,8 +1,12 @@
 error[E0455]: the constant expression at 'X' has a value that does not fit
  --> test-code/errors/front/E0455-constant-overflow.mu:3:1
   |
+1 | package errors
+2 |
 3 | X :: 9223372036854775807 + 1
   | ^
+4 |
+5 | main :: proc() Int ->
   |
   = note: an Int goes from -9223372036854775808 to 9223372036854775807, and a float must be finite.
           Constant arithmetic does not wrap around as the arithmetic of a running program does,

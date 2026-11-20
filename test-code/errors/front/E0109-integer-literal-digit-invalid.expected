@@ -1,8 +1,10 @@
 error[E0109]: '2' is not a digit of an integer literal
  --> test-code/errors/front/E0109-integer-literal-digit-invalid.mu:2:14
   |
+1 | main :: proc() Int ->
 2 |     x := 0b102
   |              ^ not a digit
+3 |     return 0
   |
   = note: an integer literal has the digits 0 to 9, or 0 and 1 after '0b', or 0 to 9 and a to f
           after '0x'

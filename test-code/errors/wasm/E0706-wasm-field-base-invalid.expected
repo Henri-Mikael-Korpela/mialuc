@@ -1,5 +1,8 @@
 error[E0706]: the field 'x' is read or assigned through a value that is not a variable, a parameter or an element of an array
  --> test-code/errors/wasm/E0706-wasm-field-base-invalid.mu:8:33
   |
+6 |
+7 | main :: proc() Int ->
 8 |     x := Point { x = 1, y = 2 }.x
   |                                 ^
+9 |     return 0

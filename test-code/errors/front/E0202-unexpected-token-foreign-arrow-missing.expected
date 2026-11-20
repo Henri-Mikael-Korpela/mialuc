@@ -1,5 +1,9 @@
 error[E0202]: unexpected end of the line
  --> test-code/errors/front/E0202-unexpected-token-foreign-arrow-missing.mu:6:37
   |
+4 |
+5 | foreign libc ->
 6 |     puts :: proc(content: C_Str) Int
   |                                     ^ expected '->' and '...', because the body of a foreign procedure is defined elsewhere
+7 |
+8 | main :: proc() Int ->

@@ -1,5 +1,8 @@
 error[E0529]: the number of names of 'a' is not the number of values that the call gives
  --> test-code/errors/x64/E0529-result-count-mismatch.mu:7:5
   |
+5 |
+6 | main :: proc() Int ->
 7 |     a, b, c := pair()
   |     ^
+8 |     return 0

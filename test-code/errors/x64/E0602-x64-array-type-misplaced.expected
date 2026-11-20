@@ -1,8 +1,12 @@
 error[E0602]: the parameter 'a' cannot be an array
  --> test-code/errors/x64/E0602-x64-array-type-misplaced.mu:3:11
   |
+1 | package errors
+2 |
 3 | f :: proc(a: [3]Int) ->
   |           ^ an array here
+4 |     y := 1
+5 |
   |
   = note: an array is in the frame of its procedure, so a parameter takes an array slice
   = help: write the type as '[]Type'

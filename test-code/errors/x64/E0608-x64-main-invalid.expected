@@ -1,7 +1,10 @@
 error[E0608]: 'main' must be 'main :: proc() Int ->'
  --> test-code/errors/x64/E0608-x64-main-invalid.mu:3:1
   |
+1 | package errors
+2 |
 3 | main :: proc(n: Int) Int ->
   | ^^^^ not the procedure that starts the program
+4 |     return 0
   |
   = note: 'main' is a procedure without parameters that returns an Int, which is the exit code

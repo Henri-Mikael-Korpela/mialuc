@@ -1,5 +1,8 @@
 error[E0543]: variable 'x' is given a value that is not of its type
  --> test-code/errors/wasm/E0543-variable-type-mismatch.mu:4:5
   |
+2 |
+3 | main :: proc() Int ->
 4 |     x : Int = "a"
   |     ^
+5 |     return 0

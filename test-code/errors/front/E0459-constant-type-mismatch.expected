@@ -1,5 +1,9 @@
 error[E0459]: the value of the constant 'X' is not of the type of the constant
  --> test-code/errors/front/E0459-constant-type-mismatch.mu:3:1
   |
+1 | package errors
+2 |
 3 | X : Int : "text"
   | ^ not of the type of the constant
+4 |
+5 | main :: proc() Int ->

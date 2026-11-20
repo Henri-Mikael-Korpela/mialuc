@@ -1,8 +1,12 @@
 error[E0708]: the match has no case for the member 'GREEN' of the enum
- --> test-code/errors/wasm/E0708-wasm-match-not-exhaustive.mu:9:5
-  |
-9 |     match c ->
-  |     ^^^^^ this match leaves 'GREEN' out
-  |
-  = help: add a case for it, a default case 'case ->', or write 'match #(partial)' to leave members
-          out
+  --> test-code/errors/wasm/E0708-wasm-match-not-exhaustive.mu:9:5
+   |
+ 7 | main :: proc() Int ->
+ 8 |     c := Color.RED
+ 9 |     match c ->
+   |     ^^^^^ this match leaves 'GREEN' out
+10 |         case .RED ->
+11 |             c = Color.GREEN
+   |
+   = help: add a case for it, a default case 'case ->', or write 'match #(partial)' to leave members
+           out

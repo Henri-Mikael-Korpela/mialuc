@@ -1,6 +1,7 @@
 error[E0103]: indentation must use spaces, not tabs
  --> test-code/errors/front/E0103-indentation-tab.mu:2:1
   |
+1 | main :: proc() Int ->
 2 |  return 0
   | ^ this is a tab
   |

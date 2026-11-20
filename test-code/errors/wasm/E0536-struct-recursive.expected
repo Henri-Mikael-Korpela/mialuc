@@ -1,8 +1,12 @@
 error[E0536]: the struct with the field 'value' contains itself
  --> test-code/errors/wasm/E0536-struct-recursive.mu:4:5
   |
+2 |
+3 | Node :: struct ->
 4 |     value: Int
   |     ^^^^^ this field makes it infinitely large
+5 |     next: Node
+6 |
   |
   = note: a struct that contains itself would never end
   = help: give it a pointer to itself instead

@@ -1,5 +1,9 @@
 error[E0530]: 'pair' returns a number of values that is not the number of its return types
  --> test-code/errors/x64/E0530-return-count-mismatch.mu:3:1
   |
+1 | package errors
+2 |
 3 | pair :: proc() (Int, Int) ->
   | ^^^^
+4 |     return 1
+5 |

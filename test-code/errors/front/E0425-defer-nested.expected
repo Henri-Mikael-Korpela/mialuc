@@ -1,5 +1,8 @@
 error[E0425]: 'defer' cannot be inside the statement of another 'defer'
  --> test-code/errors/front/E0425-defer-nested.mu:6:9
   |
+4 |     x := 0
+5 |     defer ->
 6 |         defer x = 1
   |         ^^^^^ inside a deferred statement
+7 |     return 0

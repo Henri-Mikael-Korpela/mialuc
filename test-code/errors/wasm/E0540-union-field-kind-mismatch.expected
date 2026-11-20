@@ -1,5 +1,8 @@
 error[E0540]: the field 'integer_literal' is in a case of a union, but the struct object is given another member for the field that the union is matched against
   --> test-code/errors/wasm/E0540-union-field-kind-mismatch.mu:18:38
    |
+16 |
+17 | main :: proc() Int ->
 18 |     t := Token { kind = .IDENTIFIER, integer_literal = { value = 1 } }
    |                                      ^^^^^^^^^^^^^^^ this field does not exist there
+19 |     return 0

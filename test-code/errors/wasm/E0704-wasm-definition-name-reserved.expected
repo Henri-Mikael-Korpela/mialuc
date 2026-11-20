@@ -1,7 +1,11 @@
 error[E0704]: 'memory' is reserved for the memory of the wasm module
  --> test-code/errors/wasm/E0704-wasm-definition-name-reserved.mu:3:1
   |
+1 | package errors
+2 |
 3 | memory :: 1
   | ^^^^^^ this name is reserved
+4 |
+5 | main :: proc() Int ->
   |
   = help: choose another name

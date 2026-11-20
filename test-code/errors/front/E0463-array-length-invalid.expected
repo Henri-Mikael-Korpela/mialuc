@@ -1,5 +1,8 @@
 error[E0463]: the length of an array at 'N' must be an integer that is not below zero
  --> test-code/errors/front/E0463-array-length-invalid.mu:6:10
   |
+4 |
+5 | main :: proc() Int ->
 6 |     a : [N]Int = [N]Int { .. = 0 }
   |          ^
+7 |     return 0

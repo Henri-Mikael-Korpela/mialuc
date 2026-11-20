@@ -1,8 +1,12 @@
 error[E0416]: the initial value of global variable 'counter' is not known when the program is compiled
  --> test-code/errors/front/E0416-global-value-not-constant.mu:6:1
   |
+4 |     return 1
+5 |
 6 | counter #(static) := base()
   | ^^^^^^^ not a constant expression
+7 |
+8 | main :: proc() Int ->
   |
   = note: the initial value of a global variable is a constant expression, such as a number or
           'LIMIT * 2', or a field of the information about a type

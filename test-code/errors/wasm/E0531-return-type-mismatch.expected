@@ -1,7 +1,11 @@
 error[E0531]: 'name' returns Str, but its return type is Int
  --> test-code/errors/wasm/E0531-return-type-mismatch.mu:3:1
   |
+1 | package errors
+2 |
 3 | name :: proc() Int ->
   | ^^^^ this procedure returns Int
 4 |     return "a"
   |            ^^^ this is Str
+5 |
+6 | main :: proc() Int ->

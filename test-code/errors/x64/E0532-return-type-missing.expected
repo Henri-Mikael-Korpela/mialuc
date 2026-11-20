@@ -1,5 +1,9 @@
 error[E0532]: 'nothing' returns a value but has no return type
  --> test-code/errors/x64/E0532-return-type-missing.mu:3:1
   |
+1 | package errors
+2 |
 3 | nothing :: proc() ->
   | ^^^^^^^ this has no return type
+4 |     return 1
+5 |

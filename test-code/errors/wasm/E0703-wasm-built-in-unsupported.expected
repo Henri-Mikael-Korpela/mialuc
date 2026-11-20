@@ -1,5 +1,8 @@
 error[E0703]: the built-in procedure 'str_to_c_str' is not supported by the wasm target
  --> test-code/errors/wasm/E0703-wasm-built-in-unsupported.mu:5:10
   |
+3 | main :: proc() Int ->
+4 |     s := "a"
 5 |     x := str_to_c_str(s)
   |          ^^^^^^^^^^^^
+6 |     return 0

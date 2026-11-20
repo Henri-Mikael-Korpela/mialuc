@@ -1,7 +1,11 @@
 error[E0615]: 'type_info_of' at 'info' is about a type that the x64 target gives no information about
  --> test-code/errors/x64/E0615-x64-type-info-unsupported.mu:7:1
   |
+5 |     y: Int
+6 |
 7 | info #(static) := type_info_of(Point).members
   | ^^^^
+8 |
+9 | main :: proc() Int ->
   |
   = note: the x64 target gives information about an enum only

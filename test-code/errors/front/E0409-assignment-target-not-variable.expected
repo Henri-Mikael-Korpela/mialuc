@@ -1,7 +1,10 @@
 error[E0409]: 'LIMIT' is not a variable, so it cannot be assigned to
  --> test-code/errors/front/E0409-assignment-target-not-variable.mu:6:5
   |
+4 |
+5 | main :: proc() Int ->
 6 |     LIMIT = 2
   |     ^^^^^ cannot be assigned to
+7 |     return 0
   |
   = note: a parameter and a constant are not variables

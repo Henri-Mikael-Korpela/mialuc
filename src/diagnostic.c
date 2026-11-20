@@ -15,6 +15,9 @@
 // and bold cyan for the help. They are the standard ones of ANSI terminals, which VS Code and the
 // console of Windows 10 show.
 static char const DIAGNOSTIC_STYLE_BOLD[] = "\x1b[1m";
+// The lines around the one that the error is about are dim, so that the eye goes to the lines that
+// matter.
+static char const DIAGNOSTIC_STYLE_DIM[] = "\x1b[2m";
 static char const DIAGNOSTIC_STYLE_ERROR[] = "\x1b[1;31m";
 static char const DIAGNOSTIC_STYLE_FRAME[] = "\x1b[1;34m";
 static char const DIAGNOSTIC_STYLE_HELP[] = "\x1b[1;36m";
@@ -33,6 +36,9 @@ enum {
     // when there is text before it.
     DIAGNOSTIC_SOURCE_WIDTH_MAX = 100,
     DIAGNOSTIC_SOURCE_LEAD = 30,
+    // The lines of the source that are shown before and after a line that the error is about, when
+    // there are that many, for the context of it.
+    DIAGNOSTIC_CONTEXT_LINES = 2,
 };
 
 /**
@@ -55,13 +61,21 @@ typedef struct {
 } Diagnostic_Line;
 
 static size_t          diagnostic_character_count   (Str text);
+static size_t          diagnostic_line_count        (Str source);
 static size_t          diagnostic_digit_count       (size_t number);
 static Diagnostic_Line diagnostic_line_at           (Str source, size_t offset);
+static Diagnostic_Line diagnostic_line_of           (Str source, size_t number);
+static void            diagnostic_print_context     (FILE *output, Str source, size_t number,
+                                                     size_t width, bool is_color);
 static void            diagnostic_print_gutter      (FILE *output, size_t width, bool is_color);
 static void            diagnostic_print_header      (FILE *output, Diagnostic const *diagnostic,
                                                      bool is_color);
 static void            diagnostic_print_hint        (FILE *output, size_t width, char const *kind,
                                                      char const *style, Str text, bool is_color);
+static void            diagnostic_print_lines       (FILE *output, Diagnostic const *diagnostic,
+                                                     size_t width, Str_Position position,
+                                                     Str_Position second_position,
+                                                     bool is_color);
 static void            diagnostic_print_location    (FILE *output, Diagnostic const *diagnostic,
                                                      size_t width, Str_Position position,
                                                      bool is_color);
@@ -84,19 +98,28 @@ void diagnostic_print(FILE *output, Diagnostic const *diagnostic, bool is_color)
     Str_Position position = {.line = 0, .column = 0};
     size_t width = DIAGNOSTIC_GUTTER_WIDTH_MIN;
     Str_Position second_position = {.line = 0, .column = 0};
+    size_t line_count = diagnostic_line_count(diagnostic->source);
+    size_t line_last = 0;
     if (diagnostic->has_span) {
         position = str_position_at(diagnostic->source, diagnostic->span_offset);
-        width = diagnostic_digit_count(position.line);
+        line_last = position.line;
     }
     if (diagnostic->has_second) {
         assert(diagnostic->has_span);
         assert(diagnostic->second_offset <= diagnostic->source.length);
 
         second_position = str_position_at(diagnostic->source, diagnostic->second_offset);
-        size_t second_width = diagnostic_digit_count(second_position.line);
-        if (second_width > width) {
-            width = second_width;
+        if (second_position.line > line_last) {
+            line_last = second_position.line;
         }
+    }
+    if (diagnostic->has_span) {
+        // The number of the last line that is shown, which is the widest.
+        line_last += DIAGNOSTIC_CONTEXT_LINES;
+        if (line_last > line_count) {
+            line_last = line_count;
+        }
+        width = diagnostic_digit_count(line_last);
     }
 
     diagnostic_print_header(output, diagnostic, is_color);
@@ -104,28 +127,9 @@ void diagnostic_print(FILE *output, Diagnostic const *diagnostic, bool is_color)
         diagnostic_print_location(output, diagnostic, width, position, is_color);
     }
     if (diagnostic->has_span) {
-        Diagnostic_Span span = {
-            .label = diagnostic->label,
-            .offset = diagnostic->span_offset,
-            .length = diagnostic->span_length,
-        };
         diagnostic_print_gutter(output, width, is_color);
         fputc('\n', output);
-        diagnostic_print_snippet(output, diagnostic->source, span, width, position, is_color);
-    }
-    if (diagnostic->has_second) {
-        Diagnostic_Span span = {
-            .label = diagnostic->second_label,
-            .offset = diagnostic->second_offset,
-            .length = diagnostic->second_length,
-        };
-        // Lines that are not next to each other have `...` between them, as the lines that are
-        // left out would show.
-        if (second_position.line > position.line + 1 || second_position.line < position.line) {
-            fputs("...\n", output);
-        }
-        diagnostic_print_snippet(output, diagnostic->source, span, width, second_position,
-                                 is_color);
+        diagnostic_print_lines(output, diagnostic, width, position, second_position, is_color);
     }
 
     // A blank line of the gutter separates what points at the source from what is said about it.
@@ -176,6 +180,142 @@ static void diagnostic_print_location(FILE *output, Diagnostic const *diagnostic
         fprintf(output, ":%zu:%zu", position.line, position.column);
     }
     fputc('\n', output);
+}
+
+/**
+ * Prints the lines of the source that the error is about, each with the carets under what is wrong
+ * in it, and the lines around each, which are dim. Lines that are not next to each other have `...`
+ * between them, as the lines that are left out would show.
+ */
+static void diagnostic_print_lines(FILE *output, Diagnostic const *diagnostic, size_t width,
+                                   Str_Position position, Str_Position second_position,
+                                   bool is_color) {
+    size_t line_count = diagnostic_line_count(diagnostic->source);
+    Diagnostic_Span spans[2] = {
+        {.label = diagnostic->label, .offset = diagnostic->span_offset,
+         .length = diagnostic->span_length},
+        {.label = diagnostic->second_label, .offset = diagnostic->second_offset,
+         .length = diagnostic->second_length},
+    };
+    Str_Position positions[2] = {position, second_position};
+    size_t span_count = 1;
+    if (diagnostic->has_second) {
+        span_count = 2;
+        // The lines are shown in the order of the source.
+        if (second_position.line < position.line) {
+            Diagnostic_Span span_swap = spans[0];
+            spans[0] = spans[1];
+            spans[1] = span_swap;
+            Str_Position position_swap = positions[0];
+            positions[0] = positions[1];
+            positions[1] = position_swap;
+        }
+    }
+
+    size_t shown_until = 0;
+    for (size_t i = 0; i < span_count; i += 1) {
+        size_t line = positions[i].line;
+        size_t from = 1;
+        if (line > DIAGNOSTIC_CONTEXT_LINES) {
+            from = line - DIAGNOSTIC_CONTEXT_LINES;
+        }
+        if (from <= shown_until) {
+            from = shown_until + 1;
+        } else if (shown_until > 0 && from > shown_until + 1) {
+            fputs("...\n", output);
+        }
+        for (size_t number = from; number < line; number += 1) {
+            diagnostic_print_context(output, diagnostic->source, number, width, is_color);
+        }
+        diagnostic_print_snippet(output, diagnostic->source, spans[i], width, positions[i],
+                                 is_color);
+        shown_until = line;
+
+        // The lines after, up to the line of the next place, whose own lines before it come next.
+        size_t to = line + DIAGNOSTIC_CONTEXT_LINES;
+        if (to > line_count) {
+            to = line_count;
+        }
+        if (i + 1 < span_count && to >= positions[i + 1].line) {
+            to = positions[i + 1].line - 1;
+        }
+        for (size_t number = shown_until + 1; number <= to; number += 1) {
+            diagnostic_print_context(output, diagnostic->source, number, width, is_color);
+            shown_until = number;
+        }
+    }
+}
+
+/**
+ * Prints the line `number` of the source, which has nothing that the error is about, dim.
+ */
+static void diagnostic_print_context(FILE *output, Str source, size_t number, size_t width,
+                                     bool is_color) {
+    Diagnostic_Line line = diagnostic_line_of(source, number);
+
+    diagnostic_style_begin(output, DIAGNOSTIC_STYLE_FRAME, is_color);
+    fprintf(output, "%*zu |", (int)width, number);
+    diagnostic_style_end(output, is_color);
+    if (line.end > line.start) {
+        fputc(' ', output);
+        diagnostic_style_begin(output, DIAGNOSTIC_STYLE_DIM, is_color);
+        // A line that is wider than a screen is cut, and a tab is one space, as in the lines that
+        // have carets.
+        size_t characters = 0;
+        for (size_t i = line.start; i < line.end; i += 1) {
+            char character = source.bytes[i];
+            bool is_start = ((byte)character & 0xC0) != 0x80;
+            if (is_start) {
+                if (characters == DIAGNOSTIC_SOURCE_WIDTH_MAX) {
+                    fputs("...", output);
+                    break;
+                }
+                characters += 1;
+            }
+            if (character == '\t') {
+                character = ' ';
+            }
+            fputc(character, output);
+        }
+        diagnostic_style_end(output, is_color);
+    }
+    fputc('\n', output);
+}
+
+/**
+ * Returns where the line `number` of `source`, counted from 1, starts and ends, as
+ * `diagnostic_line_at` does. The line must be one of the source.
+ */
+static Diagnostic_Line diagnostic_line_of(Str source, size_t number) {
+    assert(number >= 1);
+
+    size_t offset = 0;
+    for (size_t line = 1; line < number && offset < source.length; offset += 1) {
+        if (source.bytes[offset] == '\n') {
+            line += 1;
+        }
+    }
+    return diagnostic_line_at(source, offset);
+}
+
+/**
+ * Returns the number of lines of `source`. A line break ends a line, so the text after the last one
+ * is a line only if it has something in it.
+ */
+static size_t diagnostic_line_count(Str source) {
+    size_t count = 0;
+    for (size_t i = 0; i < source.length; i += 1) {
+        if (source.bytes[i] == '\n') {
+            count += 1;
+        }
+    }
+    if (source.length > 0 && source.bytes[source.length - 1] != '\n') {
+        count += 1;
+    }
+    if (count == 0) {
+        count = 1;
+    }
+    return count;
 }
 
 /**

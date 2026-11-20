@@ -1,6 +1,7 @@
 error[E0104]: indentation must be a multiple of 4 spaces
  --> test-code/errors/front/E0104-indentation-width-invalid.mu:2:1
   |
+1 | main :: proc() Int ->
 2 |    return 0
   | ^^^ indented by 3 spaces
   |

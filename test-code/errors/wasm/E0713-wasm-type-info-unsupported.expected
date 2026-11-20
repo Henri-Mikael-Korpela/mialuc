@@ -1,5 +1,9 @@
 error[E0713]: the wasm target has information about enums only, and 'Point' is not one
  --> test-code/errors/wasm/E0713-wasm-type-info-unsupported.mu:7:32
   |
+5 |     y: Int
+6 |
 7 | info #(static) := type_info_of(Point).members
   |                                ^^^^^
+8 |
+9 | main :: proc() Int ->

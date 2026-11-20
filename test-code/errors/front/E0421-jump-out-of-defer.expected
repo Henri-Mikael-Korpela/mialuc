@@ -1,7 +1,10 @@
 error[E0421]: 'break' cannot leave the statement of a 'defer'
  --> test-code/errors/front/E0421-jump-out-of-defer.mu:6:13
   |
+4 |     :outer for i in 0..<3 ->
+5 |         defer ->
 6 |             break outer
   |             ^^^^^ leaves the deferred statement
+7 |     return 0
   |
   = note: a deferred statement runs while its block is being left

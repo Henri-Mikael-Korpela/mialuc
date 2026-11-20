@@ -1,5 +1,8 @@
 error[E0516]: 'Point' is a type and not a value
   --> test-code/errors/wasm/E0516-identifier-not-value.mu:11:14
    |
+ 9 |
+10 | main :: proc() Int ->
 11 |     y := add(Point, 1)
    |              ^^^^^ this is a type
+12 |     return 0

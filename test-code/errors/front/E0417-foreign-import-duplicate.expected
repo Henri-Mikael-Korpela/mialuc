@@ -1,7 +1,11 @@
 error[E0417]: the program already imports foreign procedures from this target
  --> test-code/errors/front/E0417-foreign-import-duplicate.mu:4:20
   |
+2 |
+3 | import foreign js "first"
 4 | import foreign js "second"
   |                    ^^^^^^ imported again here
+5 |
+6 | main :: proc() Int ->
   |
   = note: a program imports foreign procedures once for each target

@@ -1,8 +1,11 @@
 error[E0426]: 'defer' cannot take this statement
  --> test-code/errors/front/E0426-defer-statement-invalid.mu:4:5
   |
+2 |
+3 | main :: proc() Int ->
 4 |     defer y := 1
   |     ^^^^^ cannot be deferred
+5 |     return 0
   |
   = note: 'defer' takes an assignment, a call, or an if, for or scope statement, and not a variable
           definition, 'return', 'break' or 'continue'

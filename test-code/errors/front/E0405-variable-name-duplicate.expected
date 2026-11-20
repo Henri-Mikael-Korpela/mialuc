@@ -1,5 +1,8 @@
 error[E0405]: variable 'x' is defined twice
  --> test-code/errors/front/E0405-variable-name-duplicate.mu:5:5
   |
+3 | main :: proc() Int ->
+4 |     x := 1
 5 |     x := 2
   |     ^ defined again here
+6 |     return 0

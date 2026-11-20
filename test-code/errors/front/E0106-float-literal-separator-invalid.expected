@@ -1,7 +1,9 @@
 error[E0106]: a digit separator '_' must be between two digits
  --> test-code/errors/front/E0106-float-literal-separator-invalid.mu:2:13
   |
+1 | main :: proc() Int ->
 2 |     x := 1.5_
   |             ^ this '_' is not between two digits
+3 |     return 0
   |
   = help: put a digit on each side of it, as in 1_000.5, or remove it

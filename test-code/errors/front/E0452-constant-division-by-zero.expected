@@ -1,8 +1,12 @@
 error[E0452]: the constant expression at 'X' divides by zero
  --> test-code/errors/front/E0452-constant-division-by-zero.mu:3:1
   |
+1 | package errors
+2 |
 3 | X :: 1 / 0
   | ^
+4 |
+5 | main :: proc() Int ->
   |
   = note: a division by zero has no value, also of floats, which have an infinity for it in a
           running program but not in a constant

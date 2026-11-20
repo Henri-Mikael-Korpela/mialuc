@@ -1,8 +1,12 @@
 error[E0415]: global variable 'counter' must have the attribute #(static)
  --> test-code/errors/front/E0415-global-not-static.mu:3:1
   |
+1 | package errors
+2 |
 3 | counter := 0
   | ^^^^^^^ needs #(static)
+4 |
+5 | main :: proc() Int ->
   |
   = note: a global variable has static storage duration
   = help: write the attribute after the name, as in 'counter #(static) := 0'

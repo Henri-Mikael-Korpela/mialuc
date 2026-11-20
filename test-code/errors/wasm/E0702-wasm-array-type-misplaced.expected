@@ -1,7 +1,11 @@
 error[E0702]: an array of 'Int' cannot be the type here
  --> test-code/errors/wasm/E0702-wasm-array-type-misplaced.mu:3:17
   |
+1 | package errors
+2 |
 3 | f :: proc(a: [3]Int) ->
   |                 ^^^ an array here
+4 |     y := 1
+5 |
   |
   = note: a parameter can be an array slice, as in []Int, and a global variable can be neither

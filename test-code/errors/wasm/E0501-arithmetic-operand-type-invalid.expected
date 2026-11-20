@@ -1,8 +1,11 @@
 error[E0501]: an operand of arithmetic at 'a' is not of a type that it takes
  --> test-code/errors/wasm/E0501-arithmetic-operand-type-invalid.mu:5:15
   |
+3 | main :: proc() Int ->
+4 |     n := 1
 5 |     x := n + "a"
   |               ^
+6 |     return 0
   |
   = note: an operand of arithmetic is an Int, an I32, an I64, a U32, a U64 or a float, and is of the
           type of the other operand

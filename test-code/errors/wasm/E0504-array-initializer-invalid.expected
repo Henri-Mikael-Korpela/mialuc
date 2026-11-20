@@ -1,8 +1,11 @@
 error[E0504]: the array 'b' must be given an array literal
  --> test-code/errors/wasm/E0504-array-initializer-invalid.mu:5:5
   |
+3 | main :: proc() Int ->
+4 |     a := [2]Int { 1, 2 }
 5 |     b : [2]Int = a
   |     ^ not an array literal
+6 |     return 0
   |
   = note: an array is not copied, so it is defined with an array literal and is not assigned to as a
           whole

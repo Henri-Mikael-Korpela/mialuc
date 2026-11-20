@@ -1,5 +1,9 @@
 error[E0503]: 'n' is not an array or an array slice
  --> test-code/errors/x64/E0503-array-expected.mu:5:14
   |
+3 | main :: proc() Int ->
+4 |     n := 3
 5 |     for c in n ->
   |              ^ not an array or an array slice
+6 |         return 1
+7 |     return 0

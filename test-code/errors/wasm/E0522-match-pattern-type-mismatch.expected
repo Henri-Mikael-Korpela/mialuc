@@ -1,8 +1,12 @@
 error[E0522]: the pattern of the case is not of the type of what is matched
  --> test-code/errors/wasm/E0522-match-pattern-type-mismatch.mu:6:9
   |
+4 |     n := 1
+5 |     match n ->
 6 |         case "a" ->
   |         ^^^^ not of the type of the match
+7 |             n = 2
+8 |         case ->
   |
   = note: a string is not an Int, a member is of one enum only, a Byte is from 0 to 255 and a range
           is only for an Int or a Byte

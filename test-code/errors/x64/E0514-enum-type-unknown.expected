@@ -1,8 +1,11 @@
 error[E0514]: the enum of 'c' is not known here
  --> test-code/errors/x64/E0514-enum-type-unknown.mu:8:5
   |
+6 |
+7 | main :: proc() Int ->
 8 |     c := .RED
   |     ^ nothing says what enum this is of
+9 |     return 0
   |
   = help: write the member with its enum, as in 'Color.RED', or give it to something that has an
           enum type

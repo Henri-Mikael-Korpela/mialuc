@@ -1,7 +1,11 @@
 error[E0524]: 'p' cannot be matched
- --> test-code/errors/wasm/E0524-match-subject-type-invalid.mu:9:11
-  |
-9 |     match p ->
-  |           ^ not an integer, a Str or an enum
-  |
-  = note: a match takes an integer, a Str or an enum
+  --> test-code/errors/wasm/E0524-match-subject-type-invalid.mu:9:11
+   |
+ 7 | main :: proc() Int ->
+ 8 |     p := Point { x = 1, y = 2 }
+ 9 |     match p ->
+   |           ^ not an integer, a Str or an enum
+10 |         case ->
+11 |             return 1
+   |
+   = note: a match takes an integer, a Str or an enum

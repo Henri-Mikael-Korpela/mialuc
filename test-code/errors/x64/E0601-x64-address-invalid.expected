@@ -1,8 +1,12 @@
 error[E0601]: 'n' has no address
  --> test-code/errors/x64/E0601-x64-address-invalid.mu:4:11
   |
+2 |
+3 | f :: proc(n: Int) ->
 4 |     p := %n
   |           ^ no address
+5 |
+6 | main :: proc() Int ->
   |
   = note: a variable, an element and what a pointer points to have an address, but not a parameter,
           an iterator, a value that is computed, or an array

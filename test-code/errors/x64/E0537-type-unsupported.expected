@@ -1,5 +1,9 @@
 error[E0537]: type 'Byte' is not supported by the x64 target
  --> test-code/errors/x64/E0537-type-unsupported.mu:3:15
   |
+1 | package errors
+2 |
 3 | Color :: enum Byte ->
   |               ^^^^ not supported
+4 |     RED
+5 |

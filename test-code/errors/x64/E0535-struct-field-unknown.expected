@@ -1,5 +1,8 @@
 error[E0535]: the struct has no field called 'z'
  --> test-code/errors/x64/E0535-struct-field-unknown.mu:8:18
   |
+6 |
+7 | main :: proc() Int ->
 8 |     p := Point { z = 1, x = 1, y = 2 }
   |                  ^ not a field of the struct
+9 |     return 0

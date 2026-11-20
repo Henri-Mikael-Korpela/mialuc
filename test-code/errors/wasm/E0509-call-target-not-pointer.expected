@@ -1,5 +1,8 @@
 error[E0509]: 'n' does not hold a pointer to a procedure, so it cannot be called
  --> test-code/errors/wasm/E0509-call-target-not-pointer.mu:5:10
   |
+3 | main :: proc() Int ->
+4 |     n := 3
 5 |     x := n()
   |          ^
+6 |     return 0

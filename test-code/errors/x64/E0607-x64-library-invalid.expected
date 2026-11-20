@@ -1,8 +1,12 @@
 error[E0607]: the library of the foreign procedure 'GetTickCount' is not written as a library of the system
  --> test-code/errors/x64/E0607-x64-library-invalid.mu:6:5
   |
+4 |
+5 | foreign kernel32 ->
 6 |     GetTickCount :: proc() Int -> ...
   |     ^^^^^^^^^^^^
+7 |
+8 | main :: proc() Int ->
   |
   = note: there is room for a few libraries
   = help: write it as "system:Name.lib" in its import

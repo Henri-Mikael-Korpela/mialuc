@@ -1,8 +1,11 @@
 error[E0712]: type_info_of('Color') exists only when the program is compiled
  --> test-code/errors/wasm/E0712-wasm-type-info-misplaced.mu:8:23
   |
+6 |
+7 | main :: proc() Int ->
 8 |     n := type_info_of(Color) == type_info_of(Color)
   |                       ^^^^^
+9 |     return 0
   |
   = note: a global variable can be given that and nothing more
   = help: write a field after it right away, as in type_info_of(Color).members

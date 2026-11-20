@@ -1,5 +1,9 @@
 error[E0538]: the case 'NOPE' is not a member of the enum of the field that the union is matched against
   --> test-code/errors/wasm/E0538-union-case-unknown.mu:13:15
    |
+11 |             identifier: struct ->
+12 |                 text: Str
 13 |         case .NOPE ->
    |               ^^^^ not a member of the enum
+14 |             integer_literal: struct ->
+15 |                 value: Int

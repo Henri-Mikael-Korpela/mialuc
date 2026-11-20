@@ -1,7 +1,9 @@
 error[E0110]: integer literal has no digits after its prefix
  --> test-code/errors/front/E0110-integer-literal-digits-missing.mu:2:10
   |
+1 | main :: proc() Int ->
 2 |     x := 0x
   |          ^^ needs a digit after the prefix
+3 |     return 0
   |
   = note: '0b' is followed by binary digits and '0x' by hexadecimal digits

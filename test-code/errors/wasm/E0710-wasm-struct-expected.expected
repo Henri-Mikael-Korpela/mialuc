@@ -1,5 +1,8 @@
 error[E0710]: 'n' is not a struct or a pointer to one, so it has no fields
  --> test-code/errors/wasm/E0710-wasm-struct-expected.mu:5:10
   |
+3 | main :: proc() Int ->
+4 |     n := 3
 5 |     x := n.field
   |          ^ not a struct
+6 |     return 0

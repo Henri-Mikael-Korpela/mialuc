@@ -1,8 +1,12 @@
 error[E0711]: the field 'y' is not given a value
  --> test-code/errors/wasm/E0711-wasm-struct-field-missing.mu:5:5
   |
+3 | Point :: struct ->
+4 |     x: Int
 5 |     y: Int
   |     ^
+6 |
+7 | main :: proc() Int ->
   |
   = note: either every field is given a value, or the braces are empty and every field has its
           default value

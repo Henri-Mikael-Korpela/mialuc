@@ -1,7 +1,10 @@
 error[E0541]: the field 'integer_literal' is in a case of a union, so it can only be used where the field that the union is matched against is known to be the member of the case
   --> test-code/errors/x64/E0541-union-field-unmatched.mu:19:14
    |
+17 | main :: proc() Int ->
+18 |     t := Token { kind = .INTEGER_LITERAL, integer_literal = { value = 1 } }
 19 |     return t.integer_literal.value
    |              ^^^^^^^^^^^^^^^ used outside of its case
+20 |     return 0
    |
    = help: use it inside 'if x.kind == .MEMBER ->', and do not change 'x' or 'x.kind' in it

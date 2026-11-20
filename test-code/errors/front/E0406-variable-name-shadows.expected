@@ -1,8 +1,11 @@
 error[E0406]: variable 'LIMIT' has the name of a constant, a global variable or a parameter
  --> test-code/errors/front/E0406-variable-name-shadows.mu:6:5
   |
+4 |
+5 | main :: proc() Int ->
 6 |     LIMIT := 2
   |     ^^^^^ this name is taken
+7 |     return 0
   |
   = note: a variable cannot have the name of a constant, a global variable or a parameter, which it
           would hide

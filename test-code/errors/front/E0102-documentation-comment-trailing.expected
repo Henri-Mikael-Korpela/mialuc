@@ -3,6 +3,7 @@ error[E0102]: a documentation comment must be on lines of its own
   |
 1 | main :: proc() Int -> /// Documents.
   |                       ^^^ this '///' comes after code on its line
+2 |     return 0
   |
   = note: a documentation comment documents the code after it, so it cannot follow code on the same
           line

@@ -1,5 +1,8 @@
 error[E0419]: 'break' is not inside a loop or a scope
  --> test-code/errors/front/E0419-break-outside-scope.mu:4:5
   |
+2 |
+3 | main :: proc() Int ->
 4 |     break
   |     ^^^^^ nothing to break out of
+5 |     return 0

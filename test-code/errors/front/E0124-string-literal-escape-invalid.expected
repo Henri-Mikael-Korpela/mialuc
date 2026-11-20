@@ -1,8 +1,11 @@
 error[E0124]: this is not an escape sequence of a string
  --> test-code/errors/front/E0124-string-literal-escape-invalid.mu:4:12
   |
+2 |
+3 | main :: proc() Int ->
 4 |     x := "a\qb"
   |            ^^ not an escape sequence
+5 |     return 0
   |
   = note: an escape sequence is a backslash and one of a, b, e, f, n, r, t, v, \, ' or ", three
           octal digits up to 377, x and two hexadecimal digits, u and four, or U and eight, with a

@@ -1,8 +1,12 @@
 error[E0539]: 'kind' cannot be matched by a union
  --> test-code/errors/x64/E0539-union-discriminant-invalid.mu:5:17
   |
+3 | Token :: struct ->
+4 |     kind: Int
 5 |     union match kind ->
   |                 ^^^^
+6 |         case .A ->
+7 |             value: Int
   |
   = note: the field that a union is matched against is a field of the struct, outside of the cases,
           and of an enum type

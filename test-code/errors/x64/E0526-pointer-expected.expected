@@ -1,5 +1,8 @@
 error[E0526]: 'x' is not a pointer, so '^' cannot follow it
  --> test-code/errors/x64/E0526-pointer-expected.mu:5:5
   |
+3 | main :: proc() Int ->
+4 |     x := 3
 5 |     x^ = 1
   |     ^ not a pointer
+6 |     return 0
