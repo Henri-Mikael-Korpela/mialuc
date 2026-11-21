@@ -138,7 +138,7 @@ The target rejects a program that the parser accepts when:
 - a call has a different number of arguments than the procedure has parameters, or an argument is not of the type of its parameter,
 - the call of a procedure without a return type is used as a value, and not as a statement,
 - an operand of an arithmetic operator is not an `Int` or not a float, or the operands are of different types,
-- the operands of a comparison are not both `Int`, both `Rune` or both floats of one type, or not both `Bool`, both `Str` or both pointers or both members of one enum (or `nil`) for `==` and `not=`,
+- the operands of a comparison are not both `Int`, both `Rune` or both floats of one type, or not both `Bool`, both `Str` or both pointers or both members of one enum (or `nil`) for `==` and `not=`, or are arrays, dynamic arrays or array slices of elements that are not of one type, or are floats, strings or structs, or are compared with `<`, `<=`, `>` or `>=`,
 - the value of a variable that is defined without a type is `nil` or a member such as `.RED` that is written without its enum, which does not say the type of the variable,
 - a member such as `.RED` is where no enum is known, or the enum has no such member, or it is the member of a name that is not an enum,
 - the operands of a comparison are members of two enums, or members of an enum are compared with `<`, `<=`, `>` or `>=`,
@@ -164,7 +164,7 @@ The built-in procedure `try_str_to_int` leaves an `i64`, the number, and an `i32
 
 A comparison of a `Byte` with a rune that is in the ASCII range is the comparison of two bytes, `i32.eq` or `i32.ne`, because the rune is a constant that is written as `i32.const`, which is the number that the byte has.
 
-A comparison of two arrays or array slices of bytes with `==` or `not=` is written the same way as one of two strings, because an array that is compared is made an array slice by writing its length after its address, as it is where it is given to a procedure, so the stack has an address and a length for each operand, whichever it is.
+A comparison of two arrays, dynamic arrays or array slices with `==` or `not=` is written the same way as one of two strings, because an array that is compared is made an array slice by writing its length after its address, as it is where it is given to a procedure, so the stack has an address and a length for each operand, whichever it is. The loop steps by the size of an element, which is 1 for a `Byte` and 8 for any other, so the end is the address plus the length times that, and it loads each pair of elements with `i32.load8_u`, `i32.load` or `i64.load`, whichever the element is, and compares them with `i32.ne` or `i64.ne`. Arrays of floats, strings and structs are not compared this way.
 
 A comparison of two strings with `==` or `not=` compares their lengths, and then their bytes. The two strings are on the stack as an address and a length each, and they are taken off it into scratch locals: the two addresses, which move along the strings one byte at a time, the address after the last byte of the first string, and a flag that says whether the strings are the same so far, which starts as the comparison of the lengths. A `block` that holds a `loop` leaves with `br_if` when the flag is 0 or the first address is at the end, and otherwise compares a byte of each with `i32.load8_u` and `i32.ne`, clears the flag for a byte that differs, and goes on with `br`. The result is the flag, or its `i32.eqz` for `not=`.
 

@@ -18,3 +18,5 @@ console.log("two_dynamic_arrays, 1978:", two_dynamic_arrays());
 console.log("slices_of_dynamic_array, 4878:", slices_of_dynamic_array());
 console.log("arrays_in_calls, 500063:", arrays_in_calls());
 console.log("value_from_expressions, 371:", value_from_expressions());
+console.log("compare_int_sequences, 101011101:", compare_int_sequences());
+console.log("compare_other_sequences, 10110101:", compare_other_sequences());

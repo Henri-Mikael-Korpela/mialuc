@@ -924,13 +924,13 @@ static X64_Type_Kind x64_parameter_float_at       (X64_Builder const *builder,
                                                   Ast_Node_Index procedure, size_t word);
 static bool         x64_is_ascii_rune_constant   (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
-static bool         x64_type_is_byte_sequence    (X64_Type type);
+static bool         x64_types_are_comparable_sequences(X64_Type left, X64_Type right);
 static void         x64_bytes_length_load        (X64_Builder *builder, X64_Type type,
                                                   byte register_number, int32_t place);
 static void         x64_bytes_comparison_write   (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame,
                                                   X64_Type left_type, X64_Type right_type,
-                                                  bool is_equal);
+                                                  size_t stride, bool is_equal);
 static bool         x64_float_comparison_write   (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame,
                                                   X64_Type_Kind kind);
@@ -5602,13 +5602,18 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     // of bytes and the same bytes, and have no order.
     X64_Type left_type = x64_expression_type(builder, left);
     X64_Type right_type = x64_expression_type(builder, right);
-    if (x64_type_is_byte_sequence(left_type) && x64_type_is_byte_sequence(right_type)) {
+    if (x64_types_are_comparable_sequences(left_type, right_type)) {
         if (operator != AST_COMPARISON_OPERATOR_EQUAL &&
             operator != AST_COMPARISON_OPERATOR_NOT_EQUAL) {
             return x64_comparison_fail(builder, left_type, right_type,
                                        x64_expression_subject(builder, node));
         }
-        x64_bytes_comparison_write(builder, frame, left_type, right_type,
+        X64_Type element = x64_type_element(left_type);
+        size_t stride = 1;
+        if (element.kind != X64_TYPE_KIND_BYTE) {
+            stride = x64_type_stride_bytes(builder, element);
+        }
+        x64_bytes_comparison_write(builder, frame, left_type, right_type, stride,
                                    operator == AST_COMPARISON_OPERATOR_EQUAL);
         return true;
     }
@@ -5657,7 +5662,7 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
         return x64_float_comparison_write(builder, frame, type.kind);
     }
     if (type.kind == X64_TYPE_KIND_STR) {
-        x64_bytes_comparison_write(builder, frame, type, type,
+        x64_bytes_comparison_write(builder, frame, type, type, 1,
                                    operator == AST_COMPARISON_OPERATOR_EQUAL);
         return true;
     }
@@ -5732,11 +5737,42 @@ static bool x64_is_ascii_rune_constant(X64_Builder const *builder, Ast_Node_Inde
 }
 
 /**
- * Returns whether `type` is an array or an array slice of bytes, which are compared by their bytes.
+ * Returns whether the two types are arrays, dynamic arrays or array slices, in any mix, of the same
+ * type of elements, and the elements are ones that `==` compares: a `Byte`, an `Int`, an `I32`, an
+ * `I64`, a `U32`, a `U64`, a `Bool`, a `Rune`, a member of an enum, a pointer or a pointer to a
+ * procedure. Two such sequences are the same when they have as many elements and every element is
+ * the same as the one at its place in the other. The elements of other types, floats, strings and
+ * structs, are not compared this way, because the same bits are not always the same value.
  */
-static bool x64_type_is_byte_sequence(X64_Type type) {
-    return (type.kind == X64_TYPE_KIND_ARRAY || type.kind == X64_TYPE_KIND_SLICE) &&
-           x64_type_element(type).kind == X64_TYPE_KIND_BYTE;
+static bool x64_types_are_comparable_sequences(X64_Type left, X64_Type right) {
+    bool is_left = left.kind == X64_TYPE_KIND_ARRAY || left.kind == X64_TYPE_KIND_DYNAMIC ||
+                   left.kind == X64_TYPE_KIND_SLICE;
+    bool is_right = right.kind == X64_TYPE_KIND_ARRAY || right.kind == X64_TYPE_KIND_DYNAMIC ||
+                    right.kind == X64_TYPE_KIND_SLICE;
+    if (not is_left || not is_right) {
+        return false;
+    }
+    X64_Type element = x64_type_element(left);
+    if (not x64_type_equals(element, x64_type_element(right))) {
+        return false;
+    }
+    switch (element.kind) {
+    case X64_TYPE_KIND_BOOL:
+    case X64_TYPE_KIND_BYTE:
+    case X64_TYPE_KIND_ENUM:
+    case X64_TYPE_KIND_I32:
+    case X64_TYPE_KIND_I64:
+    case X64_TYPE_KIND_INT:
+    case X64_TYPE_KIND_POINTER:
+    case X64_TYPE_KIND_PROCEDURE:
+    case X64_TYPE_KIND_RUNE:
+    case X64_TYPE_KIND_U32:
+    case X64_TYPE_KIND_U64:
+        return true;
+    default:
+        break;
+    }
+    return false;
 }
 
 /**
@@ -5765,7 +5801,8 @@ static void x64_bytes_length_load(X64_Builder *builder, X64_Type type, byte regi
  * `Bool` in `rax`, which is put on the stack in place of the operands.
  */
 static void x64_bytes_comparison_write(X64_Builder *builder, X64_Expression_Frame const *frame,
-                                       X64_Type left_type, X64_Type right_type, bool is_equal) {
+                                       X64_Type left_type, X64_Type right_type, size_t stride,
+                                       bool is_equal) {
     size_t left_words = x64_type_word_count(builder, left_type);
     size_t right_words = x64_type_word_count(builder, right_type);
     int32_t first = x64_stack_displacement(builder, frame->stack_start, left_words);
@@ -5785,14 +5822,20 @@ static void x64_bytes_comparison_write(X64_Builder *builder, X64_Expression_Fram
     uint32_t loop = (uint32_t)(builder->writer.length - builder->text_start);
     x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_RAX, X64_REGISTER_RAX);
     x64_jump_write(builder, X64_CONDITION_EQUAL, &same_jumps);
-    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RCX,
-                              X64_REGISTER_R10, 0);
-    x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RDX,
-                              X64_REGISTER_R11, 0);
+    if (stride == 1) {
+        x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RCX,
+                                  X64_REGISTER_R10, 0);
+        x64_write_memory_two_byte(builder, X64_OPCODE_TWO_BYTE_MOVZX_BYTE, X64_REGISTER_RDX,
+                                  X64_REGISTER_R11, 0);
+    } else {
+        // An element is a word.
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_R10, 0);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RDX, X64_REGISTER_R11, 0);
+    }
     x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RDX, X64_REGISTER_RCX);
     x64_jump_write(builder, X64_CONDITION_NOT_EQUAL, &different_jumps);
-    x64_write_add_immediate(builder, X64_REGISTER_R10, 1);
-    x64_write_add_immediate(builder, X64_REGISTER_R11, 1);
+    x64_write_add_immediate(builder, X64_REGISTER_R10, (int8_t)stride);
+    x64_write_add_immediate(builder, X64_REGISTER_R11, (int8_t)stride);
     x64_write_add_immediate(builder, X64_REGISTER_RAX, -1);
     x64_jump_back_write(builder, loop);
 

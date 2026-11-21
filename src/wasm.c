@@ -433,13 +433,14 @@ static void            wasm_string_length_write               (Wasm_Builder *bui
 static void            wasm_string_slice_write                (Wasm_Builder *builder,
                                                                Ast_Node_Index procedure,
                                                                bool is_end_omitted);
-static bool            wasm_comparison_is_of_bytes            (Wasm_Builder const *builder,
+static bool            wasm_comparison_is_of_sequences            (Wasm_Builder const *builder,
                                                                Ast_Node_Index comparison);
 static bool            wasm_comparison_is_of_strings          (Wasm_Builder const *builder,
                                                                Ast_Node_Index comparison);
 static void            wasm_build_code_section_body_string_comparison
                                                               (Wasm_Builder *builder,
                                                                Ast_Node_Index procedure,
+                                                               Wasm_Type element,
                                                                Ast_Comparison_Operator operator);
 static bool            wasm_check_signatures                  (Wasm_Builder *builder,
                                                                Ast_Node_Index module,
@@ -4784,7 +4785,7 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
 
     // Two arrays or array slices of bytes, in any mix, are the same when they have the same number
     // of bytes and the same bytes, so they are compared with `==` and `not=`, and have no order.
-    if (wasm_comparison_is_of_bytes(builder, operation)) {
+    if (wasm_comparison_is_of_sequences(builder, operation)) {
         if (not is_equality) {
             return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, left));
@@ -4862,15 +4863,38 @@ static bool wasm_comparison_is_of_strings(Wasm_Builder const *builder, Ast_Node_
 }
 
 /**
- * Returns whether the comparison `comparison` is of two arrays or array slices of bytes, in any mix.
+ * Returns whether the comparison `comparison` is of two arrays, dynamic arrays or array slices, in
+ * any mix, of the same type of elements, which `==` compares: a `Byte`, an `Int`, an `I32`, an
+ * `I64`, a `U32`, a `U64`, a `Bool`, a `Rune`, a member of an enum, a pointer or a pointer to a
+ * procedure. The elements of other types, floats, strings and structs, are not compared this way.
  */
-static bool wasm_comparison_is_of_bytes(Wasm_Builder const *builder, Ast_Node_Index comparison) {
+static bool wasm_comparison_is_of_sequences(Wasm_Builder const *builder,
+                                            Ast_Node_Index comparison) {
     assert(builder->nodes[comparison].node_type == AST_NODE_TYPE_COMPARISON);
 
     Wasm_Type left = wasm_expression_type(builder, builder->nodes[comparison].first_child);
     Wasm_Type right = wasm_expression_type(builder, builder->nodes[comparison].last_child);
-    return wasm_type_is_sequence(left) && wasm_type_element(left).kind == WASM_VALUE_TYPE_BYTE &&
-           wasm_type_is_sequence(right) && wasm_type_element(right).kind == WASM_VALUE_TYPE_BYTE;
+    if (not wasm_type_is_sequence(left) || not wasm_type_is_sequence(right) ||
+        not wasm_type_elements_equal(left, right)) {
+        return false;
+    }
+    switch (wasm_type_element(left).kind) {
+    case WASM_VALUE_TYPE_BOOL:
+    case WASM_VALUE_TYPE_BYTE:
+    case WASM_VALUE_TYPE_ENUM:
+    case WASM_VALUE_TYPE_I32:
+    case WASM_VALUE_TYPE_I64:
+    case WASM_VALUE_TYPE_INT:
+    case WASM_VALUE_TYPE_POINTER:
+    case WASM_VALUE_TYPE_PROCEDURE:
+    case WASM_VALUE_TYPE_RUNE:
+    case WASM_VALUE_TYPE_U32:
+    case WASM_VALUE_TYPE_U64:
+        return true;
+    default:
+        break;
+    }
+    return false;
 }
 
 /**
@@ -4884,6 +4908,7 @@ static bool wasm_comparison_is_of_bytes(Wasm_Builder const *builder, Ast_Node_In
  */
 static void wasm_build_code_section_body_string_comparison(Wasm_Builder *builder,
                                                            Ast_Node_Index procedure,
+                                                           Wasm_Type element,
                                                            Ast_Comparison_Operator operator) {
     assert(operator == AST_COMPARISON_OPERATOR_EQUAL ||
            operator == AST_COMPARISON_OPERATOR_NOT_EQUAL);
@@ -4907,8 +4932,26 @@ static void wasm_build_code_section_body_string_comparison(Wasm_Builder *builder
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, is_same);
     wasm_write_byte(writer, WASM_OPCODE_I32_EQ);
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, is_same);
-    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, first);
+    // The end is the first address plus the length times the size of an element, which is a byte
+    // for a string and a slot of 8 bytes for the elements that are not bytes.
+    size_t stride = 1;
+    byte load = WASM_OPCODE_I32_LOAD8_U;
+    byte not_equal = WASM_OPCODE_I32_NE;
+    if (element.kind != WASM_VALUE_TYPE_BYTE) {
+        stride = wasm_type_stride_bytes(builder, element);
+        if (wasm_type_slot_kind(builder, element, 0) == WASM_TYPE_I64) {
+            load = WASM_OPCODE_I64_LOAD;
+            not_equal = WASM_OPCODE_I64_NE;
+        } else {
+            load = WASM_OPCODE_I32_LOAD;
+        }
+    }
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    if (stride != 1) {
+        wasm_write_i32_const(writer, (int64_t)stride);
+        wasm_write_byte(writer, WASM_OPCODE_I32_MUL);
+    }
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, first);
     wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, end);
 
@@ -4927,21 +4970,21 @@ static void wasm_build_code_section_body_string_comparison(Wasm_Builder *builder
     wasm_write_unsigned(writer, 1);
 
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, first);
-    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
+    wasm_write_memory_instruction(writer, load, 0);
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, second);
-    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD8_U, 0);
-    wasm_write_byte(writer, WASM_OPCODE_I32_NE);
+    wasm_write_memory_instruction(writer, load, 0);
+    wasm_write_byte(writer, not_equal);
     wasm_structured_begin(builder, WASM_OPCODE_IF);
     wasm_write_i32_const(writer, 0);
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, is_same);
     wasm_write_byte(writer, WASM_OPCODE_END);
 
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, first);
-    wasm_write_i32_const(writer, 1);
+    wasm_write_i32_const(writer, (int64_t)stride);
     wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, first);
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, second);
-    wasm_write_i32_const(writer, 1);
+    wasm_write_i32_const(writer, (int64_t)stride);
     wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, second);
     wasm_write_byte(writer, WASM_OPCODE_BR);
@@ -5561,9 +5604,14 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
         // Strings are compared by their bytes, with the operands on the stack as their addresses
         // and lengths.
         if (wasm_comparison_is_of_strings(builder, current) ||
-            wasm_comparison_is_of_bytes(builder, current)) {
+            wasm_comparison_is_of_sequences(builder, current)) {
+            Wasm_Type operand = wasm_expression_type(builder, node->first_child);
+            Wasm_Type element = wasm_type_make(WASM_VALUE_TYPE_BYTE);
+            if (wasm_type_is_sequence(operand)) {
+                element = wasm_type_element(operand);
+            }
             wasm_build_code_section_body_string_comparison(
-                builder, procedure, node->payload.comparison.operator);
+                builder, procedure, element, node->payload.comparison.operator);
             break;
         }
         // Floats are compared as floats, of the type of the operand that is not an untyped literal.
@@ -6301,7 +6349,7 @@ static bool wasm_procedure_uses_arrays(Wasm_Builder const *builder, Ast_Node_Ind
         // The comparison of two strings keeps where it is in them in scratch locals.
         if (node_type == AST_NODE_TYPE_COMPARISON &&
             (wasm_comparison_is_of_strings(builder, node) ||
-             wasm_comparison_is_of_bytes(builder, node))) {
+             wasm_comparison_is_of_sequences(builder, node))) {
             return true;
         }
         // A field of a pointer to a struct is in memory, though no `^` is written.

@@ -587,8 +587,9 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .title = "{detail} cannot be compared with {other}",
         .label = "this operand cannot be compared here",
         .note = "values of different types cannot be compared, except an untyped constant or 'nil' "
-                "with the type that it fits, a Byte with an ASCII rune, and arrays or array "
-                "slices of Byte with each other, and only numbers have an order",
+                "with the type that it fits, a Byte with an ASCII rune, and arrays, dynamic arrays "
+                "or array slices of one type of elements with each other, and only numbers have an "
+                "order",
     },
     [ERROR_CODE_CONDITION_TYPE_INVALID] = {
         .title = "the condition at '{subject}' is not a Bool",

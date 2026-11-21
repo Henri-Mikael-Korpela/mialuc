@@ -8,5 +8,5 @@ error[E0511]: Int cannot be compared with Str
 6 |     return 0
   |
   = note: values of different types cannot be compared, except an untyped constant or 'nil' with the
-          type that it fits, a Byte with an ASCII rune, and arrays or array slices of Byte with each
-          other, and only numbers have an order
+          type that it fits, a Byte with an ASCII rune, and arrays, dynamic arrays or array slices
+          of one type of elements with each other, and only numbers have an order

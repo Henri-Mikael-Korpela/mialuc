@@ -1,0 +1,12 @@
+error[E0511]: an array cannot be compared with an array
+ --> test-code/errors/wasm/E0511-comparison-sequence-elements-invalid.mu:6:13
+  |
+4 |     a := [const]F64 { 1.5, 2.5 }
+5 |     b := [const]F64 { 1.5, 2.5 }
+6 |     same := a == b
+  |             ^ this operand cannot be compared here
+7 |     return 0
+  |
+  = note: values of different types cannot be compared, except an untyped constant or 'nil' with the
+          type that it fits, a Byte with an ASCII rune, and arrays, dynamic arrays or array slices
+          of one type of elements with each other, and only numbers have an order

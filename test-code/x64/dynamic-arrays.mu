@@ -179,6 +179,68 @@ value_from_expressions :: proc() Int ->
     append(%a, a[0] * 2, length_of(a) + 10)
     return a[0] * 100 + a[1] * 10 + a[2]
 
+/// Arrays, slices and dynamic arrays of Int are compared element by element, in any mix.
+compare_int_sequences :: proc() Int ->
+    a := [const]Int { 1, 2, 3 }
+    b := [const]Int { 1, 2, 3 }
+    c := [const]Int { 1, 2, 4 }
+    d := [dynamic]Int
+    append(%d, 1, 2, 3)
+    n := 0
+    if a == b ->
+        n += 1
+    if a == c ->
+        n += 10
+    if a not= c ->
+        n += 100
+    if a[:] == b[:] ->
+        n += 1000
+    if a[0:2] == c[0:2] ->
+        n += 10000
+    if a[0:2] == c ->
+        n += 100000
+    if d == a ->
+        n += 1000000
+    if d == c ->
+        n += 10000000
+    if d[:] not= a[1:] ->
+        n += 100000000
+    return n
+
+/// Arrays of the other types of elements that are compared: Bool, enums, I32, Byte and empty dynamic arrays.
+compare_other_sequences :: proc() Int ->
+    x := [const]Bool { true, false }
+    y := [const]Bool { true, false }
+    z := [const]Bool { true, true }
+    p := [const]Color { Color.RED, Color.GREEN }
+    q := [const]Color { Color.RED, Color.GREEN }
+    r := [const]Color { Color.GREEN, Color.GREEN }
+    e := [dynamic]Int
+    f := [dynamic]Int
+    i := [const]I32 { 1, -2 }
+    j := [const]I32 { 1, -2 }
+    k := [const]I32 { 1, 2 }
+    bs := [const]Byte { 1, 2 }
+    cs := [const]Byte { 1, 2 }
+    n := 0
+    if x == y ->
+        n += 1
+    if x == z ->
+        n += 10
+    if p == q ->
+        n += 100
+    if p == r ->
+        n += 1000
+    if e == f ->
+        n += 10000
+    if i == j ->
+        n += 100000
+    if i == k ->
+        n += 1000000
+    if bs == cs ->
+        n += 10000000
+    return n
+
 /// Prints the result of a procedure and says whether it is the one that the language gives.
 check :: proc(format: C_Str, number: Int, expected: Int) Int ->
     printf(format, number)
@@ -208,4 +270,6 @@ main :: proc() Int ->
     wrong += check("slices_of_dynamic_array() is %lld", slices_of_dynamic_array(), 4878)
     wrong += check("arrays_in_calls() is %lld", arrays_in_calls(), 500063)
     wrong += check("value_from_expressions() is %lld", value_from_expressions(), 371)
+    wrong += check("compare_int_sequences() is %lld", compare_int_sequences(), 101011101)
+    wrong += check("compare_other_sequences() is %lld", compare_other_sequences(), 10110101)
     return wrong
