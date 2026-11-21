@@ -7477,8 +7477,7 @@ static bool wasm_build_code_section_body_slice(Wasm_Builder *builder, Ast_Node_I
     assert((first == end) == is_end_omitted);
 
     Wasm_Type base_type = wasm_expression_type(builder, base);
-    if ((base_type.kind != WASM_VALUE_TYPE_STR && not wasm_type_is_sequence(base_type)) ||
-        base_type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+    if (base_type.kind != WASM_VALUE_TYPE_STR && not wasm_type_is_sequence(base_type)) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, base));
     }

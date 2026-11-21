@@ -4815,7 +4815,8 @@ static bool x64_slice_write(X64_Builder *builder, X64_Expression_Frame const *fr
     if (type.kind == X64_TYPE_KIND_STR) {
         return x64_string_slice_write(builder, frame);
     }
-    if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+    if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_DYNAMIC &&
+        type.kind != X64_TYPE_KIND_SLICE) {
         return x64_fail(builder, X64_BUILD_STATUS_ARRAY_EXPECTED,
                         x64_expression_subject(builder, node));
     }
@@ -6512,11 +6513,8 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
                 }
                 break;
             }
-            bool is_dynamic_element = type.kind == X64_TYPE_KIND_DYNAMIC &&
-                                      builder->nodes[path[i - 1]].node_type ==
-                                          AST_NODE_TYPE_SUBSCRIPT;
-            if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE &&
-                not is_dynamic_element) {
+            if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_DYNAMIC &&
+                type.kind != X64_TYPE_KIND_SLICE) {
                 return x64_type_make(X64_TYPE_KIND_NONE);
             }
             if (builder->nodes[path[i - 1]].node_type == AST_NODE_TYPE_SUBSCRIPT) {
