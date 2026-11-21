@@ -3262,8 +3262,7 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
             wasm_expression_type(builder, builder->nodes[call].first_child);
         // `length_of` takes an array, an array slice, or a string, which it counts by the
         // character.
-        bool is_argument_valid = (wasm_type_is_sequence(argument_type) &&
-                                  argument_type.kind != WASM_VALUE_TYPE_DYNAMIC) ||
+        bool is_argument_valid = wasm_type_is_sequence(argument_type) ||
                                  (argument_type.kind == WASM_VALUE_TYPE_STR &&
                                   str_equals(name, STR("length_of")));
         if (str_equals(name, STR("int_to_byte")) || str_equals(name, STR("int_to_i32"))) {

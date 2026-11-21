@@ -4971,7 +4971,7 @@ static bool x64_cast_write(X64_Builder *builder, X64_Expression_Frame const *fra
 /**
  * Writes a call of the built-in procedure `length_of` or `int_to_byte` of `frame`, whose argument
  * is on the stack of values. `length_of` is the length of an array, which is part of its type, or
- * the second word of an array slice. `int_to_byte` traps unless the number is at most 255, as an
+ * the second word of an array slice or of a dynamic array. `int_to_byte` traps unless the number is at most 255, as an
  * unsigned number, which a negative one is not. Returns false after it recorded an error.
  */
 static bool x64_built_in_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
@@ -5021,7 +5021,8 @@ static bool x64_built_in_write(X64_Builder *builder, X64_Expression_Frame const 
     if (str_equals(name, STR("length_of"))) {
         if (type.kind == X64_TYPE_KIND_STR) {
             x64_string_length_write(builder, place);
-        } else if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+        } else if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_DYNAMIC &&
+                   type.kind != X64_TYPE_KIND_SLICE) {
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         } else {
             x64_sequence_length_load(builder, type, X64_REGISTER_RAX, place);

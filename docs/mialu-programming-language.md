@@ -1693,7 +1693,7 @@ sum_of_squares :: proc(count: Int) Int ->
 
 A dynamic array is its elements, how many there are, and how many there is room for. The elements are in the [temporary storage](#str_to_c_str) of the program, which a procedure gives back when it returns. When `append` finds that there is no room for the values that are given to it, it makes room for twice as many elements as there will be, in the temporary storage, and copies the elements that there are to it, and the place that the elements had stays used until the procedure returns. So the elements of a dynamic array are good until the procedure that defines it returns, and a dynamic array must not leave it: it cannot be a parameter or the type of a returned value, of a global variable or of a field of a struct, which are an error as the type of an array is. Temporary storage has a fixed size, and a program that makes more room than fits in it is stopped.
 
-An element is read and assigned with an index, as for an array, `squares[2]`, which traps when the index is not below the number of elements, and a `for` statement goes through the elements, see [For statements](#for-statements). An index is checked against the number of elements, and not against the room, so the elements that `append` has not added are not there.
+An element is read and assigned with an index, as for an array, `squares[2]`, which traps when the index is not below the number of elements, and a `for` statement goes through the elements, see [For statements](#for-statements). An index is checked against the number of elements, and not against the room, so the elements that `append` has not added are not there. The number of elements is `length_of(squares)`, see [length_of](#length_of).
 
 ## Custom data types
 
@@ -2247,7 +2247,7 @@ A built-in procedure is a procedure that the language has, and that is called li
 | Procedure | Takes | Gives |
 |-----------|-------|-------|
 | [`append`](#append) | the address of a dynamic array, and one or more values | nothing: the values are at the end of the dynamic array |
-| [`length_of`](#length_of) | an array, an array slice or a `Str` | the number of its elements or characters, an `Int` |
+| [`length_of`](#length_of) | an array, a dynamic array, an array slice or a `Str` | the number of its elements or characters, an `Int` |
 | [`int_to_byte`](#int_to_byte) | an `Int` | a `Byte` of it, and stops the program when it is not from 0 to 255 |
 | [`int_to_i32`](#int_to_i32) | an `Int` or an `I64` | an `I32` of it, and stops the program when it is not from -2147483648 to 2147483647 |
 | [`int_to_str`](#int_to_str) | an integer that is known when the program is compiled | its decimal text, a string that is a constant |
@@ -2269,7 +2269,7 @@ The address is needed because the dynamic array is changed, which is `%` as for 
 
 ### length_of
 
-`length_of` gives the number of elements of an array or an array slice, or the number of characters of a string, as an `Int`. It takes one argument, and it is called like any procedure:
+`length_of` gives the number of elements of an array, a dynamic array or an array slice, or the number of characters of a string, as an `Int`. It takes one argument, and it is called like any procedure:
 
 ```
 length_of_array :: proc() Int ->
@@ -2288,7 +2288,7 @@ fill_with_length :: proc() Int ->
     return sum(a)
 ```
 
-`length_of_array` returns 5. The length of an array is part of the program, so for an array `length_of` is a number that is known when the program is compiled, also for an array whose length is `const`. The length of a slice is not known until the program runs, so for a slice it reads the length that the slice holds, which for `a[low:high]` is `high - low`. The length of an array of nothing, `[const]Int { }`, is 0. The length of a string is the number of its code points, so `length_of("äiti")` is 4, and it is worked out when the program runs by counting the bytes that are not the continuation of another, which takes as long as the string is long, see [Strings](#strings). Anything else as the argument, such as an `Int`, is an error.
+`length_of_array` returns 5. The length of an array is part of the program, so for an array `length_of` is a number that is known when the program is compiled, also for an array whose length is `const`. The length of a slice is not known until the program runs, so for a slice it reads the length that the slice holds, which for `a[low:high]` is `high - low`. The length of a [dynamic array](#dynamic-arrays) is not known until the program runs either, and it is the number of elements that `append` has added to it, which is 0 for a dynamic array that is just made, and not the room that it has. The length of an array of nothing, `[const]Int { }`, is 0. The length of a string is the number of its code points, so `length_of("äiti")` is 4, and it is worked out when the program runs by counting the bytes that are not the continuation of another, which takes as long as the string is long, see [Strings](#strings). Anything else as the argument, such as an `Int`, is an error.
 
 `length_of` is not a keyword but a name that a program can define itself: a procedure with that name is called instead of the built-in one. The [members of an enum](#static-reflection) are an array, so `length_of` gives their number as well.
 
