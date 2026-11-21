@@ -193,6 +193,9 @@ typedef enum {
     // An array, a dynamic array or an array slice is compared with one of another of the three
     // kinds.
     WASM_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH,
+    // Two arrays are compared and have different lengths, which are `length_first` and
+    // `length_second`, and `value_offset` is where the second operand is.
+    WASM_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH,
     // An element of an array, or a value that is assigned to one, that is not an `Int`.
     WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
     // A value that has to be an array or an array slice, and is not: what is indexed, sliced, gone
@@ -352,6 +355,9 @@ typedef struct {
     Str type_found;
     // The byte offset in the source of the value that is returned, for the same status.
     uint32_t value_offset;
+    // The two lengths of `WASM_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH`.
+    int64_t length_first;
+    int64_t length_second;
     Wasm_Build_Status status;
 } Wasm_Build_Result;
 

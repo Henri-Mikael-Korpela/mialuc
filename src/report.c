@@ -734,6 +734,14 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
                  "written out",
         .help = "write the member, such as '.MEMBER', and not another value",
     },
+    [ERROR_CODE_COMPARISON_ARRAY_LENGTH_MISMATCH] = {
+        .title = "two arrays of different lengths cannot be compared: {detail} and {other}",
+        .label = "this array has {detail}",
+        .second_label = "this array has {other}",
+        .note = "arrays are compared element by element, so they must have as many elements, and "
+                "the length of an array is known when the program is compiled",
+        .help = "compare slices of the parts that have the same length, as in 'a[0:2] == b[0:2]'",
+    },
     [ERROR_CODE_COMPARISON_ARRAY_KIND_MISMATCH] = {
         .title = "{detail} cannot be compared with {other}",
         .label = "these two are not compared with each other",
@@ -1032,6 +1040,7 @@ static Error_Code const REPORT_TOKENIZE_CODES[] = {
 static Error_Code const REPORT_X64_CODES[] = {
     [X64_BUILD_STATUS_APPEND_TARGET_INVALID] = ERROR_CODE_APPEND_TARGET_INVALID,
     [X64_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH] = ERROR_CODE_COMPARISON_ARRAY_KIND_MISMATCH,
+    [X64_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH] = ERROR_CODE_COMPARISON_ARRAY_LENGTH_MISMATCH,
     [X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID] = ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID,
     [X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH] = ERROR_CODE_ARRAY_ELEMENT_TYPE_MISMATCH,
     [X64_BUILD_STATUS_ARRAY_EXPECTED] = ERROR_CODE_ARRAY_EXPECTED,
@@ -1096,6 +1105,7 @@ static Error_Code const REPORT_X64_CODES[] = {
 static Error_Code const REPORT_WASM_CODES[] = {
     [WASM_BUILD_STATUS_APPEND_TARGET_INVALID] = ERROR_CODE_APPEND_TARGET_INVALID,
     [WASM_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH] = ERROR_CODE_COMPARISON_ARRAY_KIND_MISMATCH,
+    [WASM_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH] = ERROR_CODE_COMPARISON_ARRAY_LENGTH_MISMATCH,
     [WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID] =
         ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID,
     [WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH] = ERROR_CODE_ARRAY_ELEMENT_TYPE_MISMATCH,
@@ -1479,6 +1489,20 @@ void report_x64_error(Reporter const *reporter, char const *path, Str source,
         texts.second_offset = result.value_offset;
         texts.has_second = true;
     }
+    char first_length[32] = "";
+    char second_length[32] = "";
+    if (result.status == X64_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH) {
+        // The text has the word too, which is "element" for one and "elements" for any other
+        // number.
+        int first_size = snprintf(first_length, sizeof(first_length), "%" PRId64 " element%s",
+                                  result.length_first, result.length_first == 1 ? "" : "s");
+        int second_size = snprintf(second_length, sizeof(second_length), "%" PRId64 " element%s",
+                                   result.length_second, result.length_second == 1 ? "" : "s");
+        texts.detail = str_make(first_length, (size_t)first_size);
+        texts.other = str_make(second_length, (size_t)second_size);
+        texts.second_offset = result.value_offset;
+        texts.has_second = true;
+    }
     if (result.status == X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID ||
         result.status == X64_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH) {
         texts.detail = result.type_expected;
@@ -1512,6 +1536,20 @@ void report_wasm_error(Reporter const *reporter, char const *path, Str source,
     if (result.status == WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH) {
         texts.detail = result.type_expected;
         texts.other = result.type_found;
+        texts.second_offset = result.value_offset;
+        texts.has_second = true;
+    }
+    char first_length[32] = "";
+    char second_length[32] = "";
+    if (result.status == WASM_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH) {
+        // The text has the word too, which is "element" for one and "elements" for any other
+        // number.
+        int first_size = snprintf(first_length, sizeof(first_length), "%" PRId64 " element%s",
+                                  result.length_first, result.length_first == 1 ? "" : "s");
+        int second_size = snprintf(second_length, sizeof(second_length), "%" PRId64 " element%s",
+                                   result.length_second, result.length_second == 1 ? "" : "s");
+        texts.detail = str_make(first_length, (size_t)first_size);
+        texts.other = str_make(second_length, (size_t)second_size);
         texts.second_offset = result.value_offset;
         texts.has_second = true;
     }

@@ -25,6 +25,10 @@ typedef enum {
     // An array, a dynamic array or an array slice is compared with one of another of the three
     // kinds. The subject is the first operand.
     X64_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH,
+    // Two arrays whose lengths are known when the program is compiled are compared, and have
+    // different lengths. The subject is the first operand, `length_first` and `length_second` are
+    // the two lengths, and `value_offset` is where the second operand is.
+    X64_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH,
     // An element of an array literal, or the value that is assigned to an element or to a range of
     // elements, is not of the type of the elements. The subject is its first name or string.
     X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
@@ -366,6 +370,9 @@ typedef struct {
     Str type_found;
     // The byte offset in the source of the value that is returned, for the same status.
     uint32_t value_offset;
+    // The two lengths of `X64_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH`.
+    int64_t length_first;
+    int64_t length_second;
     X64_Build_Status status;
 } X64_Build_Result;
 

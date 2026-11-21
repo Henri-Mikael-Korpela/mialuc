@@ -1,0 +1,14 @@
+error[E0546]: two arrays of different lengths cannot be compared: 2 elements and 6 elements
+ --> test-code/errors/wasm/E0546-comparison-array-length-mismatch.mu:8:13
+  |
+6 |     x := [const]Int { 1, 2 }
+7 |     y := [SIZE * 2]Int { .. = 0 }
+8 |     same := x == y
+  |             ^ this array has 2 elements
+8 |     same := x == y
+  |                  ^ this array has 6 elements
+9 |     return 0
+  |
+  = note: arrays are compared element by element, so they must have as many elements, and the length
+          of an array is known when the program is compiled
+  = help: compare slices of the parts that have the same length, as in 'a[0:2] == b[0:2]'

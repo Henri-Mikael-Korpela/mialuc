@@ -490,6 +490,8 @@ typedef struct {
     Str type_expected;
     Str type_found;
     uint32_t value_offset;
+    int64_t length_first;
+    int64_t length_second;
     // What the debug information needs, or NULL when the file has none.
     X64_Debug const *debug;
     X64_Debug_Row *rows;
@@ -1134,6 +1136,8 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
         .type_expected = STR_EMPTY,
         .type_found = STR_EMPTY,
         .value_offset = 0,
+        .length_first = 0,
+        .length_second = 0,
         .debug = debug,
         .rows = rows,
         .layout = {0},
@@ -1242,6 +1246,8 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
         .type_expected = builder.type_expected,
         .type_found = builder.type_found,
         .value_offset = builder.value_offset,
+        .length_first = builder.length_first,
+        .length_second = builder.length_second,
         .status = builder.status,
     };
 }
@@ -5724,6 +5730,17 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
                  x64_expression_subject(builder, left));
         builder->type_expected = x64_comparison_type_text(builder, left_type);
         builder->type_found = x64_comparison_type_text(builder, right_type);
+        return false;
+    }
+    // Two arrays are compared when they have the same length, which is known when the program is
+    // compiled.
+    if (left_type.kind == X64_TYPE_KIND_ARRAY && right_type.kind == X64_TYPE_KIND_ARRAY &&
+        left_type.length >= 0 && right_type.length >= 0 && left_type.length != right_type.length) {
+        x64_fail(builder, X64_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH,
+                 x64_expression_subject(builder, left));
+        builder->length_first = left_type.length;
+        builder->length_second = right_type.length;
+        builder->value_offset = builder->nodes[right].source_offset;
         return false;
     }
     if (x64_types_are_comparable_sequences(left_type, right_type)) {

@@ -240,6 +240,8 @@ typedef struct {
     Str type_expected;
     Str type_found;
     uint32_t value_offset;
+    int64_t length_first;
+    int64_t length_second;
     size_t node_count;
     Ast_Node_Index module;
     // The number of foreign procedures. They are imported functions, which come before the
@@ -907,6 +909,8 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slic
         .type_expected = STR_EMPTY,
         .type_found = STR_EMPTY,
         .value_offset = 0,
+        .length_first = 0,
+        .length_second = 0,
         .node_count = nodes.length,
         .module = root,
         .foreign_count = 0,
@@ -1001,6 +1005,8 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slic
         .type_expected = builder.type_expected,
         .type_found = builder.type_found,
         .value_offset = builder.value_offset,
+        .length_first = builder.length_first,
+        .length_second = builder.length_second,
         .status = builder.status,
     };
 }
@@ -4796,6 +4802,17 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
                   wasm_expression_subject(builder, definition, left));
         builder->type_expected = wasm_comparison_type_text(builder, left_type);
         builder->type_found = wasm_comparison_type_text(builder, right_type);
+        return false;
+    }
+    // Two arrays are compared when they have the same length, which is known when the program is
+    // compiled.
+    if (left_type.kind == WASM_VALUE_TYPE_ARRAY && right_type.kind == WASM_VALUE_TYPE_ARRAY &&
+        wasm_array_length(builder, left) != wasm_array_length(builder, right)) {
+        wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH,
+                  wasm_expression_subject(builder, definition, left));
+        builder->length_first = (int64_t)wasm_array_length(builder, left);
+        builder->length_second = (int64_t)wasm_array_length(builder, right);
+        builder->value_offset = builder->nodes[right].source_offset;
         return false;
     }
     if (wasm_comparison_is_of_sequences(builder, operation)) {

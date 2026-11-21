@@ -193,6 +193,7 @@ These are found when a target builds the program, and are the same mistake in th
 | E0543 | variable 'name' is given a value that is not of its type |  |
 | E0544 | 'name' can only add to a dynamic array, and its first argument is not the address of one | Not the address of a dynamic array. Write the address of a variable of the type '[dynamic]T', as in 'append(%numbers, 1)': an array, an array slice and any other type cannot be appended to. |
 | E0545 | a type cannot be compared with the other type | An array, a dynamic array and an array slice are only compared with their own kind, even when their elements are the same. Compare slices of both instead, as in 'a[:] == b[:]'. |
+| E0546 | two arrays of different lengths cannot be compared: N elements and M elements | Each array is labeled with its length, which is known when the program is compiled and is worked out from a constant expression. Compare slices of the parts that have the same length, as in 'a[0:2] == b[0:2]'. |
 
 ## E0601 - E0699: what the x64 target rejects
 

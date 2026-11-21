@@ -47,12 +47,12 @@ main :: proc() Int ->
     wrong += check("same arrays are not unequal %lld", flag(first not= second), 0)
     wrong += check("last byte differs, equal %lld", flag(first == third), 0)
     wrong += check("last byte differs, unequal %lld", flag(first not= third), 1)
-    wrong += check("longer array, equal %lld", flag(first == longer), 0)
-    wrong += check("longer array, unequal %lld", flag(first not= longer), 1)
-    wrong += check("shorter array, equal %lld", flag(first == shorter), 0)
+    wrong += check("longer array, equal %lld", flag(first[:] == longer[:]), 0)
+    wrong += check("longer array, unequal %lld", flag(first[:] not= longer[:]), 1)
+    wrong += check("shorter array, equal %lld", flag(first[:] == shorter[:]), 0)
     wrong += check("an array is the same as itself %lld", flag(first == first), 1)
     wrong += check("two arrays of nothing are equal %lld", flag(nothing == other_nothing), 1)
-    wrong += check("nothing is not something %lld", flag(nothing == first), 0)
+    wrong += check("nothing is not something %lld", flag(nothing[:] == first[:]), 0)
 
     // The first byte, a byte in the middle and a byte above 127, which are compared as numbers
     // from 0 to 255 and not as numbers with a sign.
@@ -74,7 +74,7 @@ main :: proc() Int ->
     wrong += check("slice and different array, unequal %lld", flag(slice not= third[:]), 1)
     shorter_slice := longer[0:3]
     wrong += check("a slice of a longer array is equal %lld", flag(shorter_slice == first[:]), 1)
-    wrong += check("whole longer array is not %lld", flag(longer == first), 0)
+    wrong += check("whole longer array is not %lld", flag(longer[:] == first[:]), 0)
     last_slice := longer[1:4]
     wrong += check("another place is not equal %lld", flag(last_slice == first[:]), 0)
     wrong += check("two slices are equal %lld", flag(shorter_slice == slice), 1)

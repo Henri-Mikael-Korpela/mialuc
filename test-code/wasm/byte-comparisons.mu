@@ -16,7 +16,7 @@ different_arrays :: proc() Bool ->
 different_lengths :: proc() Bool ->
     first := [const]Byte { 1, 2, 3 }
     longer := [const]Byte { 1, 2, 3, 4 }
-    return first == longer
+    return first[:] == longer[:]
 
 /// An array and a slice, and two slices, in either order.
 array_and_slice :: proc() Bool ->
