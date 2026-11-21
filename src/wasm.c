@@ -4785,6 +4785,15 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
 
     // Two arrays or array slices of bytes, in any mix, are the same when they have the same number
     // of bytes and the same bytes, so they are compared with `==` and `not=`, and have no order.
+    if ((left_type.kind == WASM_VALUE_TYPE_ARRAY && right_type.kind == WASM_VALUE_TYPE_DYNAMIC) ||
+        (left_type.kind == WASM_VALUE_TYPE_DYNAMIC && right_type.kind == WASM_VALUE_TYPE_ARRAY)) {
+        // An array and a dynamic array are not compared, whatever their elements are.
+        wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH,
+                  wasm_expression_subject(builder, definition, left));
+        builder->type_expected = wasm_type_text(builder, left_type);
+        builder->type_found = wasm_type_text(builder, right_type);
+        return false;
+    }
     if (wasm_comparison_is_of_sequences(builder, operation)) {
         if (not is_equality) {
             return wasm_comparison_fail(builder, left_type, right_type,

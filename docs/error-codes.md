@@ -192,6 +192,7 @@ These are found when a target builds the program, and are the same mistake in th
 | E0542 | the field 'name' is in a case of a union, so the struct object must give the field that the union is matched against a member of the enum that is written out | Write the member, such as '.MEMBER', and not another value. |
 | E0543 | variable 'name' is given a value that is not of its type |  |
 | E0544 | 'name' can only add to a dynamic array, and its first argument is not the address of one | Not the address of a dynamic array. Write the address of a variable of the type '[dynamic]T', as in 'append(%numbers, 1)': an array, an array slice and any other type cannot be appended to. |
+| E0545 | a type cannot be compared with the other type | An array and a dynamic array are not compared with each other, even when their elements are the same. Compare slices of them instead, as in 'a[:] == b[:]'. |
 
 ## E0601 - E0699: what the x64 target rejects
 

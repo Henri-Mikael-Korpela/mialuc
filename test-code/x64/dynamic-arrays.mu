@@ -199,9 +199,9 @@ compare_int_sequences :: proc() Int ->
         n += 10000
     if a[0:2] == c ->
         n += 100000
-    if d == a ->
+    if d[:] == a ->
         n += 1000000
-    if d == c ->
+    if d[:] == c ->
         n += 10000000
     if d[:] not= a[1:] ->
         n += 100000000

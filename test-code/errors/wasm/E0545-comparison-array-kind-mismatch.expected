@@ -1,0 +1,12 @@
+error[E0545]: an array cannot be compared with a dynamic array
+ --> test-code/errors/wasm/E0545-comparison-array-kind-mismatch.mu:7:17
+  |
+5 |     b := [dynamic]Int
+6 |     append(%b, 2, 3, 5)
+7 |     are_same := a == b
+  |                 ^ an array and a dynamic array are not compared directly
+8 |     return 0
+  |
+  = note: an array has a length that is known when the program is compiled and a dynamic array has
+          not, so the two are not compared even when their elements are the same
+  = help: compare slices of them, as in 'a[:] == b[:]'

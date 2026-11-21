@@ -734,6 +734,13 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
                  "written out",
         .help = "write the member, such as '.MEMBER', and not another value",
     },
+    [ERROR_CODE_COMPARISON_ARRAY_KIND_MISMATCH] = {
+        .title = "{detail} cannot be compared with {other}",
+        .label = "an array and a dynamic array are not compared directly",
+        .note = "an array has a length that is known when the program is compiled and a dynamic "
+                "array has not, so the two are not compared even when their elements are the same",
+        .help = "compare slices of them, as in 'a[:] == b[:]'",
+    },
     [ERROR_CODE_APPEND_TARGET_INVALID] = {
         .title = "'{subject}' can only add to a dynamic array, and its first argument is not the "
                  "address of one",
@@ -1022,6 +1029,7 @@ static Error_Code const REPORT_TOKENIZE_CODES[] = {
 // The code of each status of the x64 build.
 static Error_Code const REPORT_X64_CODES[] = {
     [X64_BUILD_STATUS_APPEND_TARGET_INVALID] = ERROR_CODE_APPEND_TARGET_INVALID,
+    [X64_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH] = ERROR_CODE_COMPARISON_ARRAY_KIND_MISMATCH,
     [X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID] = ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID,
     [X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH] = ERROR_CODE_ARRAY_ELEMENT_TYPE_MISMATCH,
     [X64_BUILD_STATUS_ARRAY_EXPECTED] = ERROR_CODE_ARRAY_EXPECTED,
@@ -1085,6 +1093,7 @@ static Error_Code const REPORT_X64_CODES[] = {
 // The code of each status of the wasm build.
 static Error_Code const REPORT_WASM_CODES[] = {
     [WASM_BUILD_STATUS_APPEND_TARGET_INVALID] = ERROR_CODE_APPEND_TARGET_INVALID,
+    [WASM_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH] = ERROR_CODE_COMPARISON_ARRAY_KIND_MISMATCH,
     [WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID] =
         ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID,
     [WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH] = ERROR_CODE_ARRAY_ELEMENT_TYPE_MISMATCH,
@@ -1468,7 +1477,8 @@ void report_x64_error(Reporter const *reporter, char const *path, Str source,
         texts.second_offset = result.value_offset;
         texts.has_second = true;
     }
-    if (result.status == X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID) {
+    if (result.status == X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID ||
+        result.status == X64_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH) {
         texts.detail = result.type_expected;
         texts.other = result.type_found;
     }
@@ -1503,7 +1513,8 @@ void report_wasm_error(Reporter const *reporter, char const *path, Str source,
         texts.second_offset = result.value_offset;
         texts.has_second = true;
     }
-    if (result.status == WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID) {
+    if (result.status == WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID ||
+        result.status == WASM_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH) {
         texts.detail = result.type_expected;
         texts.other = result.type_found;
     }

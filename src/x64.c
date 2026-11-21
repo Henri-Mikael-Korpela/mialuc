@@ -5602,6 +5602,15 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     // of bytes and the same bytes, and have no order.
     X64_Type left_type = x64_expression_type(builder, left);
     X64_Type right_type = x64_expression_type(builder, right);
+    // An array and a dynamic array are not compared, whatever their elements are.
+    if ((left_type.kind == X64_TYPE_KIND_ARRAY && right_type.kind == X64_TYPE_KIND_DYNAMIC) ||
+        (left_type.kind == X64_TYPE_KIND_DYNAMIC && right_type.kind == X64_TYPE_KIND_ARRAY)) {
+        x64_fail(builder, X64_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH,
+                 x64_expression_subject(builder, left));
+        builder->type_expected = x64_type_text(builder, left_type);
+        builder->type_found = x64_type_text(builder, right_type);
+        return false;
+    }
     if (x64_types_are_comparable_sequences(left_type, right_type)) {
         if (operator != AST_COMPARISON_OPERATOR_EQUAL &&
             operator != AST_COMPARISON_OPERATOR_NOT_EQUAL) {
