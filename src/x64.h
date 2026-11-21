@@ -19,6 +19,9 @@ typedef enum {
     // floats, or the two operands are of different types. The subject is the first name or string
     // of the operand, or the name of the definition that it is in.
     X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
+    // The first argument of `append` is not the address of a variable that is a dynamic array.
+    // The subject is `append`.
+    X64_BUILD_STATUS_APPEND_TARGET_INVALID,
     // An element of an array literal, or the value that is assigned to an element or to a range of
     // elements, is not of the type of the elements. The subject is its first name or string.
     X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,

@@ -5996,11 +5996,11 @@ static bool x64_append_write(X64_Builder *builder, Ast_Node_Index call) {
     if (builder->nodes[pointer].node_type != AST_NODE_TYPE_ADDRESS_OF ||
         builder->nodes[target].node_type != AST_NODE_TYPE_IDENTIFIER ||
         builder->bindings[target].kind != SEMANTIC_BINDING_KIND_VARIABLE) {
-        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        return x64_fail(builder, X64_BUILD_STATUS_APPEND_TARGET_INVALID, name);
     }
     X64_Type type = x64_expression_type(builder, target);
     if (type.kind != X64_TYPE_KIND_DYNAMIC) {
-        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        return x64_fail(builder, X64_BUILD_STATUS_APPEND_TARGET_INVALID, name);
     }
     int32_t place = 0;
     if (not x64_identifier_place(builder, target, &place)) {

@@ -1,0 +1,11 @@
+error[E0544]: 'append' can only add to a dynamic array, and its first argument is not the address of one
+ --> test-code/errors/wasm/E0544-append-target-invalid.mu:6:5
+  |
+4 |     a := [const]Int { 2, 3, 5 }
+5 |     b := [dynamic]Int
+6 |     append(%a, 2, 3, 5)
+  |     ^^^^^^ not the address of a dynamic array
+7 |     return 0
+  |
+  = note: write the address of a variable of the type '[dynamic]T', as in 'append(%numbers, 1)': an
+          array, an array slice and any other type cannot be appended to

@@ -188,6 +188,8 @@ typedef enum {
     // too. The subject is the name in the operand.
     WASM_BUILD_STATUS_ADDRESS_INVALID,
     WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
+    // The first argument of `append` is not the address of a variable that is a dynamic array.
+    WASM_BUILD_STATUS_APPEND_TARGET_INVALID,
     // An element of an array, or a value that is assigned to one, that is not an `Int`.
     WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
     // A value that has to be an array or an array slice, and is not: what is indexed, sliced, gone

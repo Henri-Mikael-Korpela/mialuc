@@ -733,6 +733,14 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
                  "written out",
         .help = "write the member, such as '.MEMBER', and not another value",
     },
+    [ERROR_CODE_APPEND_TARGET_INVALID] = {
+        .title = "'{subject}' can only add to a dynamic array, and its first argument is not the "
+                 "address of one",
+        .label = "not the address of a dynamic array",
+        .note = "write the address of a variable of the type '[dynamic]T', as in "
+                "'append(%numbers, 1)': an array, an array slice and any other type cannot be "
+                "appended to",
+    },
     [ERROR_CODE_VARIABLE_TYPE_MISMATCH] = {
         .title = "variable '{subject}' is given a value that is not of its type",
     },
@@ -1012,6 +1020,7 @@ static Error_Code const REPORT_TOKENIZE_CODES[] = {
 
 // The code of each status of the x64 build.
 static Error_Code const REPORT_X64_CODES[] = {
+    [X64_BUILD_STATUS_APPEND_TARGET_INVALID] = ERROR_CODE_APPEND_TARGET_INVALID,
     [X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID] = ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID,
     [X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH] = ERROR_CODE_ARRAY_ELEMENT_TYPE_MISMATCH,
     [X64_BUILD_STATUS_ARRAY_EXPECTED] = ERROR_CODE_ARRAY_EXPECTED,
@@ -1074,6 +1083,7 @@ static Error_Code const REPORT_X64_CODES[] = {
 
 // The code of each status of the wasm build.
 static Error_Code const REPORT_WASM_CODES[] = {
+    [WASM_BUILD_STATUS_APPEND_TARGET_INVALID] = ERROR_CODE_APPEND_TARGET_INVALID,
     [WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID] =
         ERROR_CODE_ARITHMETIC_OPERAND_TYPE_INVALID,
     [WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH] = ERROR_CODE_ARRAY_ELEMENT_TYPE_MISMATCH,

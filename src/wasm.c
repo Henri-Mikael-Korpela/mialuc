@@ -826,6 +826,9 @@ static void            wasm_build_code_section_body_try_str_to_int
 static bool            wasm_build_code_section_body_append    (Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index call);
+static bool            wasm_variable_is_append_target         (Wasm_Builder const *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Ast_Node_Index variable);
 static bool            wasm_call_is_append                    (Wasm_Builder const *builder,
                                                                Ast_Node_Index call);
 static bool            wasm_call_is_built_in                  (Wasm_Builder const *builder,
@@ -3993,6 +3996,7 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
             Wasm_Type variable_type = wasm_variable_type(builder, statement);
             if (wasm_variable_is_in_memory(builder, statement) &&
                 variable_type.kind != WASM_VALUE_TYPE_DYNAMIC &&
+                not wasm_variable_is_append_target(builder, procedure, statement) &&
                 wasm_type_pointer_to(variable_type).kind == WASM_VALUE_TYPE_NONE) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_ADDRESS_INVALID,
                                  statement_node->payload.variable_definition.name);
@@ -10247,6 +10251,34 @@ static void wasm_build_code_section_body_try_str_to_int(Wasm_Builder *builder,
 }
 
 /**
+ * Returns whether `variable` is the operand of the first argument of a call of `append` in
+ * `procedure`, so that the error about it is the one of `append`, which says that only a dynamic
+ * array can be appended to, and not that the variable has no address.
+ */
+static bool wasm_variable_is_append_target(Wasm_Builder const *builder, Ast_Node_Index procedure,
+                                           Ast_Node_Index variable) {
+    Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
+    for (Ast_Node_Index node = procedure + 1; node < end; node += 1) {
+        if (builder->nodes[node].node_type != AST_NODE_TYPE_CALL ||
+            not wasm_call_is_append(builder, node)) {
+            continue;
+        }
+        Ast_Node_Index pointer = builder->nodes[node].first_child;
+        if (pointer == AST_NODE_INDEX_NONE ||
+            builder->nodes[pointer].node_type != AST_NODE_TYPE_ADDRESS_OF) {
+            continue;
+        }
+        Ast_Node_Index target = builder->nodes[pointer].first_child;
+        if (builder->nodes[target].node_type == AST_NODE_TYPE_IDENTIFIER &&
+            builder->bindings[target].kind == SEMANTIC_BINDING_KIND_VARIABLE &&
+            builder->bindings[target].target == variable) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Writes the statement `append(%a, value, ...)`, which puts the values at the end of the dynamic
  * array that the variable `a` is. The variable is in the frame, because its address is taken, and
  * it is three values there, like those of any variable: the address of the elements, how many there
@@ -10276,12 +10308,12 @@ static bool wasm_build_code_section_body_append(Wasm_Builder *builder, Ast_Node_
     if (builder->nodes[pointer].node_type != AST_NODE_TYPE_ADDRESS_OF ||
         builder->nodes[target].node_type != AST_NODE_TYPE_IDENTIFIER ||
         builder->bindings[target].kind != SEMANTIC_BINDING_KIND_VARIABLE) {
-        return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        return wasm_fail(builder, WASM_BUILD_STATUS_APPEND_TARGET_INVALID, name);
     }
     Ast_Node_Index variable = builder->bindings[target].target;
     Wasm_Type type = wasm_variable_type(builder, variable);
     if (type.kind != WASM_VALUE_TYPE_DYNAMIC || not wasm_variable_is_in_memory(builder, variable)) {
-        return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        return wasm_fail(builder, WASM_BUILD_STATUS_APPEND_TARGET_INVALID, name);
     }
     Wasm_Type element = wasm_type_element(type);
     size_t stride = wasm_type_stride_bytes(builder, element);
