@@ -1696,8 +1696,11 @@ static void main_struct_literal_rows_print(Str source, Ast_Node const *nodes, si
  * source is, and a built-in that gives two values has them between parentheses.
  */
 static char const *main_built_in_signature(Str name) {
+    if (str_equals(name, STR("append"))) {
+        return "proc(array: ^[dynamic]T, value: T, ...)";
+    }
     if (str_equals(name, STR("length_of"))) {
-        return "proc(elements: [N]T | []T | Str) Int";
+        return "proc(elements: [N]T | [dynamic]T | []T | Str) Int";
     }
     if (str_equals(name, STR("int_to_byte"))) {
         return "proc(number: Int) Byte";

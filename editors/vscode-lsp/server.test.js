@@ -172,6 +172,16 @@ const TYPES_SOURCE = [
     "    mode := Mode.NOW",
     "    return size + packet.size",
     "",
+    "grow :: proc() Int ->",
+    "    numbers := [dynamic]Int",
+    "    names : [dynamic]Str",
+    "    append(%numbers, 1, 2)",
+    "    first := numbers[0]",
+    "    part := numbers[1:]",
+    "    for number in numbers ->",
+    "        first += number",
+    "    return length_of(numbers) + first",
+    "",
 ].join("\n");
 
 test("a name shows its type when the pointer rests on it", async () => {
@@ -272,7 +282,7 @@ test("a name shows its type when the pointer rests on it", async () => {
         assert.match((await hover(measured + 1, 6)).contents.value, /number: Int/);
         assert.match((await hover(measured + 1, 14)).contents.value, /is_number: Bool/);
         assert.match((await hover(measured + 2, 12)).contents.value,
-                     /length_of: proc\(elements: \[N\]T \| \[\]T \| Str\) Int/);
+                     /length_of: proc\(elements: \[N\]T \| \[dynamic\]T \| \[\]T \| Str\) Int/);
 
         // A constant shows the value that was worked out, at its definition and where it is used,
         // such as the length of an array. A number is also in hexadecimal when it is 256 or more.
@@ -313,6 +323,24 @@ test("a name shows its type when the pointer rests on it", async () => {
         assert.match((await hover(used + 1, 10)).contents.value, /size: Int/);
         assert.match((await hover(used + 1, 16)).contents.value, /is_ok: Bool/);
         assert.match((await hover(used + 4, 11)).contents.value, /size: Int/);
+
+        // A dynamic array has the type that is written, or that its value gives, where it is defined
+        // and where it is used, and what is made of it has the type of its elements, or of a slice.
+        // The iterator says that it is an element of it.
+        const grown = lineOf("grow ::");
+        assert.match((await hover(grown + 1, 5)).contents.value, /numbers: \[dynamic\]Int/);
+        assert.match((await hover(grown + 2, 5)).contents.value, /names: \[dynamic\]Str/);
+        assert.match((await hover(grown + 3, 13)).contents.value, /numbers: \[dynamic\]Int/);
+        assert.match((await hover(grown + 4, 5)).contents.value, /first: Int/);
+        assert.match((await hover(grown + 5, 5)).contents.value, /part: \[\]Int/);
+        assert.strictEqual(
+            (await hover(grown + 6, 9)).contents.value,
+            "```mialu\nnumber: Int\n```\nelement of\n```mialu\nnumbers: [dynamic]Int\n```");
+        // The built-in procedures that take one say so in their signatures.
+        assert.match((await hover(grown + 3, 5)).contents.value, /append: proc\(array: \^\[dynamic\]T/);
+        assert.match((await hover(grown + 8, 12)).contents.value, /length_of: proc\([^)]*\[dynamic\]T/);
+        // The word `dynamic` is a keyword, so nothing is shown on it.
+        assert.strictEqual(await hover(grown + 1, 17), null);
 
         // Nothing is shown on a keyword or on a space.
         assert.strictEqual(await hover(6, 12), null);
