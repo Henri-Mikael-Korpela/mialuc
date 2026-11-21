@@ -837,6 +837,7 @@ static size_t       x64_type_stride_bytes        (X64_Builder const *builder,
 static Str          x64_type_subject             (X64_Builder const *builder, Ast_Node_Index type);
 static bool         x64_comparison_fail          (X64_Builder *builder, X64_Type left_type,
                                                   X64_Type right_type, Str subject);
+static Str          x64_comparison_type_text     (X64_Builder const *builder, X64_Type type);
 static Str          x64_type_text                (X64_Builder const *builder, X64_Type type);
 static size_t       x64_type_word_count          (X64_Builder const *builder, X64_Type type);
 static bool         x64_union_block_changes      (X64_Builder const *builder, Ast_Node_Index block,
@@ -5573,6 +5574,118 @@ static void x64_i32_wrap_write(X64_Builder *builder, bool is_division) {
 }
 
 /**
+ * Returns how a message about a comparison names `type`: an array, a dynamic array or an array
+ * slice is named with its elements when they are of a type with a name that is a word, such as
+ * `an array of Int`, and the others by `x64_type_text`. The text is a literal, so it lives on.
+ */
+static Str x64_comparison_type_text(X64_Builder const *builder, X64_Type type) {
+    if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_DYNAMIC && type.kind != X64_TYPE_KIND_SLICE) {
+        return x64_type_text(builder, type);
+    }
+    switch (type.element_kind) {
+    case X64_TYPE_KIND_BOOL:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of Bool");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of Bool");
+        }
+        return STR("an array slice of Bool");
+    case X64_TYPE_KIND_BYTE:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of Byte");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of Byte");
+        }
+        return STR("an array slice of Byte");
+    case X64_TYPE_KIND_C_STR:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of C_Str");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of C_Str");
+        }
+        return STR("an array slice of C_Str");
+    case X64_TYPE_KIND_F32:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of F32");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of F32");
+        }
+        return STR("an array slice of F32");
+    case X64_TYPE_KIND_F64:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of F64");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of F64");
+        }
+        return STR("an array slice of F64");
+    case X64_TYPE_KIND_I32:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of I32");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of I32");
+        }
+        return STR("an array slice of I32");
+    case X64_TYPE_KIND_I64:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of I64");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of I64");
+        }
+        return STR("an array slice of I64");
+    case X64_TYPE_KIND_INT:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of Int");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of Int");
+        }
+        return STR("an array slice of Int");
+    case X64_TYPE_KIND_RUNE:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of Rune");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of Rune");
+        }
+        return STR("an array slice of Rune");
+    case X64_TYPE_KIND_STR:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of Str");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of Str");
+        }
+        return STR("an array slice of Str");
+    case X64_TYPE_KIND_U32:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of U32");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of U32");
+        }
+        return STR("an array slice of U32");
+    case X64_TYPE_KIND_U64:
+        if (type.kind == X64_TYPE_KIND_ARRAY) {
+            return STR("an array of U64");
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            return STR("a dynamic array of U64");
+        }
+        return STR("an array slice of U64");
+    default:
+        break;
+    }
+    return x64_type_text(builder, type);
+}
+
+/**
  * Records the error that the operands of a comparison cannot be compared, which says the type of
  * the left one and the type of the right one, as a message names them, and fails with `subject`.
  * Returns false, so that a caller can return it.
@@ -5580,8 +5693,8 @@ static void x64_i32_wrap_write(X64_Builder *builder, bool is_division) {
 static bool x64_comparison_fail(X64_Builder *builder, X64_Type left_type, X64_Type right_type,
                                 Str subject) {
     x64_fail(builder, X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID, subject);
-    builder->type_expected = x64_type_text(builder, left_type);
-    builder->type_found = x64_type_text(builder, right_type);
+    builder->type_expected = x64_comparison_type_text(builder, left_type);
+    builder->type_found = x64_comparison_type_text(builder, right_type);
     return false;
 }
 
@@ -5609,8 +5722,8 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
         left_type.kind != right_type.kind) {
         x64_fail(builder, X64_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH,
                  x64_expression_subject(builder, left));
-        builder->type_expected = x64_type_text(builder, left_type);
-        builder->type_found = x64_type_text(builder, right_type);
+        builder->type_expected = x64_comparison_type_text(builder, left_type);
+        builder->type_found = x64_comparison_type_text(builder, right_type);
         return false;
     }
     if (x64_types_are_comparable_sequences(left_type, right_type)) {

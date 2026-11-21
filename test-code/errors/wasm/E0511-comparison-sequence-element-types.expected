@@ -1,0 +1,12 @@
+error[E0511]: an array of Int cannot be compared with an array of Bool
+ --> test-code/errors/wasm/E0511-comparison-sequence-element-types.mu:6:13
+  |
+4 |     x := [const]Int { 1, 2 }
+5 |     y := [const]Bool { true, false }
+6 |     same := x == y
+  |             ^ this operand cannot be compared here
+7 |     return 0
+  |
+  = note: values of different types cannot be compared, except an untyped constant or 'nil' with the
+          type that it fits, a Byte with an ASCII rune, and arrays, dynamic arrays or array slices
+          of one type of elements with each other, and only numbers have an order

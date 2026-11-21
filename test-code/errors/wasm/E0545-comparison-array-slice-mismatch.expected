@@ -1,4 +1,4 @@
-error[E0545]: an array cannot be compared with an array slice
+error[E0545]: an array of Int cannot be compared with an array slice of Int
  --> test-code/errors/wasm/E0545-comparison-array-slice-mismatch.mu:6:17
   |
 4 |     a := [const]Int { 2, 3, 5 }

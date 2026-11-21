@@ -694,6 +694,8 @@ static size_t          wasm_type_stride_bytes                 (Wasm_Builder cons
 static bool            wasm_type_accepts                      (Wasm_Type target, Wasm_Type value);
 static bool            wasm_type_equals                       (Wasm_Type first, Wasm_Type second);
 static bool            wasm_type_is_sequence                  (Wasm_Type type);
+static Str             wasm_comparison_type_text              (Wasm_Builder const *builder,
+                                                               Wasm_Type type);
 static Str             wasm_type_text                         (Wasm_Builder const *builder,
                                                                Wasm_Type type);
 static void            wasm_write_type                        (Wasm_Builder *builder,
@@ -4792,8 +4794,8 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
         // whatever their elements are.
         wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH,
                   wasm_expression_subject(builder, definition, left));
-        builder->type_expected = wasm_type_text(builder, left_type);
-        builder->type_found = wasm_type_text(builder, right_type);
+        builder->type_expected = wasm_comparison_type_text(builder, left_type);
+        builder->type_found = wasm_comparison_type_text(builder, right_type);
         return false;
     }
     if (wasm_comparison_is_of_sequences(builder, operation)) {
@@ -4848,6 +4850,118 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
 }
 
 /**
+ * Returns how a message about a comparison names `type`: an array, a dynamic array or an array
+ * slice is named with its elements when they are of a type with a name that is a word, such as
+ * `an array of Int`, and the others by `wasm_type_text`. The text is a literal, so it lives on.
+ */
+static Str wasm_comparison_type_text(Wasm_Builder const *builder, Wasm_Type type) {
+    if (type.kind != WASM_VALUE_TYPE_ARRAY && type.kind != WASM_VALUE_TYPE_DYNAMIC && type.kind != WASM_VALUE_TYPE_SLICE) {
+        return wasm_type_text(builder, type);
+    }
+    switch (type.element_kind) {
+    case WASM_VALUE_TYPE_BOOL:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of Bool");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of Bool");
+        }
+        return STR("an array slice of Bool");
+    case WASM_VALUE_TYPE_BYTE:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of Byte");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of Byte");
+        }
+        return STR("an array slice of Byte");
+    case WASM_VALUE_TYPE_C_STR:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of C_Str");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of C_Str");
+        }
+        return STR("an array slice of C_Str");
+    case WASM_VALUE_TYPE_F32:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of F32");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of F32");
+        }
+        return STR("an array slice of F32");
+    case WASM_VALUE_TYPE_F64:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of F64");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of F64");
+        }
+        return STR("an array slice of F64");
+    case WASM_VALUE_TYPE_I32:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of I32");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of I32");
+        }
+        return STR("an array slice of I32");
+    case WASM_VALUE_TYPE_I64:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of I64");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of I64");
+        }
+        return STR("an array slice of I64");
+    case WASM_VALUE_TYPE_INT:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of Int");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of Int");
+        }
+        return STR("an array slice of Int");
+    case WASM_VALUE_TYPE_RUNE:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of Rune");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of Rune");
+        }
+        return STR("an array slice of Rune");
+    case WASM_VALUE_TYPE_STR:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of Str");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of Str");
+        }
+        return STR("an array slice of Str");
+    case WASM_VALUE_TYPE_U32:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of U32");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of U32");
+        }
+        return STR("an array slice of U32");
+    case WASM_VALUE_TYPE_U64:
+        if (type.kind == WASM_VALUE_TYPE_ARRAY) {
+            return STR("an array of U64");
+        }
+        if (type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+            return STR("a dynamic array of U64");
+        }
+        return STR("an array slice of U64");
+    default:
+        break;
+    }
+    return wasm_type_text(builder, type);
+}
+
+/**
  * Records the error that the operands of a comparison cannot be compared, which says the type of
  * the left one and the type of the right one, as a message names them, and fails with `subject`.
  * Returns false, so that a caller can return it.
@@ -4855,8 +4969,8 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
 static bool wasm_comparison_fail(Wasm_Builder *builder, Wasm_Type left_type, Wasm_Type right_type,
                                  Str subject) {
     wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID, subject);
-    builder->type_expected = wasm_type_text(builder, left_type);
-    builder->type_found = wasm_type_text(builder, right_type);
+    builder->type_expected = wasm_comparison_type_text(builder, left_type);
+    builder->type_found = wasm_comparison_type_text(builder, right_type);
     return false;
 }
 

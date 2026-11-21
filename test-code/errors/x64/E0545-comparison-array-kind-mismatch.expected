@@ -1,4 +1,4 @@
-error[E0545]: an array cannot be compared with a dynamic array
+error[E0545]: an array of Int cannot be compared with a dynamic array of Int
  --> test-code/errors/x64/E0545-comparison-array-kind-mismatch.mu:7:17
   |
 5 |     b := [dynamic]Int

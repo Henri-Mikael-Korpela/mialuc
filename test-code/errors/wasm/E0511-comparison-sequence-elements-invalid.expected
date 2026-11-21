@@ -1,4 +1,4 @@
-error[E0511]: an array cannot be compared with an array
+error[E0511]: an array of F64 cannot be compared with an array of F64
  --> test-code/errors/wasm/E0511-comparison-sequence-elements-invalid.mu:6:13
   |
 4 |     a := [const]F64 { 1.5, 2.5 }
