@@ -40,6 +40,7 @@
   - [Elements](#elements)
   - [Comparing bytes](#comparing-bytes)
   - [Array slices](#array-slices)
+  - [Dynamic arrays](#dynamic-arrays)
 - [Custom data types](#custom-data-types)
   - [Enumerations](#enumerations)
   - [Structs](#structs)
@@ -58,6 +59,7 @@
   - [Multiple return values](#multiple-return-values)
   - [Pointers to procedures](#pointers-to-procedures)
 - [Built-in procedures](#built-in-procedures)
+  - [append](#append)
   - [length_of](#length_of)
   - [int_to_byte](#int_to_byte)
   - [int_to_i32](#int_to_i32)
@@ -222,7 +224,7 @@ Reserved words are categorized into used and unused keywords and literal words. 
 and
 break
 case cast const continue
-defer
+defer dynamic
 else enum
 for foreign
 if import in
@@ -249,7 +251,7 @@ Mialu also defines the following unused keywords. They are reserved for possible
 ```
 abstract alias as async await
 catch class
-delete distinct do dynamic
+delete distinct do
 extern
 final finally
 gen generate goto
@@ -1672,6 +1674,27 @@ array_element_range_assignment :: proc() Int ->
 
 The number of elements of an array or an array slice is given by the built-in procedure [`length_of`](#length_of), as an `Int`: `length_of(a)` for the array `a`.
 
+### Dynamic arrays
+
+A dynamic array is an array that grows: it has no length that is known when the program is compiled, and it starts with no elements, and elements are added to its end with the built-in procedure [`append`](#append). Its type is `[dynamic]` followed by the type of the elements, so `[dynamic]Int` is a dynamic array of `Int` values, and `[dynamic]Int` as a value is an empty one, which has no elements and no braces:
+
+```
+sum_of_squares :: proc(count: Int) Int ->
+    squares := [dynamic]Int
+    for i in 0..<count ->
+        append(%squares, i * i)
+    total := 0
+    for square in squares ->
+        total += square
+    return total
+```
+
+`dynamic` is a [keyword](#reserved-words). The elements can be the values that the elements of an array can be. The variable can be given its type, as in `numbers : [dynamic]Int`, which is the same as `numbers := [dynamic]Int`, and a dynamic array has no other value than the empty one: it cannot be given the elements of an array literal, and it cannot be assigned to as a whole, or copied.
+
+A dynamic array is its elements, how many there are, and how many there is room for. The elements are in the [temporary storage](#str_to_c_str) of the program, which a procedure gives back when it returns. When `append` finds that there is no room for the values that are given to it, it makes room for twice as many elements as there will be, in the temporary storage, and copies the elements that there are to it, and the place that the elements had stays used until the procedure returns. So the elements of a dynamic array are good until the procedure that defines it returns, and a dynamic array must not leave it: it cannot be a parameter or the type of a returned value, of a global variable or of a field of a struct, which are an error as the type of an array is. Temporary storage has a fixed size, and a program that makes more room than fits in it is stopped.
+
+An element is read and assigned with an index, as for an array, `squares[2]`, which traps when the index is not below the number of elements, and a `for` statement goes through the elements, see [For statements](#for-statements). An index is checked against the number of elements, and not against the room, so the elements that `append` has not added are not there.
+
 ## Custom data types
 
 Besides the [primitive data types](#primitive-data-types), a program can define data types of its own: [structs](#structs), which group values of other types into one, and [enumerations](#enumerations), which are a fixed set of named members. A custom data type is a [constant](#constants) with a name, and it is used wherever a type is written.
@@ -2223,6 +2246,7 @@ A built-in procedure is a procedure that the language has, and that is called li
 
 | Procedure | Takes | Gives |
 |-----------|-------|-------|
+| [`append`](#append) | the address of a dynamic array, and one or more values | nothing: the values are at the end of the dynamic array |
 | [`length_of`](#length_of) | an array, an array slice or a `Str` | the number of its elements or characters, an `Int` |
 | [`int_to_byte`](#int_to_byte) | an `Int` | a `Byte` of it, and stops the program when it is not from 0 to 255 |
 | [`int_to_i32`](#int_to_i32) | an `Int` or an `I64` | an `I32` of it, and stops the program when it is not from -2147483648 to 2147483647 |
@@ -2230,6 +2254,18 @@ A built-in procedure is a procedure that the language has, and that is called li
 | [`str_to_c_str`](#str_to_c_str) | a `Str` | a `C_Str`, a copy of it that ends with a zero |
 | [`try_str_to_int`](#try_str_to_int) | a `Str` | two values: the `Int` that it is, and whether it is one |
 | [`utf8_decode`](#utf8_decode) | an array or an array slice of `Byte` | two values: the `Str` of the bytes, and whether they are valid UTF-8 |
+
+### append
+
+`append` puts values at the end of a [dynamic array](#dynamic-arrays). It takes the address of the variable that is the dynamic array, `%numbers`, and then one or more values, which are of the type of the elements, and it gives nothing, so it is a statement. The values are added in the order that they are written, so `append(%numbers, 2, 4, 8)` is the same as `append(%numbers, 2)`, `append(%numbers, 4)` and `append(%numbers, 8)`, except that it makes room once:
+
+```
+numbers := [dynamic]Int
+append(%numbers, 2)
+append(%numbers, 4, 8)
+```
+
+The address is needed because the dynamic array is changed, which is `%` as for any variable that a procedure changes, see [Taking an address](#taking-an-address), and the operand of `%` here is the name of a variable of the procedure that is a dynamic array, and no other place. A value that is not of the type of the elements, or an address of something else, is an error, and so is `append` without a value. When there is no room for the values, `append` makes room, see [Dynamic arrays](#dynamic-arrays), and a program that needs more than the temporary storage has is stopped.
 
 ### length_of
 

@@ -196,6 +196,9 @@ enum {
 };
 
 // What kind of value a type is. Alphabetical, because nothing depends on the order.
+// `X64_TYPE_KIND_DYNAMIC` is a dynamic array, `[dynamic]Int`: as a value it is the address of its
+// first element and its number of elements, like an array slice, and the variable that holds it has
+// a third word after them, the number of elements that there is room for.
 // `X64_TYPE_KIND_NONE` is the type of a call of a procedure that returns nothing, and of what the
 // target does not build.
 // `X64_TYPE_KIND_NIL` is the type of `nil`, a pointer to nothing in particular, which is accepted
@@ -210,6 +213,7 @@ typedef enum {
     X64_TYPE_KIND_BOOL,
     X64_TYPE_KIND_BYTE,
     X64_TYPE_KIND_C_STR,
+    X64_TYPE_KIND_DYNAMIC,
     X64_TYPE_KIND_ENUM,
     X64_TYPE_KIND_ENUM_LITERAL,
     X64_TYPE_KIND_F32,

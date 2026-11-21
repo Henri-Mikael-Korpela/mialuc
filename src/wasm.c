@@ -96,6 +96,10 @@ typedef enum {
     WASM_VALUE_TYPE_BOOL,
     WASM_VALUE_TYPE_BYTE,
     WASM_VALUE_TYPE_C_STR,
+    // A dynamic array, `[dynamic]Int`: as a value the address of its first element and its number of
+    // elements, like an array slice, and the variable that holds it has a third value, the number of
+    // elements that there is room for, which it has in the frame.
+    WASM_VALUE_TYPE_DYNAMIC,
     WASM_VALUE_TYPE_ENUM,
     WASM_VALUE_TYPE_ENUM_LITERAL,
     WASM_VALUE_TYPE_F32,
@@ -819,6 +823,11 @@ static void            wasm_build_code_section_body_utf8_decode
 static void            wasm_build_code_section_body_try_str_to_int
                                                               (Wasm_Builder *builder,
                                                                Ast_Node_Index procedure);
+static bool            wasm_build_code_section_body_append    (Wasm_Builder *builder,
+                                                               Ast_Node_Index definition,
+                                                               Ast_Node_Index call);
+static bool            wasm_call_is_append                    (Wasm_Builder const *builder,
+                                                               Ast_Node_Index call);
 static bool            wasm_call_is_built_in                  (Wasm_Builder const *builder,
                                                                 Ast_Node_Index call);
 static size_t          wasm_string_size_bytes                 (Ast_Node const *literal);
@@ -1197,7 +1206,8 @@ static bool wasm_check_signatures(Wasm_Builder *builder, Ast_Node_Index module,
                 }
                 // The elements of an array are in the frame of the procedure that has it, and a
                 // parameter would have to be a copy of them, so an array slice is passed instead.
-                if (parameter_type.kind == WASM_VALUE_TYPE_ARRAY) {
+                if (parameter_type.kind == WASM_VALUE_TYPE_ARRAY ||
+                    parameter_type.kind == WASM_VALUE_TYPE_DYNAMIC) {
                     return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
                                      wasm_type_subject(builder, type));
                 }
@@ -1453,6 +1463,7 @@ static bool wasm_check_globals(Wasm_Builder *builder) {
             }
             // A global is set once, from a literal, and no literal makes an array or a slice.
             if (global_type.kind == WASM_VALUE_TYPE_ARRAY ||
+                global_type.kind == WASM_VALUE_TYPE_DYNAMIC ||
                 global_type.kind == WASM_VALUE_TYPE_SLICE) {
                 Ast_Node_Index type = wasm_global_type_node(builder, global);
                 assert(type != AST_NODE_INDEX_NONE);
@@ -3199,6 +3210,9 @@ static bool wasm_build_code_section_body_call_statement(Wasm_Builder *builder,
     assert(builder->nodes[statement].node_type == AST_NODE_TYPE_CALL_STATEMENT);
 
     Ast_Node_Index call = builder->nodes[statement].first_child;
+    if (wasm_call_is_append(builder, call)) {
+        return wasm_build_code_section_body_append(builder, definition, call);
+    }
     if (not wasm_build_code_section_body_expression(builder, definition, call, true)) {
         return false;
     }
@@ -3248,7 +3262,8 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
             wasm_expression_type(builder, builder->nodes[call].first_child);
         // `length_of` takes an array, an array slice, or a string, which it counts by the
         // character.
-        bool is_argument_valid = wasm_type_is_sequence(argument_type) ||
+        bool is_argument_valid = (wasm_type_is_sequence(argument_type) &&
+                                  argument_type.kind != WASM_VALUE_TYPE_DYNAMIC) ||
                                  (argument_type.kind == WASM_VALUE_TYPE_STR &&
                                   str_equals(name, STR("length_of")));
         if (str_equals(name, STR("int_to_byte")) || str_equals(name, STR("int_to_i32"))) {
@@ -3724,6 +3739,31 @@ static bool wasm_build_code_section_body_variable(Wasm_Builder *builder,
     Ast_Node_Index value = builder->nodes[variable].last_child;
     Wasm_Type variable_type = wasm_variable_type(builder, variable);
 
+    if (variable_type.kind == WASM_VALUE_TYPE_DYNAMIC) {
+        // A dynamic array has no elements where it is made, which is `[dynamic]Int` as the value or
+        // nothing at all, and no room: its address, its number of elements and its room are 0.
+        bool is_empty = declared == value ||
+                        (builder->nodes[value].node_type == AST_NODE_TYPE_ARRAY_LITERAL &&
+                         wasm_type_of_node(builder, builder->nodes[value].first_child).kind ==
+                             WASM_VALUE_TYPE_DYNAMIC);
+        if (not is_empty) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_INITIALIZER_INVALID,
+                             builder->nodes[variable].payload.variable_definition.name);
+        }
+        wasm_default_write(builder, variable_type);
+        wasm_variable_store(builder, procedure, variable);
+        if (wasm_variable_is_in_memory(builder, variable)) {
+            wasm_write_local_instruction(&builder->writer, WASM_OPCODE_LOCAL_GET,
+                                         wasm_scratch_local_index(builder, procedure,
+                                                                  WASM_SCRATCH_FRAME));
+            wasm_write_i32_const(&builder->writer, 0);
+            wasm_write_memory_instruction(
+                &builder->writer, WASM_OPCODE_I32_STORE,
+                wasm_variable_frame_offset(builder, procedure, variable) +
+                    2 * WASM_ELEMENT_SIZE_BYTES);
+        }
+        return true;
+    }
     if (declared == value && wasm_node_is_type(builder, declared)) {
         // The check of the variables rejected an array without a value.
         wasm_default_write(builder, variable_type);
@@ -3949,9 +3989,11 @@ static bool wasm_variables_check(Wasm_Builder *builder, Ast_Node_Index definitio
             }
 
             // There is no pointer to an array or to an array slice, and a variable in the frame is
-            // one that has a pointer to it. An array already is the address of its elements.
+            // one that has a pointer to it. An array already is the address of its elements. A
+            // dynamic array has its address taken by `append`, which is no pointer.
             Wasm_Type variable_type = wasm_variable_type(builder, statement);
             if (wasm_variable_is_in_memory(builder, statement) &&
+                variable_type.kind != WASM_VALUE_TYPE_DYNAMIC &&
                 wasm_type_pointer_to(variable_type).kind == WASM_VALUE_TYPE_NONE) {
                 return wasm_fail(builder, WASM_BUILD_STATUS_ADDRESS_INVALID,
                                  statement_node->payload.variable_definition.name);
@@ -6967,6 +7009,11 @@ static bool wasm_build_code_section_body_array_literal(Wasm_Builder *builder,
         return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
                          wasm_type_subject(builder, type));
     }
+    if (builder->nodes[type].payload.array_type.length_kind == AST_ARRAY_LENGTH_DYNAMIC) {
+        // An empty dynamic array is a value only where a variable is defined.
+        return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
+                         wasm_type_subject(builder, type));
+    }
 
     size_t element_count = wasm_array_literal_count(builder, literal);
     Ast_Array_Length_Kind length_kind = builder->nodes[type].payload.array_type.length_kind;
@@ -7431,7 +7478,8 @@ static bool wasm_build_code_section_body_slice(Wasm_Builder *builder, Ast_Node_I
     assert((first == end) == is_end_omitted);
 
     Wasm_Type base_type = wasm_expression_type(builder, base);
-    if (base_type.kind != WASM_VALUE_TYPE_STR && not wasm_type_is_sequence(base_type)) {
+    if ((base_type.kind != WASM_VALUE_TYPE_STR && not wasm_type_is_sequence(base_type)) ||
+        base_type.kind == WASM_VALUE_TYPE_DYNAMIC) {
         return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_EXPECTED,
                          wasm_expression_subject(builder, definition, base));
     }
@@ -7705,6 +7753,7 @@ static Wasm_Type wasm_type_pointer_to(Wasm_Type target) {
         return pointer;
     }
     case WASM_VALUE_TYPE_ARRAY:
+    case WASM_VALUE_TYPE_DYNAMIC:
     case WASM_VALUE_TYPE_ENUM_LITERAL:
     case WASM_VALUE_TYPE_NIL:
     case WASM_VALUE_TYPE_NONE:
@@ -8247,6 +8296,9 @@ static Wasm_Type wasm_type_of_node(Wasm_Builder const *builder, Ast_Node_Index t
     if (type_node->payload.array_type.length_kind == AST_ARRAY_LENGTH_OMITTED) {
         sequence.kind = WASM_VALUE_TYPE_SLICE;
     }
+    if (type_node->payload.array_type.length_kind == AST_ARRAY_LENGTH_DYNAMIC) {
+        sequence.kind = WASM_VALUE_TYPE_DYNAMIC;
+    }
     sequence.element_kind = element.kind;
     sequence.element_definition = element.definition;
     sequence.element_pointee_kind = element.pointee_kind;
@@ -8392,6 +8444,7 @@ static size_t wasm_type_slot_count(Wasm_Builder const *builder, Wasm_Type type) 
     case WASM_VALUE_TYPE_PROCEDURE:
     case WASM_VALUE_TYPE_RUNE:
         return 1;
+    case WASM_VALUE_TYPE_DYNAMIC:
     case WASM_VALUE_TYPE_SLICE:
     case WASM_VALUE_TYPE_STR:
         return 2;
@@ -8438,6 +8491,7 @@ static byte wasm_type_slot_kind(Wasm_Builder const *builder, Wasm_Type type, siz
     case WASM_VALUE_TYPE_POINTER:
     case WASM_VALUE_TYPE_PROCEDURE:
     case WASM_VALUE_TYPE_RUNE:
+    case WASM_VALUE_TYPE_DYNAMIC:
     case WASM_VALUE_TYPE_SLICE:
     case WASM_VALUE_TYPE_STR:
         return WASM_TYPE_I32;
@@ -8464,6 +8518,10 @@ static byte wasm_type_slot_kind(Wasm_Builder const *builder, Wasm_Type type, siz
 static size_t wasm_type_stride_bytes(Wasm_Builder const *builder, Wasm_Type element) {
     if (element.kind == WASM_VALUE_TYPE_BYTE) {
         return 1;
+    }
+    // A dynamic array in memory has a third value, how many elements there is room for.
+    if (element.kind == WASM_VALUE_TYPE_DYNAMIC) {
+        return (wasm_type_slot_count(builder, element) + 1) * WASM_ELEMENT_SIZE_BYTES;
     }
     return wasm_type_slot_count(builder, element) * WASM_ELEMENT_SIZE_BYTES;
 }
@@ -8558,6 +8616,7 @@ static bool wasm_type_equals(Wasm_Type first, Wasm_Type second) {
         return first.depth == second.depth && first.pointee_kind == second.pointee_kind &&
                first.definition == second.definition;
     case WASM_VALUE_TYPE_ARRAY:
+    case WASM_VALUE_TYPE_DYNAMIC:
     case WASM_VALUE_TYPE_SLICE:
         return wasm_type_elements_equal(first, second);
     case WASM_VALUE_TYPE_BOOL:
@@ -9037,11 +9096,12 @@ static Ast_Node_Index wasm_call_signature(Wasm_Builder const *builder, Ast_Node_
 }
 
 /**
- * Returns whether a value of `type` has elements that can be indexed, which an array and an array
- * slice do.
+ * Returns whether a value of `type` has elements that can be indexed, which an array, a dynamic
+ * array and an array slice do.
  */
 static bool wasm_type_is_sequence(Wasm_Type type) {
-    return type.kind == WASM_VALUE_TYPE_ARRAY || type.kind == WASM_VALUE_TYPE_SLICE;
+    return type.kind == WASM_VALUE_TYPE_ARRAY || type.kind == WASM_VALUE_TYPE_DYNAMIC ||
+           type.kind == WASM_VALUE_TYPE_SLICE;
 }
 
 /**
@@ -10189,6 +10249,157 @@ static void wasm_build_code_section_body_try_str_to_int(Wasm_Builder *builder,
 }
 
 /**
+ * Writes the statement `append(%a, value, ...)`, which puts the values at the end of the dynamic
+ * array that the variable `a` is. The variable is in the frame, because its address is taken, and
+ * it is three values there, like those of any variable: the address of the elements, how many there
+ * are, and how many there is room for. When the room is less than the elements and the values need,
+ * the stack pointer moves down by twice as much room as is needed, which is the temporary storage
+ * that the procedure gives back when it returns, see `wasm_frame_leave`, the elements move there
+ * with `memory.copy`, and a program that needs more than the stack has is stopped. Then each value
+ * is stored at the place after the last element, with its address in a scratch local while the
+ * value is worked out, and the number of elements grows by the number of values. Returns false
+ * after it recorded an error.
+ */
+static bool wasm_build_code_section_body_append(Wasm_Builder *builder, Ast_Node_Index definition,
+                                                Ast_Node_Index call) {
+    assert(wasm_call_is_append(builder, call));
+
+    Str name = builder->nodes[call].payload.call.name;
+    Ast_Node_Index procedure = wasm_procedure_of(builder, definition);
+    Ast_Node_Index pointer = builder->nodes[call].first_child;
+    if (pointer == AST_NODE_INDEX_NONE ||
+        builder->nodes[pointer].next_sibling == AST_NODE_INDEX_NONE) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
+    }
+
+    // The first argument is `%a`, where `a` is a variable of the procedure that is a dynamic
+    // array, which is in the frame because of the `%`.
+    Ast_Node_Index target = builder->nodes[pointer].first_child;
+    if (builder->nodes[pointer].node_type != AST_NODE_TYPE_ADDRESS_OF ||
+        builder->nodes[target].node_type != AST_NODE_TYPE_IDENTIFIER ||
+        builder->bindings[target].kind != SEMANTIC_BINDING_KIND_VARIABLE) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+    }
+    Ast_Node_Index variable = builder->bindings[target].target;
+    Wasm_Type type = wasm_variable_type(builder, variable);
+    if (type.kind != WASM_VALUE_TYPE_DYNAMIC || not wasm_variable_is_in_memory(builder, variable)) {
+        return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+    }
+    Wasm_Type element = wasm_type_element(type);
+    size_t stride = wasm_type_stride_bytes(builder, element);
+    size_t value_count = wasm_children_count(builder, call) - 1;
+    size_t frame = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FRAME);
+    size_t needed = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_FIRST);
+    size_t room = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_SECOND);
+    size_t address = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_ADDRESS);
+    size_t bytes = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_TEMPORARY_32);
+    // The three values of the variable are in the frame, a slot of 8 bytes each.
+    size_t place = wasm_variable_frame_offset(builder, procedure, variable);
+    size_t count_place = place + WASM_ELEMENT_SIZE_BYTES;
+    size_t room_place = place + 2 * WASM_ELEMENT_SIZE_BYTES;
+    Wasm_Writer *writer = &builder->writer;
+
+    // `needed` is the number of elements there are and the values make, and when it is above the
+    // room, which is compared as unsigned numbers, the elements move to a place that has room for
+    // twice as many.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, count_place);
+    wasm_write_i32_const(writer, (int64_t)value_count);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, needed);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, room_place);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GT_U);
+    wasm_structured_begin(builder, WASM_OPCODE_IF);
+
+    // The new room, and its size in bytes rounded up to 8, which is `(room * stride + 7) & -8`.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, needed);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, needed);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, room);
+    wasm_write_i32_const(writer, (int64_t)stride);
+    wasm_write_byte(writer, WASM_OPCODE_I32_MUL);
+    wasm_write_i32_const(writer, 7);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_i32_const(writer, -8);
+    wasm_write_byte(writer, WASM_OPCODE_I32_AND);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, bytes);
+    // The stack pointer moves down by that, unless it would pass the end of the stack, as it is
+    // checked for a frame, see `wasm_frame_enter`.
+    wasm_write_byte(writer, WASM_OPCODE_GLOBAL_GET);
+    wasm_write_unsigned(writer, wasm_stack_global_index(builder));
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, bytes);
+    wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, address);
+    wasm_write_i32_const(writer, (int64_t)builder->stack_limit_bytes);
+    wasm_write_byte(writer, WASM_OPCODE_I32_LT_S);
+    wasm_structured_trap(builder);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, address);
+    wasm_write_byte(writer, WASM_OPCODE_GLOBAL_SET);
+    wasm_write_unsigned(writer, wasm_stack_global_index(builder));
+    // `memory.copy` of the elements there are, from where they are to the new place.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, address);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, place);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, count_place);
+    wasm_write_i32_const(writer, (int64_t)stride);
+    wasm_write_byte(writer, WASM_OPCODE_I32_MUL);
+    wasm_write_byte(writer, WASM_OPCODE_PREFIX_MISC);
+    wasm_write_unsigned(writer, WASM_OPCODE_MISC_MEMORY_COPY);
+    wasm_write_byte(writer, 0x00);
+    wasm_write_byte(writer, 0x00);
+    // The variable has the new place and the new room.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, address);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_STORE, place);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, room);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_STORE, room_place);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    // Each value goes to the element after the ones there are, and after the values before it.
+    size_t index = 0;
+    for (Ast_Node_Index value = builder->nodes[pointer].next_sibling;
+         value != AST_NODE_INDEX_NONE; value = builder->nodes[value].next_sibling) {
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+        wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, place);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+        wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, count_place);
+        wasm_write_i32_const(writer, (int64_t)stride);
+        wasm_write_byte(writer, WASM_OPCODE_I32_MUL);
+        wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+        wasm_write_i32_const(writer, (int64_t)(index * stride));
+        wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+        wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, address);
+        if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
+            return false;
+        }
+        if (not wasm_value_is_accepted(builder, element, value)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        }
+        wasm_slots_store(builder, procedure, element, address, 0);
+        index += 1;
+    }
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, needed);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_STORE, count_place);
+    return true;
+}
+
+/**
+ * Returns whether `call` is a call of the built-in procedure `append`.
+ */
+static bool wasm_call_is_append(Wasm_Builder const *builder, Ast_Node_Index call) {
+    assert(call < builder->node_count);
+
+    return builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
+           wasm_call_is_built_in(builder, call) &&
+           str_equals(builder->nodes[call].payload.call.name, STR("append"));
+}
+
+/**
  * Returns whether the call `call` is a call of a built-in procedure: its name is one that the
  * language has, and the program has not defined it, which the analysis shows by binding it to
  * nothing.
@@ -10617,6 +10828,8 @@ static Str wasm_type_text(Wasm_Builder const *builder, Wasm_Type type) {
         return STR("Byte");
     case WASM_VALUE_TYPE_C_STR:
         return STR("C_Str");
+    case WASM_VALUE_TYPE_DYNAMIC:
+        return STR("a dynamic array");
     case WASM_VALUE_TYPE_ENUM:
     case WASM_VALUE_TYPE_STRUCT:
         // The definition of the type is the node of the struct or the enum, whose name is that of

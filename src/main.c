@@ -928,6 +928,8 @@ static bool main_type_text_write(Ast_Node const *nodes, Ast_Node_Index type_node
                                    (long long)node->payload.array_type.length);
             } else if (node->payload.array_type.length_kind == AST_ARRAY_LENGTH_INFERRED) {
                 written = snprintf(text + length, text_size_bytes - length, "[const]");
+            } else if (node->payload.array_type.length_kind == AST_ARRAY_LENGTH_DYNAMIC) {
+                written = snprintf(text + length, text_size_bytes - length, "[dynamic]");
             } else {
                 written = snprintf(text + length, text_size_bytes - length, "[]");
             }
@@ -2215,6 +2217,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
             break;
         case TOKEN_KIND_KEYWORD_DEFER:
             printf("KEYWORD_DEFER\n");
+            break;
+        case TOKEN_KIND_KEYWORD_DYNAMIC:
+            printf("KEYWORD_DYNAMIC\n");
             break;
         case TOKEN_KIND_KEYWORD_ELSE:
             printf("KEYWORD_ELSE\n");

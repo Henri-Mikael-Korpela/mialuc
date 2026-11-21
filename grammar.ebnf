@@ -383,7 +383,7 @@ parameter = name , ws , ":" , ws , type ;
    caret more makes a pointer to such a pointer: `^^proc(Int) Int`. The parameters of a procedure
    type have no names, and are not procedure types themselves, and the return type of a procedure
    or of a procedure type is never one either. *)
-type = element_type | array_type ;
+type = element_type | array_type | dynamic_array_type ;
 
 element_type = plain_type | procedure_pointer_type ;
 
@@ -406,6 +406,11 @@ array_type = "[" , ws , [ array_length , ws ] , "]" , ws , element_type ;
    literal alone is the number, and any other expression is told from it only by what follows the
    literal. *)
 array_length = integer_literal | "const" | expression ;
+
+(* A dynamic array has `dynamic` for its length, `[dynamic]Int`, and as a value, which is an empty
+   one, it is the type alone, without braces. It is only the type of a variable of a procedure, which
+   the compiler checks, as the grammar does not tell where a type is used. *)
+dynamic_array_type = "[" , ws , "dynamic" , ws , "]" , ws , element_type ;
 
 (* One type, or two or more between parentheses and separated by commas, as in `(Int, Str)`: a
    procedure that returns several values. A single type is never written in parentheses. *)
@@ -694,7 +699,7 @@ cast_array_type = "[" , ws , decimal_literal , ws , "]" , ws , qualified_name ;
 operand_value =
     float_literal | signed_float_literal | integer_literal | signed_integer_literal | rune_literal |
     string_literal | bool_literal | nil_literal | enum_literal | call |
-    ( name | array_literal | struct_literal | type_info_of ) , { ws , postfix } ;
+    ( name | array_literal | dynamic_array_type | struct_literal | type_info_of ) , { ws , postfix } ;
 
 (* The information about a type, which the compiler works out while it compiles the program:
    `type_info_of(Color)`. Only a field can follow it, such as `type_info_of(Color).members`, and
@@ -816,7 +821,7 @@ reserved_word = keyword | literal_word ;
 keyword =
     "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "struct" |
     "enum" | "not" | "and" | "or" | "foreign" | "import" | "type_info_of" | "union" | "match" |
-    "case" | "defer" | "cast" | "package" ;
+    "case" | "defer" | "cast" | "package" | "dynamic" ;
 
 (* The words that are literals: the two values of a `Bool` and the null pointer. *)
 literal_word = "true" | "false" | "nil" ;

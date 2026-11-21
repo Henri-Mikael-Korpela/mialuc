@@ -2818,7 +2818,7 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
     assert(parser->token_index + 1 < parser->token_count);
     if (parser->tokens[parser->token_index + 1].kind == TOKEN_KIND_BRACKET_RIGHT) {
         parse_token_advance(parser);
-        return parse_fail(parser, STR("an array length or 'const'"));
+        return parse_fail(parser, STR("an array length, 'const' or 'dynamic'"));
     }
 
     if (parser->literal_depth >= AST_BLOCK_DEPTH_MAX) {
@@ -2834,6 +2834,11 @@ static Ast_Node_Index parse_array_literal(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
     parse_node_append_child(parser, literal, type);
+
+    // A dynamic array is empty where it is made, so it has no braces and no elements.
+    if (parser->nodes[type].payload.array_type.length_kind == AST_ARRAY_LENGTH_DYNAMIC) {
+        return literal;
+    }
 
     if (not parse_token_expect(parser, TOKEN_KIND_BRACE_LEFT, STR("'{'"))) {
         return AST_NODE_INDEX_NONE;
@@ -3270,8 +3275,8 @@ static bool parse_struct_type_union_tag(Parser *parser, Ast_Node_Index field,
  * Parses a type: a name, such as `Int`, a pointer type, such as `^Int`, or an array type, which is
  * the type of the elements after brackets: `[3]Int` is an array of three, `[SIZE * 2]Int` is an
  * array whose length is a constant expression, which is a child after the type of the elements,
- * `[const]Int` is an array whose length is the number of elements in the literal that it starts, and
- * `[]Int` is an array slice. The type of the elements is a name or a pointer type, and so is the type that a pointer
+ * `[const]Int` is an array whose length is the number of elements in the literal that it starts,
+ * `[dynamic]Int` is an array that grows, and `[]Int` is an array slice. The type of the elements is a name or a pointer type, and so is the type that a pointer
  * points to: `[]^Int` is an array slice of pointers, while a pointer to an array is not a type.
  * `expected` says what the caller wants, for the error that is recorded when the current token
  * starts no type.
@@ -3307,6 +3312,9 @@ static Ast_Node_Index parse_type(Parser *parser, Str expected) {
         parse_token_advance(parser);
     } else if (length->kind == TOKEN_KIND_KEYWORD_CONST) {
         length_kind = AST_ARRAY_LENGTH_INFERRED;
+        parse_token_advance(parser);
+    } else if (length->kind == TOKEN_KIND_KEYWORD_DYNAMIC) {
+        length_kind = AST_ARRAY_LENGTH_DYNAMIC;
         parse_token_advance(parser);
     } else if (length->kind != TOKEN_KIND_BRACKET_RIGHT) {
         length_kind = AST_ARRAY_LENGTH_CONSTANT;

@@ -158,6 +158,8 @@ enum {
     // the storage follows. Strings are made at multiples of 8 so that they are aligned.
     X64_TEMPORARY_USED_SIZE_BYTES = 8,
     X64_TEMPORARY_ALIGNMENT_BYTES = 8,
+    // The most values that one `append` takes, which its code counts with an 8-bit immediate.
+    X64_APPEND_VALUE_COUNT_MAX = 100,
     // A section of the debug information is not needed to run the program, so the system may drop
     // it: it is data that is initialized, read and discardable. The table of unwinding is read by
     // the system when it unwinds the stack, so it stays.
@@ -560,6 +562,9 @@ static bool         x64_built_in_write           (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static bool         x64_c_str_write              (X64_Builder *builder, Ast_Node_Index literal,
                                                   byte register_number);
+static bool         x64_append_write             (X64_Builder *builder, Ast_Node_Index call);
+static bool         x64_call_is_append           (X64_Builder const *builder,
+                                                  Ast_Node_Index expression);
 static bool         x64_call_is_built_in         (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
 static bool         x64_call_is_try_str_to_int   (X64_Builder const *builder,
@@ -1352,7 +1357,8 @@ static bool x64_constants_collect(X64_Builder *builder) {
 
             Ast_Node_Index type = builder->nodes[parameter].first_child;
             X64_Type parameter_type = x64_type_of_node(builder, type);
-            if (parameter_type.kind == X64_TYPE_KIND_ARRAY) {
+            if (parameter_type.kind == X64_TYPE_KIND_ARRAY ||
+                parameter_type.kind == X64_TYPE_KIND_DYNAMIC) {
                 return x64_fail(builder, X64_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
                                 builder->nodes[parameter].payload.parameter.name);
             }
@@ -2031,7 +2037,8 @@ static void x64_procedure_layout(X64_Builder *builder, Ast_Node_Index procedure)
             if (builder->nodes[range].node_type != AST_NODE_TYPE_RANGE) {
                 X64_Type sequence = x64_expression_type(builder, range);
                 type = x64_type_make(X64_TYPE_KIND_NONE);
-                if (sequence.kind == X64_TYPE_KIND_ARRAY || sequence.kind == X64_TYPE_KIND_SLICE) {
+                if (sequence.kind == X64_TYPE_KIND_ARRAY || sequence.kind == X64_TYPE_KIND_DYNAMIC ||
+                    sequence.kind == X64_TYPE_KIND_SLICE) {
                     type = x64_type_element(sequence);
                 } else if (sequence.kind == X64_TYPE_KIND_STR) {
                     // A string is gone through by the character, which is a `Rune`.
@@ -2043,6 +2050,11 @@ static void x64_procedure_layout(X64_Builder *builder, Ast_Node_Index procedure)
             // The elements, after which a place is aligned again. The array that a cast makes of a
             // rune has the 4 bytes of its encoding, and a place of its own like a literal has.
             type = x64_leaf_type(builder, node);
+            if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+                // The elements of a dynamic array are in the temporary storage.
+                builder->layouts[node] = (X64_Node_Layout){.type = type, .frame_offset = 0};
+                continue;
+            }
             if (type.kind != X64_TYPE_KIND_NONE) {
                 size_t elements_bytes =
                     (size_t)type.length * x64_type_stride_bytes(builder, x64_type_element(type));
@@ -2065,6 +2077,10 @@ static void x64_procedure_layout(X64_Builder *builder, Ast_Node_Index procedure)
         size_t word_count = 1;
         if (type.kind != X64_TYPE_KIND_NONE) {
             word_count = x64_type_word_count(builder, type);
+        }
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            // The room for elements, after the address and the number of them.
+            word_count += 1;
         }
         size_bytes += word_count * X64_WORD_SIZE_BYTES;
         assert(size_bytes <= UINT32_MAX);
@@ -2508,7 +2524,8 @@ static bool x64_for_each_start_write(X64_Builder *builder, Ast_Node_Index statem
     if (type.kind == X64_TYPE_KIND_STR) {
         return x64_for_each_character_start_write(builder, statement);
     }
-    if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+    if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_DYNAMIC &&
+        type.kind != X64_TYPE_KIND_SLICE) {
         return x64_fail(builder, X64_BUILD_STATUS_ARRAY_EXPECTED,
                         x64_expression_subject(builder, sequence));
     }
@@ -3136,6 +3153,9 @@ static bool x64_statement_write(X64_Builder *builder, Ast_Node_Index procedure,
     case AST_NODE_TYPE_SUBTRACTION_ASSIGNMENT:
         return x64_assignment_write(builder, statement);
     case AST_NODE_TYPE_CALL_STATEMENT:
+        if (x64_call_is_append(builder, statement_node->first_child)) {
+            return x64_append_write(builder, statement_node->first_child);
+        }
         return x64_expression_write(builder, statement_node->first_child,
                                     x64_type_make(X64_TYPE_KIND_NONE), X64_MODE_VALUE, false);
     case AST_NODE_TYPE_VARIABLE_DEFINITION:
@@ -3165,13 +3185,14 @@ static void x64_epilogue_write(X64_Builder *builder) {
 }
 
 /**
- * Returns whether the procedure makes temporary strings, which is when it calls `str_to_c_str`.
+ * Returns whether the procedure makes temporary strings or elements of a dynamic array, which is
+ * when it calls `str_to_c_str` or `append`.
  * The nodes of a procedure are the ones from its own up to the end of it.
  */
 static bool x64_procedure_uses_temporary(X64_Builder const *builder, Ast_Node_Index procedure) {
     Ast_Node_Index end = ast_procedure_end(builder->nodes, builder->node_count, procedure);
     for (Ast_Node_Index node = procedure; node < end; node += 1) {
-        if (x64_call_is_str_to_c_str(builder, node)) {
+        if (x64_call_is_str_to_c_str(builder, node) || x64_call_is_append(builder, node)) {
             return true;
         }
         // A string that is a `C_Str` is copied to the temporary storage, as `str_to_c_str` copies
@@ -3303,6 +3324,23 @@ static bool x64_variable_definition_write(X64_Builder *builder, Ast_Node_Index s
           not x64_cast_is_array(builder, value) &&
           not x64_type_info_access_is(builder, value)))) {
         return x64_fail(builder, X64_BUILD_STATUS_ARRAY_INITIALIZER_INVALID, name);
+    }
+
+    if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+        // A dynamic array has no elements where it is made: no address, no elements and no room,
+        // which is `[dynamic]Int` as the value, or nothing at all.
+        bool is_empty = value == AST_NODE_INDEX_NONE ||
+                        (builder->nodes[value].node_type == AST_NODE_TYPE_ARRAY_LITERAL &&
+                         builder->layouts[value].type.kind == X64_TYPE_KIND_DYNAMIC);
+        if (not is_empty) {
+            return x64_fail(builder, X64_BUILD_STATUS_ARRAY_INITIALIZER_INVALID, name);
+        }
+        x64_write_load_integer(builder, X64_REGISTER_RAX, 0);
+        for (size_t i = 0; i < 3; i += 1) {
+            x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                             displacement + (int32_t)(i * X64_WORD_SIZE_BYTES));
+        }
+        return true;
     }
 
     if (value == AST_NODE_INDEX_NONE) {
@@ -4154,6 +4192,10 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
         // The elements are in their places already, and the value is the address of the first.
         X64_Type type = builder->layouts[node].type;
         Ast_Node_Index type_node = expression->first_child;
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            // An empty dynamic array is a value only where a variable is defined.
+            return x64_fail_unsupported(builder);
+        }
         if (type.kind == X64_TYPE_KIND_NONE) {
             return x64_fail(builder, X64_BUILD_STATUS_TYPE_UNSUPPORTED,
                             x64_type_subject(builder, type_node));
@@ -4434,7 +4476,8 @@ static bool x64_address_write(X64_Builder *builder, X64_Expression_Frame const *
             is_valid = binding.kind == SEMANTIC_BINDING_KIND_VARIABLE || is_global ||
                        binding.kind == SEMANTIC_BINDING_KIND_PARAMETER;
         }
-        bool is_sequence = type.kind == X64_TYPE_KIND_ARRAY || type.kind == X64_TYPE_KIND_SLICE;
+        bool is_sequence = type.kind == X64_TYPE_KIND_ARRAY || type.kind == X64_TYPE_KIND_DYNAMIC ||
+                           type.kind == X64_TYPE_KIND_SLICE;
         if (not is_valid || (is_sequence && frame->mode == X64_MODE_ADDRESS)) {
             return x64_fail(builder, X64_BUILD_STATUS_ADDRESS_INVALID, subject);
         }
@@ -4466,7 +4509,8 @@ static bool x64_address_write(X64_Builder *builder, X64_Expression_Frame const *
         Ast_Node_Index sequence = expression->first_child;
         Ast_Node_Index index = builder->nodes[sequence].next_sibling;
         X64_Type type = x64_expression_type(builder, sequence);
-        if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+        if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_DYNAMIC &&
+            type.kind != X64_TYPE_KIND_SLICE) {
             return x64_fail(builder, X64_BUILD_STATUS_ARRAY_EXPECTED, subject);
         }
         if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_INT), index)) {
@@ -4829,7 +4873,8 @@ static bool x64_slice_write(X64_Builder *builder, X64_Expression_Frame const *fr
  */
 static void x64_sequence_length_load(X64_Builder *builder, X64_Type type, byte register_number,
                                      int32_t place) {
-    assert(type.kind == X64_TYPE_KIND_ARRAY || type.kind == X64_TYPE_KIND_SLICE);
+    assert(type.kind == X64_TYPE_KIND_ARRAY || type.kind == X64_TYPE_KIND_DYNAMIC ||
+           type.kind == X64_TYPE_KIND_SLICE);
 
     if (type.kind == X64_TYPE_KIND_ARRAY) {
         assert(type.length >= 0);
@@ -5922,6 +5967,144 @@ static bool x64_call_write(X64_Builder *builder, X64_Expression_Frame const *fra
 }
 
 /**
+ * Writes the statement `append(%a, value, ...)`, which puts the values at the end of the dynamic
+ * array that the variable `a` is. The variable is three words in the frame: the address of the
+ * elements, how many there are, and how many there is room for. The values are worked out first, and
+ * stay on the stack of values. Then, when the room is less than the elements and the values need,
+ * the elements move to a new place in the temporary storage that has room for twice as many as are
+ * needed, which is taken from the storage the way `str_to_c_str` takes a string, and the procedure
+ * gives it back when it returns, see `x64_epilogue_write`. A program that needs more than the storage
+ * has is stopped with a breakpoint. The values are stored from the last, which is on the top of the
+ * stack, to the first, and the number of elements is grown. Returns false after it recorded an
+ * error.
+ */
+static bool x64_append_write(X64_Builder *builder, Ast_Node_Index call) {
+    assert(x64_call_is_append(builder, call));
+
+    Str name = builder->nodes[call].payload.call.name;
+    Ast_Node_Index pointer = builder->nodes[call].first_child;
+    if (pointer == AST_NODE_INDEX_NONE ||
+        builder->nodes[pointer].next_sibling == AST_NODE_INDEX_NONE) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
+    }
+
+    // The first argument is `%a`, where `a` is a variable of the procedure that is a dynamic
+    // array, which is the only place that has the three words.
+    Ast_Node_Index target = builder->nodes[pointer].first_child;
+    if (builder->nodes[pointer].node_type != AST_NODE_TYPE_ADDRESS_OF ||
+        builder->nodes[target].node_type != AST_NODE_TYPE_IDENTIFIER ||
+        builder->bindings[target].kind != SEMANTIC_BINDING_KIND_VARIABLE) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+    }
+    X64_Type type = x64_expression_type(builder, target);
+    if (type.kind != X64_TYPE_KIND_DYNAMIC) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+    }
+    int32_t place = 0;
+    if (not x64_identifier_place(builder, target, &place)) {
+        return false;
+    }
+    X64_Type element = x64_type_element(type);
+    size_t stride = x64_type_stride_bytes(builder, element);
+
+    size_t value_count = 0;
+    for (Ast_Node_Index value = builder->nodes[pointer].next_sibling;
+         value != AST_NODE_INDEX_NONE; value = builder->nodes[value].next_sibling) {
+        if (not x64_type_accepts(builder, element, value)) {
+            // An expression that the target does not build has no type.
+            if (x64_expression_type_for(builder, value, element).kind == X64_TYPE_KIND_NONE &&
+                builder->nodes[value].node_type != AST_NODE_TYPE_CALL) {
+                return x64_fail_unsupported(builder);
+            }
+            return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        }
+        if (not x64_expression_write(builder, value, element, X64_MODE_VALUE, true)) {
+            return false;
+        }
+        value_count += 1;
+    }
+    // The number is added with an 8-bit immediate, which is also more values than a call has room
+    // for.
+    if (value_count > X64_APPEND_VALUE_COUNT_MAX) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
+    }
+    int32_t count_place = place + X64_WORD_SIZE_BYTES;
+    int32_t capacity_place = place + 2 * (int32_t)X64_WORD_SIZE_BYTES;
+
+    // `rax` is how many elements are needed, and `rcx` the room: `jae` over the growing when the
+    // room is enough.
+    uint32_t enough_jumps = X64_JUMP_NONE;
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, count_place);
+    x64_write_add_immediate(builder, X64_REGISTER_RAX, (int8_t)value_count);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP,
+                     capacity_place);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RAX, X64_REGISTER_RCX);
+    x64_jump_write(builder, X64_CONDITION_ABOVE_EQUAL, &enough_jumps);
+
+    // The new room is twice what is needed, in `rdx`, and its size in bytes, rounded up to 8, in
+    // `r9`: `(room * stride + 7) & -8`.
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RDX);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RAX, X64_REGISTER_RDX);
+    x64_write_load_integer(builder, X64_REGISTER_R8, (int64_t)stride);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_RDX, X64_REGISTER_R9);
+    x64_write_multiply(builder, X64_REGISTER_R9, X64_REGISTER_R8);
+    x64_write_add_immediate(builder, X64_REGISTER_R9, X64_TEMPORARY_ALIGNMENT_BYTES - 1);
+    x64_write_and_immediate(builder, X64_REGISTER_R9, -X64_TEMPORARY_ALIGNMENT_BYTES);
+    // `rax` is how much of the storage is in use, and `r8` is that with the new room, which must
+    // not be more than the storage.
+    x64_write_rip_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, builder->data_rva);
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_R8);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_R9, X64_REGISTER_R8);
+    x64_write_load_integer(builder, X64_REGISTER_R10, X64_TEMPORARY_STORAGE_SIZE_BYTES);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_R10, X64_REGISTER_R8);
+    x64_write_trap_unless(builder, X64_CONDITION_BELOW_EQUAL);
+    x64_write_rip_memory(builder, X64_OPCODE_STORE, X64_REGISTER_R8, builder->data_rva);
+    // `r8` is the new place of the elements: the storage and what was in use.
+    x64_write_rip_memory(builder, X64_OPCODE_LEA, X64_REGISTER_R8,
+                         builder->data_rva + X64_TEMPORARY_USED_SIZE_BYTES);
+    x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RAX, X64_REGISTER_R8);
+    // The elements that there are move there: `r11` is where they are, `r10` where they go, and
+    // `rcx` how many bytes they are.
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_R8, X64_REGISTER_R10);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R11, X64_REGISTER_RBP, place);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, count_place);
+    x64_write_load_integer(builder, X64_REGISTER_RAX, (int64_t)stride);
+    x64_write_multiply(builder, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_copy_write(builder);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_R8, X64_REGISTER_RBP, place);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RDX, X64_REGISTER_RBP,
+                     capacity_place);
+    x64_jumps_resolve(builder, enough_jumps);
+
+    // Each value goes to the element after the ones there are, and after the values before it:
+    // `r10` is `address + (count + index) * stride`.
+    for (size_t index = value_count; index > 0; index -= 1) {
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                         count_place);
+        x64_write_load_integer(builder, X64_REGISTER_RCX, (int64_t)stride);
+        x64_write_multiply(builder, X64_REGISTER_RAX, X64_REGISTER_RCX);
+        x64_write_load_integer(builder, X64_REGISTER_RCX, (int64_t)((index - 1) * stride));
+        x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
+        x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, place);
+        x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
+        x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_R10);
+        x64_memory_store(builder, element, X64_REGISTER_R10);
+    }
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, count_place);
+    x64_write_add_immediate(builder, X64_REGISTER_RAX, (int8_t)value_count);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, count_place);
+    return true;
+}
+
+/**
+ * Returns whether `expression` is a call of the built-in procedure `append`.
+ */
+static bool x64_call_is_append(X64_Builder const *builder, Ast_Node_Index expression) {
+    return x64_call_is_built_in(builder, expression) &&
+           str_equals(builder->nodes[expression].payload.call.name, STR("append"));
+}
+
+/**
  * Writes `str_to_c_str` of `call`, which makes a copy of the string with a zero after it in the
  * temporary storage, and puts its address on the stack of values. A string that is known when the
  * program is compiled is copied with stores of 8 bytes, see `x64_c_str_write`, and any other `Str`,
@@ -6328,7 +6511,11 @@ static X64_Type x64_expression_type(X64_Builder const *builder, Ast_Node_Index e
                 }
                 break;
             }
-            if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+            bool is_dynamic_element = type.kind == X64_TYPE_KIND_DYNAMIC &&
+                                      builder->nodes[path[i - 1]].node_type ==
+                                          AST_NODE_TYPE_SUBSCRIPT;
+            if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE &&
+                not is_dynamic_element) {
                 return x64_type_make(X64_TYPE_KIND_NONE);
             }
             if (builder->nodes[path[i - 1]].node_type == AST_NODE_TYPE_SUBSCRIPT) {
@@ -6408,6 +6595,10 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
         return x64_cast_target(builder, expression);
     case AST_NODE_TYPE_ARRAY_LITERAL: {
         X64_Type type = x64_type_of_node(builder, node->first_child);
+        if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+            // `[dynamic]Int` has no elements, whatever is wanted of it.
+            return type;
+        }
         if (type.kind != X64_TYPE_KIND_ARRAY) {
             return x64_type_make(X64_TYPE_KIND_NONE);
         }
@@ -7269,6 +7460,7 @@ static X64_Type x64_type_pointer_to(X64_Type target) {
         return pointer;
     }
     case X64_TYPE_KIND_ARRAY:
+    case X64_TYPE_KIND_DYNAMIC:
     case X64_TYPE_KIND_ENUM_LITERAL:
     case X64_TYPE_KIND_NIL:
     case X64_TYPE_KIND_NONE:
@@ -7301,7 +7493,8 @@ static X64_Type x64_type_pointee(X64_Type pointer) {
  * Returns the type of the elements of the array or array slice type `sequence`.
  */
 static X64_Type x64_type_element(X64_Type sequence) {
-    assert(sequence.kind == X64_TYPE_KIND_ARRAY || sequence.kind == X64_TYPE_KIND_SLICE);
+    assert(sequence.kind == X64_TYPE_KIND_ARRAY || sequence.kind == X64_TYPE_KIND_DYNAMIC ||
+           sequence.kind == X64_TYPE_KIND_SLICE);
 
     X64_Type element = x64_type_make(sequence.element_kind);
     element.definition = sequence.element_definition;
@@ -7316,7 +7509,8 @@ static X64_Type x64_type_element(X64_Type sequence) {
  * an enum, a struct or a pointer, and any other type gives a type of the kind `X64_TYPE_KIND_NONE`.
  */
 static X64_Type x64_type_sequence_of(X64_Type element, X64_Type_Kind kind, int64_t length) {
-    assert(kind == X64_TYPE_KIND_ARRAY || kind == X64_TYPE_KIND_SLICE);
+    assert(kind == X64_TYPE_KIND_ARRAY || kind == X64_TYPE_KIND_DYNAMIC ||
+           kind == X64_TYPE_KIND_SLICE);
 
     if (element.kind != X64_TYPE_KIND_BOOL && element.kind != X64_TYPE_KIND_BYTE &&
         element.kind != X64_TYPE_KIND_ENUM && element.kind != X64_TYPE_KIND_F32 &&
@@ -7330,7 +7524,7 @@ static X64_Type x64_type_sequence_of(X64_Type element, X64_Type_Kind kind, int64
     }
     X64_Type sequence = x64_type_make(kind);
     sequence.length = length;
-    if (kind == X64_TYPE_KIND_SLICE) {
+    if (kind == X64_TYPE_KIND_DYNAMIC || kind == X64_TYPE_KIND_SLICE) {
         sequence.length = -1;
     }
     sequence.element_kind = element.kind;
@@ -7394,6 +7588,7 @@ static size_t x64_type_word_count(X64_Builder const *builder, X64_Type type) {
     case X64_TYPE_KIND_PROCEDURE:
     case X64_TYPE_KIND_RUNE:
         return 1;
+    case X64_TYPE_KIND_DYNAMIC:
     case X64_TYPE_KIND_SLICE:
     case X64_TYPE_KIND_STR:
         return 2;
@@ -7520,6 +7715,9 @@ static X64_Type x64_type_of_node(X64_Builder const *builder, Ast_Node_Index type
     X64_Type element = x64_type_of_element_node(builder, node->first_child);
     if (node->payload.array_type.length_kind == AST_ARRAY_LENGTH_OMITTED) {
         return x64_type_sequence_of(element, X64_TYPE_KIND_SLICE, -1);
+    }
+    if (node->payload.array_type.length_kind == AST_ARRAY_LENGTH_DYNAMIC) {
+        return x64_type_sequence_of(element, X64_TYPE_KIND_DYNAMIC, -1);
     }
     int64_t length = -1;
     if (node->payload.array_type.length_kind == AST_ARRAY_LENGTH_FIXED) {
@@ -7861,6 +8059,8 @@ static Str x64_type_text(X64_Builder const *builder, X64_Type type) {
         return STR("Byte");
     case X64_TYPE_KIND_C_STR:
         return STR("C_Str");
+    case X64_TYPE_KIND_DYNAMIC:
+        return STR("a dynamic array");
     case X64_TYPE_KIND_ENUM:
     case X64_TYPE_KIND_STRUCT:
         // The definition of the type is the node of the struct or the enum, whose name is that of
@@ -9514,6 +9714,7 @@ static uint32_t x64_debug_type_reference(X64_Builder const *builder, X64_Debug_T
     case X64_TYPE_KIND_STR:
         return types.str_type;
     case X64_TYPE_KIND_ARRAY:
+    case X64_TYPE_KIND_DYNAMIC:
     case X64_TYPE_KIND_ENUM_LITERAL:
     case X64_TYPE_KIND_NIL:
     case X64_TYPE_KIND_NONE:

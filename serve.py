@@ -141,14 +141,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 KEYWORD_CATEGORIES = {
     "Control flow": "break case continue defer else for if in match return",
     "Conversions": "cast",
-    "Definitions": "const enum foreign import package proc struct union",
+    "Definitions": "const dynamic enum foreign import package proc struct union",
     "Logical operators": "and not or",
     "Reflection": "type_info_of",
     "Values": "false nil true",
 }
 UNUSED_KEYWORD_CATEGORIES = {
     "Control flow": "async await catch do finally goto loop switch throw throws try where while yield",
-    "Definitions": ("abstract alias class distinct dynamic extern final gen generate impl interface "
+    "Definitions": ("abstract alias class distinct extern final gen generate impl interface "
                     "macro mutable trait virtual"),
     "Visibility and safety": "private public safe unsafe",
     "Operators and conversions": ("as delete is new of operator override ref self super this "

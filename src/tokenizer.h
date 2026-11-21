@@ -68,6 +68,8 @@ typedef enum {
     // Runs the statement after it when the block that it is in is left, see
     // `AST_NODE_TYPE_DEFER_STATEMENT`.
     TOKEN_KIND_KEYWORD_DEFER,
+    // The length of a dynamic array type, `[dynamic]Int`, see `AST_ARRAY_LENGTH_DYNAMIC`.
+    TOKEN_KIND_KEYWORD_DYNAMIC,
     TOKEN_KIND_KEYWORD_ELSE,
     TOKEN_KIND_KEYWORD_ENUM,
     TOKEN_KIND_KEYWORD_FALSE,

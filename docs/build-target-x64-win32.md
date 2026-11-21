@@ -91,6 +91,8 @@ A match statement works out its subject once and stores it in a place of its own
 
 ## Arrays and pointers
 
+A dynamic array, `[dynamic]Int`, is three words in the frame of its procedure, where its variable is: the address of its elements, how many there are, and how many there is room for, and they are 0 when it is made. As a value it is the first two, like an array slice, so a subscript and a for statement take it as they take a slice. `append(%a, ...)` works out its values first, which stay on the stack of values, and then adds the number of values to the number of elements and compares it with the room: when it is above, `rdx` is twice that, in elements, and `r9` its size in bytes, rounded up to 8, which is taken from the temporary storage as `str_to_c_str` takes a string, with the check that it fits, and a breakpoint when it does not, the elements that there are are copied there as for a copy of a range, and the variable has the new address and the new room. Then each value is stored at `address + (count + index) * size` from the last, which is on top of the stack, to the first, and the number of elements grows. A procedure that calls `append` gives the temporary storage back when it returns, like one that calls `str_to_c_str`, so the elements are gone with it.
+
 The length of an array type that is a constant, `[SIZE]Int`, or arithmetic of constants, is worked out by the analysis of the program before the target is built, and is a number in the tree like a written one, so the target does not tell them apart.
 
 An array literal that fills, `[5]Int { .. = 0 }`, works out its value once, which is on the stack of values, and a loop stores its words in each element: `r10` is the address of the element, which moves on by the size of an element with `add`, and `r11` counts the elements that are left down to 0, where the loop ends. The value is taken off the stack after the loop, so an array of no elements stores nothing.
@@ -145,9 +147,10 @@ The target builds procedures whose parameters, results and variables are of the 
 - the first number or the end of the range of a for statement is not an `Int`,
 - what is subscripted, sliced, gone through by a for statement or copied to a range of elements is not an array or an array slice, or an index or a bound is not an `Int`,
 - an array literal has another number of elements than the length of its type, an element of it or the value that is assigned to an element is not of the type of the elements, or a variable of an array type is not given an array literal or is assigned to as a whole,
-- the type of a parameter is an array,
+- the type of a parameter is an array or a dynamic array,
 - `^` follows a value that is not a pointer, or the value that is assigned through a pointer is not of the type that it points to,
-- the operand of `%` has no address: it is a parameter, the iterator of a for statement, a value that is computed, or a variable of an array or array slice type,
+- the operand of `%` has no address: it is a parameter, the iterator of a for statement, a value that is computed, or a variable of an array or array slice type, except the one that `append` takes, which is a variable that is a dynamic array,
+- `append` has no value, or a first argument that is not the address of a variable that is a dynamic array, or a value that is not of the type of the elements,
 - the value of a variable that is defined without a type is `nil` or a member such as `.RED` that is written without its enum, which do not say the type of the variable,
 - a member such as `.RED` is where no enum is wanted, or the enum has no such member, or the type written after `enum` is not `Int`,
 - a name in an expression is a struct or an enum, which is a type and not a value,

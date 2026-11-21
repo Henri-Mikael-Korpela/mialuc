@@ -110,6 +110,10 @@ typedef enum {
     // the kind `AST_ARRAY_LENGTH_FIXED` with the length in the payload, so a target only meets
     // this kind in a program that the analysis did not accept.
     AST_ARRAY_LENGTH_CONSTANT,
+    // The keyword `dynamic` between the brackets, as in `[dynamic]Int`: an array that grows when
+    // elements are appended to it, whose length is known only when the program runs. As a literal,
+    // `[dynamic]Int` is an empty one, and has no elements and no braces.
+    AST_ARRAY_LENGTH_DYNAMIC,
     // An integer literal between the brackets, as in `[5]Int`. It is in the payload.
     AST_ARRAY_LENGTH_FIXED,
     // The keyword `const` between the brackets, as in `[const]Int`: the length is the number of
