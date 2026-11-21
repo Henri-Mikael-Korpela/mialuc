@@ -10254,8 +10254,8 @@ static void wasm_build_code_section_body_try_str_to_int(Wasm_Builder *builder,
  * the stack pointer moves down by twice as much room as is needed, which is the temporary storage
  * that the procedure gives back when it returns, see `wasm_frame_leave`, the elements move there
  * with `memory.copy`, and a program that needs more than the stack has is stopped. Then each value
- * is stored at the place after the last element, with its address in a scratch local while the
- * value is worked out, and the number of elements grows by the number of values. Returns false
+ * is worked out and stored at the place after the last element, whose address is in a scratch local
+ * after that, and the number of elements grows by the number of values. Returns false
  * after it recorded an error.
  */
 static bool wasm_build_code_section_body_append(Wasm_Builder *builder, Ast_Node_Index definition,
@@ -10360,6 +10360,14 @@ static bool wasm_build_code_section_body_append(Wasm_Builder *builder, Ast_Node_
     size_t index = 0;
     for (Ast_Node_Index value = builder->nodes[pointer].next_sibling;
          value != AST_NODE_INDEX_NONE; value = builder->nodes[value].next_sibling) {
+        if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
+            return false;
+        }
+        if (not wasm_value_is_accepted(builder, element, value)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        }
+        // The address is worked out after the value, which may use the scratch local of an
+        // address itself, as a subscript does.
         wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
         wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, place);
         wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
@@ -10370,18 +10378,17 @@ static bool wasm_build_code_section_body_append(Wasm_Builder *builder, Ast_Node_
         wasm_write_i32_const(writer, (int64_t)(index * stride));
         wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
         wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, address);
-        if (not wasm_build_code_section_body_expression(builder, definition, value, false)) {
-            return false;
-        }
-        if (not wasm_value_is_accepted(builder, element, value)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
-        }
         wasm_slots_store(builder, procedure, element, address, 0);
         index += 1;
     }
 
+    // The number of elements is worked out again, because the scratch locals of the growing may
+    // have been used by the values.
     wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
-    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, needed);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, frame);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, count_place);
+    wasm_write_i32_const(writer, (int64_t)value_count);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
     wasm_write_memory_instruction(writer, WASM_OPCODE_I32_STORE, count_place);
     return true;
 }

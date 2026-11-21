@@ -9736,7 +9736,8 @@ static uint32_t x64_debug_type_reference(X64_Builder const *builder, X64_Debug_T
  */
 static uint32_t x64_debug_type_write(X64_Builder *builder, X64_Debug_Types types, X64_Type type) {
     X64_Writer *writer = &builder->writer;
-    if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_SLICE) {
+    if (type.kind != X64_TYPE_KIND_ARRAY && type.kind != X64_TYPE_KIND_DYNAMIC &&
+        type.kind != X64_TYPE_KIND_SLICE) {
         return x64_debug_scalar_type_write(builder, types, type);
     }
 
@@ -9755,9 +9756,17 @@ static uint32_t x64_debug_type_write(X64_Builder *builder, X64_Debug_Types types
     uint32_t data = x64_debug_pointers_write(builder, types, element, 1);
     uint32_t slice = (uint32_t)(writer->length - types.unit_start);
     x64_write_unsigned_leb128(writer, X64_DWARF_ABBREVIATION_STRUCTURE_TYPE_ANONYMOUS);
-    x64_write_unsigned_leb128(writer, 2 * X64_WORD_SIZE_BYTES);
+    // A dynamic array has a third word, how many elements there is room for.
+    size_t words = 2;
+    if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+        words = 3;
+    }
+    x64_write_unsigned_leb128(writer, words * X64_WORD_SIZE_BYTES);
     x64_debug_member_write(writer, STR("data"), data, 0);
     x64_debug_member_write(writer, STR("length"), types.int_type, X64_WORD_SIZE_BYTES);
+    if (type.kind == X64_TYPE_KIND_DYNAMIC) {
+        x64_debug_member_write(writer, STR("capacity"), types.int_type, 2 * X64_WORD_SIZE_BYTES);
+    }
     x64_write_byte(writer, 0);                            // The end of the fields.
     return slice;
 }
