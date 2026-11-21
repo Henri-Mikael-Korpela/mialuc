@@ -1,13 +1,12 @@
-error[E0511]: 'n' cannot be compared here
+error[E0511]: Int cannot be compared with Str
  --> test-code/errors/x64/E0511-comparison-operand-type-invalid.mu:5:10
   |
 3 | main :: proc() Int ->
 4 |     n := 1
 5 |     x := n == "a"
-  |          ^
+  |          ^ this operand cannot be compared here
 6 |     return 0
   |
-  = note: both operands of a comparison must be Int, or both must be I32, or both must be I64, or
-          both must be U32, or both must be U64, or both must be floats of one type, or both must be
-          Bool, Str, arrays or array slices of Byte, or a Byte and an ASCII rune for == and not=, or
-          pointers of one type for == and not=
+  = note: values of different types cannot be compared, except an untyped constant or 'nil' with the
+          type that it fits, a Byte with an ASCII rune, and arrays or array slices of Byte with each
+          other, and only numbers have an order

@@ -158,7 +158,7 @@ These are found when a target builds the program, and are the same mistake in th
 | E0508 | the procedure 'name' returns no value, so its call cannot be used as one |  |
 | E0509 | 'name' does not hold a pointer to a procedure, so it cannot be called |  |
 | E0510 | the value cannot be cast to 'name' | A Byte, a Bool, an I32, an I64, a U32, a U64, an Int, a Rune or a float can be cast to Int or I64, an integer or a Rune to a U64, a Byte, a Bool, a U32 or a Rune to a U32, a Byte, a Bool, an I32 or a Rune to an I32, a Byte, an I32, an I64, a U32, an Int or a float to a float, a Byte or a Rune to Rune, and a Rune to [4]Byte. |
-| E0511 | 'name' cannot be compared here | Both operands of a comparison must be Int, or both must be I32, or both must be I64, or both must be U32, or both must be U64, or both must be floats of one type, or both must be Bool, Str, arrays or array slices of Byte, or a Byte and an ASCII rune for == and not=, or pointers of one type for == and not=. |
+| E0511 | a type cannot be compared with the other type | This operand cannot be compared here. Values of different types cannot be compared, except an untyped constant or 'nil' with the type that it fits, a Byte with an ASCII rune, and arrays or array slices of Byte with each other, and only numbers have an order. |
 | E0512 | the condition at 'name' is not a Bool | An Int is not converted to a Bool. |
 | E0513 | the enum has no member 'name' | Not a member of the enum. |
 | E0514 | the enum of 'name' is not known here | Write the member with its enum, as in 'Color.RED', or give it to something that has an enum type. |

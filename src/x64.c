@@ -835,6 +835,8 @@ static X64_Type     x64_type_sequence_of         (X64_Type element, X64_Type_Kin
 static size_t       x64_type_stride_bytes        (X64_Builder const *builder,
                                                   X64_Type type);
 static Str          x64_type_subject             (X64_Builder const *builder, Ast_Node_Index type);
+static bool         x64_comparison_fail          (X64_Builder *builder, X64_Type left_type,
+                                                  X64_Type right_type, Str subject);
 static Str          x64_type_text                (X64_Builder const *builder, X64_Type type);
 static size_t       x64_type_word_count          (X64_Builder const *builder, X64_Type type);
 static bool         x64_union_block_changes      (X64_Builder const *builder, Ast_Node_Index block,
@@ -5570,6 +5572,19 @@ static void x64_i32_wrap_write(X64_Builder *builder, bool is_division) {
 }
 
 /**
+ * Records the error that the operands of a comparison cannot be compared, which says the type of
+ * the left one and the type of the right one, as a message names them, and fails with `subject`.
+ * Returns false, so that a caller can return it.
+ */
+static bool x64_comparison_fail(X64_Builder *builder, X64_Type left_type, X64_Type right_type,
+                                Str subject) {
+    x64_fail(builder, X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID, subject);
+    builder->type_expected = x64_type_text(builder, left_type);
+    builder->type_found = x64_type_text(builder, right_type);
+    return false;
+}
+
+/**
  * Writes a comparison, whose operands are on the stack of values: two `Int` values or two `Byte`
  * values with any of the six operators, two `Bool` values, two members of one enum, and two
  * pointers of one type, or a pointer and `nil`, with `==` and `not=`. The order of an `Int` is
@@ -5590,8 +5605,8 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     if (x64_type_is_byte_sequence(left_type) && x64_type_is_byte_sequence(right_type)) {
         if (operator != AST_COMPARISON_OPERATOR_EQUAL &&
             operator != AST_COMPARISON_OPERATOR_NOT_EQUAL) {
-            return x64_fail(builder, X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
-                            x64_expression_subject(builder, node));
+            return x64_comparison_fail(builder, left_type, right_type,
+                                       x64_expression_subject(builder, node));
         }
         x64_bytes_comparison_write(builder, frame, left_type, right_type,
                                    operator == AST_COMPARISON_OPERATOR_EQUAL);
@@ -5634,8 +5649,8 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     bool is_right_accepted = (is_ascii_pair && x64_is_ascii_rune_constant(builder, right)) ||
                              x64_type_accepts(builder, type, right);
     if (not is_valid || not is_left_accepted || not is_right_accepted) {
-        return x64_fail(builder, X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
-                        x64_expression_subject(builder, node));
+        return x64_comparison_fail(builder, left_type, right_type,
+                                   x64_expression_subject(builder, node));
     }
 
     if (x64_type_is_float(type)) {

@@ -829,6 +829,10 @@ static bool            wasm_build_code_section_body_append    (Wasm_Builder *bui
 static bool            wasm_variable_is_append_target         (Wasm_Builder const *builder,
                                                                Ast_Node_Index procedure,
                                                                Ast_Node_Index variable);
+static bool            wasm_comparison_fail                   (Wasm_Builder *builder,
+                                                               Wasm_Type left_type,
+                                                               Wasm_Type right_type,
+                                                               Str subject);
 static bool            wasm_call_is_append                    (Wasm_Builder const *builder,
                                                                Ast_Node_Index call);
 static bool            wasm_call_is_built_in                  (Wasm_Builder const *builder,
@@ -4672,11 +4676,11 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     Wasm_Type float_type = wasm_comparison_float_type(builder, left, right);
     if (float_type.kind != WASM_VALUE_TYPE_NONE) {
         if (not wasm_value_is_accepted(builder, float_type, left)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, left));
         }
         if (not wasm_value_is_accepted(builder, float_type, right)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, right));
         }
         return true;
@@ -4692,11 +4696,11 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
         (left_type.kind == WASM_VALUE_TYPE_RUNE || right_type.kind == WASM_VALUE_TYPE_RUNE)) {
         Wasm_Type rune_type = wasm_type_make(WASM_VALUE_TYPE_RUNE);
         if (not wasm_value_is_accepted(builder, rune_type, left)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, left));
         }
         if (not wasm_value_is_accepted(builder, rune_type, right)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, right));
         }
         return true;
@@ -4711,11 +4715,11 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
             unsigned_type = right_type;
         }
         if (not wasm_value_is_accepted(builder, unsigned_type, left)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, left));
         }
         if (not wasm_value_is_accepted(builder, unsigned_type, right)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, right));
         }
         return true;
@@ -4726,11 +4730,11 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     if (left_type.kind == WASM_VALUE_TYPE_I64 || right_type.kind == WASM_VALUE_TYPE_I64) {
         Wasm_Type i64_type = wasm_type_make(WASM_VALUE_TYPE_I64);
         if (not wasm_value_is_accepted(builder, i64_type, left)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, left));
         }
         if (not wasm_value_is_accepted(builder, i64_type, right)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, right));
         }
         return true;
@@ -4741,11 +4745,11 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     if (left_type.kind == WASM_VALUE_TYPE_I32 || right_type.kind == WASM_VALUE_TYPE_I32) {
         Wasm_Type i32_type = wasm_type_make(WASM_VALUE_TYPE_I32);
         if (not wasm_value_is_accepted(builder, i32_type, left)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, left));
         }
         if (not wasm_value_is_accepted(builder, i32_type, right)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, right));
         }
         return true;
@@ -4762,13 +4766,13 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
         if (left_type.kind != WASM_VALUE_TYPE_BYTE &&
             not wasm_is_byte_literal(builder, left) &&
             not(is_equality_here && wasm_is_ascii_rune_constant(builder, left))) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, left));
         }
         if (right_type.kind != WASM_VALUE_TYPE_BYTE &&
             not wasm_is_byte_literal(builder, right) &&
             not(is_equality_here && wasm_is_ascii_rune_constant(builder, right))) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, right));
         }
         return true;
@@ -4782,7 +4786,7 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     // of bytes and the same bytes, so they are compared with `==` and `not=`, and have no order.
     if (wasm_comparison_is_of_bytes(builder, operation)) {
         if (not is_equality) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, left));
         }
         return true;
@@ -4794,11 +4798,11 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
     if (left_type.kind == WASM_VALUE_TYPE_STR || right_type.kind == WASM_VALUE_TYPE_STR) {
         Wasm_Type string_type = wasm_type_make(WASM_VALUE_TYPE_STR);
         if (not is_equality || not wasm_value_is_accepted(builder, string_type, left)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, left));
         }
         if (not wasm_value_is_accepted(builder, string_type, right)) {
-            return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+            return wasm_comparison_fail(builder, left_type, right_type,
                              wasm_expression_subject(builder, definition, right));
         }
         return true;
@@ -4817,18 +4821,31 @@ static bool wasm_build_code_section_body_operands(Wasm_Builder *builder, Ast_Nod
                               ((left_type.kind == WASM_VALUE_TYPE_BOOL || is_address) &&
                                is_equality);
     if (not is_left_comparable) {
-        return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+        return wasm_comparison_fail(builder, left_type, right_type,
                          wasm_expression_subject(builder, definition, left));
     }
     if (is_address && not wasm_type_equals(left_type, right_type)) {
-        return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+        return wasm_comparison_fail(builder, left_type, right_type,
                          wasm_expression_subject(builder, definition, right));
     }
     if (not is_address && right_type.kind != left_type.kind) {
-        return wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
+        return wasm_comparison_fail(builder, left_type, right_type,
                          wasm_expression_subject(builder, definition, right));
     }
     return true;
+}
+
+/**
+ * Records the error that the operands of a comparison cannot be compared, which says the type of
+ * the left one and the type of the right one, as a message names them, and fails with `subject`.
+ * Returns false, so that a caller can return it.
+ */
+static bool wasm_comparison_fail(Wasm_Builder *builder, Wasm_Type left_type, Wasm_Type right_type,
+                                 Str subject) {
+    wasm_fail(builder, WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID, subject);
+    builder->type_expected = wasm_type_text(builder, left_type);
+    builder->type_found = wasm_type_text(builder, right_type);
+    return false;
 }
 
 /**

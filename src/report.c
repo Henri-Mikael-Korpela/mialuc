@@ -584,11 +584,11 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
                 "to [4]Byte",
     },
     [ERROR_CODE_COMPARISON_OPERAND_TYPE_INVALID] = {
-        .title = "'{subject}' cannot be compared here",
-        .note = "both operands of a comparison must be Int, or both must be I32, or both must be "
-                "I64, or both must be U32, or both must be U64, or both must be floats of one "
-                "type, or both must be Bool, Str, arrays or array slices of Byte, or a Byte and "
-                "an ASCII rune for == and not=, or pointers of one type for == and not=",
+        .title = "{detail} cannot be compared with {other}",
+        .label = "this operand cannot be compared here",
+        .note = "values of different types cannot be compared, except an untyped constant or 'nil' "
+                "with the type that it fits, a Byte with an ASCII rune, and arrays or array "
+                "slices of Byte with each other, and only numbers have an order",
     },
     [ERROR_CODE_CONDITION_TYPE_INVALID] = {
         .title = "the condition at '{subject}' is not a Bool",
@@ -1467,6 +1467,10 @@ void report_x64_error(Reporter const *reporter, char const *path, Str source,
         texts.second_offset = result.value_offset;
         texts.has_second = true;
     }
+    if (result.status == X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID) {
+        texts.detail = result.type_expected;
+        texts.other = result.type_found;
+    }
     report_emit_at_subject(reporter, code, path, source, result.subject, texts);
 }
 
@@ -1497,6 +1501,10 @@ void report_wasm_error(Reporter const *reporter, char const *path, Str source,
         texts.other = result.type_found;
         texts.second_offset = result.value_offset;
         texts.has_second = true;
+    }
+    if (result.status == WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID) {
+        texts.detail = result.type_expected;
+        texts.other = result.type_found;
     }
     report_emit_at_subject(reporter, code, path, source, result.subject, texts);
 }
