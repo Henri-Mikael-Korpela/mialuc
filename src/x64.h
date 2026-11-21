@@ -22,8 +22,8 @@ typedef enum {
     // The first argument of `append` is not the address of a variable that is a dynamic array.
     // The subject is `append`.
     X64_BUILD_STATUS_APPEND_TARGET_INVALID,
-    // An array whose length is known when the program is compiled is compared with a dynamic array,
-    // or the other way round. The subject is the first operand.
+    // An array, a dynamic array or an array slice is compared with one of another of the three
+    // kinds. The subject is the first operand.
     X64_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH,
     // An element of an array literal, or the value that is assigned to an element or to a range of
     // elements, is not of the type of the elements. The subject is its first name or string.

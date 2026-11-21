@@ -1,6 +1,6 @@
 // Arrays and array slices of bytes compared with `==` and `not=`: they are the same when they have
-// the same number of bytes and the same bytes, whether each is an array or a slice, and they have no
-// order. The exit code of the program is the number of wrong results, 0.
+// the same number of bytes and the same bytes, whether both are arrays or both are slices, and they
+// have no order. The exit code of the program is the number of wrong results, 0.
 
 package byte_comparisons
 
@@ -67,20 +67,20 @@ main :: proc() Int ->
 
     // An array and a slice, and two slices, in either order.
     slice := first[0:3]
-    wrong += check("array and slice are equal %lld", flag(first == slice), 1)
-    wrong += check("slice and array are equal %lld", flag(slice == first), 1)
-    wrong += check("array and the slice of another are equal %lld", flag(second == slice), 1)
-    wrong += check("slice and different array %lld", flag(slice == third), 0)
-    wrong += check("slice and different array, unequal %lld", flag(slice not= third), 1)
+    wrong += check("array and slice are equal %lld", flag(first[:] == slice), 1)
+    wrong += check("slice and array are equal %lld", flag(slice == first[:]), 1)
+    wrong += check("array and the slice of another are equal %lld", flag(second[:] == slice), 1)
+    wrong += check("slice and different array %lld", flag(slice == third[:]), 0)
+    wrong += check("slice and different array, unequal %lld", flag(slice not= third[:]), 1)
     shorter_slice := longer[0:3]
-    wrong += check("a slice of a longer array is equal %lld", flag(shorter_slice == first), 1)
+    wrong += check("a slice of a longer array is equal %lld", flag(shorter_slice == first[:]), 1)
     wrong += check("whole longer array is not %lld", flag(longer == first), 0)
     last_slice := longer[1:4]
-    wrong += check("another place is not equal %lld", flag(last_slice == first), 0)
+    wrong += check("another place is not equal %lld", flag(last_slice == first[:]), 0)
     wrong += check("two slices are equal %lld", flag(shorter_slice == slice), 1)
     wrong += check("two slices are different %lld", flag(last_slice == slice), 0)
     empty_slice := first[2:2]
-    wrong += check("an empty slice is an array of nothing %lld", flag(empty_slice == nothing), 1)
+    wrong += check("an empty slice is an array of nothing %lld", flag(empty_slice == nothing[:]), 1)
     wrong += check("two empty slices are equal %lld", flag(empty_slice == longer[0:0]), 1)
 
     // Slices that are parameters, and an array that is given where a slice is wanted.

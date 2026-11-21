@@ -924,6 +924,7 @@ static X64_Type_Kind x64_parameter_float_at       (X64_Builder const *builder,
                                                   Ast_Node_Index procedure, size_t word);
 static bool         x64_is_ascii_rune_constant   (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
+static bool         x64_type_is_sequence         (X64_Type type);
 static bool         x64_types_are_comparable_sequences(X64_Type left, X64_Type right);
 static void         x64_bytes_length_load        (X64_Builder *builder, X64_Type type,
                                                   byte register_number, int32_t place);
@@ -5598,13 +5599,14 @@ static bool x64_comparison_write(X64_Builder *builder, X64_Expression_Frame cons
     Ast_Node_Index right = builder->nodes[left].next_sibling;
     Ast_Comparison_Operator operator = builder->nodes[node].payload.comparison.operator;
 
-    // Two arrays or array slices of bytes, in any mix, are the same when they have the same number
-    // of bytes and the same bytes, and have no order.
+    // Two arrays, two dynamic arrays or two array slices of one type of elements are the same when
+    // they have the same number of elements and the same elements, and have no order.
     X64_Type left_type = x64_expression_type(builder, left);
     X64_Type right_type = x64_expression_type(builder, right);
-    // An array and a dynamic array are not compared, whatever their elements are.
-    if ((left_type.kind == X64_TYPE_KIND_ARRAY && right_type.kind == X64_TYPE_KIND_DYNAMIC) ||
-        (left_type.kind == X64_TYPE_KIND_DYNAMIC && right_type.kind == X64_TYPE_KIND_ARRAY)) {
+    // An array, a dynamic array and an array slice are compared with their own kind only, whatever
+    // their elements are.
+    if (x64_type_is_sequence(left_type) && x64_type_is_sequence(right_type) &&
+        left_type.kind != right_type.kind) {
         x64_fail(builder, X64_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH,
                  x64_expression_subject(builder, left));
         builder->type_expected = x64_type_text(builder, left_type);
@@ -5746,8 +5748,16 @@ static bool x64_is_ascii_rune_constant(X64_Builder const *builder, Ast_Node_Inde
 }
 
 /**
- * Returns whether the two types are arrays, dynamic arrays or array slices, in any mix, of the same
- * type of elements, and the elements are ones that `==` compares: a `Byte`, an `Int`, an `I32`, an
+ * Returns whether `type` is an array, a dynamic array or an array slice.
+ */
+static bool x64_type_is_sequence(X64_Type type) {
+    return type.kind == X64_TYPE_KIND_ARRAY || type.kind == X64_TYPE_KIND_DYNAMIC ||
+           type.kind == X64_TYPE_KIND_SLICE;
+}
+
+/**
+ * Returns whether the two types are arrays, dynamic arrays or array slices, of the same type of
+ * elements, which the caller has checked are of one kind, and the elements are ones that `==` compares: a `Byte`, an `Int`, an `I32`, an
  * `I64`, a `U32`, a `U64`, a `Bool`, a `Rune`, a member of an enum, a pointer or a pointer to a
  * procedure. Two such sequences are the same when they have as many elements and every element is
  * the same as the one at its place in the other. The elements of other types, floats, strings and

@@ -22,7 +22,7 @@ different_lengths :: proc() Bool ->
 array_and_slice :: proc() Bool ->
     first := [const]Byte { 1, 2, 3 }
     longer := [const]Byte { 1, 2, 3, 4 }
-    return first == longer[0:3]
+    return first[:] == longer[0:3]
 
 two_slices :: proc() Bool ->
     longer := [const]Byte { 1, 2, 3, 4, 2, 3 }
@@ -39,7 +39,7 @@ high_bytes :: proc() Bool ->
 nothing :: proc() Bool ->
     empty := [const]Byte { }
     bytes := [const]Byte { 1, 2, 3 }
-    return empty == bytes[1:1]
+    return empty[:] == bytes[1:1]
 
 /// A procedure that takes slices compares them, and an array is given where a slice is wanted.
 is_same :: proc(a: []Byte, b: []Byte) Bool ->

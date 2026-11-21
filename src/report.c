@@ -736,10 +736,12 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
     },
     [ERROR_CODE_COMPARISON_ARRAY_KIND_MISMATCH] = {
         .title = "{detail} cannot be compared with {other}",
-        .label = "an array and a dynamic array are not compared directly",
-        .note = "an array has a length that is known when the program is compiled and a dynamic "
-                "array has not, so the two are not compared even when their elements are the same",
-        .help = "compare slices of them, as in 'a[:] == b[:]'",
+        .label = "these two are not compared with each other",
+        .note = "an array, a dynamic array and an array slice are only compared with their own "
+                "kind, even when their elements are the same: the length of an array is known when "
+                "the program is compiled, the length of a dynamic array changes, and a slice views "
+                "some of the elements of another",
+        .help = "compare slices of both, as in 'a[:] == b[:]'",
     },
     [ERROR_CODE_APPEND_TARGET_INVALID] = {
         .title = "'{subject}' can only add to a dynamic array, and its first argument is not the "

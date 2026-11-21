@@ -190,8 +190,8 @@ typedef enum {
     WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
     // The first argument of `append` is not the address of a variable that is a dynamic array.
     WASM_BUILD_STATUS_APPEND_TARGET_INVALID,
-    // An array whose length is known when the program is compiled is compared with a dynamic array,
-    // or the other way round.
+    // An array, a dynamic array or an array slice is compared with one of another of the three
+    // kinds.
     WASM_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH,
     // An element of an array, or a value that is assigned to one, that is not an `Int`.
     WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,

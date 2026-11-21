@@ -139,7 +139,7 @@ The target rejects a program that the parser accepts when:
 - the call of a procedure without a return type is used as a value, and not as a statement,
 - an operand of an arithmetic operator is not an `Int` or not a float, or the operands are of different types,
 - the operands of a comparison are not both `Int`, both `Rune` or both floats of one type, or not both `Bool`, both `Str` or both pointers or both members of one enum (or `nil`) for `==` and `not=`, or are arrays, dynamic arrays or array slices of elements that are not of one type, or are floats, strings or structs, or are compared with `<`, `<=`, `>` or `>=`,
-- an array is compared with a dynamic array, or a dynamic array with an array,
+- an array, a dynamic array and an array slice are compared with each other,
 - the value of a variable that is defined without a type is `nil` or a member such as `.RED` that is written without its enum, which does not say the type of the variable,
 - a member such as `.RED` is where no enum is known, or the enum has no such member, or it is the member of a name that is not an enum,
 - the operands of a comparison are members of two enums, or members of an enum are compared with `<`, `<=`, `>` or `>=`,

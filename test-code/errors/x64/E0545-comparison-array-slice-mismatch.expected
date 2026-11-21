@@ -1,0 +1,14 @@
+error[E0545]: an array cannot be compared with an array slice
+ --> test-code/errors/x64/E0545-comparison-array-slice-mismatch.mu:6:17
+  |
+4 |     a := [const]Int { 2, 3, 5 }
+5 |     b := [const]Int { 2, 3, 5 }
+6 |     are_same := a == b[:]
+  |                 ^ these two are not compared with each other
+7 |     return 0
+  |
+  = note: an array, a dynamic array and an array slice are only compared with their own kind, even
+          when their elements are the same: the length of an array is known when the program is
+          compiled, the length of a dynamic array changes, and a slice views some of the elements of
+          another
+  = help: compare slices of both, as in 'a[:] == b[:]'
