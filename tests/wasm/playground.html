@@ -40,6 +40,8 @@
 
         header h1 { margin: 0; font-size: 16px; font-weight: 600; }
 
+        .brand { display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
+
         nav { display: flex; gap: 4px; }
 
         nav a {
@@ -264,10 +266,11 @@
 </head>
 <body>
     <header>
-        <h1>Mialu</h1>
+        <a class="brand" href="/"><img src="/logo.png" alt="" width="24" height="24"><h1>Mialu</h1></a>
         <nav aria-label="Pages">
-            <a href="playground.html" aria-current="page">Playground</a>
-            <a href="internals.html">Compiler internals</a>
+            <a href="/">Documentation</a>
+            <a href="/tools/playground" aria-current="page">Playground</a>
+            <a href="/tools/internals">Compiler internals</a>
         </nav>
         <select id="example" aria-label="Example"></select>
         <button id="run" type="button">Run</button>
@@ -613,7 +616,7 @@
                     ast: null,
                     asm: null,
                     asmError: null,
-                    error: `Cannot reach the compiler. Start it with: python serve.py\n${error}`,
+                    error: `Cannot reach the compiler. Start it with: build/mialudoc.exe, or docker compose up\n${error}`,
                 };
             }
         }
@@ -1036,7 +1039,7 @@
                 if (loadIndex === exampleLoadCount) {
                     consoleOutput.replaceChildren();
                     print("error", `Cannot load the example ${name}. Start the server with: `
-                        + `python serve.py\n${error}`);
+                        + `build/mialudoc.exe, or docker compose up\n${error}`);
                 }
                 return;
             }

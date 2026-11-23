@@ -3,7 +3,7 @@
 This document explains how to get the Mialu compiler and how to build and run Mialu programs. The steps depend on the operating system, so each platform has a section of its own:
 
 - [Windows](#windows): build the compiler yourself and use all of its targets.
-- [Linux and other operating systems](#linux-and-other-operating-systems): try the language in the playground, which runs in Docker.
+- [Linux and other operating systems](#linux-and-other-operating-systems): try the language in the playground, which runs in Docker. On Windows the playground does not need Docker, see [Playground](playground.md).
 
 See the [language specification](mialu-programming-language.md) for the language itself.
 
@@ -25,7 +25,7 @@ Windows 10 x64 has been used as the primary operating system. It is required for
 The following are optional:
 
 - [Python](https://www.python.org/downloads/) 3
-    - For running `scripts/verify_grammar.py`, `scripts/verify_errors.py`, `scripts/update_language_spec_table_of_contents.py` and `serve.py`. See [Tooling](tooling.md).
+    - For running `scripts/verify_grammar.py`, `scripts/verify_errors.py`, and `scripts/update_language_spec_table_of_contents.py`. See [Tooling](tooling.md).
     - No dependencies, the standard library is enough.
     - Tested with Python 3.11.9.
 - [VS Code](https://code.visualstudio.com/)
@@ -37,7 +37,7 @@ The following are optional:
     - For running `run.ps1`, `build-wasm.ps1` and `scripts/install_vscode_extension.ps1`.
     - Tested with PowerShell 5.1.19041.6456.
 - [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
-    - For running the [playground](playground.md) without building the compiler yourself.
+    - For running the [playground](playground.md) in a container. It is not needed to run it on Windows: `build/mialudoc.exe` is built with the compiler and serves the playground and the documentation, which is the recommended way, see [Playground](playground.md#launching-the-playground-on-windows).
     - Tested with Docker 29.8.1.
 
 The compiler has no libraries to install: it only uses the C standard library, and the Windows API in [src/process.c](../src/process.c) to run the programs of `run`. The `x64-win32` target writes executables that need nothing but Windows, and the `wasm` and `wat` targets need nothing besides the compiler.
@@ -69,11 +69,11 @@ build/mialuc.exe build --target wasm -o <output file> <source file>
 build/mialuc.exe build --target wat -o <output file> <source file>
 ```
 
-See [test-code/x64](../test-code/x64) and [test-code/wasm](../test-code/wasm) for programs of the targets, [build-wasm.ps1](../build-wasm.ps1) and [run.ps1](../run.ps1) for examples, and [Playground](playground.md) for trying the WebAssembly in the browser. All the commands, including `dump-ast`, `dump-asm`, `dump-outline`, `dump-struct-sizes` and `dump-types`, which show what the compiler makes of a source file, are in [mialuc](mialu-cli.md).
+See [test-code/x64](../test-code/x64) and [test-code/wasm](../test-code/wasm) for programs of the targets, [build-wasm.ps1](../build-wasm.ps1) and [run.ps1](../run.ps1) for examples, and [Playground](playground.md) for trying the WebAssembly in the browser, which is `build/mialudoc.exe` of the build, a server that also shows these documents as pages. All the commands, including `dump-ast`, `dump-asm`, `dump-outline`, `dump-struct-sizes` and `dump-types`, which show what the compiler makes of a source file, are in [mialuc](mialu-cli.md).
 
 ## Linux and other operating systems
 
-The compiler is not built locally on these systems for now, and the `x64-win32` target is for Windows only. If you don't need to build the compiler yourself and you just want to try stuff out, you can use the [playground](playground.md) for testing the language. You can run it via Docker in the browser. The Docker image builds the compiler on Linux with GCC 14, see the [Dockerfile](../Dockerfile), which is how the `wasm` and `wat` targets are used outside of Windows for now.
+The compiler is not built locally on these systems for now, and the `x64-win32` target is for Windows only. If you don't need to build the compiler yourself and you just want to try stuff out, you can use the [playground](playground.md) for testing the language. You can run it via Docker Compose in the browser. The Docker image builds the compiler and mialudoc, the server of the playground, which is a program for Windows that the container runs with Wine, see the [Dockerfile](../Dockerfile), which is how the `wasm` and `wat` targets are used outside of Windows for now.
 
 ### Prerequisites
 
@@ -91,4 +91,4 @@ In the root of the repository:
 docker compose up --build
 ```
 
-If your user is not in the `docker` group, put `sudo` before the command. Then open http://localhost:8008/playground.html. See [Playground](playground.md) for how to use it.
+If your user is not in the `docker` group, put `sudo` before the command. Then open http://localhost:8008/tools/playground, and see the documents of the project at http://localhost:8008/. See [Playground](playground.md) for how to use it.

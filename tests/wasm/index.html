@@ -28,7 +28,7 @@
         const error = document.getElementById("error");
 
         async function main() {
-            // Needs the server to send "application/wasm", which serve.py does.
+            // Needs the server to send "application/wasm", which mialudoc does.
             const { instance } = await WebAssembly.instantiateStreaming(fetch("sum.wasm"));
 
             function update() {

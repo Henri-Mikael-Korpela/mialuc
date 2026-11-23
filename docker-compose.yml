@@ -1,3 +1,5 @@
+# Serves the documentation and the playground at http://localhost:8008/. On Windows there is no need
+# for this: build the project and run build/mialudoc.exe, see docs/playground.md.
 services:
   playground:
     build: .

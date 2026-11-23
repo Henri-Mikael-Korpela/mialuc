@@ -1,20 +1,30 @@
 /// mialudoc: a small HTTP server written in Mialu, which shows the documentation of the project to
-/// a browser on the same machine.
+/// a browser on the same machine, and serves the playground, which compiles Mialu in the browser.
 ///
-///     mialudoc [port [directory]]
+///     mialudoc [port [directory [address]]]
 ///
-/// The port is 8080 and the directory is `.`, the root of the project, when they are left out. The
-/// server has these pages, and answers `GET` and `HEAD` requests for them:
+/// The port is 8080, the directory is `.`, the root of the project, and the address is 127.0.0.1, when
+/// they are left out. An address such as 0.0.0.0 makes the server reachable from other computers, which
+/// a container needs. The server answers `GET` and `HEAD` requests, and `POST` for `/compile`:
 ///
-///     /           an index page with the logo of Mialu, and a list of the documents
-///     /<name>     the document `docs/<name>.md`, which is written in Markdown and is shown as HTML
-///     /logo.png   the logo, `media/mialu-logo.png`
+///     /                       an index page with the logo of Mialu, and a list of the documents
+///     /<name>                 the document `docs/<name>.md`, which is written in Markdown and is shown as HTML
+///     /logo.png               the logo, `media/mialu-logo.png`
+///     /tools/playground       the playground, `tests/wasm/playground.html`
+///     /tools/internals        the page of the internals of the compiler, `tests/wasm/internals.html`
+///     /api/internals          the tokens, syntax tree nodes, reserved words and operators of the compiler, as JSON
+///     /compile                the source of a program in the body of a POST, built by `build/mialuc.exe`, as JSON
+///     /test-code/wasm/<file>  the examples of the playground
+///     /tests/wasm/<file>      the files of `tests/wasm`
 ///
-/// A name is made of letters, digits, `-` and `_`, so the files that are served are those of `docs`
-/// and nothing that a path with dots or slashes could name. The connection is closed after each answer.
+/// A name is made of letters, digits, `-` and `_`, and a file name has dots too but does not start with
+/// one, so what is served is what the directories above hold and nothing that a path with `..` or a
+/// slash could name. The connection is closed after each answer, and a request is answered before the
+/// next one is read.
 ///
 /// It is built by CMake with the target `mialudoc`, which runs `mialuc build --target x64-win32`,
-/// and it works on Windows only, as the standard library does for now.
+/// and it works on Windows only, as the standard library does for now. The Dockerfile of the project
+/// runs it under Wine, so it is the server of the playground on the other systems too.
 ///
 /// The Markdown that it understands is what the documents of the project use: headings, paragraphs,
 /// lists that are nested, tables, block quotes, fenced code, and `code`, **bold**, *emphasis* and
@@ -26,6 +36,11 @@
 /// or its library does not have. They are all collected here as well, so that they can be added and
 /// the workarounds removed:
 ///
+///   - MISSING: a standard library of processes, so `CreateProcessA` and the procedures with it are declared
+///     here, to run the compiler, with the structures that they take as bytes: `STARTUPINFOA`, which has
+///     the handles at the byte 80, 88 and 96, `PROCESS_INFORMATION` and `SECURITY_ATTRIBUTES`.
+///   - MISSING: the program and its package knowing where they are, so the compiler is found at
+///     `<directory>/build/mialuc.exe`, with the directory that is given, and not next to the program.
 ///   - MISSING: a standard library of sockets, `mu:network` or the like. The procedures of Winsock are
 ///     declared here, and the structures that they take, `WSADATA` and `sockaddr_in`, are arrays of
 ///     bytes that are filled by hand, as there is no way to say the size and the layout of a struct
@@ -150,6 +165,8 @@ STATUS_OK :: 200
 STATUS_BAD_REQUEST :: 400
 STATUS_NOT_FOUND :: 404
 STATUS_METHOD_NOT_ALLOWED :: 405
+STATUS_PAYLOAD_TOO_LARGE :: 413
+STATUS_INTERNAL_ERROR :: 500
 
 /// The numbers of the characters that the Markdown looks for. See MISSING: a `Rune` as a `Byte`.
 BACKTICK :: 96
@@ -336,9 +353,10 @@ send_all :: proc(client: Int, bytes: []Byte) Bool ->
         sent += count
     return true
 
-/// Makes the socket that listens on `port` of the address 127.0.0.1, and gives it, or
-/// INVALID_SOCKET. The server is for the machine that it runs on, so it does not listen on the others.
-listen_on :: proc(port: Int) Int ->
+/// Makes the socket that listens on `port` of the address `host`, which is its 4 bytes, and gives it, or
+/// INVALID_SOCKET. The server is for the machine that it runs on, so it listens on 127.0.0.1 unless
+/// it is told to be reachable from elsewhere, as it is in a container.
+listen_on :: proc(port: Int, host: []Byte) Int ->
     data := [WSADATA_BYTES]Byte { .. = 0 }
     if WSAStartup(WINSOCK_VERSION, %data[0]) not= 0 ->
         puts("mialudoc: Winsock did not start")
@@ -355,8 +373,8 @@ listen_on :: proc(port: Int) Int ->
     address[0] = int_to_byte(cast(Int)AF_INET)
     address[2] = int_to_byte(port / 256)
     address[3] = int_to_byte(port - port / 256 * 256)
-    address[4] = 127
-    address[7] = 1
+    for index in 0..<4 ->
+        address[4 + index] = host[index]
     if bind(listener, %address[0], 16) not= 0 ->
         puts("mialudoc: the port is not free")
         closesocket(listener)
@@ -477,6 +495,8 @@ send_head :: proc(client: Int, code: Int, reason: Str, content_type: Str, length
     at = put_text(head[:], at, reason)
     at = put_text(head[:], at, "\r\nServer: mialudoc\r\nContent-Type: ")
     at = put_text(head[:], at, content_type)
+    // A file or a page that is rebuilt often, and a stale one in the cache would be confusing.
+    at = put_text(head[:], at, "\r\nCache-Control: no-store")
     if length >= 0 ->
         at = put_text(head[:], at, "\r\nContent-Length: ")
         at = put_int(head[:], at, length)
@@ -535,7 +555,7 @@ send_file :: proc(client: Int, path: []Byte, content_type: Str, with_body: Bool)
 
 /// Puts the start of a page: the head, with the style sheet, and the bar at the top. `title` is
 /// the text of the tab. MISSING: a string constant of many lines.
-emit_page_start :: proc(out: ^Output, buffer: []Byte, title: []Byte, is_index: Bool) ->
+emit_page_start :: proc(out: ^Output, buffer: []Byte, title: []Byte) ->
     emit_text(out, buffer, "<!doctype html>\n<html lang='en'>\n<head>\n<meta charset='utf-8'>\n")
     emit_text(out, buffer, "<meta name='viewport' content='width=device-width, initial-scale=1'>\n<title>")
     emit_plain(out, buffer, title)
@@ -548,7 +568,10 @@ emit_page_start :: proc(out: ^Output, buffer: []Byte, title: []Byte, is_index: B
     emit_text(out, buffer, ".bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: .75rem; padding: .6rem 1.5rem; background: rgba(9, 11, 16, .75); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }\n")
     emit_text(out, buffer, ".bar a { display: flex; align-items: center; gap: .6rem; color: var(--text); font-weight: 650; letter-spacing: .02em; text-decoration: none; }\n")
     emit_text(out, buffer, ".bar img { width: 30px; height: 30px; }\n")
-    emit_text(out, buffer, ".bar .path { color: var(--muted); font-weight: 400; }\n")
+    emit_text(out, buffer, ".bar nav { display: flex; gap: .25rem; margin-left: 1rem; }\n")
+    emit_text(out, buffer, ".bar nav a { padding: .3rem .8rem; border-radius: 8px; color: var(--muted); font-weight: 500; letter-spacing: 0; }\n")
+    emit_text(out, buffer, ".bar nav a:hover { color: var(--text); background: var(--raised); }\n")
+    emit_text(out, buffer, ".bar nav a[aria-current='page'] { color: var(--text); background: var(--raised); }\n")
     emit_text(out, buffer, "main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.5rem 6rem; }\n")
     emit_text(out, buffer, "h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 2.2em 0 .6em; font-weight: 700; letter-spacing: -.01em; }\n")
     emit_text(out, buffer, "h1 { font-size: 2.4rem; margin-top: 0; background: linear-gradient(90deg, var(--gold), var(--accent) 55%, var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }\n")
@@ -569,10 +592,9 @@ emit_page_start :: proc(out: ^Output, buffer: []Byte, title: []Byte, is_index: B
     emit_text(out, buffer, ".card strong { display: block; font-size: 1.05rem; line-height: 1.35; } .card span { display: block; margin-top: .35rem; color: var(--muted); font: .8rem 'Cascadia Mono', Consolas, monospace; }\n")
     emit_text(out, buffer, ".label { text-transform: uppercase; letter-spacing: .14em; font-size: .78rem; color: var(--muted); margin: 3rem 0 0; }\n")
     emit_text(out, buffer, "footer { text-align: center; color: var(--muted); font-size: .85rem; padding-bottom: 3rem; }\n")
-    emit_text(out, buffer, "</style>\n</head>\n<body>\n<div class='bar'><a href='/'><img src='/logo.png' alt=''>Mialu")
-    if not is_index ->
-        emit_text(out, buffer, " <span class='path'>/ docs</span>")
-    emit_text(out, buffer, "</a></div>\n")
+    emit_text(out, buffer, "</style>\n</head>\n<body>\n<div class='bar'><a href='/'><img src='/logo.png' alt=''>Mialu</a>")
+    emit_text(out, buffer, "<nav aria-label='Pages'><a href='/' aria-current='page'>Documentation</a>")
+    emit_text(out, buffer, "<a href='/tools/playground'>Playground</a><a href='/tools/internals'>Compiler internals</a></nav></div>\n")
 
 emit_page_end :: proc(out: ^Output, buffer: []Byte) ->
     emit_text(out, buffer, "</main>\n<footer>Served by mialudoc, which is written in Mialu.</footer>\n</body>\n</html>\n")
@@ -1026,7 +1048,7 @@ send_index :: proc(client: Int, directory: []Byte, with_body: Bool) Int ->
     buffer := [OUTPUT_BYTES]Byte { .. = 0 }
     out := Output { client = client, used = 0, is_open = true }
     title := [TITLE_BYTES]Byte { .. = 0 }
-    emit_page_start(%out, buffer[:], title[0:put_text(title[:], 0, "Documentation")], true)
+    emit_page_start(%out, buffer[:], title[0:put_text(title[:], 0, "Documentation")])
     emit_text(%out, buffer[:], "<main>\n<div class=\"hero\"><img src=\"/logo.png\" alt=\"The logo of Mialu\"><h1>Mialu</h1>")
     emit_text(%out, buffer[:], "<p>The documentation of the programming language</p></div>\n")
     emit_text(%out, buffer[:], "<p class=\"label\">Documents</p>\n")
@@ -1052,10 +1074,1140 @@ send_document :: proc(client: Int, directory: []Byte, name: []Byte, with_body: B
 
     buffer := [OUTPUT_BYTES]Byte { .. = 0 }
     out := Output { client = client, used = 0, is_open = true }
-    emit_page_start(%out, buffer[:], title[0:title_length], false)
+    emit_page_start(%out, buffer[:], title[0:title_length])
     emit_text(%out, buffer[:], "<main>\n")
     render_document(%out, buffer[:], file)
     emit_page_end(%out, buffer[:])
+    flush(%out, buffer[:])
+    return STATUS_OK
+
+// ---------------------------------------------------------------------------------------------
+// The files of the playground
+// ---------------------------------------------------------------------------------------------
+
+/// Whether a byte can be in a word of code: a letter, a digit or `_`.
+is_word_byte :: proc(value: Byte) Bool ->
+    if value == '_' ->
+        return true
+    if value >= 48 and value <= 57 ->
+        return true
+    if value >= 65 and value <= 90 ->
+        return true
+    return value >= 97 and value <= 122
+
+/// Whether the byte at `index` is a byte of a word of code, which is false when there is no byte there.
+is_word_at :: proc(bytes: []Byte, index: Int) Bool ->
+    if index < 0 or index >= length_of(bytes) ->
+        return false
+    return is_word_byte(bytes[index])
+
+/// Whether two sequences of bytes are the same.
+bytes_equal :: proc(first: []Byte, second: []Byte) Bool ->
+    if length_of(first) not= length_of(second) ->
+        return false
+    for index in 0..<length_of(first) ->
+        if first[index] not= second[index] ->
+            return false
+    return true
+
+/// Whether `word` is one of the words of `list`, which are separated by spaces.
+list_has :: proc(list: Str, word: []Byte) Bool ->
+    matched := 0
+    is_match := true
+    for character in list ->
+        if character == ' ' ->
+            if is_match and matched == length_of(word) ->
+                return true
+            matched = 0
+            is_match = true
+        else ->
+            if matched < length_of(word) ->
+                if cast(Int)word[matched] not= cast(Int)character ->
+                    is_match = false
+            else ->
+                is_match = false
+            matched += 1
+    return is_match and matched == length_of(word)
+
+/// Where the bytes end before the line ends that are at their end.
+trim_lines :: proc(bytes: []Byte) Int ->
+    end := length_of(bytes)
+    for byte_is(bytes, end - 1, 10) or byte_is(bytes, end - 1, CARRIAGE_RETURN) or byte_is(bytes, end - 1, SPACE) ->
+        end -= 1
+    return end
+
+/// Whether a name is that of a file of one of the directories that are served as they are: it has
+/// letters, digits, `-`, `_` and dots, and does not start with a dot, so it cannot be `..`.
+is_file_name :: proc(bytes: []Byte) Bool ->
+    if length_of(bytes) == 0 or byte_is(bytes, 0, DOT) ->
+        return false
+    for value in bytes ->
+        if not is_name_byte(value) and value not= '.' ->
+            return false
+    return true
+
+/// What a file with the name is for a browser, by the end of its name.
+content_type_of :: proc(name: []Byte) Str ->
+    dot := -1
+    for index in 0..<length_of(name) ->
+        if name[index] == '.' ->
+            dot = index
+    if dot < 0 ->
+        return "application/octet-stream"
+    extension := name[dot + 1:]
+    if bytes_are(extension, "html") ->
+        return "text/html; charset=utf-8"
+    if bytes_are(extension, "js") ->
+        return "text/javascript; charset=utf-8"
+    if bytes_are(extension, "json") ->
+        return "application/json"
+    if bytes_are(extension, "wasm") ->
+        return "application/wasm"
+    if bytes_are(extension, "mu") or bytes_are(extension, "txt") ->
+        return "text/plain; charset=utf-8"
+    return "application/octet-stream"
+
+/// Sends the file `name` of the directory `folder` of the project, which has a path that starts and
+/// ends with a slash, such as `/tests/wasm/`, and gives the code of the answer.
+send_static :: proc(client: Int, directory: []Byte, folder: Str, name: []Byte, with_body: Bool) Int ->
+    if not is_file_name(name) ->
+        return send_error(client, STATUS_NOT_FOUND, "Not Found", with_body)
+    path := [PATH_BYTES]Byte { .. = 0 }
+    path_length := make_path(path[:], directory, folder, name, "")
+    return send_file(client, path[0:path_length], content_type_of(name), with_body)
+
+/// Sends a page of the project that is a file, such as `/tests/wasm/playground.html`.
+send_page :: proc(client: Int, directory: []Byte, folder: Str, file_name: Str, with_body: Bool) Int ->
+    path := [PATH_BYTES]Byte { .. = 0 }
+    path_length := make_path(path[:], directory, folder, path[0:0], file_name)
+    return send_file(client, path[0:path_length], "text/html; charset=utf-8", with_body)
+
+// ---------------------------------------------------------------------------------------------
+// JSON
+// ---------------------------------------------------------------------------------------------
+
+/// The hexadecimal digit of a number from 0 to 15.
+hex_digit :: proc(value: Int) Byte ->
+    if value < 10 ->
+        return int_to_byte(48 + value)
+    return int_to_byte(87 + value)
+
+/// Puts the bytes in the page as the inside of a JSON string. A carriage return is left out, as the
+/// text of a line on Windows has one before its line feed. With `strip_links` a link of Markdown,
+/// `[text](url)`, is only its text.
+emit_json_bytes :: proc(out: ^Output, buffer: []Byte, bytes: []Byte, strip_links: Bool) Int ->
+    index := 0
+    for index < length_of(bytes) ->
+        value := bytes[index]
+        if strip_links and value == '[' ->
+            middle := find_byte(bytes, index + 1, RIGHT_BRACKET)
+            if middle >= 0 and byte_is(bytes, middle + 1, LEFT_PARENTHESIS) ->
+                end := find_byte(bytes, middle + 2, RIGHT_PARENTHESIS)
+                if end >= 0 ->
+                    emit_json_bytes(out, buffer, bytes[index + 1:middle], false)
+                    index = end + 1
+                    continue
+
+        // The carriage return before a line feed is how Windows ends a line, and is not text. One
+        // that is not is, such as the one that a string of the program has.
+        if value == '\r' and byte_is(bytes, index + 1, 10) ->
+            index += 1
+            continue
+        emit_json_byte(out, buffer, value)
+        index += 1
+    return 0
+
+/// Puts a byte in the page as it is in a JSON string, which is itself unless it needs an escape.
+emit_json_byte :: proc(out: ^Output, buffer: []Byte, value: Byte) Int ->
+    if value == '"' ->
+        emit_text(out, buffer, "\\\"")
+    else if value == '\\' ->
+        emit_text(out, buffer, "\\\\")
+    else if value == '\n' ->
+        emit_text(out, buffer, "\\n")
+    else if value == '\t' ->
+        emit_text(out, buffer, "\\t")
+    else if value == '\r' ->
+        emit_text(out, buffer, "\\r")
+    else if value < 32 ->
+        emit_text(out, buffer, "\\u00")
+        emit_byte(out, buffer, hex_digit(cast(Int)value / 16))
+        emit_byte(out, buffer, hex_digit(cast(Int)value - cast(Int)value / 16 * 16))
+    else ->
+        emit_byte(out, buffer, value)
+    return 0
+
+/// Puts the file `name` of the directory of the playground in the page as a JSON string, or `null`
+/// when it cannot be read, a chunk at a time, so that it can be larger than any buffer.
+emit_json_work_file :: proc(out: ^Output, buffer: []Byte, directory: []Byte, name: Str) Int ->
+    path := [PATH_BYTES]Byte { .. = 0 }
+    path_length := work_path(path[:], directory, name)
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_path(path[0:path_length], wide_path[:])
+    if open_error not= .NONE ->
+        emit_text(out, buffer, "null")
+        return 0
+    defer mu.file_close(file)
+
+    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    is_carriage_return := false
+    emit_text(out, buffer, "\"")
+    for ->
+        count, error := mu.file_read(file, chunk[:])
+        if error not= .NONE or count == 0 ->
+            break
+        for index in 0..<count ->
+            value := chunk[index]
+            // A carriage return waits for the byte after it, which may be in the next chunk.
+            if is_carriage_return and value not= '\n' ->
+                emit_json_byte(out, buffer, int_to_byte(13))
+            is_carriage_return = value == '\r'
+            if not is_carriage_return ->
+                emit_json_byte(out, buffer, value)
+    if is_carriage_return ->
+        emit_json_byte(out, buffer, int_to_byte(13))
+    emit_text(out, buffer, "\"")
+    return 0
+
+/// Puts the bytes in the page as a JSON string.
+emit_json_string :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) Int ->
+    emit_text(out, buffer, "\"")
+    emit_json_bytes(out, buffer, bytes, false)
+    emit_text(out, buffer, "\"")
+    return 0
+
+/// Puts the bytes in the page as a JSON string of their lower case, which are all ASCII here.
+emit_json_lower :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) Int ->
+    emit_text(out, buffer, "\"")
+    for value in bytes ->
+        if value >= 65 and value <= 90 ->
+            emit_byte(out, buffer, int_to_byte(cast(Int)value + 32))
+        else ->
+            emit_byte(out, buffer, value)
+    emit_text(out, buffer, "\"")
+    return 0
+
+/// Puts the bytes in the page as a JSON string of their upper case, which are all ASCII here.
+emit_json_upper :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) Int ->
+    emit_text(out, buffer, "\"")
+    for value in bytes ->
+        if value >= 97 and value <= 122 ->
+            emit_byte(out, buffer, int_to_byte(cast(Int)value - 32))
+        else ->
+            emit_byte(out, buffer, value)
+    emit_text(out, buffer, "\"")
+    return 0
+
+/// Puts the base64 of the bytes in the page, with the `=` that fill the last group.
+emit_base64 :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) Int ->
+    index := 0
+    for index < length_of(bytes) ->
+        first := cast(Int)bytes[index]
+        second := 0
+        third := 0
+        if index + 1 < length_of(bytes) ->
+            second = cast(Int)bytes[index + 1]
+        if index + 2 < length_of(bytes) ->
+            third = cast(Int)bytes[index + 2]
+        group := first * 65536 + second * 256 + third
+        high := group / 262144
+        emit_byte(out, buffer, base64_digit(high))
+        emit_byte(out, buffer, base64_digit(group / 4096 - high * 64))
+        if index + 1 < length_of(bytes) ->
+            emit_byte(out, buffer, base64_digit(group / 64 - group / 4096 * 64))
+        else ->
+            emit_byte(out, buffer, int_to_byte(61))
+        if index + 2 < length_of(bytes) ->
+            emit_byte(out, buffer, base64_digit(group - group / 64 * 64))
+        else ->
+            emit_byte(out, buffer, int_to_byte(61))
+        index += 3
+    return 0
+
+/// The character of a number from 0 to 63 in base64: `A` to `Z`, `a` to `z`, `0` to `9`, `+` and `/`.
+base64_digit :: proc(value: Int) Byte ->
+    if value < 26 ->
+        return int_to_byte(65 + value)
+    if value < 52 ->
+        return int_to_byte(97 + value - 26)
+    if value < 62 ->
+        return int_to_byte(48 + value - 52)
+    if value == 62 ->
+        return int_to_byte(43)
+    return int_to_byte(47)
+
+// ---------------------------------------------------------------------------------------------
+// The internals of the compiler: /api/internals
+//
+// The page of the internals shows the tokens, the nodes of the syntax tree, the reserved words and
+// the operators. They are read from the sources of the compiler, `src/tokenizer.h` and `src/ast.h`,
+// and from the specification of the language, so the page cannot go out of date. The answer is
+//
+//     {"tokens": [{"name", "value", "spelling", "category", "description"}],
+//      "ast_nodes": [{"name", "category", "description"}],
+//      "reserved_words": [{"word", "status", "category", "token"}],
+//      "operators": [{"operator", "description", "precedence", "example", "category"}]}
+// ---------------------------------------------------------------------------------------------
+
+COMMA :: 44
+QUOTE :: 39
+GRAVE :: 96
+
+/// Opens a file of the project, whose path is below the directory, for reading, and gives it.
+open_project_file :: proc(directory: []Byte, below: Str, wide_path: []Byte) (mu.File, mu.File_Error) ->
+    path := [PATH_BYTES]Byte { .. = 0 }
+    path_length := make_path(path[:], directory, below, path[0:0], "")
+    file, error := open_path(path[0:path_length], wide_path)
+    return file, error
+
+/// The members of the enum `Token_Kind` of the tokenizer, each with the comment above it as its
+/// description. A comment about a group of members is not about the next one.
+emit_tokens :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_project_file(directory, "/src/tokenizer.h", wide_path[:])
+    if open_error not= .NONE ->
+        return 0
+    defer mu.file_close(file)
+
+    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    line := [LINE_BYTES]Byte { .. = 0 }
+    comment := [1024]Byte { .. = 0 }
+    comment_length := 0
+    reader := Line_Reader { file = file, position = 0, count = 0 }
+    in_enum := false
+    is_first := true
+    for ->
+        length, has_line := read_line(%reader, chunk[:], line[:])
+        if not has_line ->
+            break
+        text := line[0:length]
+        stripped := text[trim_start(text):trim_end(text)]
+        if not in_enum ->
+            if bytes_are(stripped, "typedef enum {") ->
+                in_enum = true
+            continue
+        if bytes_start_with(stripped, "} Token_Kind;") ->
+            break
+        if bytes_start_with(stripped, "//") ->
+            rest := stripped[2:]
+            rest = rest[trim_start(rest):trim_end(rest)]
+            if comment_length > 0 ->
+                comment_length = put_byte(comment[:], comment_length, 32)
+            comment_length = put_bytes(comment[:], comment_length, rest)
+            continue
+
+        // A member is `TOKEN_KIND_NAME,`, or has a value: `TOKEN_KIND_NAME = '*',` or `= 256,`.
+        name_end := 11
+        if length_of(stripped) < 11 ->
+            name_end = length_of(stripped)
+        for is_word_at(stripped, name_end) ->
+            name_end += 1
+        is_member := bytes_start_with(stripped, "TOKEN_KIND_") and name_end > 11
+        value_start := 0
+        value_end := 0
+        if is_member ->
+            is_member = false
+            if byte_is(stripped, name_end, COMMA) ->
+                is_member = true
+            else if bytes_start_with(stripped[name_end:], " = ") ->
+                start := name_end + 3
+                if byte_is(stripped, start, QUOTE) and byte_is(stripped, start + 2, QUOTE) and byte_is(stripped, start + 3, COMMA) ->
+                    is_member = true
+                    value_start = start
+                    value_end = start + 3
+                else ->
+                    digits := start
+                    for is_digit_at(stripped, digits) ->
+                        digits += 1
+                    if digits > start and byte_is(stripped, digits, COMMA) ->
+                        is_member = true
+                        value_start = start
+                        value_end = digits
+        if not is_member ->
+            comment_length = 0
+            continue
+
+        name := stripped[11:name_end]
+        description := comment[0:comment_length]
+        if bytes_start_with(description, "Tokens consisting of") ->
+            description = comment[0:0]
+        comment_length = 0
+
+        has_value := value_end > value_start
+        is_character := has_value and byte_is(stripped, value_start, QUOTE)
+        is_keyword := bytes_start_with(name, "KEYWORD_")
+
+        if is_first ->
+            is_first = false
+        else ->
+            emit_text(out, buffer, ",")
+        emit_text(out, buffer, "{\"name\":\"TOKEN_KIND_")
+        emit_bytes_text(out, buffer, name)
+        emit_text(out, buffer, "\",\"value\":")
+        if has_value ->
+            emit_json_string(out, buffer, stripped[value_start:value_end])
+        else ->
+            emit_text(out, buffer, "null")
+        emit_text(out, buffer, ",\"spelling\":")
+        if is_character ->
+            emit_json_string(out, buffer, stripped[value_start + 1:value_start + 2])
+        else if is_keyword ->
+            emit_json_lower(out, buffer, name[8:])
+        else ->
+            emit_text(out, buffer, "\"\"")
+
+        category := "Multi-character"
+        if is_keyword ->
+            category = "Keyword"
+        else if is_character ->
+            category = "Single character"
+        if list_has("IDENTIFIER INTEGER_LITERAL FLOAT_LITERAL RUNE_LITERAL STRING_LITERAL LABEL", name) ->
+            category = "Names and literals"
+        if list_has("INDENTATION COMMENT DOCUMENTATION_COMMENT END", name) ->
+            category = "Layout and comments"
+        emit_text(out, buffer, ",\"category\":\"")
+        emit_text(out, buffer, category)
+        emit_text(out, buffer, "\",\"description\":")
+        emit_json_string(out, buffer, description)
+        emit_text(out, buffer, "}")
+    return 0
+
+/// Puts the bytes in the page as they are, which are names that need no escape.
+emit_bytes_text :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) Int ->
+    for value in bytes ->
+        emit_byte(out, buffer, value)
+    return 0
+
+/// The start of the lines of the comment of `ast.h` that describes a node, and what the lines that
+/// go on with it start with.
+AST_ENTRY :: " * - `AST_NODE_TYPE_"
+AST_CONTINUATION :: " *   "
+
+/// Puts in `description` what the big comment of `ast.h` says of the node `name`, which is an entry
+/// ` * - `AST_NODE_TYPE_NAME`: text` and the lines that go on with it, and gives how long it is.
+find_ast_description :: proc(directory: []Byte, name: []Byte, description: []Byte) Int ->
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_project_file(directory, "/src/ast.h", wide_path[:])
+    if open_error not= .NONE ->
+        return 0
+    defer mu.file_close(file)
+
+    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    line := [LINE_BYTES]Byte { .. = 0 }
+    reader := Line_Reader { file = file, position = 0, count = 0 }
+    length := 0
+    is_found := false
+    for ->
+        count, has_line := read_line(%reader, chunk[:], line[:])
+        if not has_line ->
+            break
+        text := line[0:count]
+        if bytes_start_with(text, AST_ENTRY) ->
+            if is_found ->
+                break
+            start := length_of(AST_ENTRY)
+            end := find_byte(text, start, GRAVE)
+            if end >= 0 and bytes_equal(text[start:end], name) ->
+                is_found = true
+                rest := text[end + 1:]
+                // The name is followed by a colon, and a space that is not part of the description.
+                if byte_is(rest, 0, 58) ->
+                    rest = rest[1:]
+                rest = rest[trim_start(rest):trim_end(rest)]
+                length = put_bytes(description, 0, rest)
+        else if is_found ->
+            if bytes_start_with(text, AST_CONTINUATION) ->
+                rest := text[length_of(AST_CONTINUATION):]
+                rest = rest[trim_start(rest):trim_end(rest)]
+                length = put_byte(description, length, 32)
+                length = put_bytes(description, length, rest)
+            else ->
+                break
+    return length
+
+/// The members of the enum `Ast_Node_Type` of `ast.h`, which is the first enum of the file, each
+/// with its group and its entry of the big comment.
+emit_ast_nodes :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_project_file(directory, "/src/ast.h", wide_path[:])
+    if open_error not= .NONE ->
+        return 0
+    defer mu.file_close(file)
+
+    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    line := [LINE_BYTES]Byte { .. = 0 }
+    description := [2048]Byte { .. = 0 }
+    reader := Line_Reader { file = file, position = 0, count = 0 }
+    in_enum := false
+    is_first := true
+    for ->
+        length, has_line := read_line(%reader, chunk[:], line[:])
+        if not has_line ->
+            break
+        text := line[0:length]
+        stripped := text[trim_start(text):trim_end(text)]
+        if not in_enum ->
+            if bytes_are(stripped, "typedef enum {") ->
+                in_enum = true
+            continue
+        if bytes_start_with(stripped, "} Ast_Node_Type;") ->
+            break
+        name_end := 14
+        if length_of(stripped) < 14 ->
+            name_end = length_of(stripped)
+        for is_word_at(stripped, name_end) ->
+            name_end += 1
+        if bytes_start_with(stripped, "AST_NODE_TYPE_") and name_end > 14 and byte_is(stripped, name_end, COMMA) ->
+            name := stripped[14:name_end]
+            category := "Other"
+            if list_has("ARRAY_TYPE ENUM_TYPE POINTER_TYPE PROCEDURE_TYPE STRUCT_TYPE TYPE_NAME", name) ->
+                category = "Type"
+            else if list_has("ADDITION AND CAST COMPARISON CONCATENATION DIVISION MULTIPLICATION NOT OR SUBTRACTION ADDRESS_OF DEREFERENCE", name) ->
+                category = "Operator"
+            else if list_has("CALL FIELD_ACCESS IDENTIFIER SLICE SUBSCRIPT TYPE_INFO_OF", name) ->
+                category = "Expression"
+            else if bytes_end_with(name, "_DEFINITION") ->
+                category = "Definition"
+            else if bytes_end_with(name, "_STATEMENT") ->
+                category = "Statement"
+            else if bytes_end_with(name, "_LITERAL") ->
+                category = "Literal"
+            else if bytes_end_with(name, "_ASSIGNMENT") ->
+                category = "Statement"
+
+            description_length := find_ast_description(directory, name, description[:])
+            if is_first ->
+                is_first = false
+            else ->
+                emit_text(out, buffer, ",")
+            emit_text(out, buffer, "{\"name\":\"AST_NODE_TYPE_")
+            emit_bytes_text(out, buffer, name)
+            emit_text(out, buffer, "\",\"category\":\"")
+            emit_text(out, buffer, category)
+            emit_text(out, buffer, "\",\"description\":")
+            emit_json_string(out, buffer, description[0:description_length])
+            emit_text(out, buffer, "}")
+    return 0
+
+/// The group of a reserved word. The specification lists them only as used, literal and unused, so the
+/// finer groups are kept here. A word that is in none is in the group "Other".
+keyword_category :: proc(word: []Byte, is_unused: Bool) Str ->
+    if is_unused ->
+        if list_has("async await catch do finally goto loop switch throw throws try where while yield", word) ->
+            return "Control flow"
+        if list_has("abstract alias class distinct extern final gen generate impl interface macro mutable trait virtual", word) ->
+            return "Definitions"
+        if list_has("private public safe unsafe", word) ->
+            return "Visibility and safety"
+        if list_has("as delete is new of operator override ref self super this transmute type_id_of type_of use", word) ->
+            return "Operators and conversions"
+        return "Other"
+    if list_has("break case continue defer else for if in match return", word) ->
+        return "Control flow"
+    if list_has("cast", word) ->
+        return "Conversions"
+    if list_has("const dynamic enum foreign import package proc struct union", word) ->
+        return "Definitions"
+    if list_has("and not or", word) ->
+        return "Logical operators"
+    if list_has("type_info_of", word) ->
+        return "Reflection"
+    if list_has("false nil true", word) ->
+        return "Values"
+    return "Other"
+
+/// The reserved words of the specification, which has them in three blocks of code below the heading
+/// "Reserved words": the keywords in use, the literal words and the unused keywords.
+emit_reserved_words :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_project_file(directory, "/docs/mialu-programming-language.md", wide_path[:])
+    if open_error not= .NONE ->
+        return 0
+    defer mu.file_close(file)
+
+    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    line := [LINE_BYTES]Byte { .. = 0 }
+    reader := Line_Reader { file = file, position = 0, count = 0 }
+    in_section := false
+    in_block := false
+    blocks := 0
+    is_first := true
+    for ->
+        length, has_line := read_line(%reader, chunk[:], line[:])
+        if not has_line ->
+            break
+        text := line[0:length]
+        if not in_section ->
+            if bytes_are(text, "## Reserved words") ->
+                in_section = true
+            continue
+        if in_block ->
+            if bytes_start_with(text, "```") ->
+                in_block = false
+                blocks += 1
+                continue
+        else ->
+            if bytes_start_with(text, "## ") ->
+                break
+            if bytes_start_with(text, "```") ->
+                in_block = true
+            continue
+        if blocks > 2 ->
+            continue
+
+        status := "Keyword in use"
+        if blocks == 1 ->
+            status = "Literal word"
+        else if blocks == 2 ->
+            status = "Unused keyword"
+        start := 0
+        for start < length ->
+            if text[start] == ' ' ->
+                start += 1
+                continue
+            end := start
+            for end < length and not byte_is(text, end, SPACE) ->
+                end += 1
+            word := text[start:end]
+            if is_first ->
+                is_first = false
+            else ->
+                emit_text(out, buffer, ",")
+            emit_text(out, buffer, "{\"word\":")
+            emit_json_string(out, buffer, word)
+            emit_text(out, buffer, ",\"status\":\"")
+            emit_text(out, buffer, status)
+            emit_text(out, buffer, "\",\"category\":\"")
+            emit_text(out, buffer, keyword_category(word, blocks == 2))
+            emit_text(out, buffer, "\",\"token\":")
+            if blocks == 2 ->
+                emit_text(out, buffer, "null")
+            else ->
+                emit_text(out, buffer, "\"TOKEN_KIND_KEYWORD_")
+                for value in word ->
+                    if value >= 97 and value <= 122 ->
+                        emit_byte(out, buffer, int_to_byte(cast(Int)value - 32))
+                    else ->
+                        emit_byte(out, buffer, value)
+                emit_text(out, buffer, "\"")
+            emit_text(out, buffer, "}")
+            start = end
+    return 0
+
+/// The group of an operator of the precedence.
+operator_category :: proc(precedence: Int) Str ->
+    if precedence == 0 ->
+        return "Definition and assignment"
+    if precedence <= 3 ->
+        return "Logical"
+    if precedence == 4 ->
+        return "Comparison"
+    if precedence <= 6 ->
+        return "Arithmetic"
+    return "Address, access and pointers"
+
+/// The most precedence that an operator has, for `emit_operators`, which goes through the table once
+/// for each. The specification is not to have more.
+OPERATOR_PRECEDENCE_MAX :: 15
+
+/// Puts the rows of the table of operators that have the precedence, which are the rows of the
+/// section "Operators" of the specification that have four cells and a number in the third.
+emit_operators_of :: proc(out: ^Output, buffer: []Byte, directory: []Byte, wanted: Int, is_first: ^Bool) Int ->
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_project_file(directory, "/docs/mialu-programming-language.md", wide_path[:])
+    if open_error not= .NONE ->
+        return 0
+    defer mu.file_close(file)
+
+    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    line := [LINE_BYTES]Byte { .. = 0 }
+    reader := Line_Reader { file = file, position = 0, count = 0 }
+    in_section := false
+    for ->
+        length, has_line := read_line(%reader, chunk[:], line[:])
+        if not has_line ->
+            break
+        text := line[0:length]
+        if not in_section ->
+            if bytes_are(text, "## Operators") ->
+                in_section = true
+            continue
+        if bytes_start_with(text, "## ") ->
+            break
+        text = text[0:trim_end(text)]
+        if not byte_is(text, 0, 124) or not byte_is(text, length_of(text) - 1, 124) ->
+            continue
+
+        // The cells are between the five bars of the row. A row with other bars is not one.
+        bars := [6]Int { .. = 0 }
+        count := 0
+        for index in 0..<length_of(text) ->
+            if text[index] == '|' ->
+                if count < 6 ->
+                    bars[count] = index
+                count += 1
+        if count not= 5 ->
+            continue
+        // MISSING: an array slice as the result of a procedure, to have a `trim` that gives one.
+        cell := text[bars[0] + 1:bars[1]]
+        operator_text := cell[trim_start(cell):trim_end(cell)]
+        cell = text[bars[1] + 1:bars[2]]
+        description := cell[trim_start(cell):trim_end(cell)]
+        cell = text[bars[2] + 1:bars[3]]
+        precedence_text := cell[trim_start(cell):trim_end(cell)]
+        cell = text[bars[3] + 1:bars[4]]
+        example := cell[trim_start(cell):trim_end(cell)]
+        is_number := length_of(precedence_text) > 0
+        for value in precedence_text ->
+            if value < 48 or value > 57 ->
+                is_number = false
+        if not is_number ->
+            continue
+        precedence := 0
+        for value in precedence_text ->
+            precedence = precedence * 10 + cast(Int)value - 48
+        if precedence not= wanted ->
+            continue
+
+        // The backticks around an operator are not part of it.
+        operator_start := 0
+        for byte_is(operator_text, operator_start, GRAVE) ->
+            operator_start += 1
+        operator_end := length_of(operator_text)
+        for operator_end > operator_start and byte_is(operator_text, operator_end - 1, GRAVE) ->
+            operator_end -= 1
+
+        if is_first^ ->
+            is_first^ = false
+        else ->
+            emit_text(out, buffer, ",")
+        emit_text(out, buffer, "{\"operator\":")
+        emit_json_string(out, buffer, operator_text[operator_start:operator_end])
+        emit_text(out, buffer, ",\"description\":\"")
+        emit_json_bytes(out, buffer, description, true)
+        emit_text(out, buffer, "\",\"precedence\":")
+        emit_bytes_text(out, buffer, precedence_text)
+        emit_text(out, buffer, ",\"example\":")
+        emit_json_string(out, buffer, example)
+        emit_text(out, buffer, ",\"category\":\"")
+        emit_text(out, buffer, operator_category(precedence))
+        emit_text(out, buffer, "\"}")
+    return 0
+
+/// Puts the operators, from the one that binds loosest to the one that binds tightest, with the
+/// operators that are not in expressions, whose precedence is 0, last.
+emit_operators :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
+    is_first := true
+    for wanted in 1..<=OPERATOR_PRECEDENCE_MAX ->
+        emit_operators_of(out, buffer, directory, wanted, %is_first)
+    emit_operators_of(out, buffer, directory, 0, %is_first)
+    return 0
+
+/// Sends the answer of /api/internals.
+send_internals :: proc(client: Int, directory: []Byte, with_body: Bool) Int ->
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_project_file(directory, "/docs/mialu-programming-language.md", wide_path[:])
+    if open_error not= .NONE ->
+        return send_error(client, STATUS_INTERNAL_ERROR, "Cannot read the sources of the compiler", with_body)
+    mu.file_close(file)
+
+    if not send_head(client, STATUS_OK, "OK", "application/json", -1) or not with_body ->
+        return STATUS_OK
+    buffer := [OUTPUT_BYTES]Byte { .. = 0 }
+    out := Output { client = client, used = 0, is_open = true }
+    emit_text(%out, buffer[:], "{\"tokens\":[")
+    emit_tokens(%out, buffer[:], directory)
+    emit_text(%out, buffer[:], "],\"ast_nodes\":[")
+    emit_ast_nodes(%out, buffer[:], directory)
+    emit_text(%out, buffer[:], "],\"reserved_words\":[")
+    emit_reserved_words(%out, buffer[:], directory)
+    emit_text(%out, buffer[:], "],\"operators\":[")
+    emit_operators(%out, buffer[:], directory)
+    emit_text(%out, buffer[:], "]}")
+    flush(%out, buffer[:])
+    return STATUS_OK
+
+// ---------------------------------------------------------------------------------------------
+// The compiler as a process: /compile
+//
+// The playground posts the source of a program, and gets what the compiler makes of it as JSON:
+//
+//     {"error": null, "ast": "<syntax tree>", "wasm": "<module in base64>", "wat": "<module text>",
+//      "asm": "<assembly>", "asm_error": null}
+//     {"error": "<what the compiler printed>", "ast": "<syntax tree or null>", "wasm": null,
+//      "wat": null, "asm": null, "asm_error": null}
+//
+// The syntax tree is the one that `mialuc dump-ast` prints, and the assembly is the one that
+// `mialuc dump-asm --target x64-win32` prints, which is for a program that starts with `main`, so for
+// the programs of WebAssembly it is often what the compiler says it cannot do, in "asm_error". A
+// program that does not compile is a normal answer too, with status 200.
+//
+// The compiler is `build/mialuc.exe` of the project, which runs in the directory `build/playground`
+// with the source in it as `playground.mu`, so that its messages name the source without a path.
+// MISSING: a standard library of processes. The procedures of Windows that start one are declared
+// here, with the structures that they take as bytes, as for the sockets.
+// ---------------------------------------------------------------------------------------------
+
+foreign kernel32 #(default_calling_convention("system")) ->
+    CloseHandle          :: proc(handle: Int) I32 -> ...
+    CreateDirectoryA     :: proc(path: ^Byte, security: ^Byte) I32 -> ...
+    CreateFileA          :: proc(file_name: ^Byte, desired_access: U32, share_mode: U32, security: ^Byte, disposition: U32, attributes: U32, template: Int) Int -> ...
+    CreateProcessA       :: proc(application: ^Byte, command_line: ^Byte, process_security: ^Byte, thread_security: ^Byte, inherit_handles: I32, flags: U32, environment: ^Byte, directory: ^Byte, startup: ^Byte, process: ^Byte) I32 -> ...
+    GetExitCodeProcess   :: proc(process: Int, code: ^U32) I32 -> ...
+    TerminateProcess     :: proc(process: Int, code: U32) I32 -> ...
+    WaitForSingleObject  :: proc(handle: Int, milliseconds: U32) U32 -> ...
+
+GENERIC_READ : U32 : 0x80000000
+GENERIC_WRITE : U32 : 0x40000000
+FILE_SHARE_READ : U32 : 1
+FILE_SHARE_WRITE : U32 : 2
+CREATE_ALWAYS : U32 : 2
+OPEN_EXISTING : U32 : 3
+FILE_ATTRIBUTE_NORMAL : U32 : 0x80
+CREATE_NO_WINDOW : U32 : 0x08000000
+
+PLAYGROUND_DIRECTORY :: "/build/playground"
+SOURCE_BYTES_MAX :: 1048576
+COMPILE_TIMEOUT_MILLISECONDS :: 10000
+MESSAGE_BYTES :: 8192
+DATA_BYTES :: 300000
+
+/// What `run_compiler` gives when the compiler could not be started, and when it did not finish.
+RUN_FAILED :: -1
+RUN_TIMED_OUT :: -2
+
+/// Puts in `path` the path of a file of the directory of the playground.
+work_path :: proc(path: []Byte, directory: []Byte, name: Str) Int ->
+    at := put_bytes(path, 0, directory)
+    at = put_text(path, at, PLAYGROUND_DIRECTORY)
+    at = put_text(path, at, "/")
+    return put_text(path, at, name)
+
+/// Puts the number in `buffer` at `at` as 8 bytes, the lowest first, as a `HANDLE` is in a structure.
+/// MISSING: a struct with the layout of a structure of Windows.
+put_u64 :: proc(buffer: []Byte, at: Int, value: Int) Int ->
+    rest := value
+    for index in 0..<8 ->
+        quotient := rest / 256
+        buffer[at + index] = int_to_byte(rest - quotient * 256)
+        rest = quotient
+    return 0
+
+/// Reads 8 bytes of `buffer` at `at`, the lowest first, as a number.
+get_u64 :: proc(buffer: []Byte, at: Int) Int ->
+    total := 0
+    for index in 0..<8 ->
+        total = total * 256 + cast(Int)buffer[at + 7 - index]
+    return total
+
+/// Runs `mialuc` of the project with the arguments in the directory of the playground, with what it
+/// prints as the standard output and the standard error in the two files that are named, and gives its
+/// exit code, or RUN_FAILED or RUN_TIMED_OUT.
+run_compiler :: proc(directory: []Byte, arguments: Str, output_name: Str, errors_name: Str) Int ->
+    work := [PATH_BYTES]Byte { .. = 0 }
+    put_text(work[:], put_bytes(work[:], 0, directory), PLAYGROUND_DIRECTORY)
+    output_path := [PATH_BYTES]Byte { .. = 0 }
+    work_path(output_path[:], directory, output_name)
+    errors_path := [PATH_BYTES]Byte { .. = 0 }
+    work_path(errors_path[:], directory, errors_name)
+    null_path := [8]Byte { .. = 0 }
+    put_text(null_path[:], 0, "NUL")
+
+    // A handle that the compiler is to have is made inheritable by the structure with a 1 at its 16th byte.
+    security := [24]Byte { .. = 0 }
+    security[0] = 24
+    security[16] = 1
+    output := CreateFileA(%output_path[0], GENERIC_WRITE, FILE_SHARE_READ, %security[0], CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0)
+    errors := CreateFileA(%errors_path[0], GENERIC_WRITE, FILE_SHARE_READ, %security[0], CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0)
+    input := CreateFileA(%null_path[0], GENERIC_READ, FILE_SHARE_READ + FILE_SHARE_WRITE, %security[0], OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0)
+
+    command := [PATH_BYTES * 2]Byte { .. = 0 }
+    at := put_text(command[:], 0, "\"")
+    at = put_bytes(command[:], at, directory)
+    at = put_text(command[:], at, "/build/mialuc.exe\" ")
+    put_text(command[:], at, arguments)
+
+    // `STARTUPINFOA` is 104 bytes: its size, the flag that says the three standard handles are
+    // given, which is 0x100 at the byte 60, and the handles at 80, 88 and 96.
+    startup := [104]Byte { .. = 0 }
+    startup[0] = 104
+    startup[61] = 1
+    put_u64(startup[:], 80, input)
+    put_u64(startup[:], 88, output)
+    put_u64(startup[:], 96, errors)
+    // `PROCESS_INFORMATION` is the handle of the process and the one of its thread, and two ids.
+    info := [24]Byte { .. = 0 }
+
+    result := RUN_FAILED
+    created := CreateProcessA(nil, %command[0], nil, nil, 1, CREATE_NO_WINDOW, nil, %work[0], %startup[0], %info[0])
+    if created not= 0 ->
+        process := get_u64(info[:], 0)
+        thread := get_u64(info[:], 8)
+        if WaitForSingleObject(process, COMPILE_TIMEOUT_MILLISECONDS) == 0 ->
+            code : U32 = 0
+            GetExitCodeProcess(process, %code)
+            result = cast(Int)code
+        else ->
+            TerminateProcess(process, 1)
+            result = RUN_TIMED_OUT
+        CloseHandle(thread)
+        CloseHandle(process)
+    CloseHandle(output)
+    CloseHandle(errors)
+    CloseHandle(input)
+    return result
+
+/// Reads the file `name` of the directory of the playground into `data`, and gives how many bytes it has,
+/// or -1 when it cannot be read.
+read_work_file :: proc(directory: []Byte, name: Str, data: []Byte) Int ->
+    path := [PATH_BYTES]Byte { .. = 0 }
+    path_length := work_path(path[:], directory, name)
+    text, is_text := utf8_decode(path[0:path_length])
+    if not is_text ->
+        return -1
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    count, error := mu.file_read_all(text, wide_path[:], data)
+    if error not= .NONE ->
+        return -1
+    return count
+
+/// Puts in `message` what the compiler said when it did not do what was asked, which is what it printed
+/// as errors, or else as output, and gives how long it is. It is 0 when the compiler did well.
+compiler_message :: proc(directory: []Byte, status: Int, errors_name: Str, output_name: Str, message: []Byte) Int ->
+    if status == 0 ->
+        return 0
+    if status == RUN_TIMED_OUT ->
+        return put_text(message, 0, "The compiler did not finish in 10 s.")
+    length := read_work_file(directory, errors_name, message)
+    if length > 0 ->
+        length = trim_lines(message[0:length])
+    if length <= 0 ->
+        length = read_work_file(directory, output_name, message)
+        if length > 0 ->
+            length = trim_lines(message[0:length])
+    if length <= 0 ->
+        at := put_text(message, 0, "The compiler exited with ")
+        return put_int(message, at, status)
+    return length
+
+/// Goes through what `dump-ast` printed, which is the tokens, an empty line and then the tree, which starts with
+/// its root, the line `MODULE`. It says whether the tree is there. With `is_emitting` it puts the tree in the
+/// page as a JSON string, without the empty lines that end it, a line at a time so it can be of any size.
+walk_tree :: proc(out: ^Output, buffer: []Byte, directory: []Byte, is_emitting: Bool) Bool ->
+    path := [PATH_BYTES]Byte { .. = 0 }
+    path_length := work_path(path[:], directory, "ast.txt")
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_path(path[0:path_length], wide_path[:])
+    if open_error not= .NONE ->
+        return false
+    defer mu.file_close(file)
+
+    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    line := [LINE_BYTES]Byte { .. = 0 }
+    reader := Line_Reader { file = file, position = 0, count = 0 }
+    is_found := false
+    was_empty := false
+    is_first := true
+    empty_lines := 0
+    for ->
+        length, has_line := read_line(%reader, chunk[:], line[:])
+        if not has_line ->
+            break
+        if not is_found ->
+            if was_empty and bytes_start_with(line[0:length], "MODULE") ->
+                is_found = true
+                if not is_emitting ->
+                    break
+                emit_text(out, buffer, "\"")
+            was_empty = length == 0
+        if is_found ->
+            // Empty lines are put when something follows them, so the ones at the end are left out.
+            if length == 0 ->
+                empty_lines += 1
+            else ->
+                if is_first ->
+                    is_first = false
+                else ->
+                    emit_text(out, buffer, "\\n")
+                for step in 0..<empty_lines ->
+                    emit_text(out, buffer, "\\n")
+                empty_lines = 0
+                emit_json_bytes(out, buffer, line[0:length], false)
+    if is_found and is_emitting ->
+        emit_text(out, buffer, "\"")
+    return is_found
+
+/// Finds in the head of a request the length of its body, which is the header `Content-Length`, and
+/// gives it, or -1.
+content_length_of :: proc(head: []Byte) Int ->
+    start := 0
+    for start < length_of(head) ->
+        end := find_byte(head, start, 10)
+        if end < 0 ->
+            end = length_of(head)
+        // A line ends with a carriage return and a line feed, and the carriage return is not part of it.
+        field := head[start:start + trim_lines(head[start:end])]
+        if length_of(field) > 15 ->
+            name := field[0:15]
+            matches := true
+            index := 0
+            for character in "content-length:" ->
+                lower := cast(Int)name[index]
+                if lower >= 65 and lower <= 90 ->
+                    lower += 32
+                if lower not= cast(Int)character ->
+                    matches = false
+                index += 1
+            if matches ->
+                rest := field[15:]
+                rest = rest[trim_start(rest):trim_end(rest)]
+                digits, is_number := try_str_to_int(utf8_decode_or_empty(rest))
+                if is_number ->
+                    return digits
+                return -1
+        start = end + 1
+    return -1
+
+/// The text of the bytes, which is empty when they are not UTF-8.
+utf8_decode_or_empty :: proc(bytes: []Byte) Str ->
+    text, is_text := utf8_decode(bytes)
+    return text
+
+/// Writes all of `bytes` to the file, and says whether the system took them all.
+write_all :: proc(file: mu.File, bytes: []Byte) Bool ->
+    total := 0
+    for total < length_of(bytes) ->
+        count, error := mu.file_write(file, bytes[total:])
+        if error not= .NONE or count == 0 ->
+            return false
+        total += count
+    return true
+
+/// Writes the source of a request to `playground.mu`: first what came with the head, and then what the client
+/// still sends, until it has sent `length` bytes. It says whether all of it was written.
+receive_source :: proc(client: Int, directory: []Byte, first: []Byte, length: Int) Bool ->
+    path := [PATH_BYTES]Byte { .. = 0 }
+    path_length := work_path(path[:], directory, "playground.mu")
+    text, is_text := utf8_decode(path[0:path_length])
+    if not is_text ->
+        return false
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := mu.file_open(text, .WRITE, wide_path[:])
+    if open_error not= .NONE ->
+        return false
+    defer mu.file_close(file)
+
+    part := first
+    if length_of(part) > length ->
+        part = first[0:length]
+    if not write_all(file, part) ->
+        return false
+    received := length_of(part)
+    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    for received < length ->
+        wanted := length - received
+        if wanted > CHUNK_BYTES ->
+            wanted = CHUNK_BYTES
+        count := cast(Int)recv(client, %chunk[0], int_to_i32(wanted), 0)
+        if count <= 0 ->
+            return false
+        if not write_all(file, chunk[0:count]) ->
+            return false
+        received += count
+    return true
+
+/// Sends an answer of /compile that has an error and nothing else.
+send_compile_failure :: proc(client: Int, message: []Byte) Int ->
+    if not send_head(client, STATUS_OK, "OK", "application/json", -1) ->
+        return STATUS_OK
+    buffer := [BODY_BYTES * 8]Byte { .. = 0 }
+    out := Output { client = client, used = 0, is_open = true }
+    emit_text(%out, buffer[:], "{\"error\":")
+    emit_json_string(%out, buffer[:], message)
+    emit_text(%out, buffer[:], ",\"ast\":null,\"wasm\":null,\"wat\":null,\"asm\":null,\"asm_error\":null}")
+    flush(%out, buffer[:])
+    return STATUS_OK
+
+/// Answers a request of /compile, whose head is `request[0:head_end]`: the source is the body, which is
+/// built for both targets of WebAssembly, and for the one of x64, to show its assembly.
+/// The syntax tree, the text of the module and the assembly are sent from their files, so they can be
+/// of any size. The module in base64 is held in memory, which holds 300 KB: a larger module is not sent.
+send_compile :: proc(client: Int, directory: []Byte, request: []Byte, head_end: Int) Int ->
+    length := content_length_of(request[0:head_end])
+    if length < 0 ->
+        return send_error(client, STATUS_BAD_REQUEST, "Bad Request", true)
+    if length > SOURCE_BYTES_MAX ->
+        return send_error(client, STATUS_PAYLOAD_TOO_LARGE, "Payload Too Large", true)
+
+    work := [PATH_BYTES]Byte { .. = 0 }
+    put_text(work[:], put_bytes(work[:], 0, directory), PLAYGROUND_DIRECTORY)
+    CreateDirectoryA(%work[0], nil)
+    if not receive_source(client, directory, request[head_end:], length) ->
+        return send_error(client, STATUS_BAD_REQUEST, "Bad Request", true)
+
+    message := [MESSAGE_BYTES]Byte { .. = 0 }
+    tree_status := run_compiler(directory, "dump-ast playground.mu", "ast.txt", "ast.err")
+    if tree_status == RUN_FAILED ->
+        at := put_text(message[:], 0, "Cannot find the compiler at ")
+        at = put_bytes(message[:], at, directory)
+        at = put_text(message[:], at, "/build/mialuc.exe. Build it first, see Getting Started.")
+        return send_compile_failure(client, message[0:at])
+    assembly_status := run_compiler(directory, "dump-asm --target x64-win32 playground.mu", "asm.txt", "asm.err")
+    wasm_status := run_compiler(directory, "build --target wasm playground.wasm playground.mu", "wasm.txt", "wasm.err")
+    wat_status := run_compiler(directory, "build --target wat playground.wat playground.mu", "wat.txt", "wat.err")
+
+    // The first target that did not build is the error, as the compiler says it.
+    error_length := compiler_message(directory, wasm_status, "wasm.err", "wasm.txt", message[:])
+    if error_length == 0 ->
+        error_length = compiler_message(directory, wat_status, "wat.err", "wat.txt", message[:])
+    is_built := wasm_status == 0 and wat_status == 0
+
+    if not send_head(client, STATUS_OK, "OK", "application/json", -1) ->
+        return STATUS_OK
+    buffer := [OUTPUT_BYTES]Byte { .. = 0 }
+    out := Output { client = client, used = 0, is_open = true }
+    data := [DATA_BYTES]Byte { .. = 0 }
+
+    emit_text(%out, buffer[:], "{\"error\":")
+    if is_built ->
+        emit_text(%out, buffer[:], "null")
+    else ->
+        emit_json_string(%out, buffer[:], message[0:error_length])
+
+    emit_text(%out, buffer[:], ",\"ast\":")
+    if walk_tree(%out, buffer[:], directory, false) ->
+        walk_tree(%out, buffer[:], directory, true)
+    else ->
+        emit_text(%out, buffer[:], "null")
+
+    emit_text(%out, buffer[:], ",\"wasm\":")
+    count := read_work_file(directory, "playground.wasm", data[:])
+    if is_built and count >= 0 and count < DATA_BYTES ->
+        emit_text(%out, buffer[:], "\"")
+        emit_base64(%out, buffer[:], data[0:count])
+        emit_text(%out, buffer[:], "\"")
+    else ->
+        emit_text(%out, buffer[:], "null")
+
+    emit_text(%out, buffer[:], ",\"wat\":")
+    if is_built ->
+        emit_json_work_file(%out, buffer[:], directory, "playground.wat")
+    else ->
+        emit_text(%out, buffer[:], "null")
+
+    emit_text(%out, buffer[:], ",\"asm\":")
+    if assembly_status == 0 ->
+        emit_json_work_file(%out, buffer[:], directory, "asm.txt")
+    else ->
+        emit_text(%out, buffer[:], "null")
+
+    emit_text(%out, buffer[:], ",\"asm_error\":")
+    if assembly_status == 0 ->
+        emit_text(%out, buffer[:], "null")
+    else ->
+        error_length = compiler_message(directory, assembly_status, "asm.err", "asm.txt", message[:])
+        emit_json_string(%out, buffer[:], message[0:error_length])
+    emit_text(%out, buffer[:], "}")
     flush(%out, buffer[:])
     return STATUS_OK
 
@@ -1079,6 +2231,13 @@ split_request_line :: proc(line: []Byte) (Int, Int, Bool) ->
         return 0, 0, false
     return first, second, true
 
+/// Where the body of a request starts, which is after the empty line that ends its head, or -1.
+find_head_end :: proc(bytes: []Byte) Int ->
+    for index in 3..<length_of(bytes) ->
+        if byte_is(bytes, index, 10) and byte_is(bytes, index - 1, 13) and byte_is(bytes, index - 2, 10) and byte_is(bytes, index - 3, 13) ->
+            return index + 1
+    return -1
+
 /// Answers the request that is in `request`, and gives the code of the answer.
 answer :: proc(client: Int, request: []Byte, directory: []Byte) Int ->
     line_end := 0
@@ -1097,7 +2256,8 @@ answer :: proc(client: Int, request: []Byte, directory: []Byte) Int ->
     target := line[first + 1:second]
 
     is_head := bytes_are(method, "HEAD")
-    if not is_head and not bytes_are(method, "GET") ->
+    is_post := bytes_are(method, "POST")
+    if not is_head and not is_post and not bytes_are(method, "GET") ->
         return send_error(client, STATUS_METHOD_NOT_ALLOWED, "Method Not Allowed", true)
 
     // What follows a `?` or a `#` is not part of the page.
@@ -1107,12 +2267,31 @@ answer :: proc(client: Int, request: []Byte, directory: []Byte) Int ->
     target = target[0:end]
     with_body := not is_head
 
+    // The only page that is posted to is the compiler of the playground.
+    if is_post ->
+        head_end := find_head_end(request)
+        if bytes_are(target, "/compile") and head_end >= 0 ->
+            return send_compile(client, directory, request, head_end)
+        return send_error(client, STATUS_METHOD_NOT_ALLOWED, "Method Not Allowed", true)
+
     if bytes_are(target, "/") ->
         return send_index(client, directory, with_body)
     if bytes_are(target, "/logo.png") ->
         path := [PATH_BYTES]Byte { .. = 0 }
         path_length := make_path(path[:], directory, "/media/mialu-logo.png", path[0:0], "")
         return send_file(client, path[0:path_length], "image/png", with_body)
+    // The playground and the page of the internals of the compiler are files of the project, and so are
+    // the programs that the playground offers as examples, which its page asks for.
+    if bytes_are(target, "/tools/playground") ->
+        return send_page(client, directory, "/tests/wasm/", "playground.html", with_body)
+    if bytes_are(target, "/tools/internals") ->
+        return send_page(client, directory, "/tests/wasm/", "internals.html", with_body)
+    if bytes_are(target, "/api/internals") ->
+        return send_internals(client, directory, with_body)
+    if bytes_start_with(target, "/test-code/wasm/") ->
+        return send_static(client, directory, "/test-code/wasm/", target[length_of("/test-code/wasm/"):], with_body)
+    if bytes_start_with(target, "/tests/wasm/") ->
+        return send_static(client, directory, "/tests/wasm/", target[length_of("/tests/wasm/"):], with_body)
     if length_of(target) > 1 and target[0] == '/' and is_name(target[1:]) ->
         return send_document(client, directory, target[1:], with_body)
     return send_error(client, STATUS_NOT_FOUND, "Not Found", with_body)
@@ -1155,52 +2334,81 @@ log_request :: proc(request: []Byte, code: Int) ->
 // The program
 // ---------------------------------------------------------------------------------------------
 
-/// Reads the port and the directory from the arguments of the program. They are separated by
-/// spaces, as `process_arguments_start` leaves them. MISSING: arguments of `main`.
-read_arguments :: proc(directory: []Byte) (Int, Int, Bool) ->
+/// Gives where the word of `text` that starts at or after `from` starts and ends, which are the same
+/// when there is none. The words are separated by spaces.
+next_word :: proc(text: []Byte, from: Int) (Int, Int) ->
+    start := from
+    for byte_is(text, start, SPACE) ->
+        start += 1
+    end := start
+    for end < length_of(text) and not byte_is(text, end, SPACE) ->
+        end += 1
+    return start, end
+
+/// Reads the four numbers of an address such as `0.0.0.0` into `host`, and says whether it is one.
+read_host :: proc(text: []Byte, host: []Byte) Bool ->
+    start := 0
+    for index in 0..<4 ->
+        end := find_byte(text, start, DOT)
+        if end < 0 or index == 3 ->
+            end = length_of(text)
+        if index < 3 and end == length_of(text) ->
+            return false
+        number, is_number := try_str_to_int(utf8_decode_or_empty(text[start:end]))
+        if not is_number or number < 0 or number > 255 ->
+            return false
+        host[index] = int_to_byte(number)
+        start = end + 1
+    return true
+
+/// Reads the port, the directory and the address from the arguments of the program, which are words
+/// that are separated by spaces, as `process_arguments_start` leaves them, and gives the port and
+/// the length of the directory, and whether they are valid. MISSING: arguments of `main`.
+read_arguments :: proc(directory: []Byte, host: []Byte) (Int, Int, Bool) ->
     command_line := [512]Byte { .. = 0 }
     length := mu.process_command_line(command_line[:])
     start := mu.process_arguments_start(command_line[0:length])
     arguments := command_line[start:length]
 
+    host[0] = 127
+    host[3] = 1
     port := DEFAULT_PORT
     directory_length := put_text(directory, 0, DEFAULT_DIRECTORY)
-    if length_of(arguments) == 0 ->
-        return port, directory_length, true
 
-    space := length_of(arguments)
-    for index in 0..<length_of(arguments) ->
-        if arguments[index] == ' ' ->
-            space = index
-            break
+    port_start, port_end := next_word(arguments, 0)
+    if port_end > port_start ->
+        text, is_text := utf8_decode(arguments[port_start:port_end])
+        number, is_number := try_str_to_int(text)
+        if not is_text or not is_number or number < 1 or number > 65535 ->
+            return 0, 0, false
+        port = number
 
-    text, is_text := utf8_decode(arguments[0:space])
-    number, is_number := try_str_to_int(text)
-    if not is_text or not is_number or number < 1 or number > 65535 ->
-        return 0, 0, false
-    port = number
+    directory_start, directory_end := next_word(arguments, port_end)
+    if directory_end > directory_start ->
+        directory_length = put_bytes(directory, 0, arguments[directory_start:directory_end])
+        // The slash that ends a directory is not needed, as the paths put one after it.
+        if directory_length > 1 and directory[directory_length - 1] == '/' ->
+            directory_length -= 1
 
-    if space < length_of(arguments) ->
-        rest := arguments[space + 1:]
-        if length_of(rest) > 0 ->
-            directory_length = put_bytes(directory, 0, rest)
-            // The slash that ends a directory is not needed, as the paths put one after it.
-            if directory_length > 1 and directory[directory_length - 1] == '/' ->
-                directory_length -= 1
+    host_start, host_end := next_word(arguments, directory_end)
+    if host_end > host_start ->
+        if not read_host(arguments[host_start:host_end], host) ->
+            return 0, 0, false
     return port, directory_length, true
 
 main :: proc() Int ->
     directory := [DIRECTORY_BYTES]Byte { .. = 0 }
-    port, directory_length, is_valid := read_arguments(directory[:])
+    host := [4]Byte { .. = 0 }
+    port, directory_length, is_valid := read_arguments(directory[:], host[:])
     if not is_valid ->
-        puts("usage: mialudoc [port [directory]]")
+        puts("usage: mialudoc [port [directory [address]]]")
         return 2
 
-    listener := listen_on(port)
+    listener := listen_on(port, host[:])
     if listener == INVALID_SOCKET ->
         return 1
 
-    printf("mialudoc: http://127.0.0.1:%lld/ shows the documents of ", port)
+    printf("mialudoc: http://localhost:%lld/ shows the project at ", port)
     name, is_text := utf8_decode(directory[0:directory_length])
     if is_text ->
         puts(str_to_c_str(name))

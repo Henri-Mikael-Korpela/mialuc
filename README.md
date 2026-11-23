@@ -12,7 +12,7 @@ Mialu is a procedural language with manual memory management. It is influenced b
 
 - [Getting Started](docs/getting-started.md): prerequisites, building the compiler, and building and running programs, with a section for each platform.
 - [Mialu by Examples](examples): programs to read and run, one directory for each, such as a number guessing game.
-- [Playground](docs/playground.md): compile Mialu to WebAssembly in the browser, and run it.
+- [Playground](docs/playground.md): compile Mialu to WebAssembly in the browser, and run it. It is part of `mialudoc`, a server written in Mialu that also shows these documents as pages: build the project and run `build/mialudoc.exe` on Windows, or use Docker Compose on other systems.
 - [Tooling](docs/tooling.md): the grammar check, the table of contents of the specification, and editor support.
 - [Editor support](editors/vscode/README.md): the VS Code extension.
 - [Releasing](docs/releasing.md): setting the version of the compiler and releasing it.

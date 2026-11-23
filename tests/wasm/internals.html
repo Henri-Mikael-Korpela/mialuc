@@ -41,6 +41,8 @@
 
         header h1 { margin: 0; font-size: 16px; font-weight: 600; }
 
+        .brand { display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
+
         nav { display: flex; gap: 4px; }
 
         nav a {
@@ -159,10 +161,11 @@
 </head>
 <body>
     <header>
-        <h1>Mialu</h1>
+        <a class="brand" href="/"><img src="/logo.png" alt="" width="24" height="24"><h1>Mialu</h1></a>
         <nav aria-label="Pages">
-            <a href="playground.html">Playground</a>
-            <a href="internals.html" aria-current="page">Compiler internals</a>
+            <a href="/">Documentation</a>
+            <a href="/tools/playground">Playground</a>
+            <a href="/tools/internals" aria-current="page">Compiler internals</a>
         </nav>
         <div class="tabs" role="tablist">
             <button type="button" role="tab" data-tab="tokens">Tokens</button>
@@ -363,7 +366,7 @@
             } catch (error) {
                 const element = document.getElementById("error");
                 element.hidden = false;
-                element.textContent = `Cannot load the internals. Start the server with: python serve.py\n${error}`;
+                element.textContent = `Cannot load the internals. Start the server with: build/mialudoc.exe, or docker compose up\n${error}`;
             }
         }
 
