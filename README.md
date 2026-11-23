@@ -1,3 +1,5 @@
+![Mialu Logo](./media/mialu-logo.png)
+
 # Mialu Programming Language
 
 This is the official compiler implementation for the Mialu programming language.
