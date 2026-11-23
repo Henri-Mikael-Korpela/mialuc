@@ -268,7 +268,7 @@ main :: proc() Int ->
     return cast(Int)mu.file_close(file)
 ```
 
-The text in quotes is the vendor, a colon and the path under the vendor. The vendor is the library that the file is in: `mu` is the standard library of Mialu, and it is the only vendor for now. The path is the file below the directory of the library, without `.mu`, with names and slashes, so `mu:filesystem` is the file `filesystem.mu` and `mu:text/ascii` would be `text/ascii.mu`. A path that has anything else, such as a dot, is an error, and so is a vendor that is not known and a file that is not there. `import` is a [keyword](#reserved-words). The other kind of import, `import foreign`, brings in procedures that are not written in Mialu, see [Foreign procedures](#foreign-procedures).
+The text in quotes is the vendor, a colon and the path under the vendor. The vendor is the library that the file is in: `mu` is the standard library of Mialu, and it is the only vendor for now. The path is the file below the directory of the library, without `.mu`, with names and slashes, so `mu:filesystem` is the file `filesystem.mu` and `mu:text/ascii` would be `text/ascii.mu`. A path that has anything else, such as a dot, is an error, and so is a vendor that is not known and a file that is not there. `import` is a [keyword](#reserved-words). The files that the vendor `mu` has are described in [Mialu Standard Library](mialu-standard-library.md). The other kind of import, `import foreign`, brings in procedures that are not written in Mialu, see [Foreign procedures](#foreign-procedures).
 
 ## Primitive data types
 
@@ -2579,6 +2579,8 @@ sum_of_bytes :: proc(text: Str) Int ->
 ## Standard library
 
 The standard library is source code, and the compiler reads it when a program imports it. A release of the compiler has it in the directory `lib` that is next to `mialuc.exe`, in the zip file that it is distributed in, which is looked in first. A compiler that is built from the sources of the project finds it in the directory `src/mialu-std` of the project, which is also where the files of the library are kept, so a debug and a release build of the project use the files that are in the project without having them copied. A file that is in neither is an error that says where it looked.
+
+The files of the library, and the types and procedures that each has, are described in [Mialu Standard Library](mialu-standard-library.md).
 
 ## Rejected ideas
 
