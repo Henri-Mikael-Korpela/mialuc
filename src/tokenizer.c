@@ -942,6 +942,8 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer, Array_Slice text_
                         bool is_escape = tokenizer_escape_read(source, index, &escaped,
                                                                &escape_size);
                         assert(is_escape);
+                        // The assertion is gone when NDEBUG is defined, and then nothing reads it.
+                        (void)is_escape;
                         decoded_length += utf8_encode(escaped, decoded + decoded_length);
                         index += escape_size;
                     } else {
