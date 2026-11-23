@@ -34,7 +34,7 @@ The following are optional:
     - For debugging programs that are built with `--debug`, also in VS Code with the [debug extension](../editors/vscode-debug/README.md). See [Debugging](mialu-cli.md#debugging).
     - Tested with GDB 17.2.
 - Windows PowerShell 5.1
-    - For running `run.ps1`, `build-wasm.ps1` and `scripts/install_vscode_extension.ps1`.
+    - For running `build-wasm.ps1` and `scripts/install_vscode_extension.ps1`.
     - Tested with PowerShell 5.1.19041.6456.
 - [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
     - For running the [playground](playground.md) in a container. It is not needed to run it on Windows: `build/mialudoc.exe` is built with the compiler and serves the playground and the documentation, which is the recommended way, see [Playground](playground.md#launching-the-playground-on-windows).
@@ -69,7 +69,7 @@ build/mialuc.exe build --target wasm -o <output file> <source file>
 build/mialuc.exe build --target wat -o <output file> <source file>
 ```
 
-See [test-code/x64](../test-code/x64) and [test-code/wasm](../test-code/wasm) for programs of the targets, [build-wasm.ps1](../build-wasm.ps1) and [run.ps1](../run.ps1) for examples, and [Playground](playground.md) for trying the WebAssembly in the browser, which is `build/mialudoc.exe` of the build, a server that also shows these documents as pages. All the commands, including `dump-ast`, `dump-asm`, `dump-outline`, `dump-struct-sizes` and `dump-types`, which show what the compiler makes of a source file, are in [mialuc](mialu-cli.md).
+See [test-code/x64](../test-code/x64) and [test-code/wasm](../test-code/wasm) for programs of the targets, [build-wasm.ps1](../build-wasm.ps1) for examples, and [Playground](playground.md) for trying the WebAssembly in the browser, which is `build/mialudoc.exe` of the build, a server that also shows these documents as pages. All the commands, including `dump-ast`, `dump-asm`, `dump-outline`, `dump-struct-sizes` and `dump-types`, which show what the compiler makes of a source file, are in [mialuc](mialu-cli.md).
 
 ## Linux and other operating systems
 
