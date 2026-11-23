@@ -1,6 +1,7 @@
 # Pushing a tag such as `v0.1.0` checks the tagged commit and, only if every check passes,
-# publishes a GitHub release with the compiler for Windows on x64. The version in the file VERSION
-# is the single source of truth, and the tag has to match it.
+# publishes a GitHub release with the compiler for Windows on x64, and mialudoc, the server of the
+# documentation and the playground, with the files that it shows, in the same zip file. The version in
+# the file VERSION is the single source of truth, and the tag has to match it.
 
 name: release
 
@@ -75,9 +76,19 @@ jobs:
       - name: Package
         run: |
           mkdir "mialuc-$GITHUB_REF_NAME"
-          cp build/mialuc.exe LICENSE README.md "mialuc-$GITHUB_REF_NAME/"
+          package="mialuc-$GITHUB_REF_NAME"
+          cp build/mialuc.exe build/mialudoc.exe LICENSE README.md "$package/"
           # The standard library is source code that the compiler reads, as `lib` next to it.
-          cp -r src/mialu-std "mialuc-$GITHUB_REF_NAME/lib"
+          cp -r src/mialu-std "$package/lib"
+          # mialudoc is run in the directory of the package, and finds in it the files that it shows,
+          # in the places that they have in the project: the documents, the logo, the pages of the
+          # playground and its examples, and the sources that the page of the internals is made from.
+          mkdir -p "$package/media" "$package/tests" "$package/test-code" "$package/src"
+          cp -r docs "$package/docs"
+          cp media/mialu-logo.png "$package/media/"
+          cp -r tests/wasm "$package/tests/wasm"
+          cp -r test-code/wasm "$package/test-code/wasm"
+          cp src/tokenizer.h src/ast.h "$package/src/"
           7z a "mialuc-$GITHUB_REF_NAME-win-x64.zip" "mialuc-$GITHUB_REF_NAME"
 
       - name: The package finds its standard library
@@ -88,6 +99,21 @@ jobs:
           "./mialuc-$GITHUB_REF_NAME/mialuc.exe" build --target x64-win32 -o out/imports.exe test-code/x64/imports.mu
           "./mialuc-$GITHUB_REF_NAME/mialuc.exe" build --target wasm -o out/imports.wasm test-code/wasm/imports.mu
           mv src/mialu-std-moved src/mialu-std
+
+      - name: The package serves the documentation and the playground
+        run: |
+          # mialudoc is run from the directory of the package, with the project moved away from its
+          # files, so that only the ones of the package can be what it shows and runs.
+          cd "mialuc-$GITHUB_REF_NAME"
+          ./mialudoc.exe 8080 &
+          server=$!
+          curl -sf --retry 10 --retry-delay 1 --retry-connrefused http://localhost:8080/ | grep -q "getting-started"
+          curl -sf http://localhost:8080/getting-started | grep -q "<h1"
+          curl -sf http://localhost:8080/logo.png -o /dev/null
+          curl -sf http://localhost:8080/tools/playground | grep -q "Playground"
+          curl -sf http://localhost:8080/api/internals | grep -q "TOKEN_KIND_"
+          curl -sf --data-binary @../test-code/wasm/sum.mu http://localhost:8080/compile | grep -q '"error":null'
+          kill $server
 
       - uses: actions/upload-artifact@v4
         with:

@@ -13,7 +13,7 @@
 ///     /tools/playground       the playground, `tests/wasm/playground.html`
 ///     /tools/internals        the page of the internals of the compiler, `tests/wasm/internals.html`
 ///     /api/internals          the tokens, syntax tree nodes, reserved words and operators of the compiler, as JSON
-///     /compile                the source of a program in the body of a POST, built by `build/mialuc.exe`, as JSON
+///     /compile                the source of a program in the body of a POST, built by the compiler, as JSON
 ///     /test-code/wasm/<file>  the examples of the playground
 ///     /tests/wasm/<file>      the files of `tests/wasm`
 ///
@@ -40,7 +40,8 @@
 ///     here, to run the compiler, with the structures that they take as bytes: `STARTUPINFOA`, which has
 ///     the handles at the byte 80, 88 and 96, `PROCESS_INFORMATION` and `SECURITY_ATTRIBUTES`.
 ///   - MISSING: the program and its package knowing where they are, so the compiler is found at
-///     `<directory>/build/mialuc.exe`, with the directory that is given, and not next to the program.
+///     `<directory>/mialuc.exe` or `<directory>/build/mialuc.exe`, with the directory that is given, and
+///     not next to the program.
 ///   - MISSING: a standard library of sockets, `mu:network` or the like. The procedures of Winsock are
 ///     declared here, and the structures that they take, `WSADATA` and `sockaddr_in`, are arrays of
 ///     bytes that are filled by hand, as there is no way to say the size and the layout of a struct
@@ -1842,7 +1843,7 @@ send_internals :: proc(client: Int, directory: []Byte, with_body: Bool) Int ->
 // the programs of WebAssembly it is often what the compiler says it cannot do, in "asm_error". A
 // program that does not compile is a normal answer too, with status 200.
 //
-// The compiler is `build/mialuc.exe` of the project, which runs in the directory `build/playground`
+// The compiler is `mialuc.exe` next to mialudoc in a package of a release, or `build/mialuc.exe` of the project, which runs in the directory `build/playground`
 // with the source in it as `playground.mu`, so that its messages name the source without a path.
 // MISSING: a standard library of processes. The procedures of Windows that start one are declared
 // here, with the structures that they take as bytes, as for the sockets.
@@ -1853,6 +1854,7 @@ foreign kernel32 #(default_calling_convention("system")) ->
     CreateDirectoryA     :: proc(path: ^Byte, security: ^Byte) I32 -> ...
     CreateFileA          :: proc(file_name: ^Byte, desired_access: U32, share_mode: U32, security: ^Byte, disposition: U32, attributes: U32, template: Int) Int -> ...
     CreateProcessA       :: proc(application: ^Byte, command_line: ^Byte, process_security: ^Byte, thread_security: ^Byte, inherit_handles: I32, flags: U32, environment: ^Byte, directory: ^Byte, startup: ^Byte, process: ^Byte) I32 -> ...
+    GetFileAttributesA   :: proc(path: ^Byte) U32 -> ...
     GetExitCodeProcess   :: proc(process: Int, code: ^U32) I32 -> ...
     TerminateProcess     :: proc(process: Int, code: U32) I32 -> ...
     WaitForSingleObject  :: proc(handle: Int, milliseconds: U32) U32 -> ...
@@ -1865,6 +1867,7 @@ CREATE_ALWAYS : U32 : 2
 OPEN_EXISTING : U32 : 3
 FILE_ATTRIBUTE_NORMAL : U32 : 0x80
 CREATE_NO_WINDOW : U32 : 0x08000000
+INVALID_FILE_ATTRIBUTES : U32 : 0xFFFFFFFF
 
 PLAYGROUND_DIRECTORY :: "/build/playground"
 SOURCE_BYTES_MAX :: 1048576
@@ -1900,6 +1903,15 @@ get_u64 :: proc(buffer: []Byte, at: Int) Int ->
         total = total * 256 + cast(Int)buffer[at + 7 - index]
     return total
 
+/// Where the compiler is below the directory of the project: next to mialudoc, as in a package of a release,
+/// or else in `build`, where the build of the project puts it.
+compiler_location :: proc(directory: []Byte) Str ->
+    path := [PATH_BYTES]Byte { .. = 0 }
+    put_text(path[:], put_bytes(path[:], 0, directory), "/mialuc.exe")
+    if GetFileAttributesA(%path[0]) not= INVALID_FILE_ATTRIBUTES ->
+        return "/mialuc.exe"
+    return "/build/mialuc.exe"
+
 /// Runs `mialuc` of the project with the arguments in the directory of the playground, with what it
 /// prints as the standard output and the standard error in the two files that are named, and gives its
 /// exit code, or RUN_FAILED or RUN_TIMED_OUT.
@@ -1924,7 +1936,8 @@ run_compiler :: proc(directory: []Byte, arguments: Str, output_name: Str, errors
     command := [PATH_BYTES * 2]Byte { .. = 0 }
     at := put_text(command[:], 0, "\"")
     at = put_bytes(command[:], at, directory)
-    at = put_text(command[:], at, "/build/mialuc.exe\" ")
+    at = put_text(command[:], at, compiler_location(directory))
+    at = put_text(command[:], at, "\" ")
     put_text(command[:], at, arguments)
 
     // `STARTUPINFOA` is 104 bytes: its size, the flag that says the three standard handles are
@@ -2139,6 +2152,10 @@ send_compile :: proc(client: Int, directory: []Byte, request: []Byte, head_end: 
     if length > SOURCE_BYTES_MAX ->
         return send_error(client, STATUS_PAYLOAD_TOO_LARGE, "Payload Too Large", true)
 
+    // The directory `build` is not in a package of a release, which has the compiler next to mialudoc.
+    build := [PATH_BYTES]Byte { .. = 0 }
+    put_text(build[:], put_bytes(build[:], 0, directory), "/build")
+    CreateDirectoryA(%build[0], nil)
     work := [PATH_BYTES]Byte { .. = 0 }
     put_text(work[:], put_bytes(work[:], 0, directory), PLAYGROUND_DIRECTORY)
     CreateDirectoryA(%work[0], nil)
@@ -2150,7 +2167,8 @@ send_compile :: proc(client: Int, directory: []Byte, request: []Byte, head_end: 
     if tree_status == RUN_FAILED ->
         at := put_text(message[:], 0, "Cannot find the compiler at ")
         at = put_bytes(message[:], at, directory)
-        at = put_text(message[:], at, "/build/mialuc.exe. Build it first, see Getting Started.")
+        at = put_text(message[:], at, compiler_location(directory))
+        at = put_text(message[:], at, ". Build it first, see Getting Started.")
         return send_compile_failure(client, message[0:at])
     assembly_status := run_compiler(directory, "dump-asm --target x64-win32 playground.mu", "asm.txt", "asm.err")
     wasm_status := run_compiler(directory, "build --target wasm playground.wasm playground.mu", "wasm.txt", "wasm.err")
