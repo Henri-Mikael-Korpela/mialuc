@@ -44,3 +44,19 @@ target_compile_definitions(mialuc PRIVATE MIALU_STD_DIRECTORY="${CMAKE_SOURCE_DI
 
 # Warnings are errors in our own code, per the style guide. -Wpedantic rejects anything beyond C99.
 target_compile_options(mialuc PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+# mialudoc is a program in Mialu, an HTTP server that shows the documents of docs/ as pages of HTML, so it is
+# built by the compiler that was just built and not by the C compiler. It needs the target x64-win32,
+# so it is only a target on Windows. Run it as `mialudoc [port [directory]]`, see the comments of
+# src/mialudoc/mialudoc.mu, which also say what Mialu is missing for a program of this kind.
+if(WIN32)
+    file(GLOB MIALUDOC_STANDARD_LIBRARY CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/mialu-std/*.mu)
+    set(MIALUDOC_SOURCE ${CMAKE_SOURCE_DIR}/src/mialudoc/mialudoc.mu)
+    add_custom_command(
+        OUTPUT ${CMAKE_BINARY_DIR}/mialudoc.exe
+        COMMAND mialuc build --target x64-win32 -o ${CMAKE_BINARY_DIR}/mialudoc.exe ${MIALUDOC_SOURCE}
+        DEPENDS mialuc ${MIALUDOC_SOURCE} ${MIALUDOC_STANDARD_LIBRARY}
+        COMMENT "Building mialudoc with mialuc"
+        VERBATIM)
+    add_custom_target(mialudoc ALL DEPENDS ${CMAKE_BINARY_DIR}/mialudoc.exe)
+endif()

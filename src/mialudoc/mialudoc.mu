@@ -1,0 +1,1214 @@
+/// mialudoc: a small HTTP server written in Mialu, which shows the documentation of the project to
+/// a browser on the same machine.
+///
+///     mialudoc [port [directory]]
+///
+/// The port is 8080 and the directory is `.`, the root of the project, when they are left out. The
+/// server has these pages, and answers `GET` and `HEAD` requests for them:
+///
+///     /           an index page with the logo of Mialu, and a list of the documents
+///     /<name>     the document `docs/<name>.md`, which is written in Markdown and is shown as HTML
+///     /logo.png   the logo, `media/mialu-logo.png`
+///
+/// A name is made of letters, digits, `-` and `_`, so the files that are served are those of `docs`
+/// and nothing that a path with dots or slashes could name. The connection is closed after each answer.
+///
+/// It is built by CMake with the target `mialudoc`, which runs `mialuc build --target x64-win32`,
+/// and it works on Windows only, as the standard library does for now.
+///
+/// The Markdown that it understands is what the documents of the project use: headings, paragraphs,
+/// lists that are nested, tables, block quotes, fenced code, and `code`, **bold**, *emphasis* and
+/// [links](#in-this-page) in a line. A link to `name.md` is a link to `/name`. A line of HTML in
+/// a document is shown as text.
+///
+/// MISSING FEATURES. mialudoc is written to find what Mialu is missing for a program of this kind, and
+/// where it had to work around one, a comment that starts with `MISSING:` says what the language
+/// or its library does not have. They are all collected here as well, so that they can be added and
+/// the workarounds removed:
+///
+///   - MISSING: a standard library of sockets, `mu:network` or the like. The procedures of Winsock are
+///     declared here, and the structures that they take, `WSADATA` and `sockaddr_in`, are arrays of
+///     bytes that are filled by hand, as there is no way to say the size and the layout of a struct
+///     that is not made of words, or to take the size of one.
+///   - MISSING: the files of a directory in `mu:filesystem`, so `FindFirstFileA` and the procedures
+///     with it are declared here, and the name of a file is read from the bytes of `WIN32_FIND_DATAA`.
+///   - MISSING: the size of a file in `mu:filesystem`, so `GetFileSizeEx` is declared here.
+///   - MISSING: a way to see the bytes of a `Str`, see "Converting a string to bytes" in the
+///     specification. Text is put in a buffer one character at a time with `put_text` and `emit_text`,
+///     which make the UTF-8 of each character with a cast of the `Rune`, and a path is made of bytes
+///     that are turned into a `Str` with `utf8_decode`.
+///   - MISSING: joining strings when the program runs. `++` is for constants only, so a response is
+///     built with the `put_` and `emit_` procedures.
+///   - MISSING: the text of an integer when the program runs. `int_to_str` is for constants only, so
+///     `put_int` makes the digits.
+///   - MISSING: the remainder of a division. There is no operator for it, because `%` is the address of
+///     a variable, so `a - a / b * b` is written where C writes `a % b`.
+///   - MISSING: arguments of `main`, so the command line is read with `mu:process` and split by hand,
+///     and the quotes that it may have are not looked at.
+///   - MISSING: an array slice as the result of a procedure, so `split_request_line` gives where a
+///     part starts instead of the part.
+///   - MISSING: a `Rune` as a `Byte`. A rune literal is compared with a `Byte` with `==`, but it has no
+///     order with one, and it is not an argument for a parameter of a `Byte`, so the numbers of the
+///     characters are written, such as 48 for `'0'`, or the compared byte is made an `Int`.
+///   - MISSING: the sizes of the integers in memory. An `I32` takes 8 bytes in a struct or an array,
+///     so a pointer to one is not a pointer to an `int`. The `int` that `setsockopt` takes is a
+///     `DWORD` in an array of 4 bytes, which is made by hand.
+///   - MISSING: unsigned and small integers, `U16` and the byte order of the network, so the port
+///     is split in two bytes by hand.
+///   - MISSING: threads and a way to wait on many sockets, so the server answers one connection at
+///     a time. A client that is slow is cut off by a timeout of the socket.
+///   - MISSING: a log with the values of different types in a line. `printf` of the C library is
+///     declared once with one number, and a line is printed in parts.
+///   - MISSING: a `return` with no value, to leave a procedure that has no result early. `render_line`
+///     and `emit_document_cards` have an `Int` result that is always 0, only to have one.
+///   - MISSING: a field that is an array slice, or an array of `Byte`, in a struct, so the buffer of an
+///     `Output` is a parameter of every procedure that puts something in the page, and the chunk of
+///     a `Line_Reader` is one of `read_line`.
+///   - MISSING: short circuit for `and` and `or`, see `byte_is`.
+///   - MISSING: a check that a procedure with a result returns on every path. `mialuc` builds one that
+///     ends without a `return`, and it then runs on into whatever follows, which stopped this server
+///     once, so it is a gap of the compiler and not a feature to add.
+///   - MISSING: parentheses to group an expression, such as `a and (b or c)`.
+///   - MISSING: a string constant of many lines, so the style sheet of the pages is a call of
+///     `emit_text` for each of its lines.
+package mialudoc
+
+import "mu:filesystem"
+import "mu:process"
+import foreign libc
+import foreign kernel32 "system:Kernel32.lib"
+import foreign ws2_32 "system:Ws2_32.lib"
+
+foreign libc ->
+    fflush :: proc(stream: ^Byte) I32 -> ...
+    printf :: proc(format: C_Str, number: Int) I32 -> ...
+    puts   :: proc(content: C_Str) I32 -> ...
+
+foreign kernel32 #(default_calling_convention("system")) ->
+    // MISSING: `mu:filesystem` has no `file_size` and no way to list a directory, see above.
+    FindClose      :: proc(handle: Int) I32 -> ...
+    FindFirstFileA :: proc(pattern: C_Str, data: ^Byte) Int -> ...
+    FindNextFileA  :: proc(handle: Int, data: ^Byte) I32 -> ...
+    GetFileSizeEx  :: proc(file: Int, size: ^I64) I32 -> ...
+
+/// Winsock, `Ws2_32.dll`. A `SOCKET` is the size of an `Int`, and an `int` is an `I32`. The addresses
+/// and the buffers are `^Byte`, as the structures are bytes, see the MISSING notes above.
+foreign ws2_32 #(default_calling_convention("system")) ->
+    WSAStartup  :: proc(version: U32, data: ^Byte) I32 -> ...
+    socket      :: proc(family: I32, kind: I32, protocol: I32) Int -> ...
+    setsockopt  :: proc(handle: Int, level: I32, name: I32, value: ^Byte, length: I32) I32 -> ...
+    bind        :: proc(handle: Int, address: ^Byte, length: I32) I32 -> ...
+    listen      :: proc(handle: Int, backlog: I32) I32 -> ...
+    accept      :: proc(handle: Int, address: ^Byte, length: ^Byte) Int -> ...
+    recv        :: proc(handle: Int, buffer: ^Byte, length: I32, flags: I32) I32 -> ...
+    send        :: proc(handle: Int, buffer: ^Byte, length: I32, flags: I32) I32 -> ...
+    shutdown    :: proc(handle: Int, how: I32) I32 -> ...
+    closesocket :: proc(handle: Int) I32 -> ...
+
+DEFAULT_PORT :: 8080
+DEFAULT_DIRECTORY :: "."
+
+/// The version of Winsock that is asked for, 2.2, as the `WORD` that `MAKEWORD(2, 2)` makes.
+WINSOCK_VERSION : U32 : 0x0202
+
+/// `WSADATA` is 408 bytes on x64. 512 is enough, and the system writes it.
+WSADATA_BYTES :: 512
+
+AF_INET : I32 : 2
+SOCK_STREAM : I32 : 1
+IPPROTO_TCP : I32 : 6
+SOL_SOCKET : I32 : 0xFFFF
+SO_RCVTIMEO : I32 : 0x1006
+SD_SEND : I32 : 1
+INVALID_SOCKET :: -1
+INVALID_HANDLE :: -1
+
+/// `WIN32_FIND_DATAA` is 320 bytes, and the name of the file is a string of at most 260 bytes, a
+/// zero byte included, that starts at the byte 44.
+FIND_DATA_BYTES :: 320
+FIND_DATA_NAME :: 44
+FIND_NAME_BYTES :: 260
+
+/// How long the server waits for a client to send its request, in milliseconds.
+RECEIVE_TIMEOUT_MILLISECONDS :: 5000
+
+/// The most connections that wait to be accepted.
+BACKLOG : I32 : 16
+
+REQUEST_BYTES :: 8192
+HEAD_BYTES :: 1024
+BODY_BYTES :: 256
+OUTPUT_BYTES :: 16384
+CHUNK_BYTES :: 16384
+LINE_BYTES :: 16384
+PATH_BYTES :: 1024
+DIRECTORY_BYTES :: 256
+TITLE_BYTES :: 256
+LIST_LEVELS :: 6
+
+STATUS_OK :: 200
+STATUS_BAD_REQUEST :: 400
+STATUS_NOT_FOUND :: 404
+STATUS_METHOD_NOT_ALLOWED :: 405
+
+/// The numbers of the characters that the Markdown looks for. See MISSING: a `Rune` as a `Byte`.
+BACKTICK :: 96
+STAR :: 42
+LEFT_BRACKET :: 91
+RIGHT_BRACKET :: 93
+LEFT_PARENTHESIS :: 40
+RIGHT_PARENTHESIS :: 41
+SPACE :: 32
+HASH :: 35
+DASH :: 45
+DOT :: 46
+QUESTION :: 63
+CARRIAGE_RETURN :: 13
+
+// ---------------------------------------------------------------------------------------------
+// Bytes and text. The head of an answer is put in a buffer, and the pages go out through an Output.
+// ---------------------------------------------------------------------------------------------
+
+/// Puts one byte in `buffer` at `at`, and gives where the next one goes. A byte that does not fit
+/// is dropped, and the position does not move, as an index outside of a buffer would stop the program.
+put_byte :: proc(buffer: []Byte, at: Int, value: Byte) Int ->
+    if at >= length_of(buffer) ->
+        return at
+    buffer[at] = value
+    return at + 1
+
+/// Puts the UTF-8 of `text` in `buffer` at `at`, and gives where the next byte goes.
+/// MISSING: reading the bytes of a `Str`, which would make this a copy.
+put_text :: proc(buffer: []Byte, at: Int, text: Str) Int ->
+    position := at
+    for character in text ->
+        encoded := cast([4]Byte)character
+        for index in 0..<utf8_length(character) ->
+            position = put_byte(buffer, position, encoded[index])
+    return position
+
+/// The number of bytes that the UTF-8 of a character takes.
+utf8_length :: proc(character: Rune) Int ->
+    if character >= '\U00010000' ->
+        return 4
+    if character >= 'ࠀ' ->
+        return 3
+    if character >= '\u0080' ->
+        return 2
+    return 1
+
+/// Puts the bytes of `bytes` in `buffer` at `at`, and gives where the next byte goes.
+put_bytes :: proc(buffer: []Byte, at: Int, bytes: []Byte) Int ->
+    position := at
+    for value in bytes ->
+        position = put_byte(buffer, position, value)
+    return position
+
+/// Puts the decimal digits of a number that is not negative in `buffer` at `at`, and gives where
+/// the next byte goes. MISSING: `int_to_str` of a value that is known when the program runs.
+put_int :: proc(buffer: []Byte, at: Int, number: Int) Int ->
+    digits := [20]Byte { .. = 0 }
+    count := 0
+    rest := number
+    for ->
+        // MISSING: the remainder operator.
+        quotient := rest / 10
+        digits[count] = int_to_byte(rest - quotient * 10 + 48)
+        count += 1
+        rest = quotient
+        if rest == 0 ->
+            break
+    position := at
+    for index in 0..<count ->
+        position = put_byte(buffer, position, digits[count - 1 - index])
+    return position
+
+/// Whether the bytes are the characters of `text`, which are all of the ASCII range here.
+bytes_are :: proc(bytes: []Byte, text: Str) Bool ->
+    if length_of(bytes) not= length_of(text) ->
+        return false
+    index := 0
+    for character in text ->
+        if cast(Int)bytes[index] not= cast(Int)character ->
+            return false
+        index += 1
+    return true
+
+/// Whether `bytes` start with the characters of `text`, which are all of the ASCII range here.
+bytes_start_with :: proc(bytes: []Byte, text: Str) Bool ->
+    if length_of(bytes) < length_of(text) ->
+        return false
+    return bytes_are(bytes[0:length_of(text)], text)
+
+/// Whether `bytes` end with the characters of `text`, which are all of the ASCII range here.
+bytes_end_with :: proc(bytes: []Byte, text: Str) Bool ->
+    if length_of(bytes) < length_of(text) ->
+        return false
+    return bytes_are(bytes[length_of(bytes) - length_of(text):], text)
+
+/// Whether the byte at `index` is `value`, which is false when there is no byte there.
+/// MISSING: short circuit for `and` and `or`. Both of their operands are always worked out, so
+/// `index < length_of(bytes) and bytes[index] == ' '` stops the program at the end of the bytes,
+/// and this is what is written where C would write that.
+byte_is :: proc(bytes: []Byte, index: Int, value: Int) Bool ->
+    if index < 0 or index >= length_of(bytes) ->
+        return false
+    return cast(Int)bytes[index] == value
+
+/// Whether the byte at `index` is a digit, which is false when there is no byte there.
+is_digit_at :: proc(bytes: []Byte, index: Int) Bool ->
+    if index < 0 or index >= length_of(bytes) ->
+        return false
+    value := cast(Int)bytes[index]
+    return value >= 48 and value <= 57
+
+/// Where the first byte that is `target` is, from `from` on, or -1.
+find_byte :: proc(bytes: []Byte, from: Int, target: Int) Int ->
+    for index in from..<length_of(bytes) ->
+        if cast(Int)bytes[index] == target ->
+            return index
+    return -1
+
+/// Where the first two bytes in a row that are `target` are, from `from` on, or -1.
+find_pair :: proc(bytes: []Byte, from: Int, target: Int) Int ->
+    for index in from..<length_of(bytes) - 1 ->
+        if cast(Int)bytes[index] == target and cast(Int)bytes[index + 1] == target ->
+            return index
+    return -1
+
+/// Where the bytes start after the spaces at their start.
+trim_start :: proc(bytes: []Byte) Int ->
+    index := 0
+    for byte_is(bytes, index, SPACE) ->
+        index += 1
+    return index
+
+/// Where the bytes end before the spaces at their end.
+trim_end :: proc(bytes: []Byte) Int ->
+    end := length_of(bytes)
+    for byte_is(bytes, end - 1, SPACE) ->
+        end -= 1
+    // Bytes that are all spaces end where they start, so a range from one to the other is empty.
+    start := trim_start(bytes)
+    if end < start ->
+        end = start
+    return end
+
+/// Whether a byte can be in the name of a document: a letter, a digit, `-` or `_`.
+is_name_byte :: proc(value: Byte) Bool ->
+    if value >= 48 and value <= 57 ->
+        return true
+    if value >= 65 and value <= 90 ->
+        return true
+    if value >= 97 and value <= 122 ->
+        return true
+    return value == '-' or value == '_'
+
+is_name :: proc(bytes: []Byte) Bool ->
+    if length_of(bytes) == 0 ->
+        return false
+    for value in bytes ->
+        if not is_name_byte(value) ->
+            return false
+    return true
+
+/// Whether a byte is a punctuation mark of the ASCII range, which a backslash can make literal.
+is_punctuation :: proc(value: Byte) Bool ->
+    if value >= 33 and value <= 47 ->
+        return true
+    if value >= 58 and value <= 64 ->
+        return true
+    if value >= 91 and value <= 96 ->
+        return true
+    return value >= 123 and value <= 126
+
+// ---------------------------------------------------------------------------------------------
+// Sockets
+// ---------------------------------------------------------------------------------------------
+
+/// Sends all of `bytes` to the client, and says whether the system took them all.
+send_all :: proc(client: Int, bytes: []Byte) Bool ->
+    sent := 0
+    for sent < length_of(bytes) ->
+        count := cast(Int)send(client, %bytes[sent], int_to_i32(length_of(bytes) - sent), 0)
+        if count <= 0 ->
+            return false
+        sent += count
+    return true
+
+/// Makes the socket that listens on `port` of the address 127.0.0.1, and gives it, or
+/// INVALID_SOCKET. The server is for the machine that it runs on, so it does not listen on the others.
+listen_on :: proc(port: Int) Int ->
+    data := [WSADATA_BYTES]Byte { .. = 0 }
+    if WSAStartup(WINSOCK_VERSION, %data[0]) not= 0 ->
+        puts("mialudoc: Winsock did not start")
+        return INVALID_SOCKET
+
+    listener := socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+    if listener == INVALID_SOCKET ->
+        puts("mialudoc: no socket")
+        return INVALID_SOCKET
+
+    // A `sockaddr_in`: the family in 2 bytes, the port in 2 bytes with the high one first, the
+    // address in 4 bytes, and 8 bytes that are not used. MISSING: a struct of this layout and `htons`.
+    address := [16]Byte { .. = 0 }
+    address[0] = int_to_byte(cast(Int)AF_INET)
+    address[2] = int_to_byte(port / 256)
+    address[3] = int_to_byte(port - port / 256 * 256)
+    address[4] = 127
+    address[7] = 1
+    if bind(listener, %address[0], 16) not= 0 ->
+        puts("mialudoc: the port is not free")
+        closesocket(listener)
+        return INVALID_SOCKET
+    if listen(listener, BACKLOG) not= 0 ->
+        puts("mialudoc: it does not listen")
+        closesocket(listener)
+        return INVALID_SOCKET
+    return listener
+
+/// Reads the request of a client into `buffer` until its head, which ends with an empty line, is
+/// there, or the buffer is full, or the client is gone, and gives how many bytes it read.
+receive_head :: proc(client: Int, buffer: []Byte) Int ->
+    total := 0
+    for total < length_of(buffer) ->
+        count := cast(Int)recv(client, %buffer[total], int_to_i32(length_of(buffer) - total), 0)
+        if count <= 0 ->
+            break
+        total += count
+        if has_head_end(buffer[0:total]) ->
+            break
+    return total
+
+/// Whether there is an empty line in the bytes, `CR LF CR LF`, which ends the head of a request.
+has_head_end :: proc(bytes: []Byte) Bool ->
+    for index in 3..<length_of(bytes) ->
+        if bytes[index] == '\n' and bytes[index - 1] == '\r' and bytes[index - 2] == '\n' and bytes[index - 3] == '\r' ->
+            return true
+    return false
+
+// ---------------------------------------------------------------------------------------------
+// Output: the bytes of a page are collected in a buffer that is sent when it is full
+// ---------------------------------------------------------------------------------------------
+
+/// Where the bytes of a page go. `is_open` is false after the client did not take some, and what is
+/// put after that is dropped.
+Output :: struct ->
+    client: Int
+    used: Int
+    is_open: Bool
+
+flush :: proc(out: ^Output, buffer: []Byte) ->
+    if out.used > 0 and out.is_open ->
+        out.is_open = send_all(out.client, buffer[0:out.used])
+    out.used = 0
+
+emit_byte :: proc(out: ^Output, buffer: []Byte, value: Byte) ->
+    if out.used >= length_of(buffer) ->
+        flush(out, buffer)
+    buffer[out.used] = value
+    out.used += 1
+
+emit_text :: proc(out: ^Output, buffer: []Byte, text: Str) ->
+    for character in text ->
+        encoded := cast([4]Byte)character
+        for index in 0..<utf8_length(character) ->
+            emit_byte(out, buffer, encoded[index])
+
+/// Puts a byte of text in the page, where `&`, `<`, `>` and `"` are what HTML has for them.
+emit_escaped_byte :: proc(out: ^Output, buffer: []Byte, value: Byte) ->
+    if value == '&' ->
+        emit_text(out, buffer, "&amp;")
+    else if value == '<' ->
+        emit_text(out, buffer, "&lt;")
+    else if value == '>' ->
+        emit_text(out, buffer, "&gt;")
+    else if value == '"' ->
+        emit_text(out, buffer, "&quot;")
+    else ->
+        emit_byte(out, buffer, value)
+
+emit_escaped :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) ->
+    for value in bytes ->
+        emit_escaped_byte(out, buffer, value)
+
+/// Puts text in the page without the marks of Markdown that it has, for a place that shows no
+/// styles, such as the title of a tab.
+emit_plain :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) ->
+    for value in bytes ->
+        if cast(Int)value not= BACKTICK and cast(Int)value not= STAR ->
+            emit_escaped_byte(out, buffer, value)
+
+/// Puts the name that a heading has as a link target: the letters in lower case, the digits, `-` and
+/// `_`, and a `-` for a space, which is what the links of the documents expect.
+emit_slug :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) ->
+    for value in bytes ->
+        if value >= 65 and value <= 90 ->
+            emit_byte(out, buffer, int_to_byte(cast(Int)value + 32))
+        else if value == ' ' ->
+            emit_byte(out, buffer, int_to_byte(45))
+        else if is_name_byte(value) or value >= 128 ->
+            emit_byte(out, buffer, value)
+
+/// Puts a link target: a link to `name.md` is a link to the page `name`, which has no suffix.
+emit_href :: proc(out: ^Output, buffer: []Byte, url: []Byte) ->
+    index := 0
+    for index < length_of(url) ->
+        if bytes_start_with(url[index:], ".md") ->
+            after := index + 3
+            if after == length_of(url) or byte_is(url, after, HASH) ->
+                index = after
+                continue
+        emit_escaped_byte(out, buffer, url[index])
+        index += 1
+
+// ---------------------------------------------------------------------------------------------
+// Answers
+// ---------------------------------------------------------------------------------------------
+
+/// Sends the head of an answer with the status, the type and the length of the body, which is all the
+/// headers that a browser needs. A length below zero is not known, and then the body goes on until
+/// the connection is closed, which the head says it will be.
+send_head :: proc(client: Int, code: Int, reason: Str, content_type: Str, length: Int) Bool ->
+    head := [HEAD_BYTES]Byte { .. = 0 }
+    at := put_text(head[:], 0, "HTTP/1.1 ")
+    at = put_int(head[:], at, code)
+    at = put_text(head[:], at, " ")
+    at = put_text(head[:], at, reason)
+    at = put_text(head[:], at, "\r\nServer: mialudoc\r\nContent-Type: ")
+    at = put_text(head[:], at, content_type)
+    if length >= 0 ->
+        at = put_text(head[:], at, "\r\nContent-Length: ")
+        at = put_int(head[:], at, length)
+    at = put_text(head[:], at, "\r\nConnection: close\r\n\r\n")
+    return send_all(client, head[0:at])
+
+/// Sends an answer that is a line of text, such as `404 Not Found`, and gives the code. The body is
+/// left out for a `HEAD` request, which gets the head that a `GET` would.
+send_error :: proc(client: Int, code: Int, reason: Str, with_body: Bool) Int ->
+    body := [BODY_BYTES]Byte { .. = 0 }
+    at := put_int(body[:], 0, code)
+    at = put_text(body[:], at, " ")
+    at = put_text(body[:], at, reason)
+    at = put_text(body[:], at, "\n")
+    if send_head(client, code, reason, "text/plain; charset=utf-8", at) and with_body ->
+        send_all(client, body[0:at])
+    return code
+
+/// Opens the file whose path is the bytes, which are UTF-8 and are turned into the `Str` that the
+/// standard library takes.
+open_path :: proc(path: []Byte, wide_path: []Byte) (mu.File, mu.File_Error) ->
+    text, is_text := utf8_decode(path)
+    if not is_text ->
+        return mu.File { handle = INVALID_HANDLE }, .PATH_INVALID
+    file, error := mu.file_open(text, .READ, wide_path)
+    return file, error
+
+/// Sends the file at `path` as it is, in chunks, and gives the code of the answer.
+send_file :: proc(client: Int, path: []Byte, content_type: Str, with_body: Bool) Int ->
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_path(path, wide_path[:])
+    if open_error not= .NONE ->
+        return send_error(client, STATUS_NOT_FOUND, "Not Found", with_body)
+    defer mu.file_close(file)
+
+    size : I64 = 0
+    if GetFileSizeEx(file.handle, %size) == 0 ->
+        return send_error(client, STATUS_NOT_FOUND, "Not Found", with_body)
+    if not send_head(client, STATUS_OK, "OK", content_type, cast(Int)size) ->
+        return STATUS_OK
+    if not with_body ->
+        return STATUS_OK
+
+    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    for ->
+        count, read_error := mu.file_read(file, chunk[:])
+        if read_error not= .NONE or count == 0 ->
+            break
+        if not send_all(client, chunk[0:count]) ->
+            break
+    return STATUS_OK
+
+// ---------------------------------------------------------------------------------------------
+// The look of the pages
+// ---------------------------------------------------------------------------------------------
+
+/// Puts the start of a page: the head, with the style sheet, and the bar at the top. `title` is
+/// the text of the tab. MISSING: a string constant of many lines.
+emit_page_start :: proc(out: ^Output, buffer: []Byte, title: []Byte, is_index: Bool) ->
+    emit_text(out, buffer, "<!doctype html>\n<html lang='en'>\n<head>\n<meta charset='utf-8'>\n")
+    emit_text(out, buffer, "<meta name='viewport' content='width=device-width, initial-scale=1'>\n<title>")
+    emit_plain(out, buffer, title)
+    emit_text(out, buffer, " · Mialu</title>\n<link rel='icon' href='/logo.png'>\n<style>\n")
+    emit_text(out, buffer, ":root { --bg: #090b10; --surface: #11141b; --raised: #171b24; --line: #242a37; --text: #d9dde7; --muted: #8e97ac; --accent: #ff8a1f; --accent-2: #ff4d2e; --gold: #ffc43d; color-scheme: dark; }\n")
+    emit_text(out, buffer, "* { box-sizing: border-box; }\n")
+    emit_text(out, buffer, "html { scroll-behavior: smooth; scroll-padding-top: 5rem; }\n")
+    emit_text(out, buffer, "body { margin: 0; color: var(--text); font: 16px/1.7 system-ui, 'Segoe UI', Roboto, sans-serif; background: radial-gradient(900px 500px at 85% -10%, rgba(255, 98, 46, .16), transparent 60%), radial-gradient(800px 500px at -10% 10%, rgba(255, 196, 61, .08), transparent 60%), var(--bg); background-attachment: fixed; min-height: 100vh; }\n")
+    emit_text(out, buffer, "a { color: var(--gold); text-decoration: none; } a:hover { color: var(--accent); text-decoration: underline; }\n")
+    emit_text(out, buffer, ".bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: .75rem; padding: .6rem 1.5rem; background: rgba(9, 11, 16, .75); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }\n")
+    emit_text(out, buffer, ".bar a { display: flex; align-items: center; gap: .6rem; color: var(--text); font-weight: 650; letter-spacing: .02em; text-decoration: none; }\n")
+    emit_text(out, buffer, ".bar img { width: 30px; height: 30px; }\n")
+    emit_text(out, buffer, ".bar .path { color: var(--muted); font-weight: 400; }\n")
+    emit_text(out, buffer, "main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.5rem 6rem; }\n")
+    emit_text(out, buffer, "h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 2.2em 0 .6em; font-weight: 700; letter-spacing: -.01em; }\n")
+    emit_text(out, buffer, "h1 { font-size: 2.4rem; margin-top: 0; background: linear-gradient(90deg, var(--gold), var(--accent) 55%, var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }\n")
+    emit_text(out, buffer, "h2 { font-size: 1.6rem; padding-bottom: .35em; border-bottom: 1px solid var(--line); } h3 { font-size: 1.25rem; } h4 { font-size: 1.05rem; }\n")
+    emit_text(out, buffer, "p, ul, ol, table, blockquote, pre { margin: 0 0 1.1em; } li { margin: .2em 0; } li > ul, li > ol { margin: .2em 0 .2em; }\n")
+    emit_text(out, buffer, "code { font: .9em/1.5 'Cascadia Code', 'Cascadia Mono', Consolas, 'SFMono-Regular', monospace; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: .1em .4em; color: #ffd9a8; }\n")
+    emit_text(out, buffer, "pre { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.2rem; overflow-x: auto; box-shadow: 0 8px 30px rgba(0, 0, 0, .35); }\n")
+    emit_text(out, buffer, "pre code { background: none; border: 0; padding: 0; color: #e6e9f1; font-size: .88rem; }\n")
+    emit_text(out, buffer, "blockquote { border-left: 3px solid var(--accent); background: rgba(255, 138, 31, .07); border-radius: 0 10px 10px 0; padding: .6rem 1.1rem; color: #e8d9c6; } blockquote p { margin: .4em 0; }\n")
+    emit_text(out, buffer, ".table { overflow-x: auto; margin: 0 0 1.2em; border: 1px solid var(--line); border-radius: 12px; } table { border-collapse: collapse; width: 100%; margin: 0; font-size: .93rem; }\n")
+    emit_text(out, buffer, "th, td { text-align: left; padding: .55rem .9rem; border-bottom: 1px solid var(--line); vertical-align: top; } th { background: var(--surface); color: var(--gold); font-weight: 650; } tr:last-child td { border-bottom: 0; } tbody tr:hover { background: rgba(255, 255, 255, .025); }\n")
+    emit_text(out, buffer, "hr { border: 0; border-top: 1px solid var(--line); margin: 2rem 0; }\n")
+    emit_text(out, buffer, ".hero { text-align: center; padding: 3.5rem 0 2rem; } .hero img { width: min(260px, 60vw); height: auto; filter: drop-shadow(0 0 40px rgba(255, 98, 46, .45)); }\n")
+    emit_text(out, buffer, ".hero h1 { font-size: clamp(2.8rem, 8vw, 4.5rem); margin: .2em 0 .1em; letter-spacing: -.03em; } .hero p { color: var(--muted); font-size: 1.15rem; margin: 0; }\n")
+    emit_text(out, buffer, ".grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 1rem; list-style: none; padding: 0; margin: 2rem 0 0; }\n")
+    emit_text(out, buffer, ".card { display: block; height: 100%; padding: 1.1rem 1.25rem; background: linear-gradient(160deg, var(--raised), var(--surface)); border: 1px solid var(--line); border-radius: 14px; color: var(--text); transition: transform .15s, border-color .15s, box-shadow .15s; }\n")
+    emit_text(out, buffer, ".card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 10px 34px rgba(255, 98, 46, .18); text-decoration: none; color: var(--text); }\n")
+    emit_text(out, buffer, ".card strong { display: block; font-size: 1.05rem; line-height: 1.35; } .card span { display: block; margin-top: .35rem; color: var(--muted); font: .8rem 'Cascadia Mono', Consolas, monospace; }\n")
+    emit_text(out, buffer, ".label { text-transform: uppercase; letter-spacing: .14em; font-size: .78rem; color: var(--muted); margin: 3rem 0 0; }\n")
+    emit_text(out, buffer, "footer { text-align: center; color: var(--muted); font-size: .85rem; padding-bottom: 3rem; }\n")
+    emit_text(out, buffer, "</style>\n</head>\n<body>\n<div class='bar'><a href='/'><img src='/logo.png' alt=''>Mialu")
+    if not is_index ->
+        emit_text(out, buffer, " <span class='path'>/ docs</span>")
+    emit_text(out, buffer, "</a></div>\n")
+
+emit_page_end :: proc(out: ^Output, buffer: []Byte) ->
+    emit_text(out, buffer, "</main>\n<footer>Served by mialudoc, which is written in Mialu.</footer>\n</body>\n</html>\n")
+
+// ---------------------------------------------------------------------------------------------
+// Markdown
+// ---------------------------------------------------------------------------------------------
+
+/// Puts the text of a line of Markdown as HTML: `code`, **bold**, *emphasis*, [links](url) and
+/// the characters that a backslash makes literal.
+render_inline :: proc(out: ^Output, buffer: []Byte, text: []Byte) ->
+    index := 0
+    for index < length_of(text) ->
+        value := text[index]
+        rest := length_of(text) - index
+
+        if cast(Int)value == BACKTICK ->
+            end := find_byte(text, index + 1, BACKTICK)
+            if end >= 0 ->
+                emit_text(out, buffer, "<code>")
+                emit_escaped(out, buffer, text[index + 1:end])
+                emit_text(out, buffer, "</code>")
+                index = end + 1
+                continue
+
+        if cast(Int)value == STAR and byte_is(text, index + 1, STAR) ->
+            end := find_pair(text, index + 2, STAR)
+            if end > index + 2 ->
+                emit_text(out, buffer, "<strong>")
+                render_inline(out, buffer, text[index + 2:end])
+                emit_text(out, buffer, "</strong>")
+                index = end + 2
+                continue
+
+        if cast(Int)value == STAR and rest > 1 and not byte_is(text, index + 1, SPACE) ->
+            end := find_byte(text, index + 1, STAR)
+            if end > index + 1 ->
+                emit_text(out, buffer, "<em>")
+                render_inline(out, buffer, text[index + 1:end])
+                emit_text(out, buffer, "</em>")
+                index = end + 1
+                continue
+
+        if cast(Int)value == LEFT_BRACKET ->
+            middle := find_byte(text, index + 1, RIGHT_BRACKET)
+            if middle >= 0 and byte_is(text, middle + 1, LEFT_PARENTHESIS) ->
+                end := find_byte(text, middle + 2, RIGHT_PARENTHESIS)
+                if end >= 0 ->
+                    emit_text(out, buffer, "<a href=\"")
+                    emit_href(out, buffer, text[middle + 2:end])
+                    emit_text(out, buffer, "\">")
+                    render_inline(out, buffer, text[index + 1:middle])
+                    emit_text(out, buffer, "</a>")
+                    index = end + 1
+                    continue
+
+        if value == '\\' and rest > 1 ->
+            if is_punctuation(text[index + 1]) ->
+                emit_escaped_byte(out, buffer, text[index + 1])
+                index += 2
+                continue
+
+        emit_escaped_byte(out, buffer, value)
+        index += 1
+
+/// What is known about the Markdown that has been read: which block is open, so that the line that
+/// comes next can continue or close it. `indents` has the indentation of each level of list, a digit of base 256
+/// for each, and `numbered` has a digit of base 2 for each, which is 1 when the level is numbered.
+/// MISSING: an array in a struct, which would hold these as arrays.
+Render :: struct ->
+    in_code: Bool
+    code_indent: Int
+    in_paragraph: Bool
+    in_quote: Bool
+    in_table: Bool
+    table_row: Int
+    list_depth: Int
+    indents: Int
+    numbered: Int
+
+close_paragraph :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+    if state.in_paragraph ->
+        emit_text(out, buffer, "</p>\n")
+        state.in_paragraph = false
+
+close_quote :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+    if state.in_quote ->
+        emit_text(out, buffer, "</p></blockquote>\n")
+        state.in_quote = false
+
+close_table :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+    if state.in_table ->
+        if state.table_row == 1 ->
+            emit_text(out, buffer, "</thead><tbody>")
+        emit_text(out, buffer, "</tbody></table></div>\n")
+        state.in_table = false
+
+/// A number to the power of an exponent.
+power :: proc(base: Int, exponent: Int) Int ->
+    result := 1
+    for step in 0..<exponent ->
+        result *= base
+    return result
+
+/// The digit of `packed` at `place`, where `packed` is a number whose digits are of base `base`.
+digit_at :: proc(packed: Int, base: Int, place: Int) Int ->
+    unit := power(base, place)
+    next := unit * base
+    return packed / unit - packed / next * base
+
+/// `packed` with the digit at `place` set to `value`.
+with_digit :: proc(packed: Int, base: Int, place: Int, value: Int) Int ->
+    change := value - digit_at(packed, base, place)
+    return packed + change * power(base, place)
+
+/// Closes the innermost level of list, and the item that is open in it.
+close_list_level :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+    if digit_at(state.numbered, 2, state.list_depth - 1) == 1 ->
+        emit_text(out, buffer, "</li></ol>\n")
+    else ->
+        emit_text(out, buffer, "</li></ul>\n")
+    state.list_depth -= 1
+
+close_lists :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+    for state.list_depth > 0 ->
+        close_list_level(out, buffer, state)
+
+/// Closes the blocks that a list item can be followed by without ending the list.
+close_flow :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+    close_paragraph(out, buffer, state)
+    close_quote(out, buffer, state)
+    close_table(out, buffer, state)
+
+close_everything :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+    close_flow(out, buffer, state)
+    close_lists(out, buffer, state)
+
+/// Gives how many bytes the marker of a list item takes, `- `, `* ` or `12. `, and whether it is a
+/// number. It is 0 when the text does not start with one.
+list_marker :: proc(text: []Byte) (Int, Bool) ->
+    // MISSING: parentheses to group a condition, so the two bullets are two conditions.
+    if byte_is(text, 1, SPACE) and byte_is(text, 0, DASH) ->
+        return 2, false
+    if byte_is(text, 1, SPACE) and byte_is(text, 0, STAR) ->
+        return 2, false
+    digits := 0
+    for is_digit_at(text, digits) ->
+        digits += 1
+    if digits > 0 and byte_is(text, digits, DOT) and byte_is(text, digits + 1, SPACE) ->
+        return digits + 2, true
+    return 0, false
+
+/// Whether the line of a table is the one under the headings, which has only `|`, `-`, `:` and spaces.
+is_table_separator :: proc(text: []Byte) Bool ->
+    for value in text ->
+        if value not= '|' and value not= '-' and value not= ':' and value not= ' ' ->
+            return false
+    return true
+
+/// Puts the cells of a row of a table, which are between the `|` of the line, but not those that are
+/// in `code` or have a backslash before them.
+render_table_row :: proc(out: ^Output, buffer: []Byte, text: []Byte, is_head: Bool) ->
+    emit_text(out, buffer, "<tr>")
+    cell_start := 1
+    is_code := false
+    is_escaped := false
+    for position in 1..<length_of(text) ->
+        value := text[position]
+        if is_escaped ->
+            is_escaped = false
+            continue
+        if value == '\\' ->
+            is_escaped = true
+        if cast(Int)value == BACKTICK ->
+            is_code = not is_code
+        if value == '|' and not is_code ->
+            render_table_cell(out, buffer, text[cell_start:position], is_head)
+            cell_start = position + 1
+    if cell_start < length_of(text) ->
+        rest := text[cell_start:]
+        if trim_start(rest) < length_of(rest) ->
+            render_table_cell(out, buffer, rest, is_head)
+    emit_text(out, buffer, "</tr>")
+
+render_table_cell :: proc(out: ^Output, buffer: []Byte, cell: []Byte, is_head: Bool) ->
+    trimmed := cell[trim_start(cell):trim_end(cell)]
+    if is_head ->
+        emit_text(out, buffer, "<th>")
+    else ->
+        emit_text(out, buffer, "<td>")
+    render_inline(out, buffer, trimmed)
+    if is_head ->
+        emit_text(out, buffer, "</th>")
+    else ->
+        emit_text(out, buffer, "</td>")
+
+/// Puts the HTML of one line of Markdown, and keeps in `state` what the next line needs to know.
+render_line :: proc(out: ^Output, buffer: []Byte, state: ^Render, line: []Byte) Int ->
+    indent := trim_start(line)
+    text := line[indent:]
+
+    if state.in_code ->
+        if bytes_start_with(text, "```") ->
+            emit_text(out, buffer, "</code></pre>\n")
+            state.in_code = false
+            return 0
+        skip := indent
+        if skip > state.code_indent ->
+            skip = state.code_indent
+        emit_escaped(out, buffer, line[skip:])
+        emit_text(out, buffer, "\n")
+        return 0
+
+    if length_of(text) == 0 ->
+        close_flow(out, buffer, state)
+        return 0
+
+    if bytes_start_with(text, "```") ->
+        if indent == 0 ->
+            close_lists(out, buffer, state)
+        close_flow(out, buffer, state)
+        language := text[3:]
+        language = language[trim_start(language):trim_end(language)]
+        if length_of(language) > 0 ->
+            emit_text(out, buffer, "<pre><code class=\"language-")
+            emit_escaped(out, buffer, language)
+            emit_text(out, buffer, "\">")
+        else ->
+            emit_text(out, buffer, "<pre><code>")
+        state.in_code = true
+        state.code_indent = indent
+        return 0
+
+    if indent == 0 and text[0] == '#' ->
+        level := 0
+        for byte_is(text, level, HASH) ->
+            level += 1
+        if level <= 6 and byte_is(text, level, SPACE) ->
+            close_everything(out, buffer, state)
+            heading := text[level + 1:]
+            emit_text(out, buffer, "<h")
+            emit_byte(out, buffer, int_to_byte(48 + level))
+            emit_text(out, buffer, " id=\"")
+            emit_slug(out, buffer, heading)
+            emit_text(out, buffer, "\">")
+            render_inline(out, buffer, heading)
+            emit_text(out, buffer, "</h")
+            emit_byte(out, buffer, int_to_byte(48 + level))
+            emit_text(out, buffer, ">\n")
+            return 0
+
+    if bytes_are(text, "---") ->
+        close_everything(out, buffer, state)
+        emit_text(out, buffer, "<hr>\n")
+        return 0
+
+    if indent == 0 and text[0] == '>' ->
+        close_paragraph(out, buffer, state)
+        close_table(out, buffer, state)
+        close_lists(out, buffer, state)
+        content := text[1:]
+        if byte_is(content, 0, SPACE) ->
+            content = content[1:]
+        if not state.in_quote ->
+            emit_text(out, buffer, "<blockquote><p>")
+            state.in_quote = true
+        if length_of(content) == 0 ->
+            emit_text(out, buffer, "</p><p>")
+        else ->
+            render_inline(out, buffer, content)
+            emit_text(out, buffer, "\n")
+        return 0
+
+    if indent == 0 and text[0] == '|' ->
+        close_paragraph(out, buffer, state)
+        close_quote(out, buffer, state)
+        close_lists(out, buffer, state)
+        if not state.in_table ->
+            emit_text(out, buffer, "<div class=\"table\"><table><thead>")
+            state.in_table = true
+            state.table_row = 0
+            render_table_row(out, buffer, text, true)
+        else if state.table_row == 1 ->
+            emit_text(out, buffer, "</thead><tbody>")
+            if not is_table_separator(text) ->
+                render_table_row(out, buffer, text, false)
+        else ->
+            render_table_row(out, buffer, text, false)
+        state.table_row += 1
+        return 0
+
+    marker, is_numbered := list_marker(text)
+    if marker > 0 ->
+        close_paragraph(out, buffer, state)
+        close_quote(out, buffer, state)
+        close_table(out, buffer, state)
+        // The levels that are deeper than this item are over.
+        for state.list_depth > 0 and indent < digit_at(state.indents, 256, state.list_depth - 1) ->
+            close_list_level(out, buffer, state)
+        if state.list_depth > 0 and indent == digit_at(state.indents, 256, state.list_depth - 1) ->
+            emit_text(out, buffer, "</li><li>")
+        else if state.list_depth < LIST_LEVELS ->
+            if is_numbered ->
+                emit_text(out, buffer, "<ol><li>")
+                state.numbered = with_digit(state.numbered, 2, state.list_depth, 1)
+            else ->
+                emit_text(out, buffer, "<ul><li>")
+                state.numbered = with_digit(state.numbered, 2, state.list_depth, 0)
+            state.indents = with_digit(state.indents, 256, state.list_depth, indent)
+            state.list_depth += 1
+        else ->
+            emit_text(out, buffer, "</li><li>")
+        render_inline(out, buffer, text[marker:])
+        return 0
+
+    // A line that is indented goes on with the item that is open, and any other ends the list.
+    if state.list_depth > 0 and indent > 0 ->
+        emit_text(out, buffer, "\n")
+        render_inline(out, buffer, text)
+        return 0
+    close_lists(out, buffer, state)
+    close_quote(out, buffer, state)
+    close_table(out, buffer, state)
+    if state.in_paragraph ->
+        emit_text(out, buffer, "\n")
+    else ->
+        emit_text(out, buffer, "<p>")
+        state.in_paragraph = true
+    render_inline(out, buffer, text)
+    return 0
+
+/// Reads the lines of a file through a chunk of bytes that is read at once.
+Line_Reader :: struct ->
+    file: mu.File
+    position: Int
+    count: Int
+
+/// Reads the next line into `line`, without its end, and gives how long it is, and whether there was
+/// a line. A line that does not fit is cut where `line` ends, and the rest of it is dropped.
+/// MISSING: `file_read_line` of the standard library reads a byte at a time, which is too slow for this.
+read_line :: proc(reader: ^Line_Reader, chunk: []Byte, line: []Byte) (Int, Bool) ->
+    length := 0
+    has_line := false
+    for ->
+        if reader.position >= reader.count ->
+            count, error := mu.file_read(reader.file, chunk)
+            if error not= .NONE or count == 0 ->
+                break
+            reader.position = 0
+            reader.count = count
+        value := chunk[reader.position]
+        reader.position += 1
+        has_line = true
+        if value == '\n' ->
+            break
+        if length < length_of(line) ->
+            line[length] = value
+            length += 1
+    if not has_line ->
+        return 0, false
+    if byte_is(line, length - 1, CARRIAGE_RETURN) ->
+        length -= 1
+    return length, true
+
+/// Reads the whole file and puts it in the page as HTML.
+render_document :: proc(out: ^Output, buffer: []Byte, file: mu.File) ->
+    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    line := [LINE_BYTES]Byte { .. = 0 }
+    reader := Line_Reader { file = file, position = 0, count = 0 }
+    state := Render { in_code = false, code_indent = 0, in_paragraph = false, in_quote = false, in_table = false, table_row = 0, list_depth = 0, indents = 0, numbered = 0 }
+    for ->
+        length, has_line := read_line(%reader, chunk[:], line[:])
+        if not has_line ->
+            break
+        render_line(out, buffer, %state, line[0:length])
+    if state.in_code ->
+        emit_text(out, buffer, "</code></pre>\n")
+    close_everything(out, buffer, %state)
+
+// ---------------------------------------------------------------------------------------------
+// The pages
+// ---------------------------------------------------------------------------------------------
+
+/// Puts in `path` the path of a file: the directory, the text, the name and the end.
+make_path :: proc(path: []Byte, directory: []Byte, before: Str, name: []Byte, after: Str) Int ->
+    at := put_bytes(path, 0, directory)
+    at = put_text(path, at, before)
+    at = put_bytes(path, at, name)
+    return put_text(path, at, after)
+
+/// Puts the title of the document at `path` in `title`, which is the text of its first heading, and
+/// gives how long it is. It is `fallback` when there is no heading.
+read_title :: proc(path: []Byte, title: []Byte, fallback: []Byte) Int ->
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_path(path, wide_path[:])
+    if open_error not= .NONE ->
+        return put_bytes(title, 0, fallback)
+    defer mu.file_close(file)
+
+    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    line := [TITLE_BYTES]Byte { .. = 0 }
+    reader := Line_Reader { file = file, position = 0, count = 0 }
+    length, has_line := read_line(%reader, chunk[:], line[:])
+    if has_line and bytes_start_with(line[0:length], "# ") ->
+        return put_bytes(title, 0, line[2:length])
+    return put_bytes(title, 0, fallback)
+
+/// Puts a card for each document of the directory `docs`, which is a link to its page and has its
+/// title. The files are found with `FindFirstFileA`, and are in the order that the system gives them,
+/// which is the one of their names.
+emit_document_cards :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
+    pattern_bytes := [PATH_BYTES]Byte { .. = 0 }
+    pattern_length := make_path(pattern_bytes[:], directory, "/docs/", pattern_bytes[0:0], "*.md")
+    pattern, is_text := utf8_decode(pattern_bytes[0:pattern_length])
+    if not is_text ->
+        return 0
+
+    data := [FIND_DATA_BYTES]Byte { .. = 0 }
+    handle := FindFirstFileA(str_to_c_str(pattern), %data[0])
+    if handle == INVALID_HANDLE ->
+        return 0
+    emit_text(out, buffer, "<ul class=\"grid\">\n")
+    for ->
+        name_length := 0
+        for name_length < FIND_NAME_BYTES and data[FIND_DATA_NAME + name_length] not= 0 ->
+            name_length += 1
+        file_name := data[FIND_DATA_NAME:FIND_DATA_NAME + name_length]
+        if bytes_end_with(file_name, ".md") and is_name(file_name[0:name_length - 3]) ->
+            name := file_name[0:name_length - 3]
+            path := [PATH_BYTES]Byte { .. = 0 }
+            path_length := make_path(path[:], directory, "/docs/", name, ".md")
+            title := [TITLE_BYTES]Byte { .. = 0 }
+            title_length := read_title(path[0:path_length], title[:], name)
+            emit_text(out, buffer, "<li><a class=\"card\" href=\"/")
+            emit_escaped(out, buffer, name)
+            emit_text(out, buffer, "\"><strong>")
+            render_inline(out, buffer, title[0:title_length])
+            emit_text(out, buffer, "</strong><span>")
+            emit_escaped(out, buffer, file_name)
+            emit_text(out, buffer, "</span></a></li>\n")
+        if FindNextFileA(handle, %data[0]) == 0 ->
+            break
+    emit_text(out, buffer, "</ul>\n")
+    FindClose(handle)
+    return 0
+
+/// Sends the index page: the logo, and the list of the documents.
+send_index :: proc(client: Int, directory: []Byte, with_body: Bool) Int ->
+    if not send_head(client, STATUS_OK, "OK", "text/html; charset=utf-8", -1) or not with_body ->
+        return STATUS_OK
+    buffer := [OUTPUT_BYTES]Byte { .. = 0 }
+    out := Output { client = client, used = 0, is_open = true }
+    title := [TITLE_BYTES]Byte { .. = 0 }
+    emit_page_start(%out, buffer[:], title[0:put_text(title[:], 0, "Documentation")], true)
+    emit_text(%out, buffer[:], "<main>\n<div class=\"hero\"><img src=\"/logo.png\" alt=\"The logo of Mialu\"><h1>Mialu</h1>")
+    emit_text(%out, buffer[:], "<p>The documentation of the programming language</p></div>\n")
+    emit_text(%out, buffer[:], "<p class=\"label\">Documents</p>\n")
+    emit_document_cards(%out, buffer[:], directory)
+    emit_page_end(%out, buffer[:])
+    flush(%out, buffer[:])
+    return STATUS_OK
+
+/// Sends the document `docs/<name>.md` as a page of HTML.
+send_document :: proc(client: Int, directory: []Byte, name: []Byte, with_body: Bool) Int ->
+    path := [PATH_BYTES]Byte { .. = 0 }
+    path_length := make_path(path[:], directory, "/docs/", name, ".md")
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_path(path[0:path_length], wide_path[:])
+    if open_error not= .NONE ->
+        return send_error(client, STATUS_NOT_FOUND, "Not Found", with_body)
+    defer mu.file_close(file)
+
+    if not send_head(client, STATUS_OK, "OK", "text/html; charset=utf-8", -1) or not with_body ->
+        return STATUS_OK
+    title := [TITLE_BYTES]Byte { .. = 0 }
+    title_length := read_title(path[0:path_length], title[:], name)
+
+    buffer := [OUTPUT_BYTES]Byte { .. = 0 }
+    out := Output { client = client, used = 0, is_open = true }
+    emit_page_start(%out, buffer[:], title[0:title_length], false)
+    emit_text(%out, buffer[:], "<main>\n")
+    render_document(%out, buffer[:], file)
+    emit_page_end(%out, buffer[:])
+    flush(%out, buffer[:])
+    return STATUS_OK
+
+// ---------------------------------------------------------------------------------------------
+// Requests
+// ---------------------------------------------------------------------------------------------
+
+/// Gives where the two spaces of the line of a request, `GET /target HTTP/1.1`, are, which split it
+/// in the method, the target and the version, and whether the line has them. MISSING: an array slice
+/// as a result, so the three parts are not given as they are.
+split_request_line :: proc(line: []Byte) (Int, Int, Bool) ->
+    first := -1
+    second := -1
+    for index in 0..<length_of(line) ->
+        if line[index] == ' ' ->
+            if first < 0 ->
+                first = index
+            else if second < 0 ->
+                second = index
+    if first <= 0 or second <= first + 1 ->
+        return 0, 0, false
+    return first, second, true
+
+/// Answers the request that is in `request`, and gives the code of the answer.
+answer :: proc(client: Int, request: []Byte, directory: []Byte) Int ->
+    line_end := 0
+    for line_end < length_of(request) ->
+        if request[line_end] == '\r' or request[line_end] == '\n' ->
+            break
+        line_end += 1
+    if line_end == length_of(request) ->
+        return send_error(client, STATUS_BAD_REQUEST, "Bad Request", true)
+
+    line := request[0:line_end]
+    first, second, is_line := split_request_line(line)
+    if not is_line or not bytes_start_with(line[second + 1:], "HTTP/") ->
+        return send_error(client, STATUS_BAD_REQUEST, "Bad Request", true)
+    method := line[0:first]
+    target := line[first + 1:second]
+
+    is_head := bytes_are(method, "HEAD")
+    if not is_head and not bytes_are(method, "GET") ->
+        return send_error(client, STATUS_METHOD_NOT_ALLOWED, "Method Not Allowed", true)
+
+    // What follows a `?` or a `#` is not part of the page.
+    end := 0
+    for end < length_of(target) and not byte_is(target, end, QUESTION) and not byte_is(target, end, HASH) ->
+        end += 1
+    target = target[0:end]
+    with_body := not is_head
+
+    if bytes_are(target, "/") ->
+        return send_index(client, directory, with_body)
+    if bytes_are(target, "/logo.png") ->
+        path := [PATH_BYTES]Byte { .. = 0 }
+        path_length := make_path(path[:], directory, "/media/mialu-logo.png", path[0:0], "")
+        return send_file(client, path[0:path_length], "image/png", with_body)
+    if length_of(target) > 1 and target[0] == '/' and is_name(target[1:]) ->
+        return send_document(client, directory, target[1:], with_body)
+    return send_error(client, STATUS_NOT_FOUND, "Not Found", with_body)
+
+/// Reads the request of a client, answers it, and closes the connection.
+serve_client :: proc(client: Int, directory: []Byte) ->
+    // A client that does not send its request is cut off, so it does not hold the server. The
+    // timeout is a `DWORD` of 4 bytes, the lowest first. MISSING: the sizes of integers in memory.
+    timeout := [4]Byte { .. = 0 }
+    timeout[0] = int_to_byte(RECEIVE_TIMEOUT_MILLISECONDS - RECEIVE_TIMEOUT_MILLISECONDS / 256 * 256)
+    timeout[1] = int_to_byte(RECEIVE_TIMEOUT_MILLISECONDS / 256)
+    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, %timeout[0], 4)
+
+    request := [REQUEST_BYTES]Byte { .. = 0 }
+    count := receive_head(client, request[:])
+    if count > 0 ->
+        code := answer(client, request[0:count], directory)
+        log_request(request[0:count], code)
+
+    shutdown(client, SD_SEND)
+    closesocket(client)
+
+/// Prints the code and the request line, such as `200 GET /mialu-cli HTTP/1.1`.
+log_request :: proc(request: []Byte, code: Int) ->
+    line_end := 0
+    for line_end < length_of(request) ->
+        if request[line_end] == '\r' or request[line_end] == '\n' ->
+            break
+        line_end += 1
+    line, is_text := utf8_decode(request[0:line_end])
+    printf("%lld ", code)
+    if is_text ->
+        puts(str_to_c_str(line))
+    else ->
+        puts("(not text)")
+    // The output is a pipe or a file when it is redirected, which the C library buffers.
+    fflush(nil)
+
+// ---------------------------------------------------------------------------------------------
+// The program
+// ---------------------------------------------------------------------------------------------
+
+/// Reads the port and the directory from the arguments of the program. They are separated by
+/// spaces, as `process_arguments_start` leaves them. MISSING: arguments of `main`.
+read_arguments :: proc(directory: []Byte) (Int, Int, Bool) ->
+    command_line := [512]Byte { .. = 0 }
+    length := mu.process_command_line(command_line[:])
+    start := mu.process_arguments_start(command_line[0:length])
+    arguments := command_line[start:length]
+
+    port := DEFAULT_PORT
+    directory_length := put_text(directory, 0, DEFAULT_DIRECTORY)
+    if length_of(arguments) == 0 ->
+        return port, directory_length, true
+
+    space := length_of(arguments)
+    for index in 0..<length_of(arguments) ->
+        if arguments[index] == ' ' ->
+            space = index
+            break
+
+    text, is_text := utf8_decode(arguments[0:space])
+    number, is_number := try_str_to_int(text)
+    if not is_text or not is_number or number < 1 or number > 65535 ->
+        return 0, 0, false
+    port = number
+
+    if space < length_of(arguments) ->
+        rest := arguments[space + 1:]
+        if length_of(rest) > 0 ->
+            directory_length = put_bytes(directory, 0, rest)
+            // The slash that ends a directory is not needed, as the paths put one after it.
+            if directory_length > 1 and directory[directory_length - 1] == '/' ->
+                directory_length -= 1
+    return port, directory_length, true
+
+main :: proc() Int ->
+    directory := [DIRECTORY_BYTES]Byte { .. = 0 }
+    port, directory_length, is_valid := read_arguments(directory[:])
+    if not is_valid ->
+        puts("usage: mialudoc [port [directory]]")
+        return 2
+
+    listener := listen_on(port)
+    if listener == INVALID_SOCKET ->
+        return 1
+
+    printf("mialudoc: http://127.0.0.1:%lld/ shows the documents of ", port)
+    name, is_text := utf8_decode(directory[0:directory_length])
+    if is_text ->
+        puts(str_to_c_str(name))
+    fflush(nil)
+
+    for ->
+        client := accept(listener, nil, nil)
+        if client == INVALID_SOCKET ->
+            continue
+        serve_client(client, directory[0:directory_length])
+    return 0
