@@ -20,7 +20,8 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-add_executable(mialuc src/main.c src/array_slice.c src/ast.c src/constant.c src/diagnostic.c src/package.c src/parser.c src/report.c src/semantic.c src/str.c src/tokenizer.c src/wasm.c src/wasm-text.c src/x64.c src/x64-text.c src/process.c)
+set(MIALUC_SOURCES src/main.c src/array_slice.c src/ast.c src/constant.c src/diagnostic.c src/package.c src/parser.c src/report.c src/semantic.c src/str.c src/tokenizer.c src/wasm.c src/wasm-text.c src/x64.c src/x64-text.c src/process.c)
+add_executable(mialuc ${MIALUC_SOURCES})
 
 # Headers live directly in src/ but are included as <mialu/...>, so they are copied into a
 # generated include directory under that name. configure_file reruns CMake when a header changes.
@@ -44,6 +45,22 @@ target_compile_definitions(mialuc PRIVATE MIALU_STD_DIRECTORY="${CMAKE_SOURCE_DI
 
 # Warnings are errors in our own code, per the style guide. -Wpedantic rejects anything beyond C99.
 target_compile_options(mialuc PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+# The release workflow builds with -DCMAKE_BUILD_TYPE=Release, which defines NDEBUG and optimizes, and
+# that has warnings that a build without a type does not: a variable that only an assert reads is
+# unused when the assert is gone, and the optimizer finds variables that may not be set. A build that
+# is made for development has the asserts and does not optimize, so it would not see them, and they
+# would only be found by the workflow. This library compiles the same sources as a Release build does,
+# to find them, and is part of the default build. It makes no program and takes no time in a Release
+# build, which has the same warnings already.
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_library(mialuc_release_check OBJECT ${MIALUC_SOURCES})
+    target_include_directories(mialuc_release_check PRIVATE ${MIALU_INCLUDE_DIRECTORY})
+    target_compile_definitions(mialuc_release_check PRIVATE NDEBUG
+        MIALU_VERSION_STRING="${MIALU_VERSION}" MIALU_STD_DIRECTORY="${CMAKE_SOURCE_DIR}/src/mialu-std")
+    target_compile_options(mialuc_release_check PRIVATE -O3 -Wall -Wextra -Wpedantic -Werror)
+    add_dependencies(mialuc mialuc_release_check)
+endif()
 
 # mialudoc is a program in Mialu: an HTTP server that shows the documents of docs/ as pages of HTML,
 # and serves the playground, which compiles Mialu with this compiler. It is built by the compiler that

@@ -53,6 +53,8 @@ cmake --build build
 
 This writes `build/mialuc.exe`.
 
+The build also compiles the sources of the compiler the way that the release workflow does, as a Release build with the assertions off and the optimizer on, and treats its warnings as errors too. A variable that only an `assert` reads is unused when the assert is gone, and the workflow would stop on it, so the build finds it before it is pushed. That compile only checks and is not part of the program. A Release build, `-DCMAKE_BUILD_TYPE=Release`, has no extra check, as it is the same compile.
+
 ### Building and running programs
 
 After a successful compiler build, you can run a Mialu source file directly:
