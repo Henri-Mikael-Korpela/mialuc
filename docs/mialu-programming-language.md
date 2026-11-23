@@ -4,14 +4,12 @@
 
 - [Introduction](#introduction)
 - [Source code representation](#source-code-representation)
-- [Packages](#packages)
-- [Imports](#imports)
-  - [Where the standard library is](#where-the-standard-library-is)
-  - [Packages and names](#packages-and-names)
 - [Lines, spaces and indentation](#lines-spaces-and-indentation)
 - [Comments](#comments)
 - [Reserved words](#reserved-words)
 - [Identifiers](#identifiers)
+- [Packages](#packages)
+- [Imports](#imports)
 - [Primitive data types](#primitive-data-types)
   - [Booleans](#booleans)
   - [Characters](#characters)
@@ -28,6 +26,7 @@
   - [Casts](#casts)
 - [Constants](#constants)
 - [Variables](#variables)
+  - [Global variables](#global-variables)
 - [Control flow structures](#control-flow-structures)
   - [If statements](#if-statements)
   - [Match statements](#match-statements)
@@ -36,6 +35,7 @@
   - [Break and continue](#break-and-continue)
   - [Defer](#defer)
 - [Arrays](#arrays)
+  - [Compile-time arrays](#compile-time-arrays)
   - [Array literals](#array-literals)
   - [Elements](#elements)
   - [Comparing arrays and slices](#comparing-arrays-and-slices)
@@ -80,6 +80,7 @@
 - [Possible future features](#possible-future-features)
   - [Parametric polymorphism](#parametric-polymorphism)
   - [Converting a string to bytes](#converting-a-string-to-bytes)
+- [Standard library](#standard-library)
 - [Rejected ideas](#rejected-ideas)
   - [Interfaces](#interfaces)
 
@@ -89,7 +90,7 @@ This document describes the Mialu programming language, its syntax, semantics an
 
 Mialu is a procedural programming language with straight-foward and familiar syntax, built with simplicity and performance in mind. It is influenced by multiple programming languages including, but not limited to, C, C++, Go, Odin and Python, fully embracing the fact that it comes after many of them, so it has learned from their mistakes and successes.
 
-The fact that there's no mention of functional programming, object-oriented programming or metaprogramming does not mean the author is unfamiliar with or blissfully ignorant of such concepts. The author has made an intention choice to not focus on such paradigms that much in the design of this language. In the future, the overall reasoning will become more evident as the language progresses and new posts documenting certain design decisions emerge.
+The fact that there's no mention of functional programming, object-oriented programming or metaprogramming does not mean the author is unfamiliar with or blissfully ignorant of such concepts. The author has made an intentional choice to not focus on such paradigms that much in the design of this language. In the future, the overall reasoning will become more evident as the language progresses and new posts documenting certain design decisions emerge.
 
 Where does the name Mialu come from? It comes from the first syllables of my children's names, Miriam, Amira and Lukas. That's my personal touch to such a technical tool.
 
@@ -97,69 +98,9 @@ Where does the name Mialu come from? It comes from the first syllables of my chi
 
 Mialu source code is a sequence of Unicode characters, encoded in UTF-8. Source code files should have the `.mu` extension.
 
-## Packages
-
-Every Mialu source file belongs to a package, and says which one with a package definition:
-
-```
-package helloworld
-
-main :: proc() Int ->
-    return 0
-```
-
-The package definition is `package` and the name of the package, on a line of its own, written in the first column. It is required: a source file without it is an error, and so is a source file that has more than one. It is the first thing in the file, with the exception of [comments](#comments) and blank lines, which can be above it and below it, so everything else, including `import foreign` and every definition, comes after it:
-
-```
-// Greets the world.
-
-package helloworld // The name of the package.
-
-/// Returns the answer.
-answer :: proc() Int ->
-    return 42
-```
-
-`package` is a [keyword](#reserved-words), so it cannot be used as a name, and the name of the package is an [identifier](#identifiers), so it follows the rules of one: it has alphanumeric characters and underscores, does not begin with a digit, and is not a reserved word. The convention is to write it in lowercase with underscores, such as `helloworld` or `secret_project`, and to name the package after what the code in it is for. The name of the package of the program has no effect on the program that is built, and the compiler does not check it any further: it is kept in the syntax tree, which `mialuc dump-ast` prints on the first line, `MODULE package helloworld`. The package name of a file that is [imported](#imports) is the name that its definitions have outside of the file.
-
-The code examples of this specification that show a part of a program, such as a single procedure, leave the package definition out to keep the example short. A whole program, which can be compiled as it is, has it.
-
-## Imports
-
-An import statement brings the definitions of another source file into the program. It is `import` and a path in quotes, on a line of its own, written in the first column, below the [package definition](#packages) and above the definitions that use it:
-
-```
-package program
-
-import "mu:filesystem"
-
-main :: proc() Int ->
-    buffer := [64]Byte { .. = 0 }
-    file, error := mu.file_open("data.txt", mu.File_Open_Mode.READ, buffer[0:64])
-    if error not= mu.File_Error.NONE ->
-        return 1
-    return cast(Int)mu.file_close(file)
-```
-
-The text in quotes is the vendor, a colon and the path under the vendor. The vendor is the library that the file is in: `mu` is the standard library of Mialu, and it is the only vendor for now. The path is the file below the directory of the library, without `.mu`, with names and slashes, so `mu:filesystem` is the file `filesystem.mu` and `mu:text/ascii` would be `text/ascii.mu`. A path that has anything else, such as a dot, is an error, and so is a vendor that is not known and a file that is not there. `import` is a [keyword](#reserved-words). The other kind of import, `import foreign`, brings in procedures that are not written in Mialu, see [Foreign procedures](#foreign-procedures).
-
-### Where the standard library is
-
-The standard library is source code, and the compiler reads it when a program imports it. A release of the compiler has it in the directory `lib` that is next to `mialuc.exe`, in the zip file that it is distributed in, which is looked in first. A compiler that is built from the sources of the project finds it in the directory `src/mialu-std` of the project, which is also where the files of the library are kept, so a debug and a release build of the project use the files that are in the project without having them copied. A file that is in neither is an error that says where it looked.
-
-### Packages and names
-
-All the definitions of the imported file are part of the program, but they are used with the name of their package, written before the name, with a dot and nothing between: `file_open` that is defined in a file whose package is `mu` is `mu.file_open` everywhere outside of that file. That goes for every kind of definition: a procedure, a constant, a global variable, a struct and an enum, and so a type is written as `mu.File`, a member of an enum as `mu.File_Error.NOT_FOUND`, and a struct literal as `mu.File { handle = 5 }`. The name of the package is the one that the imported file has in its [package definition](#packages), and it is not the name of the file, so every file of the standard library has `mu`, which makes the definitions of all of them `mu.` something, and no two may have the same name.
-
-The program's own names are never the names of a package, and the other way round, so a program that defines a `File` of its own, or `min`, or `CP_UTF8`, has no conflict with the library that has the same, and uses its own without the package before it. Inside the file that defines it a definition is written with its plain name, as everywhere else. A name of a package is not found without the package: `file_open` alone, where `mu.file_open` is meant, is an unknown name. A parameter or a variable of a program may have the name of any definition of a package, which is not a definition of the program, but one of an imported file may not have the name of a definition of the same file, as in the program.
-
-The files that an imported file imports are imported too, once, before it, in the order that they are written, and a file is only read once however many files import it. Files that import each other, directly or through others, are an error. There are at most 32 files, and the imports go at most 8 files deep.
-
-The definitions of an imported file are part of the program that is built: a procedure that nothing calls is in it, so a target has to be able to build all that a file has. A file of the standard library that uses what a target does not have, such as `filesystem`, which is for Windows and calls the system, does not build for the others. [WebAssembly](build-target-wasm.md#imports) does not export the procedures of the imported files, as the name of one has a dot, which a caller cannot write.
-
 ## Lines, spaces and indentation
 
-Mialu doesn't use curly brackets for defining blocks. Mialu borrows its indentation-based syntax from Python, so the structure of the code is defined by its indentation, like this
+For block definitions, Mialu doesn't use curly brackets like C, C# or Java for defining blocks. Instead, Mialu borrows its indentation-based syntax from Python, so the structure of the code is defined by its indentation, like this
 
 ```
 foo :: proc() Int ->
@@ -181,7 +122,7 @@ foo :: proc() Int {
 }
 ```
 
-A line that is indented deeper than the previous one starts a block, and a line that is indented less ends it. Instead of using colon (`:`) to start a block, Mialu uses `->` after the header of a statement to starts a block or scope.
+A line that is indented deeper than the previous one starts a block, and a line that is indented less ends it. Mialu uses `->` after the header of a statement to starts a block or scope instead of colon (`:`) as in Python.
 
 The reason for using indentation-based approach for blocks is to both make the code more readable and to reduce the amount of vertical space, which is a problem in languages that use curly brackets (and especially if you use language like C# where a general convention is to set each curly bracket on its own line).
 
@@ -274,6 +215,61 @@ yield
 
 Identifiers can contain alphanumeric characters and underscores. Case matters for identifiers in Mialu are case-sensitive. An identifier cannot begin with a digit. A [keyword](#keywords) or a [literal word](#literal-words) cannot be used as an identifier.
 
+
+## Packages
+
+Every Mialu source file belongs to a package, and says which one with a package definition:
+
+```
+package helloworld
+
+main :: proc() Int ->
+    return 0
+```
+
+The package definition is `package` and the name of the package, on a line of its own, written in the first column. It is required: a source file without it is an error, and so is a source file that has more than one. It is the first thing in the file, with the exception of [comments](#comments) and blank lines, which can be above it and below it, so everything else, including `import foreign` and every definition, comes after it:
+
+```
+// Greets the world.
+
+package helloworld // The name of the package.
+
+/// Returns the answer.
+answer :: proc() Int ->
+    return 42
+```
+
+`package` is a [keyword](#reserved-words), so it cannot be used as a name, and the name of the package is an [identifier](#identifiers), so it follows the rules of one: it has alphanumeric characters and underscores, does not begin with a digit, and is not a reserved word. The convention is to write it in lowercase with underscores, such as `helloworld` or `secret_project`, and to name the package after what the code in it is for. The name of the package of the program has no effect on the program that is built, and the compiler does not check it any further: it is kept in the syntax tree, which `mialuc dump-ast` prints on the first line, `MODULE package helloworld`. The package name of a file that is [imported](#imports) is the name that its definitions have outside of the file.
+
+The code examples of this specification that show a part of a program, such as a single procedure, leave the package definition out to keep the example short. A whole program, which can be compiled as it is, has it.
+
+All the definitions of the imported file are part of the program, but they are used with the name of their package, written before the name, with a dot and nothing between: `file_open` that is defined in a file whose package is `mu` is `mu.file_open` everywhere outside of that file. That goes for every kind of definition: a procedure, a constant, a global variable, a struct and an enum, and so a type is written as `mu.File`, a member of an enum as `mu.File_Error.NOT_FOUND`, and a struct literal as `mu.File { handle = 5 }`. The name of the package is not the name of the file, so every file of the standard library has `mu`, which makes the definitions of all of them `mu.` something, and no two may have the same name.
+
+The program's own names are never the names of a package, and the other way round, so a program that defines a `File` of its own, or `min`, or `CP_UTF8`, has no conflict with the library that has the same, and uses its own without the package before it. Inside the file that defines it a definition is written with its plain name, as everywhere else. A name of a package is not found without the package: `file_open` alone, where `mu.file_open` is meant, is an unknown name. A parameter or a variable of a program may have the name of any definition of a package, which is not a definition of the program, but one of an imported file may not have the name of a definition of the same file, as in the program.
+
+The files that an imported file imports are imported too, once, before it, in the order that they are written, and a file is only read once however many files import it. Files that import each other, directly or through others, are an error. There are at most 32 files, and the imports go at most 8 files deep.
+
+The definitions of an imported file are part of the program that is built: a procedure that nothing calls is in it, so a target has to be able to build all that a file has. A file of the standard library that uses what a target does not have, such as `filesystem`, which is for Windows and calls the system, does not build for the others. [WebAssembly](build-target-wasm.md#imports) does not export the procedures of the imported files, as the name of one has a dot, which a caller cannot write.
+
+## Imports
+
+An import statement brings the definitions of another source file into the program. It is `import` and a path in quotes, on a line of its own, written in the first column, below the [package definition](#packages) and above the definitions that use it:
+
+```
+package program
+
+import "mu:filesystem"
+
+main :: proc() Int ->
+    buffer := [64]Byte { .. = 0 }
+    file, error := mu.file_open("data.txt", mu.File_Open_Mode.READ, buffer[0:64])
+    if error not= mu.File_Error.NONE ->
+        return 1
+    return cast(Int)mu.file_close(file)
+```
+
+The text in quotes is the vendor, a colon and the path under the vendor. The vendor is the library that the file is in: `mu` is the standard library of Mialu, and it is the only vendor for now. The path is the file below the directory of the library, without `.mu`, with names and slashes, so `mu:filesystem` is the file `filesystem.mu` and `mu:text/ascii` would be `text/ascii.mu`. A path that has anything else, such as a dot, is an error, and so is a vendor that is not known and a file that is not there. `import` is a [keyword](#reserved-words). The other kind of import, `import foreign`, brings in procedures that are not written in Mialu, see [Foreign procedures](#foreign-procedures).
+
 ## Primitive data types
 
 Every value has a type, which is written as an identifier. Mialu has the following primitive data types:
@@ -362,7 +358,7 @@ The escape sequences are:
 
 The digits of a hexadecimal number are of either case, so `'\u00e9'` and `'\u00E9'` are the same rune. A number has all of its digits, so `'\x4'` is an error, and so is a number that is not a Unicode character: `'\ud800'` is a surrogate, and `'\U00110000'` is above the last code point. The octal form takes exactly three digits, so the character with the code point 0 is `'\000'` or `'\x00'`, and not `'\0'`. A backslash followed by anything else, such as `'\q'`, is an error. The single quote is written `'\''` in a rune literal, because a quote that is not escaped ends it, while the double quote, which is no problem there, can be written either way. A character that is a line break cannot be written as itself, because a literal is on one line, so a new line is `'\n'`.
 
-An escape sequence is a way to write one character, and the ones that are in the ASCII range, such as `'\n'`, `'\t'` and `'\x41'`, are one byte in UTF-8, so a rune that has one is compared with a [`Byte`](#bytes) with `==` and `not=`. An escape sequence is a way to write one character, so a rune literal that has one is the same rune as the character: `'\u0041'`, `'\x41'`, `'\101'` and `'A'` are all 65. The escape sequences are only for rune literals now: a string has no escape sequences yet, and a backslash in one is an error.
+An escape sequence is a way to write one character, so a rune literal that has one is the same rune as the character: `'\u0041'`, `'\x41'`, `'\101'` and `'A'` are all 65. The ones that are in the ASCII range, such as `'\n'`, `'\t'` and `'\x41'`, are one byte in UTF-8, so a rune that has one is compared with a [`Byte`](#bytes) with `==` and `not=`. The escape sequences are only for rune literals now: a string has no escape sequences yet, and a backslash in one is an error.
 
 > **Lessons learnt from C** In C, a character literal such as `'A'` is an `int`, and the type `char` is a byte that may or may not be signed, so text in UTF-8 is a sequence of numbers that are not characters, and a character that takes several bytes cannot be one literal. In Mialu a character is a `Rune`, which is as wide as the largest code point, and its literal is one character in any alphabet.
 
@@ -383,7 +379,7 @@ flags := 0b1111_0000
 mask := 0xFF_FF
 ```
 
-A literal is the same untyped integer whatever its base, which is an `Int` where nothing else is wanted, see [Untyped constants](#untyped-constants), so the bases can be mixed, and `0b1010 + 10 + 0xA` is 30. A literal that does not fit in an `Int` is an error in every base, so the largest hexadecimal literal is `0x7FFF_FFFF_FFFF_FFFF`, and `0xFFFF_FFFF_FFFF_FFFF` is an error and not -1. A literal is signed with a minus sign directly before its digits, with no space between them, so `-5`, `-112` and `-0x10` are negative literals, and the sign is part of the literal and not an operator. The lowest `Int`, -9223372036854775808, has no literal, because its digits alone do not fit, so the lowest literal is `-9_223_372_036_854_775_807`. A literal must not be directly followed by a letter or an underscore, so `12a`, `0b102` and `0xFG` are errors that name the character that is not a digit of the literal.
+A literal is the same untyped integer whatever its base, which is an `Int` where nothing else is wanted, see [Untyped constants](#untyped-constants), so the bases can be mixed, and `0b1010 + 10 + 0xA` is 30. A literal that does not fit in an `Int` is an error in every base, so the largest hexadecimal literal is `0x7FFF_FFFF_FFFF_FFFF`, and `0xFFFF_FFFF_FFFF_FFFF` is an error and not -1. A negative literal is written with a minus sign, see below. The lowest `Int`, -9223372036854775808, has no literal, because its digits alone do not fit, so the lowest literal is `-9_223_372_036_854_775_807`. A literal must not be directly followed by a letter or an underscore, so `12a`, `0b102` and `0xFG` are errors that name the character that is not a digit of the literal.
 
 A negative number is written as a signed integer literal: a `-` directly followed by the digits of an integer literal, in any base, with no space between them. `-5`, `-112`, `-0x10` and `-0b101` are signed literals, whose values are -5, -112, -16 and -5.
 
@@ -403,7 +399,7 @@ The arithmetic operators `+`, `-`, `*` and `/` take two `Int` values and give an
 
 > **Lessons learnt from C** In C, the size of `int` and `long` depends on the platform, so the same code can overflow on one machine and not on another, and overflow of a signed integer is undefined behavior, which lets a compiler assume that it never happens and remove checks that a programmer wrote against it. Integer types of different sizes and signs are also converted into each other silently, so a comparison of a signed and an unsigned number can give a surprising answer. In Mialu there is one `Int` of 64 bits whose overflow wraps around in a defined way, nothing is converted implicitly, and the cases of division that have no result are traps and not undefined behavior.
 
-An `Int` is not converted implicitly: it is not a `Bool`, so `if n ->` is an error, it is not a `Byte`, and an operand of arithmetic that is not an `Int` is an error. A literal or a constant without a type is not an `Int` yet, so it becomes a `Byte` where one is wanted without being converted, see [Untyped constants](#untyped-constants). The integer types `I8`, `I16`, `I32`, `I64` and `U8`, `U16`, `U32`, `U64` are reserved for possible future use, see [Primitive data types](#primitive-data-types).
+An `Int` is not converted implicitly: it is not a `Bool`, it is not a `Byte`, and an operand of arithmetic that is not an `Int` is an error. A literal or a constant without a type is not an `Int` yet, so it becomes a `Byte` where one is wanted without being converted, see [Untyped constants](#untyped-constants).
 
 An `I32` is a signed 32-bit integer: it holds the numbers from -2147483648 to 2147483647. It is the type of the `int` of C, which is what it is for: a procedure of the C library that takes or gives an `int` is declared with an `I32`, see [Foreign procedures in the C library](#foreign-procedures-in-the-c-library), and so is a procedure of JavaScript that takes numbers of 32 bits, which are plain numbers there and not a `BigInt`, see [Foreign procedures in WebAssembly](#foreign-procedures-in-webassembly). The default value of an `I32` is `0`.
 
@@ -531,7 +527,7 @@ A `C_Str` (short for "C string") represents a null-terminated string. Unlike `St
 
 A `C_Str` is for interoperating with existing C code, as in [foreign procedures](#foreign-procedures), the equivalent type in C being `char*` or `char const*` Nothing can be done with a `C_Str` but to keep it in a variable or a parameter, pass it on, return it, and hand it to a foreign procedure.
 
-A `Str` value is never converted to a `C_Str` implicitly. A string literal, and a constant that is an untyped string, is not a `Str` yet: it is a `C_Str` where one is wanted, which is the same as `str_to_c_str` of it, see [Untyped constants](#untyped-constants). The built-in procedure [`str_to_c_str`](#str_to_c_str) makes a `C_Str` of a `Str` explicitly, and how long the `C_Str` is good for is there too.
+A `Str` value is never converted to a `C_Str` implicitly. The built-in procedure [`str_to_c_str`](#str_to_c_str) makes a `C_Str` of a `Str` explicitly, and an untyped string is a `C_Str` where one is wanted, see there.
 
 A character is a Unicode code point, which is what a [`Rune`](#characters) holds, and it takes one to four bytes. A string is subscripted by the character, and not by the byte. The subscript `s[i]` is the `Rune` of the character at the index `i`, which is counted from 0, and `length_of(s)` is the number of characters, see [length_of](#length_of):
 
@@ -614,11 +610,11 @@ Mialu supports the following operators. A higher precedence binds tighter:
 | `:=`     | Defines a variable, deducing its type from the value. It is `:` followed by `=`, with the type left out. | 0 | `x := 4` |
 | `=`      | Sets the initial value of a variable whose type is written. It also assigns a new value to a variable, an element or a field, and copies to a range of elements. | 0 | `x : Int = 5`, `x = 6`, `a[0] = 5`, `p.age = 5` |
 
-A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, float literals, rune literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` or `cast(Type)` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. A comparison takes two `Int` values, or two `Bool` values or two pointers of one type for `==` and `not=`, and its result is a `Bool`.
+A binary operator is written between its two operands, such as `a + b`. The operands are integer literals, float literals, rune literals, string literals, `true`, `false`, names, [calls](#calling-procedures) or [array literals](#array-literals), which can have subscripts, or the results of operators of a higher precedence. An operand can have `%` or `cast(Type)` before it, and a name can have `^` after it. `not` is a unary operator, written before its operand. A comparison gives a `Bool`, and which operands it takes is described in [Comparison operators](#comparison-operators).
 
 > **Lessons learnt from C** In C, `a < b < c` is valid, and it does not mean what it means in mathematics: it compares the `0` or `1` of `a < b` with `c`. Mialu makes the comparison of a comparison an error, so the mistake is found at compile-time.
 
-Operators of the same precedence are left associative, and an operator of a higher precedence binds tighter, see [Arithmetic operators](#arithmetic-operators). A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, so `a + 1 > b * 2` means `(a + 1) > (b * 2)`. A comparison is an expression of type `Bool`, but its operands are not comparisons, so it cannot be an operand of another operator, and `a < b < c` and `a == b == c` are errors.
+Operators of the same precedence are left associative, see [Arithmetic operators](#arithmetic-operators). A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, so `a + 1 > b * 2` means `(a + 1) > (b * 2)`. A comparison is an expression of type `Bool`, but its operands are not comparisons, so it cannot be an operand of another operator, and `a < b < c` and `a == b == c` are errors.
 
 The operators of precedence 0 define names or assign to them, and are not part of an expression. Each one is written after the name that it defines or assigns to, which can be followed by subscripts, fields and carets, as in `a[0] = 1`, `p.age = 1` and `p^ = 1`, and takes everything up to the end of the line as its right-hand side, so `x := a + b` means `x := (a + b)`, and `x += a * b` means `x += (a * b)`. Spaces may be written between the characters of `::` and `:=`, because they are separate tokens. An assignment operator such as `+=`, `-=`, `*=` or `/=` is one token, so no space may be written between its characters.
 
@@ -637,7 +633,7 @@ Addition, subtraction, multiplication and division are defined for [`Int`](#inte
 
 `+` and `-` have the same precedence, and so do `*` and `/`, and operators of the same precedence are left associative. So `a + b + c` means `(a + b) + c`, `a - b + c` means `(a - b) + c`, `5 - 1 + 2` is 6 and not 2, and `8 / 2 * 3` is 12 and not 1. An operator of a higher precedence binds tighter, so `2 + 3 * 4` means `2 + (3 * 4)`, which is 14 and not 20, and `20 - 12 / 4` means `20 - (12 / 4)`, which is 17 and not 2. Parentheses are not part of the language, so the order is changed by naming a part of the expression in a variable.
 
-Division of `Int` values truncates toward zero, so `7 / 2` is 3 and `-7 / 2` is -3, while division of floats is not truncated, so `7.0 / 2.0` is 3.5. Dividing by zero is an error at run time, see [WebAssembly](#webassembly), and an error at compile-time when both operands are constants, see [Constants](#constants). Arithmetic that goes beyond the range of an `Int` wraps around when the program runs. The arithmetic can be combined with an assignment, see [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators).
+Division of `Int` values truncates toward zero, as described in [Integers](#integers), while division of floats is not truncated, so `7.0 / 2.0` is 3.5. Dividing by zero is an error at compile-time when both operands are constants, see [Constants](#constants). The arithmetic can be combined with an assignment, see [Assignment and compound assignment operators](#assignment-and-compound-assignment-operators).
 
 ### Assignment and compound assignment operators
 
@@ -666,7 +662,7 @@ swap :: proc() Int ->
     return a * 10 + b
 ```
 
-`swap` returns 73. An assignment can be in a block of an if or a for statement, and the variable that it assigns to can be defined above the block. A variable that is defined with a type and no value, such as `x : Int`, is given its value with `=` as well. The name must stand for a variable, so `n = 2` is an error for a parameter `n`, and so is assigning to a constant or to the iterator of a for statement. The other assignments work on an `Int` or a float. `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 2` leaves `x` 2 greater than it was.
+`swap` returns 73. An assignment can be in a block of an if or a for statement, and the variable that it assigns to can be defined above the block. A variable that is defined with a type and no value, such as `x : Int`, is given its value with `=` as well. The name must stand for a variable, so `n = 2` is an error for a parameter `n`, and so is assigning to a constant or to the iterator of a for statement.
 
 A compound assignment operator applies an arithmetic operator to the variable and the value, and stores the result in the variable, so `x += 2` means `x = x + 2`. The variable and the value must be both `Int` or both floats of one type.
 
@@ -713,7 +709,7 @@ foo :: proc() Int ->
     return x
 ```
 
-`foo` returns 5. An element of an array can be assigned to as well, such as `a[0] += 2`, see [Elements](#elements). Dividing by zero is an error at run time, see [WebAssembly](#webassembly). The value is evaluated first, with the value that the variable has before the assignment, so `x += x` doubles `x`, `x += 2 * 3` adds 6, `x -= 1 + 1` subtracts 2, `x *= 1 + 2` multiplies `x` by 3, and `x /= 1 + 1` divides `x` by 2. The name must be a variable of the procedure, defined above the assignment, or a global variable: a parameter or a constant cannot be assigned to. The variable and the value must be an `Int`, because addition, subtraction, multiplication and division are defined for `Int` only.
+`foo` returns 5. An element of an array can be assigned to as well, such as `a[0] += 2`, see [Elements](#elements). Dividing by zero is an error at run time, see [WebAssembly](#webassembly). As for `=`, the value is evaluated first, so `x += x` doubles `x`, `x += 2 * 3` adds 6, `x -= 1 + 1` subtracts 2, `x *= 1 + 2` multiplies `x` by 3, and `x /= 1 + 1` divides `x` by 2.
 
 ### Comparison operators
 
@@ -742,8 +738,6 @@ Both operands must have the same type, because nothing is converted. Two [`Int`]
 is_help :: proc(command: Str) Bool ->
     return command == "help" or command == "-h"
 ```
-
-A comparison binds looser than `+` and `-`, and tighter than `not`, `and` and `or`, see [Operators](#operators).
 
 ### Logical operators
 
@@ -779,7 +773,7 @@ A word must be separated from what is next to it by whitespace, unlike a symbol,
 | `%a` | a pointer to `a`, of type `^T` when `a` is of type `T` |
 | `p^` | what the pointer `p` points to, which can be assigned to |
 
-`%` is the address of operator. It is written before its operand, which must have an address, such as a variable, a field, an element, or what a pointer points to, and gives a pointer to it. It binds looser than what follows a name, so `%p.x` is the address of `p.x` and `%a[1]` is the address of the element, and tighter than every operator. `^` is the dereference operator. It is written after an expression whose value is a pointer, and gives what the pointer points to, so a chain of pointers reads from left to right, as in `pp^^`. It binds like `.` and `[ ]`, and `p^` can be assigned to, with `=` and with the compound assignment operators.
+`%` is the address of operator. It is written before its operand, which must have an address, such as a variable, a field, an element, or what a pointer points to, and gives a pointer to it. `^` is the dereference operator. It is written after an expression whose value is a pointer, and gives what the pointer points to, so a chain of pointers reads from left to right, as in `pp^^`. It binds like `.` and `[ ]`, and `p^` can be assigned to, with `=` and with the compound assignment operators.
 
 ```
 increment :: proc() Int ->
@@ -953,7 +947,7 @@ A variable is defined once, with its initial value, and every variable has one. 
 
 The values of a call of a procedure that returns several values are defined together, with a name for each, as in `quotient, remainder := divide(31, 4)`, see [Multiple return values](#multiple-return-values).
 
-A variable that is defined outside of every procedure is a [global variable](#global-variables).
+### Global variables
 
 A global variable is a variable that is defined at file scope, outside of every procedure. It is written like a variable, with the attribute `static` before the `:`, and it starts in the first column like a constant:
 
@@ -1518,7 +1512,22 @@ There is nothing about a `defer` that is left for the program to do when it runs
 
 ## Arrays
 
-An array is a fixed number of values of one type, which are called its elements. The elements are one after the other, and the number of them is the length of the array. The length is known when the program is compiled, and it never changes. An array lives on the stack of the procedure that defines it: it takes no allocation, and it is gone when the procedure returns. The type of an array is its length between square brackets, followed by the type of its elements, so `[5]Int` is an array of five `Int` values. Elements are numbered from zero, so the elements of `[5]Int` have the indexes 0, 1, 2, 3 and 4. The elements can be `Int`, `Bool`, `Byte` or `Str` values, [struct objects](#structs-in-arrays) or [pointers](#pointers-in-structs-and-arrays), and not arrays.
+An array is a sequence of elements of certain type. The number of elements is the length of the array. There are different types of arrays in Mialu:
+
+- Compile-time arrays
+- Dynamic arrays
+
+### Compile-time arrays
+
+For compile-time arrays, the length is known when the program is compiled, and it never changes, it is fixed. An array lives on the stack of the procedure that defines it: it requires no memory allocation, and it is gone when the procedure returns. Example compile-time array initialization:
+
+```
+a := [const]Int { 3, 6, 9 }
+```
+
+The type of this array is its length between square brackets, followed by the type of its elements, so `[5]Int` is an array of five `Int` values. Elements are numbered from zero, so the elements of `[5]Int` have the indexes 0, 1, 2, 3 and 4. Element type can be a primitive type, a pointer or a custom type.
+
+Currently, arrays of arrays are not supported.
 
 ### Array literals
 
@@ -1746,7 +1755,7 @@ For convenience, the name of the enum can be automatically deduced and therefore
 
 > **Lessons learnt from C** In C, an enum is an integer in disguise: any `int` can be given to a variable of an enum type, members of different enums can be compared and mixed, and a member can be used in arithmetic. So the type says very little about what a value can be. In Mialu, an enum is a type of its own that is not converted to or from an `Int`, so a value of an enum type is always one of its members.
 
-Enum members don't have any order, so comparsing enum values with `<`, `<=`, `>` and `>=` results in an error. An enum is not converted to or from an `Int` or any other type.
+Enum members don't have any order, so comparing enum values with `<`, `<=`, `>` and `>=` results in an error.
 
 The default value for any enum is the first member of the enum.
 
@@ -2166,8 +2175,6 @@ ignores_result :: proc(n: Int) Int ->
     return n
 ```
 
-A call that is a statement is the way to call a procedure that returns nothing.
-
 ### Multiple return values
 
 A procedure can return several values. Its return types are written between parentheses and separated by commas, and a `return` statement gives a value for each of them, separated by commas, in the same order:
@@ -2300,7 +2307,7 @@ fill_with_length :: proc() Int ->
 
 `length_of_array` returns 5. The length of an array is part of the program, so for an array `length_of` is a number that is known when the program is compiled, also for an array whose length is `const`. The length of a slice is not known until the program runs, so for a slice it reads the length that the slice holds, which for `a[low:high]` is `high - low`. The length of a [dynamic array](#dynamic-arrays) is not known until the program runs either, and it is the number of elements that `append` has added to it, which is 0 for a dynamic array that is just made, and not the room that it has. The length of an array of nothing, `[const]Int { }`, is 0. The length of a string is the number of its code points, so `length_of("äiti")` is 4, and it is worked out when the program runs by counting the bytes that are not the continuation of another, which takes as long as the string is long, see [Strings](#strings). Anything else as the argument, such as an `Int`, is an error.
 
-`length_of` is not a keyword but a name that a program can define itself: a procedure with that name is called instead of the built-in one. The [members of an enum](#static-reflection) are an array, so `length_of` gives their number as well.
+The [members of an enum](#static-reflection) are an array, so `length_of` gives their number as well.
 
 ### int_to_byte
 
@@ -2428,7 +2435,7 @@ The order of the definitions does not matter, so a procedure can use a constant 
 
 > **Lessons learnt from C** In C, a variable in an inner block can have the name of one in an outer block and hide it. A reader, or the author a month later, can take one for the other, and the change of a name or a block can silently make a use refer to another variable. In Mialu, a name has one meaning wherever it can be used, so this cannot happen.
 
-There is no shadowing of names so a name cannot be declared twice in the same scope. A name cannot be declared again in a nested scope either, where the first declaration is visible. A name has one meaning wherever it can be used. The compiler rejects a program when:
+There is no shadowing of names so a name cannot be declared twice in the same scope. A name cannot be declared again in a nested scope either, where the first declaration is visible. The compiler rejects a program when:
 
 - two definitions, constants or global variables, have the same name,
 - two parameters of a procedure have the same name,
@@ -2568,6 +2575,10 @@ sum_of_bytes :: proc(text: Str) Int ->
 ```
 
 `byte_count("äiti")` would be 5, where `length_of("äiti")` is 4.
+
+## Standard library
+
+The standard library is source code, and the compiler reads it when a program imports it. A release of the compiler has it in the directory `lib` that is next to `mialuc.exe`, in the zip file that it is distributed in, which is looked in first. A compiler that is built from the sources of the project finds it in the directory `src/mialu-std` of the project, which is also where the files of the library are kept, so a debug and a release build of the project use the files that are in the project without having them copied. A file that is in neither is an error that says where it looked.
 
 ## Rejected ideas
 
