@@ -1059,7 +1059,7 @@ describe :: proc(x: Int) Str ->
 
 > **Lessons learnt from C** In C, the cases of a `switch` fall through into each other unless each ends with `break`, and a forgotten `break` is a well-known bug that compilers can only warn about. A Mialu case never falls through: its block is its own, like the branch of an `if`.
 
-The subject is an integer, which is an `Int`, a `Byte`, an `I32`, an `I64`, a `U32` or a `U64`, a `Str` or an enum. A pattern is known when the program is compiled: a literal, a [constant](#constants), or arithmetic of them such as `LIMIT + 1` or `0 - 1`, or a signed literal such as `-1`. It must be of the type of the subject, and an untyped one becomes it when it fits, so a pattern of a `Byte` is a number from 0 to 255. A pattern that is a variable or a call is an error, because what it matches would not be known until the program runs. A string matches a pattern when it has the same bytes, so `"go"` does not match `"gone"` or `"Go"`, and `""` matches the empty string only:
+The subject is an integer, which is an `Int`, a `Byte`, an `I32`, an `I64`, a `U32` or a `U64`, a `Str` or an enum. A pattern is known when the program is compiled: a literal, a [constant](#constants), or arithmetic of them such as `LIMIT + 1` or `0 - 1`, or a signed literal such as `-1`. It must be of the type of the subject, and an untyped one becomes it when it fits, so a pattern of a `Byte` is a number from 0 to 255, or a rune of the ASCII range, as described after the ranges below. A pattern that is a variable or a call is an error, because what it matches would not be known until the program runs. A string matches a pattern when it has the same bytes, so `"go"` does not match `"gone"` or `"Go"`, and `""` matches the empty string only:
 
 ```
 command_number :: proc(command: Str) Int ->
@@ -1085,6 +1085,25 @@ classify :: proc(n: Int) Str ->
             return "medium"
         case ->
             return "large"
+```
+
+A `Byte` can also be matched with a rune that is known when the program is compiled and is in the ASCII range, from 0 to 127, as it is [compared with one](#bytes): the rune is the byte that is its UTF-8 encoding. A rune is a pattern and an end of a range, so a range of characters is a range of bytes, and a number and a rune can be the two ends of one range. A rune above 127, such as `'é'`, is an error, because it is not one byte, and so is a rune as a pattern of any other subject. This is how a character is classified without a chain of comparisons:
+
+```
+is_name_byte :: proc(value: Byte) Bool ->
+    match value ->
+        case '0'..<='9' ->
+            return true
+        case 'A'..<='Z' ->
+            return true
+        case 'a'..<='z' ->
+            return true
+        case '-' ->
+            return true
+        case '_' ->
+            return true
+        case ->
+            return false
 ```
 
 No two cases may match a value in common: a pattern that is the same as one above it, a range that overlaps one above it, and a number that is in a range above it are errors, because the case could never run for that value. So the order of the cases does not change what a match does.

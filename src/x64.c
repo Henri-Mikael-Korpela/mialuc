@@ -3046,7 +3046,10 @@ static X64_Match_Pattern x64_match_pattern(X64_Builder const *builder, X64_Type 
             result.status = X64_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT;
             return result;
         }
-        if (not x64_type_accepts(builder, subject, ends[i])) {
+        // A rune in the ASCII range is the byte that is its UTF-8 encoding, as in a comparison.
+        bool is_byte_rune = subject.kind == X64_TYPE_KIND_BYTE &&
+                            x64_is_ascii_rune_constant(builder, ends[i]);
+        if (not is_byte_rune and not x64_type_accepts(builder, subject, ends[i])) {
             result.status = X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
             return result;
         }

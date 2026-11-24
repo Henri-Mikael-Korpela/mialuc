@@ -180,7 +180,7 @@ These are found when a target builds the program, and are the same mistake in th
 | E0519 | this case matches a value that a case above it matches already | It could never run for that value. |
 | E0520 | 'name' only means something for a match of an enum that has no default case | A match of an enum that has no default case is the only match that must have a case for every value. |
 | E0521 | the pattern of the case is not known when the program is compiled | The pattern is a literal, a constant or a member of an enum. |
-| E0522 | the pattern of the case is not of the type of what is matched | A string is not an Int, a member is of one enum only, a Byte is from 0 to 255 and a range is only for an Int or a Byte. |
+| E0522 | the pattern of the case is not of the type of what is matched | A string is not an Int, a member is of one enum only, a Byte is from 0 to 255 or a rune of ASCII and a range is only for an Int or a Byte. |
 | E0523 | the range of the case has no numbers in it, so it could never match | An empty range. |
 | E0524 | 'name' cannot be matched | A match takes an integer, a Str or an enum. |
 | E0525 | 'nil' does not say what 'name' points to | Write the type of the variable, as in 'p : ^Int = nil'. |

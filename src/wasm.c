@@ -380,6 +380,9 @@ static void            wasm_build_code_section_body_match_string(Wasm_Builder *b
 static bool            wasm_match_check                       (Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index match);
+static bool            wasm_match_constant_is_accepted        (Wasm_Builder const *builder,
+                                                               Wasm_Type subject,
+                                                               Ast_Node_Index pattern);
 static Wasm_Match_Pattern wasm_match_pattern                  (Wasm_Builder const *builder,
                                                                Wasm_Type subject,
                                                                Ast_Node_Index pattern);
@@ -3048,6 +3051,20 @@ static Wasm_Type wasm_match_subject_type(Wasm_Builder const *builder, Ast_Node_I
 }
 
 /**
+ * Returns whether the constant `pattern`, a pattern of a case or an end of its range, can be
+ * matched with a subject of the type `subject`: it is a constant that `subject` accepts, or a rune
+ * in the ASCII range when the subject is a `Byte`, which is the byte that is its UTF-8 encoding, as
+ * when a `Byte` is compared with `==`.
+ */
+static bool wasm_match_constant_is_accepted(Wasm_Builder const *builder, Wasm_Type subject,
+                                            Ast_Node_Index pattern) {
+    if (subject.kind == WASM_VALUE_TYPE_BYTE && wasm_is_ascii_rune_constant(builder, pattern)) {
+        return true;
+    }
+    return wasm_constant_is_accepted(subject, builder->constants[pattern]);
+}
+
+/**
  * Returns what `pattern`, the pattern of a case of a match statement whose subject is of the type
  * `subject`, matches, see `Wasm_Match_Pattern`. A pattern is known when the program is compiled:
  * for an enum it is a member of the enum of the subject, written `.RED` or `Color.RED`, and for an
@@ -3105,7 +3122,7 @@ static Wasm_Match_Pattern wasm_match_pattern(Wasm_Builder const *builder, Wasm_T
                 result.status = WASM_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT;
                 return result;
             }
-            if (not wasm_constant_is_accepted(subject, builder->constants[ends[i]])) {
+            if (not wasm_match_constant_is_accepted(builder, subject, ends[i])) {
                 result.status = WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
                 return result;
             }
@@ -3134,7 +3151,7 @@ static Wasm_Match_Pattern wasm_match_pattern(Wasm_Builder const *builder, Wasm_T
         return result;
     }
     Constant_Value constant = builder->constants[pattern];
-    if (not wasm_constant_is_accepted(subject, constant)) {
+    if (not wasm_match_constant_is_accepted(builder, subject, pattern)) {
         result.status = WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH;
         return result;
     }

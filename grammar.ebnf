@@ -135,7 +135,7 @@
        from the names of variables.
      - The subject of a match statement must be an `Int`, a `Byte`, a `Str` or an enum, and every
        pattern a constant of its type: a literal, a constant or arithmetic of them, a range of
-       them for an `Int` or a `Byte`, and a member of the enum of the subject, written `.MEMBER`
+       them for an `Int` or a `Byte`, a rune of ASCII for a `Byte`, and a member of the enum of the subject, written `.MEMBER`
        or `Enum.MEMBER`, for an enum. A range must have a number in it, and no two cases may match
        a value in common. A match of an enum without a default case must have a case for every
        member of the enum, unless it has the attribute `partial`, which is its only attribute and

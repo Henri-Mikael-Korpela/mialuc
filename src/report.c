@@ -705,7 +705,7 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .title = "the pattern of the case is not of the type of what is matched",
         .label = "not of the type of the match",
         .note = "a string is not an Int, a member is of one enum only, a Byte is from 0 to 255 "
-                "and a range is only for an Int or a Byte",
+                "or a rune of ASCII and a range is only for an Int or a Byte",
     },
     [ERROR_CODE_MATCH_RANGE_EMPTY] = {
         .title = "the range of the case has no numbers in it, so it could never match",
