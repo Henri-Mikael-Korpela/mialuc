@@ -56,6 +56,10 @@ The container has the compiler of the time that the image was built, so build th
 
 The navigation bar on top of the page goes to the compiler internals page, `/tools/internals` of the server, which documents the implementation of the compiler: the tokens, the syntax tree nodes, the reserved words and the operators, each with a search. mialudoc builds it from `src/tokenizer.h`, `src/ast.h` and the [language specification](mialu-programming-language.md) when the page asks for it, at `/api/internals`, so it follows the code.
 
+## Source statistics
+
+The navigation bar also goes to the source statistics, `/tools/stats` of the server, which shows how many lines of code the project has in C and in Mialu, as a pie chart. The lines can be counted in two ways, which a button chooses: *lines*, which are all of the lines of the files, and *source lines*, which leave out the blank lines and the lines that have only a comment, so a line of code that ends with a comment is still one. The pie can be split by language, or by the part of the project: the sources and the headers of the compiler, the standard library, mialudoc, the scripts and the examples, and the tests of the targets and of the errors. Under the chart a table has the numbers of each part, with the number of files, the lines, the source lines, the lines of comments and the blank lines. The page works as the one of the internals does: mialudoc counts the files of the project, in Mialu, when the page asks for them at `/api/stats`, so it follows the code. The comments that are counted are `//` in both languages, and `/* */` in C, also of many lines.
+
 ## What the server has
 
 | Address | What it is |
@@ -65,6 +69,8 @@ The navigation bar on top of the page goes to the compiler internals page, `/too
 | `/tools/playground` | The playground, `tests/wasm/playground.html`. |
 | `/tools/internals` | The page of the compiler internals, `tests/wasm/internals.html`. |
 | `/api/internals` | The tokens, the syntax tree nodes, the reserved words and the operators, as JSON. |
+| `/tools/stats` | The page of the source statistics, `tests/wasm/stats.html`. |
+| `/api/stats` | The files, lines, source lines, comment lines and blank lines of each part of the project, as JSON. |
 | `/compile` | Posting the source of a program to it compiles it, and gives the answer as JSON. |
 | `/test-code/wasm/<file>` | The examples of the playground, which are kept in `test-code/wasm`. |
 | `/tests/wasm/<file>` | The files of `tests/wasm`, such as `sum.wasm`. |

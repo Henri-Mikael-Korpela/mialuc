@@ -13,6 +13,8 @@
 ///     /tools/playground       the playground, `tests/wasm/playground.html`
 ///     /tools/internals        the page of the internals of the compiler, `tests/wasm/internals.html`
 ///     /api/internals          the tokens, syntax tree nodes, reserved words and operators of the compiler, as JSON
+///     /tools/stats            the page of the source statistics, `tests/wasm/stats.html`
+///     /api/stats              the lines of the C code and of the Mialu code of the project, as JSON
 ///     /compile                the source of a program in the body of a POST, built by the compiler, as JSON
 ///     /test-code/wasm/<file>  the examples of the playground
 ///     /tests/wasm/<file>      the files of `tests/wasm`
@@ -609,7 +611,7 @@ emit_page_start :: proc(out: ^Output, title: []Byte) ->
     emit_text(out, "footer { text-align: center; color: var(--muted); font-size: .85rem; padding-bottom: 3rem; }\n")
     emit_text(out, "</style>\n</head>\n<body>\n<div class='bar'><a href='/'><img src='/logo.png' alt=''>Mialu</a>")
     emit_text(out, "<nav aria-label='Pages'><a href='/' aria-current='page'>Documentation</a>")
-    emit_text(out, "<a href='/tools/playground'>Playground</a><a href='/tools/internals'>Compiler internals</a></nav></div>\n")
+    emit_text(out, "<a href='/tools/playground'>Playground</a><a href='/tools/internals'>Compiler internals</a><a href='/tools/stats'>Source statistics</a></nav></div>\n")
 
 emit_page_end :: proc(out: ^Output) ->
     emit_text(out, "</main>\n<footer>Served by mialudoc, which is written in Mialu.</footer>\n</body>\n</html>\n")
@@ -1850,6 +1852,195 @@ send_internals :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byt
     return STATUS_OK
 
 // ---------------------------------------------------------------------------------------------
+// The source statistics: /api/stats
+//
+// The page of the statistics shows how many lines the code of the project has, in C and in Mialu, as
+// the pie chart of the lines and the one of the source lines: the lines that are left when the
+// blank lines and the lines of comments are not counted. The files are counted here, when the page
+// asks for them, one part of the project at a time, and the answer is JSON:
+//
+//     {"groups": [{"name": "Compiler sources", "language": "C", "files": 18, "lines": 40000,
+//                  "code": 33000, "comments": 4000, "blanks": 3000}, ...]}
+//
+// A line is blank when it has nothing but spaces, a line of a comment is one that has nothing else, and
+// the others are source lines, also when a comment follows the code. In C a comment is `//` and
+// `/* */`, which can be of many lines, and in Mialu it is `//` and the `///` of a document. A line
+// that ends a block comment and goes on with code is a source line.
+// ---------------------------------------------------------------------------------------------
+
+LINE_BLANK :: 0
+LINE_COMMENT :: 1
+LINE_CODE :: 2
+
+/// How many files and lines a part of the project has, and how the lines are divided: every line is
+/// blank, a line of a comment or a source line.
+Line_Count :: struct ->
+    files: Int
+    lines: Int
+    code: Int
+    comments: Int
+    blanks: Int
+
+/// Where the first byte is that is not a space, a tab or a control character, which is the length
+/// of the bytes when there is none.
+first_visible :: proc(bytes: []Byte) Int ->
+    index := 0
+    for index < length_of(bytes) and bytes[index] <= 32 ->
+        index += 1
+    return index
+
+/// Where the `*/` that ends a block comment starts, from `from` on, or -1.
+find_comment_end :: proc(bytes: []Byte, from: Int) Int ->
+    for index in from..<length_of(bytes) - 1 ->
+        if bytes[index] == '*' and bytes[index + 1] == '/' ->
+            return index
+    return -1
+
+/// The kind of the line that is `rest`, what is left of it after a block comment ended in it.
+line_kind_after_comment :: proc(rest: []Byte) Int ->
+    if first_visible(rest) == length_of(rest) ->
+        return LINE_COMMENT
+    return LINE_CODE
+
+/// Gives the kind of the line: `LINE_BLANK`, `LINE_COMMENT` or `LINE_CODE`. `is_c` says that the
+/// language has block comments, and `is_in_comment` is set while the lines are in one, which this
+/// changes when the line starts or ends one.
+line_kind :: proc(line: []Byte, is_c: Bool, is_in_comment: ^Bool) Int ->
+    text := line[first_visible(line):]
+    if length_of(text) == 0 ->
+        return LINE_BLANK
+    if is_in_comment^ ->
+        end := find_comment_end(text, 0)
+        if end < 0 ->
+            return LINE_COMMENT
+        is_in_comment^ = false
+        return line_kind_after_comment(text[end + 2:])
+    if bytes_start_with(text, "//") ->
+        return LINE_COMMENT
+    if is_c and bytes_start_with(text, "/*") ->
+        end := find_comment_end(text, 2)
+        if end < 0 ->
+            is_in_comment^ = true
+            return LINE_COMMENT
+        return line_kind_after_comment(text[end + 2:])
+    return LINE_CODE
+
+/// Counts the lines of the file at `path` in `count`. A file that cannot be opened is not counted.
+/// The memory that it takes from the arena is given back after it.
+count_file :: proc(arena: ^mu.Arena_Allocator, path: []Byte, is_c: Bool, count: ^Line_Count) ->
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_path(path, wide_path[:])
+    if open_error == .NONE ->
+        defer mu.file_close(file)
+        mark := arena.used
+        defer arena.used = mark
+
+        line, _ := mu.arena_allocate(arena, LINE_BYTES)
+        reader := line_reader_make(file, arena)
+        is_in_comment := false
+        count.files += 1
+        for ->
+            length, has_line := read_line(%reader, line)
+            if not has_line ->
+                break
+            count.lines += 1
+            kind := line_kind(line[0:length], is_c, %is_in_comment)
+            if kind == LINE_BLANK ->
+                count.blanks += 1
+            else if kind == LINE_COMMENT ->
+                count.comments += 1
+            else ->
+                count.code += 1
+
+/// Puts a number that is not negative in the page.
+emit_number :: proc(out: ^Output, number: Int) ->
+    digits := [20]Byte { .. = 0 }
+    length := put_int(digits[:], 0, number)
+    for value in digits[0:length] ->
+        emit_byte(out, value)
+
+/// Puts a field of a group of the answer: `,"name":number`.
+emit_count_field :: proc(out: ^Output, name: Str, number: Int) ->
+    emit_text(out, ",\"")
+    emit_text(out, name)
+    emit_text(out, "\":")
+    emit_number(out, number)
+
+/// Counts the files of the directory `folder` of the project whose names end with `extension`, and
+/// puts the part of the project that they are in the page, as an object of the answer. Parts of
+/// the same name are one part for the page. `is_first` is false after the first part.
+emit_stats_group :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte, name: Str, language: Str, folder: Str, extension: Str, is_first: ^Bool) ->
+    count := Line_Count { files = 0, lines = 0, code = 0, comments = 0, blanks = 0 }
+    is_c := language == "C"
+
+    pattern_bytes := [PATH_BYTES]Byte { .. = 0 }
+    at := put_bytes(pattern_bytes[:], 0, directory)
+    at = put_text(pattern_bytes[:], at, folder)
+    at = put_text(pattern_bytes[:], at, "/*")
+    at = put_text(pattern_bytes[:], at, extension)
+    pattern, is_text := utf8_decode(pattern_bytes[0:at])
+
+    // The pattern of the system also finds the names that only start with the extension, so the
+    // end of each name is looked at too.
+    data := [FIND_DATA_BYTES]Byte { .. = 0 }
+    handle := INVALID_HANDLE
+    if is_text ->
+        handle = FindFirstFileA(str_to_c_str(pattern), %data[0])
+    for handle not= INVALID_HANDLE ->
+        name_length := 0
+        for name_length < FIND_NAME_BYTES and data[FIND_DATA_NAME + name_length] not= 0 ->
+            name_length += 1
+        file_name := data[FIND_DATA_NAME:FIND_DATA_NAME + name_length]
+        if bytes_end_with(file_name, extension) ->
+            path := [PATH_BYTES]Byte { .. = 0 }
+            path_at := put_bytes(path[:], 0, directory)
+            path_at = put_text(path[:], path_at, folder)
+            path_at = put_text(path[:], path_at, "/")
+            path_at = put_bytes(path[:], path_at, file_name)
+            count_file(arena, path[0:path_at], is_c, %count)
+        if FindNextFileA(handle, %data[0]) == 0 ->
+            FindClose(handle)
+            break
+
+    if is_first^ ->
+        is_first^ = false
+    else ->
+        emit_text(out, ",")
+    emit_text(out, "{\"name\":\"")
+    emit_text(out, name)
+    emit_text(out, "\",\"language\":\"")
+    emit_text(out, language)
+    emit_text(out, "\"")
+    emit_count_field(out, "files", count.files)
+    emit_count_field(out, "lines", count.lines)
+    emit_count_field(out, "code", count.code)
+    emit_count_field(out, "comments", count.comments)
+    emit_count_field(out, "blanks", count.blanks)
+    emit_text(out, "}")
+
+/// Sends the answer of /api/stats.
+send_stats :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, with_body: Bool) Int ->
+    if not send_head(client, STATUS_OK, "OK", "application/json", -1) or not with_body ->
+        return STATUS_OK
+    out := output_make(client, arena, OUTPUT_BYTES)
+    is_first := true
+    emit_text(%out, "{\"groups\":[")
+    emit_stats_group(%out, arena, directory, "Compiler sources", "C", "/src", ".c", %is_first)
+    emit_stats_group(%out, arena, directory, "Compiler headers", "C", "/src", ".h", %is_first)
+    emit_stats_group(%out, arena, directory, "Standard library", "Mialu", "/src/mialu-std", ".mu", %is_first)
+    emit_stats_group(%out, arena, directory, "mialudoc", "Mialu", "/src/mialudoc", ".mu", %is_first)
+    emit_stats_group(%out, arena, directory, "Scripts and examples", "Mialu", "/scripts", ".mu", %is_first)
+    emit_stats_group(%out, arena, directory, "Scripts and examples", "Mialu", "/examples/guess-my-number", ".mu", %is_first)
+    emit_stats_group(%out, arena, directory, "x64 tests", "Mialu", "/test-code/x64", ".mu", %is_first)
+    emit_stats_group(%out, arena, directory, "Wasm tests", "Mialu", "/test-code/wasm", ".mu", %is_first)
+    emit_stats_group(%out, arena, directory, "Error tests", "Mialu", "/test-code/errors/front", ".mu", %is_first)
+    emit_stats_group(%out, arena, directory, "Error tests", "Mialu", "/test-code/errors/x64", ".mu", %is_first)
+    emit_stats_group(%out, arena, directory, "Error tests", "Mialu", "/test-code/errors/wasm", ".mu", %is_first)
+    emit_text(%out, "]}")
+    flush(%out)
+    return STATUS_OK
+
+// ---------------------------------------------------------------------------------------------
 // The compiler as a process: /compile
 //
 // The playground posts the source of a program, and gets what the compiler makes of it as JSON:
@@ -2335,6 +2526,10 @@ answer :: proc(client: Int, arena: ^mu.Arena_Allocator, request: []Byte, directo
         return send_page(client, arena, directory, "/tests/wasm/", "internals.html", with_body)
     if bytes_are(target, "/api/internals") ->
         return send_internals(client, arena, directory, with_body)
+    if bytes_are(target, "/tools/stats") ->
+        return send_page(client, arena, directory, "/tests/wasm/", "stats.html", with_body)
+    if bytes_are(target, "/api/stats") ->
+        return send_stats(client, arena, directory, with_body)
     if bytes_start_with(target, "/test-code/wasm/") ->
         return send_static(client, arena, directory, "/test-code/wasm/", target[length_of("/test-code/wasm/"):], with_body)
     if bytes_start_with(target, "/tests/wasm/") ->

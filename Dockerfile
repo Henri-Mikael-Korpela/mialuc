@@ -29,15 +29,17 @@ ENV PATH=/usr/lib/wine:$PATH WINEPREFIX=/wine WINEDEBUG=-all WINEDLLOVERRIDES=ms
 RUN wine64 wineboot --init; wineserver64 --wait || true
 WORKDIR /app
 COPY --from=build /app/build/mialuc.exe /app/build/mialudoc.exe ./build/
-# The compiler reads the standard library from where it was built.
-COPY src/mialu-std ./src/mialu-std
-# The pages of the playground, the examples, the documents and the logo, and the sources that the page
-# of the internals of the compiler is made from.
+# The sources of the project, which the compiler reads the standard library from, the page of the
+# internals of the compiler is made from, and the page of the source statistics counts the lines of,
+# with the tests, the scripts and the examples that it counts too.
+COPY src ./src
+COPY scripts ./scripts
+COPY examples ./examples
+COPY test-code ./test-code
+# The pages of the playground, the documents and the logo.
 COPY tests/wasm ./tests/wasm
-COPY test-code/wasm ./test-code/wasm
 COPY docs ./docs
 COPY media/mialu-logo.png ./media/mialu-logo.png
-COPY src/tokenizer.h src/ast.h ./src/
 # Inside a container the server has to listen on all interfaces to be reachable through the
 # published port. docker-compose.yml publishes it on the loopback of the host only.
 EXPOSE 8008

@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mialu Source Statistics</title>
+    <style>
+        :root {
+            --background: #1e1e1e;
+            --background-panel: #252526;
+            --border: #3c3c3c;
+            --text: #d4d4d4;
+            --text-muted: #858585;
+            --accent: #0e639c;
+            --error: #f48771;
+            --font-code: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+            /* The categorical colors, in their fixed order, for a dark surface. */
+            --series-1: #3987e5;
+            --series-2: #d95926;
+            --series-3: #199e70;
+            --series-4: #c98500;
+            --series-5: #d55181;
+            --series-6: #0ca30c;
+            --series-7: #9085e9;
+            --series-8: #e66767;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: var(--background);
+            color: var(--text);
+            font: 14px/1.5 system-ui, sans-serif;
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 16px;
+            padding: 8px 16px;
+            background: var(--background-panel);
+            border-bottom: 1px solid var(--border);
+        }
+
+        header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+
+        .brand { display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
+
+        nav { display: flex; flex-wrap: wrap; gap: 4px; }
+
+        nav a {
+            padding: 4px 10px;
+            border-radius: 2px;
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+
+        nav a:hover { color: var(--text); }
+        nav a[aria-current="page"] { background: var(--background); color: var(--text); }
+
+        main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+
+        .intro { margin: 0 0 16px; color: var(--text-muted); max-width: 70ch; }
+
+        .controls { display: flex; flex-wrap: wrap; gap: 8px 32px; margin-bottom: 16px; }
+
+        .control { display: flex; align-items: center; gap: 8px; }
+        .control > span { color: var(--text-muted); font-size: 12px; }
+
+        .segmented { display: flex; }
+
+        .segmented button {
+            padding: 4px 12px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-muted);
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .segmented button:first-child { border-radius: 2px 0 0 2px; }
+        .segmented button:last-child { border-radius: 0 2px 2px 0; margin-left: -1px; }
+        .segmented button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: white; position: relative; }
+        .segmented button:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+
+        .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 24px; }
+
+        .tile {
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--background-panel);
+        }
+
+        .tile h2 {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0 0 4px;
+            padding: 0;
+            border: 0;
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .tile .big { font-size: 28px; font-weight: 600; line-height: 1.2; }
+        .tile .sub { color: var(--text-muted); font-size: 12px; }
+
+        .swatch { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 2px; }
+
+        .chart { display: flex; flex-wrap: wrap; align-items: center; gap: 24px 48px; margin-bottom: 8px; }
+
+        .pie { flex: 0 1 auto; width: min(100%, 460px); height: auto; }
+
+        .slice { stroke: var(--background); stroke-width: 2; cursor: default; transition: filter 0.1s; }
+        .slice:hover, .slice:focus { filter: brightness(1.18); outline: none; }
+        .slice:focus-visible { stroke: var(--text); }
+
+        .pie-label { fill: var(--text); font: 12px system-ui, sans-serif; pointer-events: none; }
+        .pie-label tspan { fill: var(--text-muted); }
+
+        .legend { flex: 1; min-width: 260px; margin: 0; padding: 0; list-style: none; }
+
+        .legend li {
+            display: grid;
+            grid-template-columns: 10px 1fr auto auto;
+            align-items: center;
+            gap: 4px 10px;
+            padding: 4px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .legend .value { font-variant-numeric: tabular-nums; }
+        .legend .share { min-width: 4.5ch; color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
+
+        h2.section {
+            margin: 24px 0 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .table-wrap { overflow-x: auto; }
+
+        table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+        th, td { padding: 6px 12px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+        th:first-child, td:first-child { text-align: left; }
+        th { color: var(--text-muted); font-size: 12px; font-weight: 600; }
+        tr.total td, tr.subtotal td { font-weight: 600; }
+        tr.subtotal td { background: var(--background-panel); }
+        td .swatch { margin-right: 8px; }
+
+        .tooltip {
+            position: fixed;
+            z-index: 2;
+            max-width: 280px;
+            padding: 6px 10px;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--background-panel);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+        }
+
+        .tooltip[hidden] { display: none; }
+        .tooltip strong { display: block; font-size: 16px; }
+        .tooltip span { color: var(--text-muted); font-size: 12px; }
+
+        #error { padding: 16px 0; color: var(--error); white-space: pre-wrap; }
+
+        @media (max-width: 700px) {
+            .legend { min-width: 0; flex-basis: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <a class="brand" href="/"><img src="/logo.png" alt="" width="24" height="24"><h1>Mialu</h1></a>
+        <nav aria-label="Pages">
+            <a href="/">Documentation</a>
+            <a href="/tools/playground">Playground</a>
+            <a href="/tools/internals">Compiler internals</a>
+            <a href="/tools/stats" aria-current="page">Source statistics</a>
+        </nav>
+    </header>
+
+    <main>
+        <p class="intro">
+            The code of this project in C and in Mialu, counted by mialudoc, which is written in Mialu, from the files of the project when this page asks for them.
+            <em>Lines</em> are all of the lines of the files. <em>Source lines</em> leave out the blank lines and the lines that have only a comment.
+        </p>
+
+        <div class="controls">
+            <div class="control">
+                <span id="count-label">Count</span>
+                <div class="segmented" role="group" aria-labelledby="count-label" id="count-control">
+                    <button type="button" data-value="lines" aria-pressed="true">Lines</button>
+                    <button type="button" data-value="code" aria-pressed="false">Source lines</button>
+                </div>
+            </div>
+            <div class="control">
+                <span id="split-label">Split by</span>
+                <div class="segmented" role="group" aria-labelledby="split-label" id="split-control">
+                    <button type="button" data-value="language" aria-pressed="true">Language</button>
+                    <button type="button" data-value="part" aria-pressed="false">Part of the project</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="error" hidden></div>
+        <div class="tiles" id="tiles"></div>
+
+        <div class="chart">
+            <svg class="pie" id="pie" viewBox="-230 -125 460 250" role="img"></svg>
+            <ul class="legend" id="legend"></ul>
+        </div>
+
+        <h2 class="section">The numbers</h2>
+        <div class="table-wrap">
+            <table id="table">
+                <thead>
+                    <tr>
+                        <th scope="col">Part of the project</th>
+                        <th scope="col">Files</th>
+                        <th scope="col">Lines</th>
+                        <th scope="col">Source lines</th>
+                        <th scope="col">Comment lines</th>
+                        <th scope="col">Blank lines</th>
+                    </tr>
+                </thead>
+                <tbody id="table-body"></tbody>
+            </table>
+        </div>
+    </main>
+
+    <div class="tooltip" id="tooltip" role="status" hidden></div>
+
+    <script>
+        "use strict";
+
+        const SERIES_COUNT = 8;
+        const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+        const LANGUAGES = ["C", "Mialu"];
+        const LANGUAGE_NAMES = { C: "C code", Mialu: "Mialu code" };
+        const COUNT_NAMES = { lines: "lines", code: "source lines" };
+
+        const number = new Intl.NumberFormat("en");
+        const state = { count: "lines", split: "language" };
+        let parts = [];
+        let error = null;
+
+        const element = (name, attributes = {}, text = "") => {
+            const node = name === "svg" || name === "path" || name === "circle" || name === "text" || name === "tspan"
+                ? document.createElementNS(SVG_NAMESPACE, name)
+                : document.createElement(name);
+            for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+            if (text !== "") node.textContent = text;
+            return node;
+        };
+
+        const swatch = (index) => element("span", { class: "swatch", style: `background: var(--series-${index + 1})` });
+
+        // The groups of the answer that have the same name are one part of the project.
+        function mergeParts(groups) {
+            const merged = [];
+            for (const group of groups) {
+                let part = merged.find((candidate) => candidate.name === group.name);
+                if (part === undefined) {
+                    part = { name: group.name, language: group.language, files: 0, lines: 0, code: 0, comments: 0, blanks: 0 };
+                    merged.push(part);
+                }
+                for (const field of ["files", "lines", "code", "comments", "blanks"]) part[field] += group[field];
+            }
+            return merged;
+        }
+
+        function total(items, field) {
+            return items.reduce((sum, item) => sum + item[field], 0);
+        }
+
+        // The slices of the pie: the two languages, or the parts of the project, each with its own color.
+        function slices() {
+            const field = state.count;
+            if (state.split === "language") {
+                return LANGUAGES.map((language, index) => ({
+                    name: LANGUAGE_NAMES[language],
+                    value: total(parts.filter((part) => part.language === language), field),
+                    color: index,
+                }));
+            }
+            return parts.map((part, index) => ({ name: part.name, value: part[field], color: index % SERIES_COUNT }));
+        }
+
+        const percent = (value, whole) => (whole === 0 ? "0%" : `${(value * 100 / whole).toFixed(value * 100 / whole < 10 ? 1 : 0)}%`);
+
+        const tooltip = document.getElementById("tooltip");
+
+        function showTooltip(slice, whole, x, y) {
+            tooltip.replaceChildren(
+                element("strong", {}, number.format(slice.value)),
+                element("span", {}, `${slice.name}: ${percent(slice.value, whole)} of the ${COUNT_NAMES[state.count]}`),
+            );
+            tooltip.hidden = false;
+            const box = tooltip.getBoundingClientRect();
+            tooltip.style.left = `${Math.max(8, Math.min(x + 14, window.innerWidth - box.width - 8))}px`;
+            tooltip.style.top = `${Math.max(8, Math.min(y + 14, window.innerHeight - box.height - 8))}px`;
+        }
+
+        const hideTooltip = () => { tooltip.hidden = true; };
+
+        function renderPie(items, whole) {
+            const pie = document.getElementById("pie");
+            pie.replaceChildren();
+            pie.setAttribute("aria-label", items.map((item) => `${item.name} ${percent(item.value, whole)}`).join(", "));
+            const radius = 100;
+            const shown = items.filter((item) => item.value > 0);
+            let angle = -Math.PI / 2;
+            for (const item of shown) {
+                const sweep = whole === 0 ? 0 : item.value / whole * 2 * Math.PI;
+                const middle = angle + sweep / 2;
+                let slice;
+                if (shown.length === 1) {
+                    slice = element("circle", { r: radius, cx: 0, cy: 0 });
+                } else {
+                    const x1 = radius * Math.cos(angle), y1 = radius * Math.sin(angle);
+                    const x2 = radius * Math.cos(angle + sweep), y2 = radius * Math.sin(angle + sweep);
+                    slice = element("path", { d: `M0 0 L${x1.toFixed(2)} ${y1.toFixed(2)} A${radius} ${radius} 0 ${sweep > Math.PI ? 1 : 0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z` });
+                }
+                slice.setAttribute("class", "slice");
+                slice.setAttribute("fill", `var(--series-${item.color + 1})`);
+                slice.setAttribute("tabindex", "0");
+                slice.setAttribute("aria-label", `${item.name}: ${number.format(item.value)} ${COUNT_NAMES[state.count]}, ${percent(item.value, whole)}`);
+                slice.addEventListener("pointermove", (event) => showTooltip(item, whole, event.clientX, event.clientY));
+                slice.addEventListener("pointerleave", hideTooltip);
+                slice.addEventListener("focus", () => {
+                    const box = slice.getBoundingClientRect();
+                    showTooltip(item, whole, box.left + box.width / 2, box.top + box.height / 2);
+                });
+                slice.addEventListener("blur", hideTooltip);
+                pie.append(slice);
+
+                // Up to four slices are named on the chart, the others only in the legend.
+                if (items.length <= 4 && item.value > 0) {
+                    const x = (radius + 12) * Math.cos(middle), y = (radius + 12) * Math.sin(middle);
+                    const side = Math.cos(middle) < -0.05 ? "end" : "start";
+                    const label = element("text", { class: "pie-label", x: x.toFixed(1), y: y.toFixed(1), "text-anchor": side, "dominant-baseline": "middle" });
+                    label.append(item.name, element("tspan", { dx: 6 }, percent(item.value, whole)));
+                    pie.append(label);
+                }
+                angle += sweep;
+            }
+        }
+
+        function renderLegend(items, whole) {
+            const legend = document.getElementById("legend");
+            legend.replaceChildren();
+            for (const item of items) {
+                const row = element("li");
+                row.append(
+                    swatch(item.color),
+                    element("span", {}, item.name),
+                    element("span", { class: "value" }, number.format(item.value)),
+                    element("span", { class: "share" }, percent(item.value, whole)),
+                );
+                legend.append(row);
+            }
+        }
+
+        function renderTiles() {
+            const tiles = document.getElementById("tiles");
+            tiles.replaceChildren();
+            LANGUAGES.forEach((language, index) => {
+                const own = parts.filter((part) => part.language === language);
+                const tile = element("div", { class: "tile" });
+                const heading = element("h2");
+                heading.append(swatch(index), LANGUAGE_NAMES[language]);
+                tile.append(
+                    heading,
+                    element("div", { class: "big" }, number.format(total(own, state.count))),
+                    element("div", { class: "sub" }, `${COUNT_NAMES[state.count]} in ${number.format(total(own, "files"))} files`),
+                    element("div", { class: "sub" }, state.count === "lines"
+                        ? `${number.format(total(own, "code"))} of them are source lines`
+                        : `${number.format(total(own, "lines"))} lines in all`),
+                );
+                tiles.append(tile);
+            });
+        }
+
+        function tableRow(name, part, className, colorIndex) {
+            const row = element("tr", className === "" ? {} : { class: className });
+            const first = element("td");
+            if (colorIndex !== undefined) first.append(swatch(colorIndex));
+            first.append(name);
+            row.append(first);
+            for (const field of ["files", "lines", "code", "comments", "blanks"]) {
+                row.append(element("td", {}, number.format(part[field])));
+            }
+            return row;
+        }
+
+        function renderTable() {
+            const body = document.getElementById("table-body");
+            body.replaceChildren();
+            const sum = (items) => Object.fromEntries(["files", "lines", "code", "comments", "blanks"].map((field) => [field, total(items, field)]));
+            LANGUAGES.forEach((language, languageIndex) => {
+                const own = parts.filter((part) => part.language === language);
+                body.append(tableRow(LANGUAGE_NAMES[language], sum(own), "subtotal", languageIndex));
+                for (const part of own) body.append(tableRow(part.name, part, ""));
+            });
+            body.append(tableRow("All of the code", sum(parts), "total"));
+        }
+
+        function render() {
+            if (error !== null) return;
+            const items = slices();
+            const whole = total(items, "value");
+            renderTiles();
+            renderPie(items, whole);
+            renderLegend(items, whole);
+            renderTable();
+            for (const control of ["count", "split"]) {
+                for (const button of document.querySelectorAll(`#${control}-control button`)) {
+                    button.setAttribute("aria-pressed", String(button.dataset.value === state[control]));
+                }
+            }
+            try { history.replaceState(null, "", `#${state.count},${state.split}`); } catch (failure) { /* The choice is not remembered. */ }
+        }
+
+        for (const control of ["count", "split"]) {
+            for (const button of document.querySelectorAll(`#${control}-control button`)) {
+                button.addEventListener("click", () => { state[control] = button.dataset.value; render(); });
+            }
+        }
+
+        async function load() {
+            const [count, split] = location.hash.slice(1).split(",");
+            if (count in COUNT_NAMES) state.count = count;
+            if (split === "language" || split === "part") state.split = split;
+            try {
+                const response = await fetch("/api/stats");
+                if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+                parts = mergeParts((await response.json()).groups);
+                render();
+            } catch (failure) {
+                error = failure;
+                const box = document.getElementById("error");
+                box.hidden = false;
+                box.textContent = `Cannot load the statistics. Start the server with: build/mialudoc.exe, or docker compose up\n${failure}`;
+            }
+        }
+
+        load();
+    </script>
+</body>
+</html>
