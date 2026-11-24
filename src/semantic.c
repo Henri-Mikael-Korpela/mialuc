@@ -55,6 +55,9 @@ static bool             semantic_call_resolve       (Semantic_Analyzer *analyzer
                                                      Ast_Node_Index procedure,
                                                      Ast_Node_Index statement,
                                                      Ast_Node_Index call);
+static bool             semantic_call_type_arguments_check(Semantic_Analyzer *analyzer,
+                                                     Ast_Node_Index call,
+                                                     Ast_Node_Index procedure);
 static bool             semantic_constant_fail      (Semantic_Analyzer *analyzer,
                                                      Constant_Value value,
                                                      Ast_Node_Index definition);
@@ -1134,14 +1137,14 @@ static bool semantic_call_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index pr
         // A built-in procedure is what is called when the program has no name of its own, and the
         // call keeps the kind `SEMANTIC_BINDING_KIND_NONE` for the target to recognize by name.
         if (semantic_is_built_in_procedure(name)) {
-            return true;
+            return semantic_call_type_arguments_check(analyzer, call, AST_NODE_INDEX_NONE);
         }
         return semantic_fail(analyzer, SEMANTIC_STATUS_IDENTIFIER_UNKNOWN, name);
     }
 
     if (binding.kind != SEMANTIC_BINDING_KIND_CONSTANT) {
         analyzer->bindings[call] = binding;
-        return true;
+        return semantic_call_type_arguments_check(analyzer, call, AST_NODE_INDEX_NONE);
     }
     Ast_Node_Index value = analyzer->nodes[binding.target].first_child;
     if (analyzer->nodes[value].node_type != AST_NODE_TYPE_PROCEDURE) {
@@ -1149,6 +1152,80 @@ static bool semantic_call_resolve(Semantic_Analyzer *analyzer, Ast_Node_Index pr
     }
 
     analyzer->bindings[call] = binding;
+    return semantic_call_type_arguments_check(analyzer, call, value);
+}
+
+/**
+ * Checks the arguments of `call` that are types, which `procedure` takes, the
+ * `AST_NODE_TYPE_PROCEDURE` that the call is bound to, or `AST_NODE_INDEX_NONE` for a call of a
+ * built-in procedure or through a pointer. A type is an argument only of a type parameter that is
+ * given as a type, `$T: type_id`, when the call gives every parameter, the type parameters too, see
+ * `ast_parameter_is_type`, and of the built-in `make`, whose first argument is a type, see
+ * `AST_NODE_TYPE_CALL`. A type that is a name, such as `Int` or `Point`, is parsed as a name, so it
+ * becomes the `AST_NODE_TYPE_TYPE_NAME` that it is here, before the names of the arguments are
+ * looked up, which they are after the call because their nodes come after it. Any other type that
+ * is an argument is an error, and so is an argument of a type parameter that is not a type.
+ * Returns false after it recorded an error.
+ */
+static bool semantic_call_type_arguments_check(Semantic_Analyzer *analyzer, Ast_Node_Index call,
+                                               Ast_Node_Index procedure) {
+    assert(analyzer->nodes[call].node_type == AST_NODE_TYPE_CALL);
+
+    Str name = analyzer->nodes[call].payload.call.name;
+    size_t argument_count = 0;
+    for (Ast_Node_Index argument = analyzer->nodes[call].first_child;
+         argument != AST_NODE_INDEX_NONE; argument = analyzer->nodes[argument].next_sibling) {
+        argument_count += 1;
+    }
+    size_t parameter_count = 0;
+    bool has_type_parameter = false;
+    if (procedure != AST_NODE_INDEX_NONE) {
+        for (Ast_Node_Index parameter = analyzer->nodes[procedure].first_child;
+             parameter != AST_NODE_INDEX_NONE &&
+             analyzer->nodes[parameter].node_type == AST_NODE_TYPE_PARAMETER;
+             parameter = analyzer->nodes[parameter].next_sibling) {
+            parameter_count += 1;
+            has_type_parameter = has_type_parameter || ast_parameter_is_type(analyzer->nodes,
+                                                                             parameter);
+        }
+    }
+    bool is_explicit = has_type_parameter && argument_count == parameter_count;
+    bool is_make = procedure == AST_NODE_INDEX_NONE &&
+                   analyzer->bindings[call].kind == SEMANTIC_BINDING_KIND_NONE &&
+                   str_equals(name, STR("make"));
+
+    Ast_Node_Index parameter = AST_NODE_INDEX_NONE;
+    if (is_explicit) {
+        parameter = analyzer->nodes[procedure].first_child;
+    }
+    size_t index = 0;
+    for (Ast_Node_Index argument = analyzer->nodes[call].first_child;
+         argument != AST_NODE_INDEX_NONE; argument = analyzer->nodes[argument].next_sibling) {
+        Ast_Node *node = &analyzer->nodes[argument];
+        bool is_type = node->node_type == AST_NODE_TYPE_TYPE_NAME ||
+                       node->node_type == AST_NODE_TYPE_ARRAY_TYPE ||
+                       node->node_type == AST_NODE_TYPE_POINTER_TYPE;
+        bool is_type_wanted = (is_make && index == 0) ||
+                              (parameter != AST_NODE_INDEX_NONE &&
+                               ast_parameter_is_type(analyzer->nodes, parameter));
+        if (is_type_wanted && node->node_type == AST_NODE_TYPE_IDENTIFIER) {
+            // The payloads of both are the name alone, see `AST_NODE_TYPE_TYPE_NAME`.
+            Str type_name = node->payload.identifier.name;
+            node->node_type = AST_NODE_TYPE_TYPE_NAME;
+            node->payload.type_name.name = type_name;
+            is_type = true;
+        }
+        if (is_type_wanted && not is_type) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_TYPE_ARGUMENT_INVALID, name);
+        }
+        if (not is_type_wanted && is_type) {
+            return semantic_fail(analyzer, SEMANTIC_STATUS_TYPE_ARGUMENT_MISPLACED, name);
+        }
+        if (parameter != AST_NODE_INDEX_NONE) {
+            parameter = analyzer->nodes[parameter].next_sibling;
+        }
+        index += 1;
+    }
     return true;
 }
 

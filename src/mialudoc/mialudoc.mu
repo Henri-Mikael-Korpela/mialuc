@@ -1607,7 +1607,7 @@ keyword_category :: proc(word: []Byte, is_unused: Bool) Str ->
         return "Control flow"
     if list_has("cast", word) ->
         return "Conversions"
-    if list_has("const dynamic enum foreign import package proc struct union", word) ->
+    if list_has("const dynamic enum foreign import package proc struct type_id union", word) ->
         return "Definitions"
     if list_has("and not or", word) ->
         return "Logical operators"

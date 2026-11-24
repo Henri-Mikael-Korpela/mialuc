@@ -18,7 +18,7 @@ The impact says how much the gap matters for production readiness: **Critical** 
 ### Critical
 
 - **A heap by hand only.** `make([]T, count)` allocates the elements of an array slice that outlives its procedure, and `destroy` gives them back, with `malloc` and `free` on x64-win32 and a heap of the module on WebAssembly. But `[dynamic]Int` still grows in the temporary storage, which a procedure gives back when it returns, and an array cannot be a parameter, a result, a field of a struct or a global variable. There is no way to grow what `make` made, and nothing checks that memory is not used after it is destroyed. Without data that grows and lives on (lists, maps, strings built at run time, a cache) a service cannot be written.
-- **No generic code.** Parametric polymorphism is only a possible future feature. Every container would be written again for each type, and no library of containers is possible.
+- **Generics without constraints or a library.** Procedures and structs take type parameters (`$T`), which are deduced from the arguments of a call and specialized for each list of types before the targets see the program. But nothing says what a type parameter must be able to do, so a wrong type is found inside the specialization, and the standard library has no containers written with them yet.
 - **No networking and no concurrency.** `mialudoc` declares Winsock by hand and answers one connection at a time, because there are no threads, no async and no way to wait on many sockets. A web server that answers many clients is the first thing that a web language is asked for.
 - **No tests that run in CI.** Releases check the grammar and that every example compiles, and only on a version tag. Nothing runs a program and compares its output, and nothing runs `scripts/verify_errors.py` on a push. A compiler of this size that is not tested on every change will produce wrong code sooner or later.
 - **One native platform.** `x64-win32` is the only native target. Servers run on Linux, and developers on macOS and ARM.
@@ -61,7 +61,7 @@ A language that only catches up with C, a better C, competes with Zig and Rust, 
 
 **Problem:** reuse of containers and algorithms, without the cost of run time dispatch.
 
-**Idea:** `$T` that specializes a procedure or a struct per set of types in the semantic analysis, so that neither target changes, with errors that name the type and the place. Constraints are written as ordinary compile-time checks, not as a second language of traits.
+**Idea:** `$T` that specializes a procedure or a struct per set of types before the targets, so that neither target changes, with errors that name the type and the place. This part exists: see [Parametric polymorphism](mialu-programming-language.md#parametric-polymorphism). What is missing is constraints, written as ordinary compile-time checks and not as a second language of traits, so that a wrong type is told at the call and not inside the specialization.
 
 **Compared:** C has none. C++ templates are the most powerful and give the worst errors. Java and Kotlin erase types at run time. C# keeps them. Rust traits are strong and complex. Zig uses `comptime`, which is simple and strong but not checked until a type is used. Python is dynamic. Mialu already has the base of what the others lack, errors designed as an interface ([Errors as interface](errors-as-interface.md)), so generics with readable errors would be a visible advantage.
 
@@ -118,7 +118,7 @@ A language that only catches up with C, a better C, competes with Zig and Rust, 
 | | C++ | C# | Java | Kotlin | Python | Rust | Zig | Mialu |
 |---|---|---|---|---|---|---|---|---|
 | Memory safety by default | No | Yes | Yes | Yes | Yes | Yes | Partly | Partly: bounds and null trap, no heap |
-| Generics | Templates | Yes | Erased | Yes | Dynamic | Traits | `comptime` | **No** |
+| Generics | Templates | Yes | Erased | Yes | Dynamic | Traits | `comptime` | Specialized, no constraints |
 | Concurrency | Threads | Tasks | Threads | Coroutines | GIL, `asyncio` | `Send`, async | Threads | **None** |
 | Allocators | Yes | GC | GC | GC | GC | Yes | Explicit | **None** |
 | Package manager | Several | NuGet | Maven | Gradle | pip | Cargo | Yes | **None** |
@@ -160,9 +160,9 @@ Each milestone has an exit criterion that can be checked, and its steps are in t
 
 *Exit criterion:* the standard library has containers that are written once and used for any type.
 
-1. Specify parametric polymorphism: syntax, how a type is inferred, and the errors. The sketch in the specification (`$T`) is the start.
-2. Implement it by specializing a procedure per set of types in the semantic analysis, so that both targets need no change.
-3. Allow generic structs, so that a container is one definition.
+1. Specify parametric polymorphism: syntax, how a type is inferred, and the errors. (Done.)
+2. Implement it by specializing a procedure per set of types before the targets, so that both targets need no change. (Done, see `src/specialize.c`.)
+3. Allow generic structs, so that a container is one definition. (Done.)
 4. Write `mu:array`, `mu:map` and `mu:string` as generic code.
 5. Add a short form for returning an error early.
 6. Raise the compiler limits that tests or the library reach, and keep the limits documented.
@@ -214,7 +214,7 @@ Each milestone has an exit criterion that can be checked, and its steps are in t
 | Language design and specification | Strong, for the size of the language |
 | Evidence that the compiler is correct | Weak: examples compile, nothing runs them in CI |
 | Targets | One native platform and WebAssembly |
-| Memory, generics, concurrency | Missing |
+| Memory, generics, concurrency | Memory by hand and generics without constraints, no concurrency |
 | Standard library | Minimal |
 | Web development | A Wasm target and a playground, no networking library |
 | Stability | Pre-1.0, nothing promised |

@@ -1,0 +1,10 @@
+error[E0431]: '$T' declares a type parameter, which only a parameter of a procedure does
+ --> test-code/errors/front/E0431-type-parameter-misplaced.mu:4:13
+  |
+2 |
+3 | main :: proc() Int ->
+4 |     count : $T = 0
+  |             ^^ a type parameter
+5 |     return count
+  |
+  = help: declare it in the type of a parameter, or write the name without '$'

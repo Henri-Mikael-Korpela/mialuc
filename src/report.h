@@ -8,6 +8,7 @@
 #include <mialu/package.h>
 #include <mialu/parser.h>
 #include <mialu/semantic.h>
+#include <mialu/specialize.h>
 #include <mialu/x64.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
@@ -76,6 +77,7 @@ typedef enum {
     ERROR_CODE_TOKEN_LIMIT = 122,
     ERROR_CODE_UNEXPECTED_CHARACTER = 123,
     ERROR_CODE_STRING_LITERAL_ESCAPE_INVALID = 124,
+    ERROR_CODE_TYPE_PARAMETER_INVALID = 125,
 
     ERROR_CODE_NODE_LIMIT = 201,
     ERROR_CODE_UNEXPECTED_TOKEN = 202,
@@ -115,6 +117,16 @@ typedef enum {
     ERROR_CODE_DEFER_NESTED = 425,
     ERROR_CODE_DEFER_STATEMENT_INVALID = 426,
     ERROR_CODE_RETURN_IN_DEFER = 427,
+    ERROR_CODE_TYPE_ARGUMENT_MISPLACED = 428,
+    ERROR_CODE_TYPE_ARGUMENT_INVALID = 429,
+    ERROR_CODE_TYPE_PARAMETER_DUPLICATE = 430,
+    ERROR_CODE_TYPE_PARAMETER_MISPLACED = 431,
+    ERROR_CODE_TYPE_PARAMETER_UNDEDUCED = 432,
+    ERROR_CODE_TYPE_PARAMETER_CONFLICT = 433,
+    ERROR_CODE_PROCEDURE_NOT_CALLED = 434,
+    ERROR_CODE_STRUCT_TYPE_ARGUMENT_COUNT_MISMATCH = 435,
+    ERROR_CODE_STRUCT_NOT_POLYMORPHIC = 436,
+    ERROR_CODE_SPECIALIZATION_LIMIT = 437,
 
     ERROR_CODE_CONSTANT_CYCLE = 451,
     ERROR_CODE_CONSTANT_DIVISION_BY_ZERO = 452,
@@ -220,11 +232,14 @@ typedef enum {
 
 /**
  * How the errors are reported. `packages` are the files that the program imports, which an error in
- * one of them is told with the path and the lines of, and it is NULL when there are none.
- * `is_color` says whether the standard error shows colors.
+ * one of them is told with the path and the lines of, and it is NULL when there are none. `texts`
+ * are the texts that the specialization of polymorphic definitions wrote, which an error about one
+ * of them is told at the place of the source that it is made of, see `specialize_source_of`, and it
+ * is NULL before there are any. `is_color` says whether the standard error shows colors.
  */
 typedef struct {
     Packages const *packages;
+    Specialize_Texts const *texts;
     bool is_color;
 } Reporter;
 
@@ -263,6 +278,14 @@ void report_package_error(Reporter const *reporter, char const *path, Str source
  */
 void report_semantic_error(Reporter const *reporter, char const *path, Str source,
                            Semantic_Result result);
+
+/**
+ * Reports an error of `specialize`, other than an error of the analysis of a round, which
+ * `report_semantic_error` reports, in the program whose source is `source` and whose file is
+ * `path`, or in a file that it imports.
+ */
+void report_specialize_error(Reporter const *reporter, char const *path, Str source,
+                             Specialize_Result result);
 
 /**
  * Reports an error of `x64_build`, in the program whose source is `source` and whose file is

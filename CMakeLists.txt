@@ -20,7 +20,7 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-set(MIALUC_SOURCES src/main.c src/array_slice.c src/ast.c src/constant.c src/diagnostic.c src/package.c src/parser.c src/report.c src/semantic.c src/str.c src/tokenizer.c src/wasm.c src/wasm-text.c src/x64.c src/x64-text.c src/process.c)
+set(MIALUC_SOURCES src/main.c src/array_slice.c src/ast.c src/constant.c src/diagnostic.c src/package.c src/parser.c src/report.c src/semantic.c src/specialize.c src/str.c src/tokenizer.c src/wasm.c src/wasm-text.c src/x64.c src/x64-text.c src/process.c)
 add_executable(mialuc ${MIALUC_SOURCES})
 
 # Headers live directly in src/ but are included as <mialu/...>, so they are copied into a

@@ -1,0 +1,10 @@
+error[E0125]: a type parameter cannot be a reserved word
+ --> test-code/errors/front/E0125-type-parameter-invalid.mu:3:25
+  |
+1 | package errors
+2 |
+3 | identity :: proc(value: $if) Int ->
+  |                         ^^^ this is a reserved word
+4 |     return 0
+  |
+  = note: a type parameter is a '$' directly followed by a name, and the name is not a reserved word

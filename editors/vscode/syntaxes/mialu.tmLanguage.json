@@ -22,6 +22,9 @@
             "include": "#labels"
         },
         {
+            "include": "#type-parameters"
+        },
+        {
             "include": "#type-definitions"
         },
         {
@@ -392,11 +395,24 @@
                 }
             ]
         },
+        "type-parameters": {
+            "comment": "A type parameter that is declared with $ before its name, as in $T: type_id or values: []$T, and the type of a type parameter, type_id. They come before the parameters of a procedure, which would take them for names.",
+            "patterns": [
+                {
+                    "name": "entity.name.type.parameter.mialu",
+                    "match": "\\$[A-Za-z_][A-Za-z0-9_]*"
+                },
+                {
+                    "name": "storage.type.type-id.mialu",
+                    "match": "\\btype_id\\b"
+                }
+            ]
+        },
         "type-definitions": {
             "patterns": [
                 {
                     "comment": "The name of a struct or an enum at its definition, as in Person :: struct ->. The type of the numbers of an enum, as in the Int of enum Int, is a type too.",
-                    "match": "^[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)[ \\t]*(::)(?=[ \\t]*(?:struct|enum)\\b)",
+                    "match": "^[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)[ \\t]*(::)(?=[ \\t]*(?:struct|enum)\\b)",
                     "captures": {
                         "1": {
                             "name": "entity.name.type.mialu",
@@ -412,7 +428,7 @@
                     }
                 },
                 {
-                    "match": "\\b(enum)\\b[ \\t]+((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "match": "\\b(enum)\\b[ \\t]+((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
                     "captures": {
                         "1": {
                             "name": "storage.type.enum.mialu"
@@ -429,7 +445,7 @@
                 },
                 {
                     "comment": "The type that cast converts to, as in cast(Int)b.",
-                    "match": "\\b(cast)\\b[ \\t]*(\\()[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "match": "\\b(cast)\\b[ \\t]*(\\()[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
                     "captures": {
                         "1": {
                             "name": "keyword.operator.cast.mialu"
@@ -446,7 +462,7 @@
                 },
                 {
                     "comment": "The type that type_info_of gathers information about, as in type_info_of(Color).members.",
-                    "match": "\\b(type_info_of)\\b[ \\t]*(\\()[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "match": "\\b(type_info_of)\\b[ \\t]*(\\()[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
                     "captures": {
                         "1": {
                             "name": "keyword.operator.type-info.mialu"
@@ -467,7 +483,7 @@
             "comment": "The places in which a name is a type: after the colon of a type separator, as in x: Int, after a ^ of a pointer type, after the ] of an array type or of a slice type, after the ) of a procedure, as its return type, and before the { of a struct literal, as in Person { age = 30 }. The colon of a slice, as in a[1:4], is inside brackets, where these rules are not in use, so its upper bound is not taken for a type. The colon rule comes before the operators, so it takes the colon as well.",
             "patterns": [
                 {
-                    "match": "((?<!:):)(?![:=])([ \\t]*)((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "match": "((?<!:):)(?![:=])([ \\t]*)((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
                     "captures": {
                         "1": {
                             "name": "keyword.operator.type.mialu"
@@ -483,7 +499,7 @@
                     }
                 },
                 {
-                    "match": "(?<=\\^)[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "match": "(?<=\\^)[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
                     "captures": {
                         "1": {
                             "name": "entity.name.type.mialu",
@@ -496,7 +512,7 @@
                     }
                 },
                 {
-                    "match": "(?<=\\])[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "match": "(?<=\\])[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
                     "captures": {
                         "1": {
                             "name": "entity.name.type.mialu",
@@ -518,7 +534,7 @@
                             "name": "keyword.operator.pointer.mialu"
                         },
                         {
-                            "match": "((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                            "match": "((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
                             "captures": {
                                 "1": {
                                     "name": "entity.name.type.mialu",
@@ -533,7 +549,7 @@
                     ]
                 },
                 {
-                    "match": "(?<=\\))[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+                    "match": "(?<=\\))[ \\t]*((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)",
                     "captures": {
                         "1": {
                             "name": "entity.name.type.mialu",
@@ -546,7 +562,21 @@
                     }
                 },
                 {
-                    "match": "\\b((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)(?=[ \\t]*\\{)",
+                    "match": "\\b((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)(?=[ \\t]*\\{)",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.type.mialu",
+                            "patterns": [
+                                {
+                                    "include": "#primitive-types"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "comment": "The name of a polymorphic struct before its type arguments and the { of a struct literal, as in Pair(Int) { first = 1, second = 2 }.",
+                    "match": "\\b((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)(?=[ \\t]*\\([^{}\\n]*\\)[ \\t]*\\{)",
                     "captures": {
                         "1": {
                             "name": "entity.name.type.mialu",
@@ -609,6 +639,9 @@
             "end": "\\)",
             "patterns": [
                 {
+                    "include": "#type-parameters"
+                },
+                {
                     "include": "#procedure-types"
                 },
                 {
@@ -618,7 +651,7 @@
                     "include": "#type-positions"
                 },
                 {
-                    "match": "\\b((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)\\b(?![ \\t]*:)",
+                    "match": "\\b((?!(?:proc|return|if|else|for|in|break|continue|defer|foreign|import|package|enum|struct|union|match|case|cast|type_id|type_info_of|const|dynamic|and|or|not|true|false|nil)\\b)[A-Za-z_][A-Za-z0-9_]*)\\b(?![ \\t]*:)",
                     "captures": {
                         "1": {
                             "name": "entity.name.type.mialu",

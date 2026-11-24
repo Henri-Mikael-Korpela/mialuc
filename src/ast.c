@@ -191,10 +191,18 @@ size_t ast_procedure_return_count(Ast_Node const *procedure) {
         return 1;
     }
 
-    // The types are separated by commas, and no type has a comma or a parenthesis in it.
+    // The types are separated by the commas that are directly between the outer parentheses. A
+    // type can have commas of its own between the parentheses of its type arguments, as in
+    // `Pair(Int, Str)`, which are deeper.
     size_t count = 1;
+    size_t depth = 0;
     for (size_t i = 0; i < return_type.length; i += 1) {
-        if (return_type.bytes[i] == ',') {
+        char byte = return_type.bytes[i];
+        if (byte == '(') {
+            depth += 1;
+        } else if (byte == ')') {
+            depth -= 1;
+        } else if (byte == ',' && depth == 1) {
             count += 1;
         }
     }
@@ -210,12 +218,22 @@ Str ast_procedure_return_type_at(Ast_Node const *procedure, size_t index) {
     }
 
     // The text between the parentheses, from the start of the type at `index` up to the next comma
-    // or the closing parenthesis, which is the last byte.
+    // or the closing parenthesis, which is the last byte. The commas inside the type arguments of a
+    // type are deeper than the outer parentheses, see `ast_procedure_return_count`.
     size_t start = 1;
     size_t position = 0;
+    size_t depth = 1;
     for (size_t i = 1; i < return_type.length; i += 1) {
         char byte = return_type.bytes[i];
-        if (byte != ',' && i + 1 != return_type.length) {
+        if (byte == '(') {
+            depth += 1;
+            continue;
+        }
+        if (byte == ')' && i + 1 != return_type.length) {
+            depth -= 1;
+            continue;
+        }
+        if ((byte != ',' || depth != 1) && i + 1 != return_type.length) {
             continue;
         }
         if (position == index) {
@@ -245,6 +263,71 @@ bool ast_procedure_is_foreign(Ast_Node const *nodes, Ast_Node_Index procedure) {
 
     Ast_Node_Index last = nodes[procedure].last_child;
     return last != AST_NODE_INDEX_NONE && nodes[last].node_type == AST_NODE_TYPE_FOREIGN_BODY;
+}
+
+bool ast_parameter_is_type(Ast_Node const *nodes, Ast_Node_Index parameter) {
+    assert(nodes != NULL);
+    assert(nodes[parameter].node_type == AST_NODE_TYPE_PARAMETER);
+
+    Ast_Node_Index type = nodes[parameter].first_child;
+    return type != AST_NODE_INDEX_NONE && nodes[type].node_type == AST_NODE_TYPE_TYPE_NAME &&
+           str_equals(nodes[type].payload.type_name.name, STR("type_id"));
+}
+
+bool ast_parameter_declares_type(Ast_Node const *nodes, Ast_Node_Index parameter) {
+    assert(nodes != NULL);
+    assert(nodes[parameter].node_type == AST_NODE_TYPE_PARAMETER);
+
+    if (ast_parameter_is_type(nodes, parameter)) {
+        return true;
+    }
+    // The type is carets and brackets down to a name, each a node with the rest as its first child,
+    // and a `$` is in the text of the name, also when it is in a type argument, as in `Pair($T)`.
+    Ast_Node_Index type = nodes[parameter].first_child;
+    for (size_t depth = 0; depth < AST_BLOCK_DEPTH_MAX && type != AST_NODE_INDEX_NONE;
+         depth += 1) {
+        Ast_Node const *node = &nodes[type];
+        if (node->node_type == AST_NODE_TYPE_TYPE_NAME) {
+            Str name = node->payload.type_name.name;
+            for (size_t i = 0; i < name.length; i += 1) {
+                if (name.bytes[i] == '$') {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (node->node_type != AST_NODE_TYPE_POINTER_TYPE &&
+            node->node_type != AST_NODE_TYPE_ARRAY_TYPE) {
+            return false;
+        }
+        type = node->first_child;
+    }
+    return false;
+}
+
+bool ast_definition_is_polymorphic(Ast_Node const *nodes, Ast_Node_Index definition) {
+    assert(nodes != NULL);
+
+    if (nodes[definition].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION) {
+        return false;
+    }
+    Ast_Node_Index value = nodes[definition].first_child;
+    if (nodes[value].node_type == AST_NODE_TYPE_STRUCT_TYPE) {
+        // The type parameters of a struct are the children of its definition after it.
+        Ast_Node_Index next = nodes[value].next_sibling;
+        return next != AST_NODE_INDEX_NONE && nodes[next].node_type == AST_NODE_TYPE_PARAMETER;
+    }
+    if (nodes[value].node_type != AST_NODE_TYPE_PROCEDURE) {
+        return false;
+    }
+    for (Ast_Node_Index child = nodes[value].first_child;
+         child != AST_NODE_INDEX_NONE && nodes[child].node_type == AST_NODE_TYPE_PARAMETER;
+         child = nodes[child].next_sibling) {
+        if (ast_parameter_declares_type(nodes, child)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 Ast_Foreign_Target ast_procedure_foreign_target(Ast_Node const *nodes, Ast_Node_Index procedure) {

@@ -116,6 +116,11 @@ typedef struct {
     // absolute path of the source file that it names.
     Array_Slice debug_rows;
     Array_Slice source_path;
+    // What the specialization of polymorphic definitions works in, see `specialize`, and the texts
+    // that it writes, which the tree that it makes views.
+    Specialize_Buffers specialize;
+    Array_Slice specialize_text;
+    Array_Slice specialize_entries;
 } Buffers;
 
 static Command      main_command_parse                     (Array_Slice args);
@@ -288,10 +293,53 @@ int main(int argc, char *argv[]) {
             X64_DEBUG_ROWS_PER_NODE * TOKEN_COUNT_MAX),
         .source_path = array_slice_make(malloc(SOURCE_PATH_SIZE_BYTES_MAX * sizeof(char)),
                                         SOURCE_PATH_SIZE_BYTES_MAX),
+        // The trees of the specialization have as many nodes as the one that is parsed, and the
+        // copying of a tree needs one more of the places of its nodes, for the end of the tree.
+        .specialize =
+            {
+                .nodes = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Ast_Node)),
+                                          TOKEN_COUNT_MAX),
+                .spare_nodes = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Ast_Node)),
+                                                TOKEN_COUNT_MAX),
+                .origins = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Ast_Node_Index)),
+                                            TOKEN_COUNT_MAX),
+                .spare_origins = array_slice_make(
+                    malloc(TOKEN_COUNT_MAX * sizeof(Ast_Node_Index)), TOKEN_COUNT_MAX),
+                .bindings = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Semantic_Binding)),
+                                             TOKEN_COUNT_MAX),
+                .constants = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Constant_Value)),
+                                              TOKEN_COUNT_MAX),
+                .text = array_slice_make(malloc(CONSTANT_TEXT_SIZE_BYTES_MAX * sizeof(char)),
+                                         CONSTANT_TEXT_SIZE_BYTES_MAX),
+                .positions = array_slice_make(
+                    malloc((TOKEN_COUNT_MAX + 1) * sizeof(Ast_Node_Index)), TOKEN_COUNT_MAX + 1),
+                .ends = array_slice_make(malloc((TOKEN_COUNT_MAX + 1) * sizeof(Ast_Node_Index)),
+                                         TOKEN_COUNT_MAX + 1),
+                .marks = array_slice_make(malloc((TOKEN_COUNT_MAX + 1) * sizeof(uint32_t)),
+                                          TOKEN_COUNT_MAX + 1),
+                .rewrites = array_slice_make(malloc(TOKEN_COUNT_MAX * sizeof(Str)),
+                                             TOKEN_COUNT_MAX),
+            },
+        .specialize_text = array_slice_make(malloc(SPECIALIZE_TEXT_SIZE_BYTES_MAX * sizeof(char)),
+                                            SPECIALIZE_TEXT_SIZE_BYTES_MAX),
+        .specialize_entries = array_slice_make(
+            malloc(SPECIALIZE_TEXT_COUNT_MAX * sizeof(Specialize_Text)), SPECIALIZE_TEXT_COUNT_MAX),
     };
 
     int32_t exit_code = 1;
-    if (buffers.source.elements == NULL || buffers.tokens.elements == NULL ||
+    bool is_specialize_allocated =
+        buffers.specialize.nodes.elements != NULL &&
+        buffers.specialize.spare_nodes.elements != NULL &&
+        buffers.specialize.origins.elements != NULL &&
+        buffers.specialize.spare_origins.elements != NULL &&
+        buffers.specialize.bindings.elements != NULL &&
+        buffers.specialize.constants.elements != NULL &&
+        buffers.specialize.text.elements != NULL && buffers.specialize.positions.elements != NULL &&
+        buffers.specialize.ends.elements != NULL && buffers.specialize.marks.elements != NULL &&
+        buffers.specialize.rewrites.elements != NULL &&
+        buffers.specialize_text.elements != NULL && buffers.specialize_entries.elements != NULL;
+    if (not is_specialize_allocated || buffers.source.elements == NULL ||
+        buffers.tokens.elements == NULL ||
         buffers.string_text.elements == NULL || buffers.code_tokens.elements == NULL || buffers.nodes.elements == NULL ||
         buffers.bindings.elements == NULL || buffers.constants.elements == NULL ||
         buffers.text.elements == NULL ||
@@ -305,6 +353,19 @@ int main(int argc, char *argv[]) {
         exit_code = main_run_command(command, &buffers);
     }
 
+    free(buffers.specialize_entries.elements);
+    free(buffers.specialize_text.elements);
+    free(buffers.specialize.rewrites.elements);
+    free(buffers.specialize.marks.elements);
+    free(buffers.specialize.ends.elements);
+    free(buffers.specialize.positions.elements);
+    free(buffers.specialize.text.elements);
+    free(buffers.specialize.constants.elements);
+    free(buffers.specialize.bindings.elements);
+    free(buffers.specialize.spare_origins.elements);
+    free(buffers.specialize.origins.elements);
+    free(buffers.specialize.spare_nodes.elements);
+    free(buffers.specialize.nodes.elements);
     free(buffers.source_path.elements);
     free(buffers.debug_rows.elements);
     free(buffers.symbols.elements);
@@ -596,12 +657,48 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
         return 1;
     }
 
+    // The polymorphic definitions become copies for the types that they are used with, which the
+    // targets build. `dump-types` finds the errors of it too, but shows the program as it is
+    // written, and the outline and the sizes of the structs are of the program as it is written.
+    Specialize_Texts texts = {
+        .bytes = buffers->specialize_text.elements,
+        .entries = buffers->specialize_entries.elements,
+        .size_bytes = buffers->specialize_text.length,
+        .length = 0,
+        .entry_count = 0,
+        .entry_count_max = buffers->specialize_entries.length,
+    };
+    command.reporter.texts = &texts;
+    Parse_Result specialized_parse = parse_result;
+    Semantic_Result specialized_semantic = semantic_result;
+    bool is_specialized = command.mode == COMMAND_MODE_BUILD ||
+                          command.mode == COMMAND_MODE_DUMP_ASM ||
+                          command.mode == COMMAND_MODE_DUMP_TYPES ||
+                          command.mode == COMMAND_MODE_RUN;
+    if (is_specialized) {
+        Specialize_Result specialized =
+            specialize(parse_result.nodes, parse_result.root, packages->imported_end,
+                       semantic_result, buffers->specialize, &texts);
+        if (specialized.status == SPECIALIZE_STATUS_SEMANTIC) {
+            report_semantic_error(&command.reporter, path, source, specialized.semantic);
+            return 1;
+        }
+        if (specialized.status != SPECIALIZE_STATUS_OK) {
+            report_specialize_error(&command.reporter, path, source, specialized);
+            return 1;
+        }
+        specialized_parse.nodes = specialized.nodes;
+        specialized_parse.root = specialized.root;
+        specialized_semantic = specialized.semantic;
+    }
+
     switch (command.mode) {
     case COMMAND_MODE_BUILD:
-        return main_run_command_build(command, buffers, source, parse_result, semantic_result);
+        return main_run_command_build(command, buffers, source, specialized_parse,
+                                      specialized_semantic);
     case COMMAND_MODE_DUMP_ASM:
-        return main_run_command_build_x64(command, buffers, source, parse_result,
-                                          semantic_result);
+        return main_run_command_build_x64(command, buffers, source, specialized_parse,
+                                          specialized_semantic);
     case COMMAND_MODE_DUMP_AST:
         return 0;
     case COMMAND_MODE_DUMP_OUTLINE:
@@ -618,7 +715,8 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
         assert(false);
         return 1;
     case COMMAND_MODE_RUN:
-        return main_run_command_build_x64(command, buffers, source, parse_result, semantic_result);
+        return main_run_command_build_x64(command, buffers, source, specialized_parse,
+                                          specialized_semantic);
     }
 
     assert(false);
@@ -702,7 +800,7 @@ static void main_run_command_print_outline(Str source, Parse_Result parse_result
  * source: the line of its definition, counted from 1, its name, its size in bytes and its
  * alignment in bytes, separated by tabs. The sizes are those of the program for the processor, see
  * `x64_struct_size_bytes`. This is what an editor shows above the definition of a struct. A struct
- * that has no size, because it contains itself, is left out.
+ * that has no size, because it contains itself or it has type parameters, is left out.
  */
 static void main_run_command_print_struct_sizes(Str source, Parse_Result parse_result,
                                                size_t first_node) {
@@ -715,8 +813,11 @@ static void main_run_command_print_struct_sizes(Str source, Parse_Result parse_r
         Ast_Node const *node = &nodes[definition];
         Ast_Node_Index current = definition;
         definition = node->next_sibling;
+        // A polymorphic struct has the size of the types that a use gives it, which it does not
+        // have itself.
         if (current < first_node || node->node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
-            nodes[node->first_child].node_type != AST_NODE_TYPE_STRUCT_TYPE) {
+            nodes[node->first_child].node_type != AST_NODE_TYPE_STRUCT_TYPE ||
+            ast_definition_is_polymorphic(nodes, current)) {
             continue;
         }
 
@@ -2290,6 +2391,9 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_KIND_KEYWORD_TRUE:
             printf("KEYWORD_TRUE\n");
             break;
+        case TOKEN_KIND_KEYWORD_TYPE_ID:
+            printf("KEYWORD_TYPE_ID\n");
+            break;
         case TOKEN_KIND_KEYWORD_TYPE_INFO_OF:
             printf("KEYWORD_TYPE_INFO_OF\n");
             break;
@@ -2351,6 +2455,10 @@ static void main_run_command_print_tokens(Array_Slice tokens) {
         case TOKEN_KIND_STRING_LITERAL:
             printf("STRING_LITERAL \"%.*s\"\n", (int)token.payload.string_literal.text.length,
                    token.payload.string_literal.text.bytes);
+            break;
+        case TOKEN_KIND_TYPE_PARAMETER:
+            printf("TYPE_PARAMETER %.*s\n", (int)token.payload.identifier.text.length,
+                   token.payload.identifier.text.bytes);
             break;
         case TOKEN_KIND_TYPE_SEPARATOR:
             printf("TYPE_SEPARATOR\n");

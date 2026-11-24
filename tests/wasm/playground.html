@@ -367,6 +367,7 @@
             match: "match",
             "multiple return values": "multiple-return-values",
             pointers: "pointers",
+            "parametric polymorphism": "polymorphism",
             "procedure pointers": "procedure-pointers",
             procedures: "procedures",
             reflection: "reflection",
@@ -412,8 +413,10 @@
                 ["string", /"(?:[^"\\\n]|\\(?:[abefnrtv\\'"]|[0-7]{3}|x[\dA-Fa-f]{2}|u[\dA-Fa-f]{4}|U[\dA-Fa-f]{8}))*"|'(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|[^'\\\n]|\\(?:[abefnrtv\\'"]|[0-7]{3}|x[\dA-Fa-f]{2}|u[\dA-Fa-f]{4}|U[\dA-Fa-f]{8}))'/],
                 ["attribute", /#(?:[ \t]*\([ \t]*[A-Za-z_]\w*[ \t]*\))+/],
                 ["label", /(?<=(?:^|\n)[ \t]*|defer[ \t]+):[A-Za-z_]\w*/],
-                ["keyword", /\b(?:proc|return|if|else|for|in|break|case|cast|const|continue|defer|dynamic|enum|match|struct|type_info_of|union|foreign|import|package|and|or)\b|\bnot\b(?!=)/],
+                ["keyword", /\b(?:proc|return|if|else|for|in|break|case|cast|const|continue|defer|dynamic|enum|match|struct|type_id|type_info_of|union|foreign|import|package|and|or)\b|\bnot\b(?!=)/],
                 ["literal", /\b(?:true|false|nil)\b/],
+                // A type parameter that is declared with `$` before its name, as in `$T: type_id`.
+                ["type", /\$[A-Za-z_]\w*/],
                 // A name before `::`, or at the start of a line before `: Type :`, which is a typed
                 // constant, as in `MASK : Byte : 0x0F`. A global variable has `=` after its type.
                 ["definition", /\b[A-Za-z_]\w*(?=\s*::)|(?<=^|\n)[A-Za-z_]\w*(?=[ \t]*:[ \t]*[A-Za-z_]\w*[ \t]*:(?![:=]))/],

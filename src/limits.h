@@ -26,6 +26,12 @@ enum {
     // largest growth is `i64.add`, one byte of the module that becomes 12 bytes of text, so 16
     // bytes of text per byte of the module is enough.
     OUTPUT_TEXT_SIZE_BYTES_MAX = 16 * OUTPUT_SIZE_BYTES_MAX,
+    // Bounds the texts that the specialization of polymorphic definitions writes: the names of
+    // the copies and of their calls, and the types that are made canonical, see `specialize`.
+    // They are part of the program, so they are never larger than the module either. Each text is
+    // made for a node, and there are no more nodes than tokens.
+    SPECIALIZE_TEXT_SIZE_BYTES_MAX = OUTPUT_SIZE_BYTES_MAX,
+    SPECIALIZE_TEXT_COUNT_MAX = TOKEN_COUNT_MAX,
 };
 
 #endif

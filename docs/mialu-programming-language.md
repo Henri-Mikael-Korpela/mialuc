@@ -71,6 +71,9 @@
   - [destroy](#destroy)
 - [Scope resolution](#scope-resolution)
 - [Attributes](#attributes)
+- [Parametric polymorphism](#parametric-polymorphism)
+  - [Polymorphic procedures](#polymorphic-procedures)
+  - [Polymorphic structs](#polymorphic-structs)
 - [Foreign procedures](#foreign-procedures)
   - [Foreign procedures in WebAssembly](#foreign-procedures-in-webassembly)
   - [Foreign procedures in the libraries of the system](#foreign-procedures-in-the-libraries-of-the-system)
@@ -80,7 +83,6 @@
   - [WebAssembly](#webassembly)
   - [x64 for Windows](#x64-for-windows)
 - [Possible future features](#possible-future-features)
-  - [Parametric polymorphism](#parametric-polymorphism)
   - [Converting a string to bytes](#converting-a-string-to-bytes)
 - [Standard library](#standard-library)
 - [Rejected ideas](#rejected-ideas)
@@ -177,7 +179,7 @@ or
 package proc
 return
 struct
-type_info_of
+type_id type_info_of
 union
 ```
 
@@ -2504,6 +2506,100 @@ A list can have more than one attribute, which are written one after the other, 
 
 The attributes are built into the language. Mialu has two so far: `static`, which is an attribute of a variable, see [Global variables](#global-variables), and `partial`, which is an attribute of a match statement and is written after `match`, as in `match #(partial) color ->`, see [Match statements](#match-statements). Any other attribute is an error, and so is an attribute that is given twice in the same list, or one that is not an attribute of what it is given to, such as `static` on a match statement. Attributes are accepted on the definition of a global variable and on a match statement only. A constant and a variable of a procedure take none yet, so they are errors there.
 
+## Parametric polymorphism
+
+Parametric polymorphism lets a procedure or a struct be written once for values of any type. Such a definition is polymorphic: it has type parameters, names that stand for types, which each use of the definition gives a type. The program has no type parameters when it runs. The compiler makes a copy of the definition for each list of types that it is used with, a specialization, in which every type parameter is the type that it is given, and the copy is built like any other procedure or struct. So a polymorphic procedure is as fast as one written for each type by hand, and an error in one of its specializations is told at the place in the polymorphic definition where it is.
+
+### Polymorphic procedures
+
+A procedure is polymorphic when a parameter declares a type parameter. A parameter whose type is the keyword `type_id` is a type parameter itself, and it is written with `$` directly before its name, which says that the name is declared there. The other parameters and the return type use the name without the `$`:
+
+```
+add :: proc($T: type_id, a: T, b: T) T ->
+    return a + b
+
+main :: proc() Int ->
+    whole := add(10, 20)
+    part := add(1.5, 2.25)
+    return whole
+```
+
+The calls do not give `T`: its type is deduced from the arguments. The type of each argument is matched with the type of its parameter, in which `T` stands for any one type, so `add(10, 20)` gives `T` the type `Int` and `add(1.5, 2.25)` the type `F64`, and each call calls the specialization for its type: `whole` is an `Int` and `part` an `F64`. Within the procedure a type parameter is used wherever a type is: as the type of a variable, `total : T`, of a cast, `cast(T)x`, of the elements of an array slice, `[]T`, of what a pointer points to, `^T`, and as the type of what `make` makes, `make([]T, count)`. Whatever the procedure does with a value of `T` must be done with the types that it is given, so `add` cannot be called with two `Bool` values, which have no `+`: its specialization `add(Bool)` is an error, which is told at the place in `add` that is wrong, or at the call that needs the specialization when the error is about the procedure as a whole.
+
+A type parameter can be declared in the type of a parameter instead, by writing the `$` there. It is declared at its first use, and the other uses are written without it:
+
+```
+larger :: proc(a: $T, b: T) T ->
+    if a > b ->
+        return a
+    return b
+
+sum :: proc(values: []$T) T ->
+    total : T
+    for value in values ->
+        total += value
+    return total
+
+swap :: proc(a: ^$T, b: ^T) ->
+    kept := a^
+    a^ = b^
+    b^ = kept
+```
+
+`sum` takes an array slice of anything, so `sum(prices)` of a `[]F64` gives `T` the type `F64`, and an array is given where an array slice is wanted as a slice of all of its elements, as for any other parameter, so `sum(numbers)` of a `[4]Int` gives it `Int`. `swap(%x, %y)` gives `T` the type of the variables whose addresses are given. A procedure can have several type parameters, each declared once: a name that is declared twice is an error, and so is a `$` anywhere else than in the parameters of a procedure, such as in the return type or in the type of a variable.
+
+Each type parameter is one type in a call. When two arguments give it different types, as `add(count, half)` with an `Int` and an `F64`, the call is an error. An untyped constant, such as `20`, can become many types, so it only gives its type parameter the type that it has where nothing else says, see [Untyped constants](#untyped-constants), and only when no other argument gives it one: `add(1.5, 2)` gives `T` the type `F64` from the float literal, and the `2` is then an argument of the type `F64`, which an untyped integer is not, so it is an error, as it is for any parameter of the type `F64`. The type of an argument that is the result of a call of a polymorphic procedure is the return type of the specialization that the call calls, so `add(add(1, 2), 3)` works out the inner call first.
+
+A type parameter whose type no argument says, such as one that is only the return type, cannot be deduced, and a call that does not give it is an error. Such a call gives every parameter, the type parameters as well, which are given types, as the arguments of the parameters of the type `type_id`:
+
+```
+zero :: proc($T: type_id) T ->
+    nothing : T
+    return nothing
+
+main :: proc() Int ->
+    count := zero(Int)
+    flag := zero(Bool)
+    return count
+```
+
+A type that is given is written as a type: a name, such as `Int` or `Point`, or a pointer type or the type of an array slice, such as `^Int` and `[]Byte`. A type where a value is wanted, and a value where a type is wanted, are errors.
+
+The specialization of a procedure is called the name of the procedure and its types between parentheses, such as `add(Int)` and `add(F64)`, which no name that is written can be. It is a procedure of the program like any other, which the specializations of other procedures can call. A polymorphic procedure itself is no procedure that the program has, so it can only be called: its name as a value, as in `adder := add`, which would be a [pointer to a procedure](#pointers-to-procedures), is an error, since it has no one signature. A procedure that calls itself with a larger type each time, such as `nest(Box(T) { item = value })`, would need specializations without end, so the compiler stops at a limit, which is an error.
+
+### Polymorphic structs
+
+A struct is polymorphic when it has type parameters, which are written between parentheses after `struct`, each of them `$T: type_id`. The fields use the names of the type parameters as types:
+
+```
+Pair :: struct($T: type_id) ->
+    first: T
+    second: T
+
+Labeled :: struct($K: type_id, $V: type_id) ->
+    key: K
+    value: V
+```
+
+A polymorphic struct is not a type until it is given types, which are written between parentheses after its name, as many as it has type parameters: `Pair(Int)` is a struct whose fields are an `Int` each, and `Labeled(Str, Pair(Int))` one whose key is a `Str` and whose value is a `Pair(Int)`. Such a type is written anywhere a type is: as the type of a variable, of a parameter, of a field or of what a procedure returns, and before the braces of a [struct literal](#structs):
+
+```
+pair := Pair(Int) { first = 1, second = 2 }
+labeled : Labeled(Str, Pair(Int))
+```
+
+Each list of types makes one specialization of the struct, a struct of its own, whose name is the name of the struct and its types, such as `Pair(Int)`, so two uses with the same types are the same type, and `Pair(Int)` and `Pair(F64)` are two types. The types are compared as they are written, without spaces, so `Pair( Int )` is `Pair(Int)`. A polymorphic struct without types, such as `pair : Pair`, a number of types that is not the number of its type parameters, and types after a struct that has no type parameters, are errors.
+
+A polymorphic procedure can take or give a polymorphic struct with its own type parameters, and the type of an argument is matched with it as with any other type, so `T` of the parameter `pair: Pair($T)` is `Int` for an argument of the type `Pair(Int)`:
+
+```
+pair_of :: proc(a: $T, b: T) Pair(T) ->
+    return Pair(T) { first = a, second = b }
+
+swapped :: proc(pair: Pair($T)) Pair(T) ->
+    return Pair(T) { first = pair.second, second = pair.first }
+```
+
 ## Foreign procedures
 
 A program can call procedures that are not written in Mialu but in another language, which is JavaScript, the C library or a library of the system. They are called foreign procedures, and the language that they are in is the foreign target. Two things are needed: an import, which says where the procedures come from, and a foreign block, which lists the ones that the program uses, with their parameters and return types:
@@ -2581,18 +2677,6 @@ The `wasm` target writes a WebAssembly binary module, and the `wat` target the s
 The `x64-win32` target writes an executable file for Windows on x64. See [Build target: x64-win32](build-target-x64-win32.md).
 
 ## Possible future features
-
-### Parametric polymorphism
-
-```
-sum :: proc(a: $T, b: T) T ->
-    return a + b
-
-main :: proc() ->
-    x := sum(1, 2)
-    y := sum(1.0, 2.0)
-    ...
-```
 
 ### Converting a string to bytes
 

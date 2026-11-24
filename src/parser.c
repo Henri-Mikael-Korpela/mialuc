@@ -74,6 +74,9 @@ typedef struct {
     // their elements and fields are expressions. It is bounded by `AST_BLOCK_DEPTH_MAX`, so that
     // the recursion that this needs cannot go on without end.
     size_t literal_depth;
+    // How many lists of type arguments are open, as in `Stack(Pair(Int))`, which are inside each
+    // other because an argument is a type. It is bounded like `literal_depth`.
+    size_t type_argument_depth;
     // Whether `type_info_of` was parsed, which makes the module get the types of the information,
     // see `parse_reflection_types_append`.
     bool has_type_info;
@@ -152,7 +155,10 @@ static Ast_Node_Index parse_statement           (Parser *parser);
 static Ast_Node_Index parse_string_literal      (Parser *parser);
 static void           parse_skip_indentation    (Parser *parser);
 static Ast_Node_Index parse_struct_literal      (Parser *parser);
-static Ast_Node_Index parse_struct_type         (Parser *parser, uint32_t indentation_level);
+static bool           parse_struct_literal_is_polymorphic(Parser const *parser);
+static Ast_Node_Index parse_struct_type         (Parser *parser, uint32_t indentation_level,
+                                                 Ast_Node_Index *type_parameters,
+                                                 size_t *type_parameter_count);
 static Str            parse_struct_type_frame_expected(Parse_Struct_Frame_Kind kind);
 static Parse_Struct_Frame parse_struct_type_union_line(Parser *parser,
                                                  Parse_Struct_Frame const *parent);
@@ -166,6 +172,8 @@ static Token const *  parse_token_current       (Parser const *parser);
 static bool           parse_token_expect        (Parser *parser, Token_Kind token_kind,
                                                  Str expected);
 static Ast_Node_Index parse_type                (Parser *parser, Str expected);
+static bool           parse_type_arguments      (Parser *parser, Ast_Node_Index type_name,
+                                                 Token const *name);
 static Ast_Node_Index parse_type_name           (Parser *parser, Str expected,
                                                  bool is_procedure_allowed);
 static Ast_Node_Index parse_procedure_type      (Parser *parser);
@@ -191,6 +199,7 @@ Parse_Result parse_at(Array_Slice tokens, Array_Slice node_buffer, size_t node_s
         .nodes = node_buffer.elements,
         .expected = STR(""),
         .literal_depth = 0,
+        .type_argument_depth = 0,
         .has_type_info = false,
         .procedure = AST_NODE_INDEX_NONE,
         .system_aliases = {{0}},
@@ -420,9 +429,14 @@ static Ast_Node_Index parse_definition(Parser *parser) {
     // compiled. Only an expression can have a type.
     Token_Kind next = parse_token_current(parser)->kind;
     Ast_Node_Index value = AST_NODE_INDEX_NONE;
+    // The type parameters of a polymorphic struct, which are children of the definition after the
+    // struct, see `AST_NODE_TYPE_CONSTANT_DEFINITION`.
+    Ast_Node_Index type_parameters[AST_STRUCT_TYPE_PARAMETER_COUNT_MAX];
+    size_t type_parameter_count = 0;
     if (not is_typed_constant && next == TOKEN_KIND_KEYWORD_STRUCT) {
         // Like a procedure, a struct ends with its body.
-        value = parse_struct_type(parser, INDENTATION_LEVEL_TOP);
+        value = parse_struct_type(parser, INDENTATION_LEVEL_TOP, type_parameters,
+                                  &type_parameter_count);
     } else if (not is_typed_constant && next == TOKEN_KIND_KEYWORD_ENUM) {
         // An enum ends with its members.
         value = parse_enum_type(parser, INDENTATION_LEVEL_TOP);
@@ -443,6 +457,9 @@ static Ast_Node_Index parse_definition(Parser *parser) {
     parse_node_append_child(parser, definition, value);
     if (type != AST_NODE_INDEX_NONE) {
         parse_node_append_child(parser, definition, type);
+    }
+    for (size_t i = 0; i < type_parameter_count; i += 1) {
+        parse_node_append_child(parser, definition, type_parameters[i]);
     }
 
     assert(parser->nodes[definition].first_child == value);
@@ -1034,6 +1051,9 @@ static bool parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure
 
     Token const *name = first;
     char const *source_bytes = NULL;
+    // The end of the last type in the source, which is the end of its name, or of the `)` of the
+    // type arguments of a polymorphic struct after the name.
+    char const *last_end = NULL;
     size_t type_count = 0;
     // Every type consumes a token, so there are fewer types than tokens, which bounds the loop.
     for (size_t type = 0; type < parser->token_count; type += 1) {
@@ -1046,6 +1066,11 @@ static bool parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure
         }
 
         name = parse_token_current(parser);
+        if (name->kind == TOKEN_KIND_TYPE_PARAMETER) {
+            (void)parse_fail(parser, STR("the name of a return type without '$', because a type "
+                                         "parameter is declared by a parameter"));
+            return false;
+        }
         if (name->kind != TOKEN_KIND_IDENTIFIER) {
             // The false return value reports the failure, so the node index is not needed.
             if (name->kind == TOKEN_KIND_KEYWORD_PROC) {
@@ -1066,6 +1091,31 @@ static bool parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure
         // The tokens do not point at the source, but a name does, and its offset says where the
         // source starts.
         source_bytes = name->payload.identifier.text.bytes - name->source_offset;
+        last_end = name->payload.identifier.text.bytes + name->payload.identifier.text.length;
+
+        // The type arguments of a polymorphic struct, as in `Stack(Int)`, are part of the text up
+        // to the `)` that closes them. The parentheses are counted, because an argument can have
+        // arguments too, and every token is consumed, which bounds the loop.
+        if (parse_token_current(parser)->kind == TOKEN_KIND_PARENTHESIS_LEFT) {
+            size_t depth = 0;
+            for (size_t i = 0; i < parser->token_count; i += 1) {
+                Token const *token = parse_token_current(parser);
+                if (token->kind == TOKEN_KIND_PARENTHESIS_LEFT) {
+                    depth += 1;
+                } else if (token->kind == TOKEN_KIND_PARENTHESIS_RIGHT) {
+                    depth -= 1;
+                } else if (token->kind == TOKEN_KIND_INDENTATION ||
+                           token->kind == TOKEN_KIND_END || token->kind == TOKEN_KIND_ARROW) {
+                    (void)parse_fail(parser, STR("')' after the type arguments"));
+                    return false;
+                }
+                parse_token_advance(parser);
+                if (depth == 0) {
+                    last_end = source_bytes + token->source_offset + 1;
+                    break;
+                }
+            }
+        }
 
         if (not is_list || parse_token_current(parser)->kind != TOKEN_KIND_COMMA) {
             break;
@@ -1074,7 +1124,7 @@ static bool parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure
     }
 
     char const *type_bytes = source_bytes + first->source_offset;
-    char const *type_end = name->payload.identifier.text.bytes + name->payload.identifier.text.length;
+    char const *type_end = last_end;
     if (is_list) {
         Token const *close = parse_token_current(parser);
         if (close->kind != TOKEN_KIND_PARENTHESIS_RIGHT) {
@@ -1955,7 +2005,10 @@ static Ast_Node_Index parse_parameter(Parser *parser) {
     assert(parser->token_index < parser->token_count);
 
     Token const *name = parse_token_current(parser);
-    if (name->kind != TOKEN_KIND_IDENTIFIER) {
+    // `$T: type_id` is a type parameter: its name, without the `$`, is a type in the procedure or
+    // the struct, which each use of it gives, and its type is the word `type_id`.
+    bool is_type_parameter = name->kind == TOKEN_KIND_TYPE_PARAMETER;
+    if (name->kind != TOKEN_KIND_IDENTIFIER && not is_type_parameter) {
         return parse_fail(parser, STR("a parameter name"));
     }
 
@@ -1963,11 +2016,39 @@ static Ast_Node_Index parse_parameter(Parser *parser) {
     if (parameter == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    parser->nodes[parameter].payload.parameter.name = name->payload.identifier.text;
+    Str parameter_name = name->payload.identifier.text;
+    if (is_type_parameter) {
+        assert(parameter_name.length > 1);
+        parameter_name = str_make(parameter_name.bytes + 1, parameter_name.length - 1);
+    }
+    parser->nodes[parameter].payload.parameter.name = parameter_name;
     parse_token_advance(parser);
 
     if (not parse_token_expect(parser, TOKEN_KIND_TYPE_SEPARATOR, STR("':'"))) {
         return AST_NODE_INDEX_NONE;
+    }
+
+    Token const *type_token = parse_token_current(parser);
+    if (is_type_parameter || type_token->kind == TOKEN_KIND_KEYWORD_TYPE_ID) {
+        if (not is_type_parameter) {
+            return parse_fail(parser, STR("a type name, because a parameter of the type 'type_id' "
+                                          "has '$' before its name, as in '$T: type_id'"));
+        }
+        if (type_token->kind != TOKEN_KIND_KEYWORD_TYPE_ID) {
+            return parse_fail(parser, STR("'type_id', because a parameter that has '$' before its "
+                                          "name is a type"));
+        }
+        // The type is the word, which is a name to every stage after this one, see
+        // `ast_parameter_is_type`. A keyword token has its text like a name does.
+        Ast_Node_Index type = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
+        if (type == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[type].payload.type_name.name = type_token->payload.identifier.text;
+        parse_token_advance(parser);
+        parse_node_append_child(parser, parameter, type);
+        assert(parser->nodes[parameter].first_child == type);
+        return parameter;
     }
 
     Ast_Node_Index type = parse_type(parser, STR("a type name"));
@@ -2457,7 +2538,21 @@ static Ast_Node_Index parse_call(Parser *parser) {
         // Every argument consumes a token, so there are fewer arguments than tokens, which bounds
         // the loop.
         for (size_t i = 0; i < parser->token_count; i += 1) {
-            Ast_Node_Index argument = parse_expression(parser);
+            // A type can be given to a type parameter of a polymorphic procedure, see
+            // `ast_parameter_is_type`. A type that is a name is a name like any other here, which
+            // the analysis tells apart, but a pointer type and the type of an array slice start
+            // as no expression does, and are parsed as types.
+            Token_Kind first = parse_token_current(parser)->kind;
+            bool is_type = first == TOKEN_KIND_CARET ||
+                           (first == TOKEN_KIND_BRACKET_LEFT &&
+                            parser->tokens[parser->token_index + 1].kind ==
+                                TOKEN_KIND_BRACKET_RIGHT);
+            Ast_Node_Index argument = AST_NODE_INDEX_NONE;
+            if (is_type) {
+                argument = parse_type(parser, STR("a type"));
+            } else {
+                argument = parse_expression(parser);
+            }
             if (argument == AST_NODE_INDEX_NONE) {
                 return AST_NODE_INDEX_NONE;
             }
@@ -2618,8 +2713,18 @@ static Ast_Node_Index parse_operand_value(Parser *parser) {
     if (next == TOKEN_KIND_IDENTIFIER) {
         // The name is not the last token, because the last one is `END`.
         assert(parser->token_index + 1 < parser->token_count);
-        if (parser->tokens[parser->token_index + 1].kind == TOKEN_KIND_PARENTHESIS_LEFT) {
+        if (parser->tokens[parser->token_index + 1].kind == TOKEN_KIND_PARENTHESIS_LEFT &&
+            not parse_struct_literal_is_polymorphic(parser)) {
             return parse_call(parser);
+        }
+        // A polymorphic struct with its type arguments and a brace starts a struct literal too,
+        // such as `Pair(Int) { ... }`.
+        if (parser->tokens[parser->token_index + 1].kind == TOKEN_KIND_PARENTHESIS_LEFT) {
+            Ast_Node_Index literal = parse_struct_literal(parser);
+            if (literal == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            return parse_subscripts(parser, literal);
         }
         // A name directly followed by a brace starts a struct literal, such as `Person { ... }`.
         if (parser->tokens[parser->token_index + 1].kind == TOKEN_KIND_BRACE_LEFT) {
@@ -2961,14 +3066,35 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
     if (parser->literal_depth >= AST_BLOCK_DEPTH_MAX) {
         return parse_fail(parser, STR("fewer nested literals"));
     }
+    // The name of a polymorphic struct has its type arguments after it, as in `Pair(Int)`, and the
+    // name of the literal is the text of both, like the name of a type, see
+    // `parse_type_arguments`. The arguments are checked by parsing them into a type name that is
+    // given up afterwards, because the children of a literal are its fields.
+    Str name = STR_EMPTY;
+    if (start->kind == TOKEN_KIND_IDENTIFIER) {
+        name = start->payload.identifier.text;
+        parse_token_advance(parser);
+    }
+    if (start->kind == TOKEN_KIND_IDENTIFIER &&
+        parse_token_current(parser)->kind == TOKEN_KIND_PARENTHESIS_LEFT) {
+        size_t node_count = parser->node_count;
+        Ast_Node_Index type_name = parse_node_make(parser, AST_NODE_TYPE_TYPE_NAME);
+        if (type_name == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parser->nodes[type_name].payload.type_name.name = name;
+        if (not parse_type_arguments(parser, type_name, start)) {
+            return AST_NODE_INDEX_NONE;
+        }
+        name = parser->nodes[type_name].payload.type_name.name;
+        parser->node_count = node_count;
+    }
+
     Ast_Node_Index literal = parse_node_make(parser, AST_NODE_TYPE_STRUCT_LITERAL);
     if (literal == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
     }
-    if (start->kind == TOKEN_KIND_IDENTIFIER) {
-        parser->nodes[literal].payload.struct_literal.name = start->payload.identifier.text;
-        parse_token_advance(parser);
-    }
+    parser->nodes[literal].payload.struct_literal.name = name;
 
     if (not parse_token_expect(parser, TOKEN_KIND_BRACE_LEFT, STR("'{'"))) {
         return AST_NODE_INDEX_NONE;
@@ -3026,6 +3152,34 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
 }
 
 /**
+ * Returns whether the current token, a name that a `(` follows, starts the struct literal of a
+ * polymorphic struct, such as `Pair(Int) { ... }`, and not a call: the `)` that closes the
+ * parentheses has a `{` after it, which never follows a call. The parentheses are counted, because
+ * a type argument can have its own, and a line break ends the search, because a literal does not
+ * start on one line with its name and its brace on another.
+ */
+static bool parse_struct_literal_is_polymorphic(Parser const *parser) {
+    assert(parser->tokens[parser->token_index].kind == TOKEN_KIND_IDENTIFIER);
+
+    size_t depth = 0;
+    for (size_t index = parser->token_index + 1; index + 1 < parser->token_count; index += 1) {
+        Token_Kind kind = parser->tokens[index].kind;
+        if (kind == TOKEN_KIND_INDENTATION || kind == TOKEN_KIND_END) {
+            return false;
+        }
+        if (kind == TOKEN_KIND_PARENTHESIS_LEFT) {
+            depth += 1;
+        } else if (kind == TOKEN_KIND_PARENTHESIS_RIGHT) {
+            depth -= 1;
+            if (depth == 0) {
+                return parser->tokens[index + 1].kind == TOKEN_KIND_BRACE_LEFT;
+            }
+        }
+    }
+    return false;
+}
+
+/**
  * Parses the definition of a struct after `::`: the word `struct`, `->`, and the fields, which are
  * the lines that are indented one level deeper than the line of the definition, each of them
  * `name: Type`. A field can be a struct of its own, written `name: struct ->`, whose fields are
@@ -3037,13 +3191,49 @@ static Ast_Node_Index parse_struct_literal(Parser *parser) {
  * indented less than the innermost one closes it, and as many outer ones as it is indented less
  * than. Every struct must have a field, every union match a case and every case a field. The
  * current token is `struct`, and `indentation_level` is the level of the line it is on.
+ *
+ * A polymorphic struct has its type parameters between parentheses after `struct`, as in
+ * `struct($T: type_id) ->`, each one a parameter of the type `type_id`. Their nodes come before the
+ * struct, and are written to `type_parameters`, which has room for
+ * `AST_STRUCT_TYPE_PARAMETER_COUNT_MAX`, with their number in `*type_parameter_count`, for the
+ * caller to make them children of the definition.
  */
-static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_level) {
+static Ast_Node_Index parse_struct_type(Parser *parser, uint32_t indentation_level,
+                                        Ast_Node_Index *type_parameters,
+                                        size_t *type_parameter_count) {
     assert(parser->status == PARSE_STATUS_OK);
     assert(parse_token_current(parser)->kind == TOKEN_KIND_KEYWORD_STRUCT);
     assert(indentation_level < UINT32_MAX);
+    assert(type_parameters != NULL);
+    assert(type_parameter_count != NULL);
 
+    *type_parameter_count = 0;
     parse_token_advance(parser);
+    if (parse_token_current(parser)->kind == TOKEN_KIND_PARENTHESIS_LEFT) {
+        parse_token_advance(parser);
+        // Every parameter consumes a token, so there are fewer parameters than tokens.
+        for (size_t i = 0; i < parser->token_count; i += 1) {
+            if (*type_parameter_count == AST_STRUCT_TYPE_PARAMETER_COUNT_MAX) {
+                return parse_fail(parser, STR("fewer type parameters"));
+            }
+            if (parse_token_current(parser)->kind != TOKEN_KIND_TYPE_PARAMETER) {
+                return parse_fail(parser, STR("a type parameter, such as '$T: type_id'"));
+            }
+            Ast_Node_Index parameter = parse_parameter(parser);
+            if (parameter == AST_NODE_INDEX_NONE) {
+                return AST_NODE_INDEX_NONE;
+            }
+            type_parameters[*type_parameter_count] = parameter;
+            *type_parameter_count += 1;
+            if (parse_token_current(parser)->kind != TOKEN_KIND_COMMA) {
+                break;
+            }
+            parse_token_advance(parser);
+        }
+        if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("',' or ')'"))) {
+            return AST_NODE_INDEX_NONE;
+        }
+    }
     Ast_Node_Index root = parse_node_make(parser, AST_NODE_TYPE_STRUCT_TYPE);
     if (root == AST_NODE_INDEX_NONE) {
         return AST_NODE_INDEX_NONE;
@@ -3418,7 +3608,8 @@ static Ast_Node_Index parse_type_name(Parser *parser, Str expected, bool is_proc
             return parse_fail(parser, STR("a type name, because the parameter of a procedure type "
                                           "is not a pointer to a procedure"));
         }
-        if (name->kind != TOKEN_KIND_IDENTIFIER) {
+        // A type parameter, `$T`, declares a type, which is a name too.
+        if (name->kind != TOKEN_KIND_IDENTIFIER && name->kind != TOKEN_KIND_TYPE_PARAMETER) {
             if (outermost != AST_NODE_INDEX_NONE) {
                 return parse_fail(parser, STR("a type name after '^'"));
             }
@@ -3430,6 +3621,11 @@ static Ast_Node_Index parse_type_name(Parser *parser, Str expected, bool is_proc
         }
         parser->nodes[type_name].payload.type_name.name = name->payload.identifier.text;
         parse_token_advance(parser);
+        if (name->kind == TOKEN_KIND_IDENTIFIER &&
+            parse_token_current(parser)->kind == TOKEN_KIND_PARENTHESIS_LEFT &&
+            not parse_type_arguments(parser, type_name, name)) {
+            return AST_NODE_INDEX_NONE;
+        }
     }
 
     if (outermost == AST_NODE_INDEX_NONE) {
@@ -3437,6 +3633,56 @@ static Ast_Node_Index parse_type_name(Parser *parser, Str expected, bool is_proc
     }
     parse_node_append_child(parser, innermost, type_name);
     return outermost;
+}
+
+/**
+ * Parses the type arguments of a polymorphic struct, the types between the parentheses after its
+ * name, as in `Stack(Int)` or `Pair(Int, ^Str)`, and appends them to `type_name`, the
+ * `AST_NODE_TYPE_TYPE_NAME` of the token `name`. Its text becomes the name and the arguments as
+ * they are in the source, so that the type is one text to the stages that read types as text, and
+ * the arguments are its children for the ones that read them as types. The current token is the
+ * `(`. The arguments can be type arguments themselves, which the parser parses by calling itself,
+ * so how deep they are is bounded. Returns false after it recorded an error.
+ */
+static bool parse_type_arguments(Parser *parser, Ast_Node_Index type_name, Token const *name) {
+    assert(parser->status == PARSE_STATUS_OK);
+    assert(parse_token_current(parser)->kind == TOKEN_KIND_PARENTHESIS_LEFT);
+    assert(parser->nodes[type_name].node_type == AST_NODE_TYPE_TYPE_NAME);
+
+    if (parser->type_argument_depth >= AST_BLOCK_DEPTH_MAX) {
+        (void)parse_fail(parser, STR("fewer type arguments inside each other"));
+        return false;
+    }
+    parse_token_advance(parser);
+    parser->type_argument_depth += 1;
+    // Every argument consumes a token, so there are fewer arguments than tokens, which bounds the
+    // loop.
+    for (size_t i = 0; i < parser->token_count; i += 1) {
+        Ast_Node_Index argument = parse_type(parser, STR("a type argument"));
+        if (argument == AST_NODE_INDEX_NONE) {
+            return false;
+        }
+        parse_node_append_child(parser, type_name, argument);
+        if (parse_token_current(parser)->kind != TOKEN_KIND_COMMA) {
+            break;
+        }
+        parse_token_advance(parser);
+    }
+    parser->type_argument_depth -= 1;
+
+    Token const *close = parse_token_current(parser);
+    if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("',' or ')'"))) {
+        return false;
+    }
+    // The tokens do not point at the source, but a name does, and its offset says where the
+    // source starts.
+    Str name_text = name->payload.identifier.text;
+    char const *source_bytes = name_text.bytes - name->source_offset;
+    char const *end = source_bytes + close->source_offset + 1;
+    assert(end > name_text.bytes);
+    parser->nodes[type_name].payload.type_name.name =
+        str_make(name_text.bytes, (size_t)(end - name_text.bytes));
+    return true;
 }
 
 /**

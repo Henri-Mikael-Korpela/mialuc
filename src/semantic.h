@@ -153,6 +153,11 @@ typedef enum {
     // A `return` inside a deferred statement, which runs while the block is being left, maybe by
     // another `return`. The subject is the word `return`.
     SEMANTIC_STATUS_RETURN_IN_DEFER,
+    // An argument that is not a type where a call gives a type to a type parameter, `$T: type_id`.
+    // The subject is the name of the call.
+    SEMANTIC_STATUS_TYPE_ARGUMENT_INVALID,
+    // A type is an argument of a call where a value is wanted. The subject is the name of the call.
+    SEMANTIC_STATUS_TYPE_ARGUMENT_MISPLACED,
     SEMANTIC_STATUS_VARIABLE_NAME_DUPLICATE,
     SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS,
 } Semantic_Status;
@@ -274,6 +279,12 @@ typedef struct {
  * parameter or of a variable that is in scope where it is
  * defined. Two blocks that are not inside each other can have a variable of one name each, because
  * neither is in scope in the other. A name that no scope has is an error as well.
+ *
+ * A call gives a type as an argument only to a type parameter of the type `type_id` of a
+ * polymorphic procedure, when it gives every parameter, and to `make`. A name there is the name of
+ * a type, and it becomes the `AST_NODE_TYPE_TYPE_NAME` that it is, before it is looked up as a name
+ * of a value. Any other type that is an argument is an error, and so is a value where a type is
+ * wanted. Which types a polymorphic definition is given is worked out later, see `specialize`.
  *
  * Apart from the values of constants, the analysis is about names only. It does not know what a
  * type is, so whether the value that a name stands for is of the right type is for the target to

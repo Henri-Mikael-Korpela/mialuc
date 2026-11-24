@@ -1,0 +1,11 @@
+error[E0430]: the type parameter 'T' is declared twice
+ --> test-code/errors/front/E0430-type-parameter-duplicate.mu:3:36
+  |
+1 | package errors
+2 |
+3 | first :: proc($T: type_id, value: $T) T ->
+  |                                    ^ declared again here
+4 |     return value
+  |
+  = help: write '$' before the name of a type parameter once, and the name without it where it is
+          used again

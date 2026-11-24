@@ -695,6 +695,8 @@ static Token_Kind tokenizer_keyword_type(Str text) {
         return TOKEN_KIND_KEYWORD_STRUCT;
     } else if (str_equals(text, STR("true"))) {
         return TOKEN_KIND_KEYWORD_TRUE;
+    } else if (str_equals(text, STR("type_id"))) {
+        return TOKEN_KIND_KEYWORD_TYPE_ID;
     } else if (str_equals(text, STR("type_info_of"))) {
         return TOKEN_KIND_KEYWORD_TYPE_INFO_OF;
     } else if (str_equals(text, STR("union"))) {
@@ -1070,6 +1072,32 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer, Array_Slice text_
                 .kind = TOKEN_KIND_LABEL,
                 .source_offset = (uint32_t)offset,
                 .payload.identifier.text = name,
+            };
+            result.tokens.length += 1;
+            offset = end;
+        }
+        // A type parameter is a `$` directly followed by a name, as in `$T`, and no space may be in
+        // between, as for a label. A `$` that no name follows starts no token.
+        else if (character == '$' && offset + 1 < source.length &&
+                 (char_is_letter(source.bytes[offset + 1]) || source.bytes[offset + 1] == '_')) {
+            size_t end = offset + 1;
+            while (end < source.length && (char_is_letter(source.bytes[end]) ||
+                                           char_is_digit(source.bytes[end]) ||
+                                           source.bytes[end] == '_')) {
+                end += 1;
+            }
+
+            Str name = str_make(source.bytes + offset + 1, end - offset - 1);
+            if (tokenizer_keyword_type(name) != TOKEN_KIND_IDENTIFIER) {
+                result.status = TOKENIZE_STATUS_TYPE_PARAMETER_INVALID;
+                result.error_offset = offset;
+                return result;
+            }
+
+            token_elements[result.tokens.length] = (Token){
+                .kind = TOKEN_KIND_TYPE_PARAMETER,
+                .source_offset = (uint32_t)offset,
+                .payload.identifier.text = str_make(source.bytes + offset, end - offset),
             };
             result.tokens.length += 1;
             offset = end;

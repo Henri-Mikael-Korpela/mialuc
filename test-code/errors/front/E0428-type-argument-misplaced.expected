@@ -1,0 +1,10 @@
+error[E0428]: the call of 'twice' gives a type where a value is wanted
+ --> test-code/errors/front/E0428-type-argument-misplaced.mu:7:12
+  |
+5 |
+6 | main :: proc() Int ->
+7 |     return twice(^Int)
+  |            ^^^^^
+  |
+  = note: a call gives a type only to a type parameter of the type 'type_id', when it gives every
+          parameter, and to the first argument of 'make'

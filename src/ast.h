@@ -129,6 +129,10 @@ enum {
     // procedure. The parser and the analysis keep the blocks that are open in a fixed array
     // instead of recursing, and a deeper nesting is rejected by the parser.
     AST_BLOCK_DEPTH_MAX = 32,
+    // The most type parameters that a struct has, `struct($K: type_id, $V: type_id)`. The parser
+    // keeps them aside while it makes the struct, which comes after them, see
+    // `AST_NODE_TYPE_CONSTANT_DEFINITION`.
+    AST_STRUCT_TYPE_PARAMETER_COUNT_MAX = 8,
 };
 
 /**
@@ -199,7 +203,11 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   argument must be a constant and the call is a constant string. A call of the built-in `make`
  *   is the other exception: its first child is the type of what it makes, such as the
  *   `AST_NODE_TYPE_ARRAY_TYPE` of `[]Byte` in `make([]Byte, 16)`, which is not an expression, and
- *   the arguments follow it.
+ *   the arguments follow it. A call of a polymorphic procedure that gives every parameter has a type
+ *   as the argument of each type parameter of the type `type_id`, which is an
+ *   `AST_NODE_TYPE_TYPE_NAME`, an `AST_NODE_TYPE_POINTER_TYPE` or an `AST_NODE_TYPE_ARRAY_TYPE`,
+ *   see `ast_parameter_is_type`: a type that is a name is parsed as an `AST_NODE_TYPE_IDENTIFIER`,
+ *   which the analysis makes the type name that it is.
  * - `AST_NODE_TYPE_CALL_STATEMENT`: one child, an `AST_NODE_TYPE_CALL` whose value, if it has
  *   one, is dropped. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_CAST`: one child, the operand, as `b` in `cast(Int)b`. The name of the type that
@@ -223,7 +231,10 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   an `AST_NODE_TYPE_IDENTIFIER`, as in `DEFAULT :: Color.RED`, or any other expression, which the
  *   analysis checks is a constant, see `constant_evaluate`, such as `LIMIT :: 100` or
  *   `GREETING :: "Hello"`. A typed constant, `LIMIT : Byte : 100`, has a second child, its type,
- *   which comes after the value, so that the value is the first child of every definition.
+ *   which comes after the value, so that the value is the first child of every definition. A
+ *   polymorphic struct has its type parameters after the struct, each an
+ *   `AST_NODE_TYPE_PARAMETER` of the type `type_id`, whose nodes come before the struct, see
+ *   `ast_definition_is_polymorphic`.
  * - `AST_NODE_TYPE_CONTINUE_STATEMENT`: no children, or one `AST_NODE_TYPE_LABEL` when the
  *   statement names the loop to go on with. It ends the current pass of the innermost loop that it
  *   is in, or of the labeled loop, and goes on with the next one. The word is in the payload. It is
@@ -367,7 +378,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   expression of type `Bool` with the lowest precedence of the operators, and the target
  *   requires both operands to be `Bool`.
  * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`, an
- *   `AST_NODE_TYPE_POINTER_TYPE` or an `AST_NODE_TYPE_ARRAY_TYPE`.
+ *   `AST_NODE_TYPE_POINTER_TYPE` or an `AST_NODE_TYPE_ARRAY_TYPE`. A type parameter, written
+ *   `$T: type_id`, has the name without the `$` and the type name `type_id`, the word, as its type,
+ *   see `ast_parameter_is_type`.
  * - `AST_NODE_TYPE_POINTER_TYPE`: one child, the type that is pointed to, which is an
  *   `AST_NODE_TYPE_TYPE_NAME` or another `AST_NODE_TYPE_POINTER_TYPE`, so `^^Int` is a pointer type
  *   in a pointer type. It is a type like `AST_NODE_TYPE_TYPE_NAME`, found wherever a type is, and
@@ -416,7 +429,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   given a value, in the order of the source, which is not necessarily the order of the fields of
  *   the struct. `Person { age = 30, name = "Bob" }` is a struct literal. The name of the struct is
  *   in the payload, with `bytes` NULL for the literal `{ ... }` of a field that is a struct, which
- *   gets its type from the field. It is an expression.
+ *   gets its type from the field, and with the type arguments for a polymorphic struct, as in
+ *   `Pair(Int) { ... }`, like the text of an `AST_NODE_TYPE_TYPE_NAME`. It is an expression.
  * - `AST_NODE_TYPE_STRUCT_TYPE`: one `AST_NODE_TYPE_FIELD` for each field, in the order of the
  *   source. It is the value of an `AST_NODE_TYPE_CONSTANT_DEFINITION` that defines a struct, or the
  *   type of a field.
@@ -433,7 +447,11 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   type that is asked about. It can be followed by subscripts, such as the `.members` of
  *   `type_info_of(Color).members`, and it is the value of an
  *   `AST_NODE_TYPE_GLOBAL_VARIABLE_DEFINITION` when a subscript follows it.
- * - `AST_NODE_TYPE_TYPE_NAME`: no children.
+ * - `AST_NODE_TYPE_TYPE_NAME`: the name of a type, which is in the payload. It has no children,
+ *   except the name of a polymorphic struct with its type arguments, as in `Pair(Int)`, whose text
+ *   is the name and the arguments, from the name to the `)`, and whose children are the types of
+ *   the arguments. The text of a type parameter that is declared there, as in `values: []$T`, has
+ *   the `$` before the name.
  * - `AST_NODE_TYPE_UNION_CASE`: no children. The member of the enum that the field is for, such as
  *   `IDENTIFIER` in `case .IDENTIFIER ->`, in the payload without the dot. It is the only child of
  *   an `AST_NODE_TYPE_UNION_MATCH`.
@@ -725,6 +743,29 @@ Str ast_procedure_return_type_at(Ast_Node const *procedure, size_t index);
  * has no statements but the `...` that stands for its body, which is the last child.
  */
 bool ast_procedure_is_foreign(Ast_Node const *nodes, Ast_Node_Index procedure);
+
+/**
+ * Returns whether `parameter`, an `AST_NODE_TYPE_PARAMETER`, is a type parameter that is given as a
+ * type, `$T: type_id`, whose type is the `AST_NODE_TYPE_TYPE_NAME` of the word `type_id`, see
+ * `ast_definition_is_polymorphic`.
+ */
+bool ast_parameter_is_type(Ast_Node const *nodes, Ast_Node_Index parameter);
+
+/**
+ * Returns whether `parameter`, an `AST_NODE_TYPE_PARAMETER`, declares a type parameter: it is
+ * `$T: type_id`, or its type has a name with `$` before it, as `$T` in `values: []$T`.
+ */
+bool ast_parameter_declares_type(Ast_Node const *nodes, Ast_Node_Index parameter);
+
+/**
+ * Returns whether `definition`, a child of the module, is polymorphic: a procedure that has a
+ * parameter that declares a type parameter, see `ast_parameter_declares_type`, or a struct that has
+ * type parameters, which are the children of its definition after the struct. A polymorphic
+ * definition is no code of its own: each call of a procedure, or each use of a struct with type
+ * arguments, gets a copy of it in which the type parameters are the types that the use gives, see
+ * `specialize`.
+ */
+bool ast_definition_is_polymorphic(Ast_Node const *nodes, Ast_Node_Index definition);
 
 /**
  * Returns the target of the foreign block that declares `procedure`, an `AST_NODE_TYPE_PROCEDURE`

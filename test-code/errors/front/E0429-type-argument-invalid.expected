@@ -1,0 +1,10 @@
+error[E0429]: the call of 'zero' gives a type parameter something that is not a type
+ --> test-code/errors/front/E0429-type-argument-invalid.mu:8:12
+  |
+6 |
+7 | main :: proc() Int ->
+8 |     return zero(5)
+  |            ^^^^
+  |
+  = note: a call that gives every parameter gives each parameter of the type 'type_id' a type, such
+          as 'Int' or '[]Byte'

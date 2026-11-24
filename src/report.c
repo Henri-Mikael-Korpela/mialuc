@@ -209,6 +209,12 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .label = "this is a reserved word",
         .note = "a label is a ':' directly followed by a name, and the name is not a reserved word",
     },
+    [ERROR_CODE_TYPE_PARAMETER_INVALID] = {
+        .title = "a type parameter cannot be a reserved word",
+        .label = "this is a reserved word",
+        .note = "a type parameter is a '$' directly followed by a name, and the name is not a "
+                "reserved word",
+    },
     [ERROR_CODE_RUNE_LITERAL_EMPTY] = {
         .title = "a rune literal has no character",
         .label = "there is no character between the quotes",
@@ -457,6 +463,63 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
         .label = "inside a deferred statement",
         .note = "a deferred statement runs while its block is being left, maybe by another "
                 "'return'",
+    },
+    [ERROR_CODE_TYPE_ARGUMENT_MISPLACED] = {
+        .title = "the call of '{subject}' gives a type where a value is wanted",
+        .note = "a call gives a type only to a type parameter of the type 'type_id', when it gives "
+                "every parameter, and to the first argument of 'make'",
+    },
+    [ERROR_CODE_TYPE_ARGUMENT_INVALID] = {
+        .title = "the call of '{subject}' gives a type parameter something that is not a type",
+        .note = "a call that gives every parameter gives each parameter of the type 'type_id' a "
+                "type, such as 'Int' or '[]Byte'",
+    },
+    [ERROR_CODE_TYPE_PARAMETER_DUPLICATE] = {
+        .title = "the type parameter '{subject}' is declared twice",
+        .label = "declared again here",
+        .help = "write '$' before the name of a type parameter once, and the name without it where "
+                "it is used again",
+    },
+    [ERROR_CODE_TYPE_PARAMETER_MISPLACED] = {
+        .title = "'{subject}' declares a type parameter, which only a parameter of a procedure does",
+        .label = "a type parameter",
+        .help = "declare it in the type of a parameter, or write the name without '$'",
+    },
+    [ERROR_CODE_TYPE_PARAMETER_UNDEDUCED] = {
+        .title = "the type of the type parameter '{detail}' of '{subject}' cannot be deduced from "
+                 "the arguments of the call",
+        .note = "a type parameter gets the type of an argument whose parameter has it in its type, "
+                "and the type of that argument must be known",
+        .help = "give every parameter, the type parameters too, as in 'zero(Int)'",
+    },
+    [ERROR_CODE_TYPE_PARAMETER_CONFLICT] = {
+        .title = "the type parameter '{detail}' of '{subject}' is deduced as '{other}' and as "
+                 "'{target}'",
+        .note = "a type parameter is one type in a call, so the arguments whose parameters have it "
+                "must agree about it",
+    },
+    [ERROR_CODE_PROCEDURE_NOT_CALLED] = {
+        .title = "'{subject}' is a polymorphic procedure, so it can only be called",
+        .label = "not called",
+        .note = "a polymorphic procedure is a procedure for each of the types that it is called "
+                "with, so it is no one value",
+    },
+    [ERROR_CODE_STRUCT_TYPE_ARGUMENT_COUNT_MISMATCH] = {
+        .title = "'{subject}' gives a polymorphic struct another number of type arguments than its "
+                 "{number} type parameters",
+        .help = "write a type for each type parameter between parentheses after the name of the "
+                "struct, as in 'Pair(Int)'",
+    },
+    [ERROR_CODE_STRUCT_NOT_POLYMORPHIC] = {
+        .title = "'{subject}' gives type arguments to a type that is not a polymorphic struct",
+        .note = "only a struct that has type parameters, as in 'struct($T: type_id)', takes type "
+                "arguments",
+    },
+    [ERROR_CODE_SPECIALIZATION_LIMIT] = {
+        .title = "the copies of the polymorphic definitions at '{subject}' go past a limit of the "
+                 "compiler, {number}",
+        .note = "a procedure that calls itself with a larger type each time needs copies without "
+                "end",
     },
 
     // What is known when the program is compiled.
@@ -978,6 +1041,8 @@ static Error_Code const REPORT_SEMANTIC_CODES[] = {
     [SEMANTIC_STATUS_DEFER_NESTED] = ERROR_CODE_DEFER_NESTED,
     [SEMANTIC_STATUS_DEFER_STATEMENT_INVALID] = ERROR_CODE_DEFER_STATEMENT_INVALID,
     [SEMANTIC_STATUS_RETURN_IN_DEFER] = ERROR_CODE_RETURN_IN_DEFER,
+    [SEMANTIC_STATUS_TYPE_ARGUMENT_INVALID] = ERROR_CODE_TYPE_ARGUMENT_INVALID,
+    [SEMANTIC_STATUS_TYPE_ARGUMENT_MISPLACED] = ERROR_CODE_TYPE_ARGUMENT_MISPLACED,
     [SEMANTIC_STATUS_CONSTANT_CYCLE] = ERROR_CODE_CONSTANT_CYCLE,
     [SEMANTIC_STATUS_CONSTANT_DIVISION_BY_ZERO] = ERROR_CODE_CONSTANT_DIVISION_BY_ZERO,
     [SEMANTIC_STATUS_CONSTANT_NOT_CONSTANT] = ERROR_CODE_CONSTANT_NOT_CONSTANT,
@@ -1030,6 +1095,7 @@ static Error_Code const REPORT_TOKENIZE_CODES[] = {
         ERROR_CODE_INTEGER_LITERAL_SEPARATOR_INVALID,
     [TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE] = ERROR_CODE_INTEGER_LITERAL_TOO_LARGE,
     [TOKENIZE_STATUS_LABEL_INVALID] = ERROR_CODE_LABEL_INVALID,
+    [TOKENIZE_STATUS_TYPE_PARAMETER_INVALID] = ERROR_CODE_TYPE_PARAMETER_INVALID,
     [TOKENIZE_STATUS_RUNE_LITERAL_EMPTY] = ERROR_CODE_RUNE_LITERAL_EMPTY,
     [TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID] = ERROR_CODE_RUNE_LITERAL_ENCODING_INVALID,
     [TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID] = ERROR_CODE_RUNE_LITERAL_ESCAPE_INVALID,
@@ -1259,7 +1325,8 @@ void report_tokenize_error(Reporter const *reporter, char const *path, Str sourc
         number = (int64_t)length;
         break;
     case TOKENIZE_STATUS_LABEL_INVALID:
-        // The colon and the name.
+    case TOKENIZE_STATUS_TYPE_PARAMETER_INVALID:
+        // The colon or the `$`, and the name.
         length = 1 + report_length_word(source, offset + 1);
         detail = str_make(source.bytes + offset + 1, length - 1);
         break;
@@ -1456,6 +1523,62 @@ void report_semantic_error(Reporter const *reporter, char const *path, Str sourc
     report_emit_at_subject(reporter, code, path, source, result.subject, texts);
 }
 
+void report_specialize_error(Reporter const *reporter, char const *path, Str source,
+                             Specialize_Result result) {
+    assert(reporter != NULL);
+    assert(path != NULL);
+    assert(result.status != SPECIALIZE_STATUS_OK);
+    assert(result.status != SPECIALIZE_STATUS_SEMANTIC);
+
+    Error_Code code = ERROR_CODE_SPECIALIZATION_LIMIT;
+    switch (result.status) {
+    case SPECIALIZE_STATUS_ARGUMENT_COUNT_MISMATCH:
+        code = ERROR_CODE_CALL_ARGUMENT_COUNT_MISMATCH;
+        break;
+    case SPECIALIZE_STATUS_ARGUMENT_TYPE_MISMATCH:
+        code = ERROR_CODE_CALL_ARGUMENT_TYPE_MISMATCH;
+        break;
+    case SPECIALIZE_STATUS_LIMIT:
+        code = ERROR_CODE_SPECIALIZATION_LIMIT;
+        break;
+    case SPECIALIZE_STATUS_PROCEDURE_NOT_CALLED:
+        code = ERROR_CODE_PROCEDURE_NOT_CALLED;
+        break;
+    case SPECIALIZE_STATUS_STRUCT_NOT_POLYMORPHIC:
+        code = ERROR_CODE_STRUCT_NOT_POLYMORPHIC;
+        break;
+    case SPECIALIZE_STATUS_STRUCT_TYPE_ARGUMENT_COUNT_MISMATCH:
+        code = ERROR_CODE_STRUCT_TYPE_ARGUMENT_COUNT_MISMATCH;
+        break;
+    case SPECIALIZE_STATUS_TYPE_PARAMETER_CONFLICT:
+        code = ERROR_CODE_TYPE_PARAMETER_CONFLICT;
+        break;
+    case SPECIALIZE_STATUS_TYPE_PARAMETER_DUPLICATE:
+        code = ERROR_CODE_TYPE_PARAMETER_DUPLICATE;
+        break;
+    case SPECIALIZE_STATUS_TYPE_PARAMETER_MISPLACED:
+        code = ERROR_CODE_TYPE_PARAMETER_MISPLACED;
+        break;
+    case SPECIALIZE_STATUS_TYPE_PARAMETER_UNDEDUCED:
+        code = ERROR_CODE_TYPE_PARAMETER_UNDEDUCED;
+        break;
+    case SPECIALIZE_STATUS_OK:
+    case SPECIALIZE_STATUS_SEMANTIC:
+        // Not errors of the specialization itself, see the assertions above.
+        assert(false);
+        break;
+    }
+    Report_Texts texts = {
+        .detail = result.detail,
+        .other = result.other,
+        .target = result.target,
+        .number = result.number,
+        .second_offset = 0,
+        .has_second = false,
+    };
+    report_emit_at_subject(reporter, code, path, source, result.subject, texts);
+}
+
 void report_x64_error(Reporter const *reporter, char const *path, Str source,
                       X64_Build_Result result) {
     assert(reporter != NULL);
@@ -1629,6 +1752,8 @@ static void report_emit_at_subject(Reporter const *reporter, Error_Code code, ch
     assert(reporter != NULL);
     assert(path != NULL);
 
+    // A text that the specialization wrote is told at the place of the source that it is made of.
+    subject = specialize_source_of(reporter->texts, subject);
     char const *file_path = path;
     Str file_source = source;
     if (reporter->packages != NULL && subject.bytes != NULL) {
@@ -1679,7 +1804,7 @@ static size_t report_length_token(Str source, size_t offset, Token_Kind kind) {
         return 1;
     }
     char first = source.bytes[offset];
-    if (kind == TOKEN_KIND_LABEL) {
+    if (kind == TOKEN_KIND_LABEL || kind == TOKEN_KIND_TYPE_PARAMETER) {
         return 1 + report_length_word(source, offset + 1);
     }
     if (first == '"' || first == '\'' || (first >= '0' && first <= '9')) {

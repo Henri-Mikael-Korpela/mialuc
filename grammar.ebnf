@@ -286,7 +286,12 @@ constant_value = expression , ws , line_end ;
    union match is in. The rules of the union matches go down to the fourth level too, so a union
    match in a struct of the first level has its fields in the third, which can be structs, and one
    in a struct of the second level has them in the fourth, which cannot. *)
-struct_definition = "struct" , branch_end , struct_body_1 ;
+struct_definition = "struct" , [ ws , type_parameters ] , branch_end , struct_body_1 ;
+
+(* The type parameters of a polymorphic struct, between parentheses after `struct`, as in
+   `Pair :: struct($T: type_id) ->`. The fields use the names of the type parameters as types, and
+   each use of the struct gives it types, as in `Pair(Int)`, see `type_name`. *)
+type_parameters = "(" , ws , type_parameter , { ws , "," , ws , type_parameter } , ws , ")" ;
 
 (* An enum is a type with a fixed set of members: `enum Int ->` and then its members, one on each line,
    indented one level deeper, each of them a name. There is at least one member. The members are
@@ -370,8 +375,17 @@ procedure =
 (* One or more parameters, separated by commas. There is no comma after the last one. *)
 parameters = parameter , { ws , "," , ws , parameter } ;
 
-(* The name of the parameter, and its type. *)
-parameter = name , ws , ":" , ws , type ;
+(* The name of the parameter, and its type, or a type parameter, `$T: type_id`, which a call gives a
+   type, so that the procedure is polymorphic. A type parameter is also declared by the type of a
+   parameter, where its name has `$` before it, as in `values: []$T`, see `type_name`. The compiler
+   checks that a type parameter is declared once, and only in the parameters of a procedure. *)
+parameter = type_parameter | name , ws , ":" , ws , type ;
+
+type_parameter = declared_type_parameter , ws , ":" , ws , "type_id" ;
+
+(* A `$` directly followed by a name, which declares a type parameter. The name is not a reserved
+   word. *)
+declared_type_parameter = "$" , name ;
 
 (* A type is a name, such as `Int`, a pointer type, or an array type. A pointer type is a caret and
    the type that is pointed to, which is a name or another pointer type: `^Int` is a pointer to an
@@ -394,7 +408,11 @@ element_type = plain_type | procedure_pointer_type ;
 (* A name, or the carets of a pointer type and then a name, and never a procedure type. *)
 plain_type = type_name | "^" , ws , plain_type ;
 
-type_name = qualified_name ;
+(* A name, a type parameter that is declared there, `$T`, or a polymorphic struct with the types
+   that it is given between parentheses, as in `Pair(Int)` or `Labeled(Str, Pair(Int))`. *)
+type_name = declared_type_parameter | qualified_name , [ ws , type_arguments ] ;
+
+type_arguments = "(" , ws , type , { ws , "," , ws , type } , ws , ")" ;
 
 procedure_pointer_type = "^" , ws , { "^" , ws } , procedure_type ;
 
@@ -419,8 +437,13 @@ dynamic_array_type = "[" , ws , "dynamic" , ws , "]" , ws , element_type ;
 (* One type, or two or more between parentheses and separated by commas, as in `(Int, Str)`: a
    procedure that returns several values. A single type is never written in parentheses. *)
 return_type =
-    plain_type |
-    "(" , ws , plain_type , ws , "," , ws , plain_type , { ws , "," , ws , plain_type } , ws , ")" ;
+    return_plain_type |
+    "(" , ws , return_plain_type , ws , "," , ws , return_plain_type ,
+    { ws , "," , ws , return_plain_type } , ws , ")" ;
+
+(* A type that is returned is a name, with the type arguments of a polymorphic struct, or carets
+   and then such a name. It declares no type parameter, because only the parameters do. *)
+return_plain_type = qualified_name , [ ws , type_arguments ] | "^" , ws , return_plain_type ;
 
 (* At least one statement. Blank lines are allowed before, between and after statements, and are
    not statements. The body is indented exactly one level, 4 spaces. A tab, or any other number of
@@ -753,7 +776,9 @@ elements = expression , { gap , "," , gap , expression } , [ gap , "," ] ;
    checks, as the grammar does not know the fields of a struct. The fields are separated by commas, and can be on lines of their own, and a
    comma can come after the last one. A field that is a struct can be given its value without a
    name, `{ x = 1, y = 2 }`, since the field says which struct it is. *)
-struct_literal = qualified_name , ws , struct_fields ;
+(* The name of the struct, with its type arguments when it is polymorphic, as in
+   `Pair(Int) { first = 1, second = 2 }`, and the fields. *)
+struct_literal = qualified_name , [ ws , type_arguments ] , ws , struct_fields ;
 
 struct_fields = "{" , gap , [ field_initializers , gap ] , "}" ;
 
@@ -781,7 +806,14 @@ make_call = "make" , ws , "(" , ws , type , [ ws , "," , ws , arguments ] , ws ,
    file that is imported is written: `mu.file_open`. The dot has no space around it. *)
 qualified_name = [ name , "." ] , name ;
 
-arguments = expression , { ws , "," , ws , expression } ;
+(* An argument is an expression, or a type that is given to a type parameter, `$T: type_id`, when
+   the call gives every parameter, as in `zero(Int)`. A type that is a name is an expression to the
+   grammar, and the compiler tells it apart. *)
+arguments = argument , { ws , "," , ws , argument } ;
+
+argument = expression | type_argument ;
+
+type_argument = "^" , ws , plain_type | "[" , ws , "]" , ws , element_type ;
 
 bool_literal = "true" | "false" ;
 
@@ -829,7 +861,7 @@ reserved_word = keyword | literal_word ;
 keyword =
     "proc" | "return" | "if" | "else" | "for" | "in" | "break" | "const" | "continue" | "struct" |
     "enum" | "not" | "and" | "or" | "foreign" | "import" | "type_info_of" | "union" | "match" |
-    "case" | "defer" | "cast" | "package" | "dynamic" ;
+    "case" | "defer" | "cast" | "package" | "dynamic" | "type_id" ;
 
 (* The words that are literals: the two values of a `Bool` and the null pointer. *)
 literal_word = "true" | "false" | "nil" ;

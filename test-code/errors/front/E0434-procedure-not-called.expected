@@ -1,0 +1,11 @@
+error[E0434]: 'add' is a polymorphic procedure, so it can only be called
+ --> test-code/errors/front/E0434-procedure-not-called.mu:7:14
+  |
+5 |
+6 | main :: proc() Int ->
+7 |     adder := add
+  |              ^^^ not called
+8 |     return 0
+  |
+  = note: a polymorphic procedure is a procedure for each of the types that it is called with, so it
+          is no one value

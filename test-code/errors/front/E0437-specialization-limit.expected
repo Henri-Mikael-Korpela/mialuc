@@ -1,0 +1,11 @@
+error[E0437]: the copies of the polymorphic definitions at 'Box(T)' go past a limit of the compiler, 32
+  --> test-code/errors/front/E0437-specialization-limit.mu:8:17
+   |
+ 6 | /// Each call is of a copy for a larger type than its own, so the copies never end.
+ 7 | nest :: proc(value: $T) Int ->
+ 8 |     return nest(Box(T) { item = value })
+   |                 ^^^^^^
+ 9 |
+10 | main :: proc() Int ->
+   |
+   = note: a procedure that calls itself with a larger type each time needs copies without end

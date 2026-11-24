@@ -1,0 +1,11 @@
+error[E0432]: the type of the type parameter 'T' of 'zero' cannot be deduced from the arguments of the call
+ --> test-code/errors/front/E0432-type-parameter-undeduced.mu:8:12
+  |
+6 |
+7 | main :: proc() Int ->
+8 |     return zero()
+  |            ^^^^
+  |
+  = note: a type parameter gets the type of an argument whose parameter has it in its type, and the
+          type of that argument must be known
+  = help: give every parameter, the type parameters too, as in 'zero(Int)'

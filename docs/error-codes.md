@@ -10,7 +10,7 @@ The text of the errors is all in [report.c](../src/report.c), where each code is
 | E0101 - E0199 | the tokens: comments, indentation, numbers, runes and strings |
 | E0201 - E0299 | the syntax |
 | E0301 - E0399 | the files that a program imports |
-| E0401 - E0449 | names, attributes, labels and the statements that jump |
+| E0401 - E0449 | names, attributes, labels, the statements that jump and type parameters |
 | E0451 - E0499 | what is known when the program is compiled: constants and array lengths |
 | E0501 - E0599 | what both targets reject: types, calls, structs, matches and unions |
 | E0601 - E0699 | what the x64 target rejects, and its limits |
@@ -63,6 +63,7 @@ These are found first, when the source is split into tokens. See the [specificat
 | E0122 | more than 65536 tokens | The compiler reads at most 65536 tokens of a file. |
 | E0123 | unexpected character 'c' | A character that cannot start a token. |
 | E0124 | this is not an escape sequence of a string | A backslash in a string that does not make an escape sequence, such as `"a\qb"`, or one with a number that is not a Unicode character. A backslash is written `\\`. |
+| E0125 | a type parameter cannot be a reserved word | A `$` directly followed by a reserved word, as in `$if`. |
 
 ## E0201 - E0299: the syntax
 
@@ -87,9 +88,9 @@ These are found when the files that `import` names are read and put together, se
 | E0305 | 'name' has the name of a definition of the same file | A parameter, a variable or an iterator of an imported file has the name of a definition of that file, which it would hide. |
 | E0306 | the vendor of the import 'path' is not known | The text before the colon is not `mu`, which is the standard library of Mialu. |
 
-## E0401 - E0449: names, attributes, labels and the statements that jump
+## E0401 - E0449: names, attributes, labels, the statements that jump and type parameters
 
-These are found when the names of the program are resolved, see [Scope resolution](mialu-programming-language.md#scope-resolution), [Attributes](mialu-programming-language.md#attributes), [Labels and scopes](mialu-programming-language.md#labels-and-scopes) and [Defer](mialu-programming-language.md#defer).
+These are found when the names of the program are resolved, see [Scope resolution](mialu-programming-language.md#scope-resolution), [Attributes](mialu-programming-language.md#attributes), [Labels and scopes](mialu-programming-language.md#labels-and-scopes) and [Defer](mialu-programming-language.md#defer), and when the polymorphic definitions are specialized for the types that they are used with, see [Parametric polymorphism](mialu-programming-language.md#parametric-polymorphism).
 
 | Code | Title | When |
 |---|---|---|
@@ -120,6 +121,16 @@ These are found when the names of the program are resolved, see [Scope resolutio
 | E0425 | 'defer' cannot be inside the statement of another 'defer' | |
 | E0426 | 'defer' cannot take this statement | It takes an assignment, a call, or an if, for or scope statement. |
 | E0427 | 'return' cannot be inside the statement of a 'defer' | |
+| E0428 | the call of 'name' gives a type where a value is wanted | A type, such as `^Int` or `[]Byte`, is an argument only of a type parameter `$T: type_id`, when the call gives every parameter, and of `make`. See [Parametric polymorphism](mialu-programming-language.md#parametric-polymorphism). |
+| E0429 | the call of 'name' gives a type parameter something that is not a type | A call that gives every parameter of a polymorphic procedure gives each parameter of the type `type_id` a type, such as `Int`, and not a value. |
+| E0430 | the type parameter 'name' is declared twice | A type parameter is declared once, with `$` before its name, and its other uses are written without it. |
+| E0431 | 'name' declares a type parameter, which only a parameter of a procedure does | A name with `$` before it outside the parameters of a procedure, such as in the type of a variable. |
+| E0432 | the type of the type parameter 'name' of 'name' cannot be deduced from the arguments of the call | No argument says the type, because no parameter has the type parameter in its type, or the type of the argument is not known, such as `nil`. Give every parameter, the type parameters too, as in `zero(Int)`. |
+| E0433 | the type parameter 'name' of 'name' is deduced as 'type' and as 'type' | Two arguments give one type parameter different types. |
+| E0434 | 'name' is a polymorphic procedure, so it can only be called | A polymorphic procedure has a specialization for each list of types that it is called with, so it has no one value. |
+| E0435 | 'type' gives a polymorphic struct another number of type arguments than its N type parameters | A polymorphic struct is written with a type for each of its type parameters, as in `Pair(Int)`, and never without them. |
+| E0436 | 'type' gives type arguments to a type that is not a polymorphic struct | Only a struct with type parameters, `struct($T: type_id)`, takes types between parentheses. |
+| E0437 | the copies of the polymorphic definitions at 'name' go past a limit of the compiler, N | The specializations need more rounds, copies, nodes or text than the compiler has room for, as a procedure that calls itself with a larger type each time does. |
 
 ## E0451 - E0499: what is known when the program is compiled
 

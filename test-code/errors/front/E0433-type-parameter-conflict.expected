@@ -1,0 +1,11 @@
+error[E0433]: the type parameter 'T' of 'add' is deduced as 'Int' and as 'F64'
+  --> test-code/errors/front/E0433-type-parameter-conflict.mu:9:14
+   |
+ 7 |     count := 1
+ 8 |     half := 0.5
+ 9 |     total := add(count, half)
+   |              ^^^
+10 |     return 0
+   |
+   = note: a type parameter is one type in a call, so the arguments whose parameters have it must
+           agree about it

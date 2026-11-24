@@ -90,6 +90,9 @@ typedef enum {
     TOKEN_KIND_KEYWORD_RETURN,
     TOKEN_KIND_KEYWORD_STRUCT,
     TOKEN_KIND_KEYWORD_TRUE,
+    // The type of a type parameter, as in `$T: type_id`: the parameter is a type, which a call
+    // gives, and not a value.
+    TOKEN_KIND_KEYWORD_TYPE_ID,
     TOKEN_KIND_KEYWORD_TYPE_INFO_OF,
     TOKEN_KIND_KEYWORD_UNION,
     // `:` and a name with nothing in between, such as `:outer`. The name without the `:` is in the
@@ -111,6 +114,10 @@ typedef enum {
     TOKEN_KIND_RUNE_LITERAL,
     TOKEN_KIND_SLASH_EQUALS,
     TOKEN_KIND_STRING_LITERAL,
+    // `$` and a name with nothing in between, such as `$T`, which declares the name as a type
+    // parameter of a procedure, see `AST_NODE_TYPE_TYPE_NAME`. The `identifier` payload is the
+    // whole text, with the `$`, so that the type that it is part of is one view of the source.
+    TOKEN_KIND_TYPE_PARAMETER,
 
     TOKEN_KIND_END,
 } Token_Kind;
@@ -229,6 +236,9 @@ typedef enum {
     // the literal starts.
     TOKENIZE_STATUS_RUNE_LITERAL_UNTERMINATED,
     TOKENIZE_STATUS_TOKEN_LIMIT,
+    // A type parameter, a `$` and a name, whose name is a reserved word. `error_offset` is where
+    // the `$` is.
+    TOKENIZE_STATUS_TYPE_PARAMETER_INVALID,
     TOKENIZE_STATUS_UNEXPECTED_CHARACTER,
 } Tokenize_Status;
 

@@ -1,0 +1,11 @@
+error[E0435]: 'Pair(Int, Bool)' gives a polymorphic struct another number of type arguments than its 1 type parameters
+ --> test-code/errors/front/E0435-struct-type-argument-count-mismatch.mu:8:12
+  |
+6 |
+7 | main :: proc() Int ->
+8 |     pair : Pair(Int, Bool)
+  |            ^^^^^^^^^^^^^^^
+9 |     return 0
+  |
+  = help: write a type for each type parameter between parentheses after the name of the struct, as
+          in 'Pair(Int)'
