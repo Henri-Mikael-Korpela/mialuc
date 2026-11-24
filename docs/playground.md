@@ -15,7 +15,7 @@ The panel below the console has three tabs: the parsed code (what `mialuc dump-a
 
 On Windows use `mialuc` and `mialudoc`, and not Docker Compose: there is no container to build and no virtual machine to start, so it is faster, it uses the compiler that you built, and so it shows a change to the compiler as soon as it is built.
 
-1. Build the project as described in [Getting Started](getting-started.md#building-the-compiler). The build makes `build/mialuc.exe`, the compiler, and then uses it to make `build/mialudoc.exe` from [src/mialudoc/mialudoc.mu](../src/mialudoc/mialudoc.mu), so a single build is all that is needed:
+1. Build the project as described in [Getting Started](getting-started.md#building-the-compiler), which has [how to build only mialudoc](getting-started.md#building-mialudoc) too. The build makes `build/mialuc.exe`, the compiler, and then uses it to make `build/mialudoc.exe` from [src/mialudoc/mialudoc.mu](../src/mialudoc/mialudoc.mu), so a single build is all that is needed:
 
     ```
     cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_C_COMPILER=gcc
