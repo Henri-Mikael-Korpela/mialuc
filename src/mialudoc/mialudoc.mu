@@ -81,7 +81,6 @@
 ///   - MISSING: a `return` with no value, to leave a procedure that has no result early. `render_line`
 ///     and `emit_document_cards` have an `Int` result that is always 0, only to have one.
 ///   - MISSING: an array in a struct, so the levels of the lists of `Render` are digits of an `Int`.
-///   - MISSING: short circuit for `and` and `or`, see `byte_is`.
 ///   - MISSING: a check that a procedure with a result returns on every path. `mialuc` builds one that
 ///     ends without a `return`, and it then runs on into whatever follows, which stopped this server
 ///     once, so it is a gap of the compiler and not a feature to add.
@@ -271,21 +270,15 @@ bytes_end_with :: proc(bytes: []Byte, text: Str) Bool ->
         return false
     return bytes_are(bytes[length_of(bytes) - length_of(text):], text)
 
-/// Whether the byte at `index` is `value`, which is false when there is no byte there.
-/// MISSING: short circuit for `and` and `or`. Both of their operands are always worked out, so
-/// `index < length_of(bytes) and bytes[index] == ' '` stops the program at the end of the bytes,
-/// and this is what is written where C would write that.
+/// Whether the byte at `index` is `value`, which is false when there is no byte there. The index is
+/// checked first, and the byte is only read when it is there, as `and` does not evaluate its right
+/// operand otherwise.
 byte_is :: proc(bytes: []Byte, index: Int, value: Int) Bool ->
-    if index < 0 or index >= length_of(bytes) ->
-        return false
-    return cast(Int)bytes[index] == value
+    return index >= 0 and index < length_of(bytes) and cast(Int)bytes[index] == value
 
 /// Whether the byte at `index` is a digit, which is false when there is no byte there.
 is_digit_at :: proc(bytes: []Byte, index: Int) Bool ->
-    if index < 0 or index >= length_of(bytes) ->
-        return false
-    value := cast(Int)bytes[index]
-    return value >= 48 and value <= 57
+    return index >= 0 and index < length_of(bytes) and bytes[index] >= 48 and bytes[index] <= 57
 
 /// Where the first byte that is `target` is, from `from` on, or -1.
 find_byte :: proc(bytes: []Byte, from: Int, target: Int) Int ->
@@ -406,16 +399,17 @@ receive_head :: proc(client: Int, buffer: []Byte) Int ->
         if count <= 0 ->
             break
         total += count
-        if has_head_end(buffer[0:total]) ->
+        if find_head_end(buffer[0:total]) >= 0 ->
             break
     return total
 
-/// Whether there is an empty line in the bytes, `CR LF CR LF`, which ends the head of a request.
-has_head_end :: proc(bytes: []Byte) Bool ->
+/// Where the body of a request starts, which is after the empty line that ends its head, `CR LF CR LF`,
+/// or -1 when the bytes have no such line.
+find_head_end :: proc(bytes: []Byte) Int ->
     for index in 3..<length_of(bytes) ->
         if bytes[index] == '\n' and bytes[index - 1] == '\r' and bytes[index - 2] == '\n' and bytes[index - 3] == '\r' ->
-            return true
-    return false
+            return index + 1
+    return -1
 
 // ---------------------------------------------------------------------------------------------
 // Output: the bytes of a page are collected in a buffer that is sent when it is full
@@ -1128,9 +1122,7 @@ is_word_byte :: proc(value: Byte) Bool ->
 
 /// Whether the byte at `index` is a byte of a word of code, which is false when there is no byte there.
 is_word_at :: proc(bytes: []Byte, index: Int) Bool ->
-    if index < 0 or index >= length_of(bytes) ->
-        return false
-    return is_word_byte(bytes[index])
+    return index >= 0 and index < length_of(bytes) and is_word_byte(bytes[index])
 
 /// Whether two sequences of bytes are the same.
 bytes_equal :: proc(first: []Byte, second: []Byte) Bool ->
@@ -1315,17 +1307,6 @@ emit_json_lower :: proc(out: ^Output, bytes: []Byte) Int ->
     for value in bytes ->
         if value >= 65 and value <= 90 ->
             emit_byte(out, int_to_byte(cast(Int)value + 32))
-        else ->
-            emit_byte(out, value)
-    emit_text(out, "\"")
-    return 0
-
-/// Puts the bytes in the page as a JSON string of their upper case, which are all ASCII here.
-emit_json_upper :: proc(out: ^Output, bytes: []Byte) Int ->
-    emit_text(out, "\"")
-    for value in bytes ->
-        if value >= 97 and value <= 122 ->
-            emit_byte(out, int_to_byte(cast(Int)value - 32))
         else ->
             emit_byte(out, value)
     emit_text(out, "\"")
@@ -2305,13 +2286,6 @@ split_request_line :: proc(line: []Byte) ([]Byte, []Byte, []Byte, Bool) ->
     if first <= 0 or second <= first + 1 ->
         return line[0:0], line[0:0], line[0:0], false
     return line[0:first], line[first + 1:second], line[second + 1:], true
-
-/// Where the body of a request starts, which is after the empty line that ends its head, or -1.
-find_head_end :: proc(bytes: []Byte) Int ->
-    for index in 3..<length_of(bytes) ->
-        if byte_is(bytes, index, 10) and byte_is(bytes, index - 1, 13) and byte_is(bytes, index - 2, 10) and byte_is(bytes, index - 3, 13) ->
-            return index + 1
-    return -1
 
 /// Answers the request that is in `request`, and gives the code of the answer.
 answer :: proc(client: Int, arena: ^mu.Arena_Allocator, request: []Byte, directory: []Byte) Int ->

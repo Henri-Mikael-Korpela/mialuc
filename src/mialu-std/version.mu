@@ -10,10 +10,8 @@ is_version_part :: proc(part: Str) Bool ->
     for digit in part ->
         if digit < '0' or digit > '9' ->
             return false
-    if length_of(part) > 1 ->
-        if part[:1] == "0" ->
-            return false
-    return true
+    // A zero at the start is only right when it is the whole number.
+    return length_of(part) == 1 or part[:1] not= "0"
 
 /// Whether `text` is a version of the form MAJOR.MINOR.PATCH: three numbers, with a dot between
 /// each two. The characters of the text are gone through, and a `.` ends a number.
