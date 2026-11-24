@@ -526,6 +526,8 @@ static size_t          wasm_heap_start_bytes                  (Wasm_Builder cons
 static void            wasm_heap_trap_write                   (Wasm_Writer *writer);
 static size_t          wasm_memory_page_count                 (Wasm_Builder const *builder);
 static size_t          wasm_signature_count                   (Wasm_Builder const *builder);
+static Wasm_Type       wasm_type_of_element_name              (Wasm_Builder const *builder,
+                                                               Str type_name);
 static bool            wasm_data_measure                      (Wasm_Builder *builder);
 static Wasm_Type       wasm_signature_return_type             (Wasm_Builder const *builder,
                                                                Ast_Node_Index signature,
@@ -8766,6 +8768,34 @@ static Wasm_Type wasm_type_of_name(Wasm_Builder const *builder, Str type_name) {
     assert(type_name.bytes != NULL);
     assert(type_name.length > 0);
 
+    // `[]` before a name is an array slice of what the rest is, which is written as text where a
+    // type has no node, as in a return type. The rest is a name with carets, as the elements of an
+    // array slice are, and never an array again.
+    if (type_name.length > 2 && type_name.bytes[0] == '[' && type_name.bytes[1] == ']') {
+        Wasm_Type element = wasm_type_of_element_name(
+            builder, str_make(type_name.bytes + 2, type_name.length - 2));
+        if (element.kind == WASM_VALUE_TYPE_NONE) {
+            return element;
+        }
+        Wasm_Type slice = wasm_type_make(WASM_VALUE_TYPE_SLICE);
+        slice.element_kind = element.kind;
+        slice.element_definition = element.definition;
+        slice.element_pointee_kind = element.pointee_kind;
+        slice.element_depth = element.depth;
+        return slice;
+    }
+    return wasm_type_of_element_name(builder, type_name);
+}
+
+/**
+ * Returns the type that the name `type_name` stands for, with the carets of a pointer type before
+ * it, which is what the elements of an array slice are, see `wasm_type_of_name`, or a type of the
+ * kind `WASM_VALUE_TYPE_NONE` if the target does not have it.
+ */
+static Wasm_Type wasm_type_of_element_name(Wasm_Builder const *builder, Str type_name) {
+    assert(type_name.bytes != NULL);
+    assert(type_name.length > 0);
+
     size_t start = 0;
     size_t depth = 0;
     // Every step consumes a byte, so there are at most as many steps as bytes.
@@ -9035,6 +9065,9 @@ static size_t wasm_struct_slots(Wasm_Builder const *builder, Ast_Node_Index stru
                        not str_equals(name, STR("Rune"))) {
                 nested = wasm_struct_find(builder, name);
             }
+        } else if (builder->nodes[type_node].node_type == AST_NODE_TYPE_ARRAY_TYPE) {
+            // An array slice is two 32-bit values, its address and its length, like a `Str`.
+            leaf = WASM_VALUE_TYPE_STR;
         }
 
         if (nested != AST_NODE_INDEX_NONE) {
@@ -9798,9 +9831,17 @@ static bool wasm_check_structs(Wasm_Builder *builder) {
             continue;
         }
 
+        // An array slice is the address and the number of its elements, which is a value that can
+        // be kept anywhere, and an array or a dynamic array is not.
         Ast_Node_Index type = builder->nodes[i].first_child;
-        if (builder->nodes[type].node_type == AST_NODE_TYPE_ARRAY_TYPE) {
+        if (builder->nodes[type].node_type == AST_NODE_TYPE_ARRAY_TYPE &&
+            builder->nodes[type].payload.array_type.length_kind != AST_ARRAY_LENGTH_OMITTED) {
             return wasm_fail(builder, WASM_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
+                             wasm_type_subject(builder, type));
+        }
+        if (builder->nodes[type].node_type == AST_NODE_TYPE_ARRAY_TYPE &&
+            wasm_type_of_node(builder, type).kind == WASM_VALUE_TYPE_NONE) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
                              wasm_type_subject(builder, type));
         }
         // A pointer type is checked too: a struct can have a pointer to a struct that is not

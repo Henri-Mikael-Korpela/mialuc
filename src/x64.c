@@ -845,6 +845,7 @@ static bool         x64_type_nodes_equal         (X64_Builder const *builder, As
                                                   Ast_Node_Index second);
 static X64_Type     x64_type_of_element_node     (X64_Builder const *builder, Ast_Node_Index type);
 static X64_Type     x64_type_of_name             (X64_Builder const *builder, Str name);
+static X64_Type     x64_type_of_element_name     (X64_Builder const *builder, Str name);
 static X64_Type     x64_type_of_node             (X64_Builder const *builder, Ast_Node_Index type);
 static X64_Type     x64_type_pointee             (X64_Type pointer);
 static X64_Type     x64_type_pointer_to          (X64_Type target);
@@ -7437,6 +7438,11 @@ static size_t x64_struct_word_count(X64_Builder const *builder, Ast_Node_Index s
             if (str_equals(name, STR("Str"))) {
                 leaf_words = 2;
             }
+        } else if (builder->nodes[type_node].node_type == AST_NODE_TYPE_ARRAY_TYPE &&
+                   builder->nodes[type_node].payload.array_type.length_kind ==
+                       AST_ARRAY_LENGTH_OMITTED) {
+            // An array slice is the address of its first element and the number of them.
+            leaf_words = 2;
         }
         if (nested == AST_NODE_INDEX_NONE) {
             count += leaf_words;
@@ -7482,7 +7488,7 @@ static bool x64_struct_field_find(X64_Builder const *builder, Ast_Node_Index str
     Ast_Node_Index field = builder->nodes[struct_node].first_child;
     // Every field is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < builder->node_count && field != AST_NODE_INDEX_NONE; i += 1) {
-        X64_Type field_type = x64_type_of_element_node(builder, builder->nodes[field].first_child);
+        X64_Type field_type = x64_type_of_node(builder, builder->nodes[field].first_child);
         if (str_equals(builder->nodes[field].payload.field.name, name)) {
             *word_offset = offset;
             *type = field_type;
@@ -7833,8 +7839,11 @@ static bool x64_structs_check(X64_Builder *builder) {
         // Every field is a distinct node, so there cannot be more than there are nodes.
         for (size_t i = 0; i < builder->node_count && field != AST_NODE_INDEX_NONE; i += 1) {
             Ast_Node_Index type_node = builder->nodes[field].first_child;
-            X64_Type type = x64_type_of_element_node(builder, type_node);
+            X64_Type type = x64_type_of_node(builder, type_node);
+            // An array slice is the address and the number of its elements, which is a value that
+            // can be kept anywhere, and an array or a dynamic array is not, see `Arrays`.
             bool is_valid = type.kind == X64_TYPE_KIND_BOOL || type.kind == X64_TYPE_KIND_BYTE ||
+                            type.kind == X64_TYPE_KIND_SLICE ||
                             type.kind == X64_TYPE_KIND_ENUM || type.kind == X64_TYPE_KIND_F32 ||
                             type.kind == X64_TYPE_KIND_F64 || type.kind == X64_TYPE_KIND_I32 ||
                             type.kind == X64_TYPE_KIND_I64 || type.kind == X64_TYPE_KIND_INT ||
@@ -8082,11 +8091,29 @@ static size_t x64_type_stride_bytes(X64_Builder const *builder, X64_Type type) {
 }
 
 /**
- * Returns the type that the name `name` stands for, a primitive type or a struct, which can have
- * the carets of a pointer type before it, such as `^Int`, or a type of the kind
- * `X64_TYPE_KIND_NONE` if the target does not have a type of that name.
+ * Returns the type that the text `name` stands for: a name with the carets of a pointer type
+ * before it, see `x64_type_of_element_name`, or `[]` and such a name, which is an array slice, or a
+ * type of the kind `X64_TYPE_KIND_NONE` if the target does not have it.
  */
 static X64_Type x64_type_of_name(X64_Builder const *builder, Str name) {
+    // `[]` before a name is an array slice of what the rest is, which is written as text where a
+    // type has no node, as in a return type. The rest is a name with carets, as the elements of an
+    // array slice are, and never an array again.
+    if (name.length > 2 && name.bytes[0] == '[' && name.bytes[1] == ']') {
+        X64_Type element =
+            x64_type_of_element_name(builder, str_make(name.bytes + 2, name.length - 2));
+        return x64_type_sequence_of(element, X64_TYPE_KIND_SLICE, -1);
+    }
+    return x64_type_of_element_name(builder, name);
+}
+
+/**
+ * Returns the type that the name `name` stands for, a primitive type or a struct, which can have
+ * the carets of a pointer type before it, such as `^Int`, or a type of the kind
+ * `X64_TYPE_KIND_NONE` if the target does not have a type of that name. It is what the elements of
+ * an array slice are, see `x64_type_of_name`.
+ */
+static X64_Type x64_type_of_element_name(X64_Builder const *builder, Str name) {
     size_t start = 0;
     uint32_t depth = 0;
     // Every step reads a byte, so there are at most as many steps as bytes.
@@ -10353,9 +10380,8 @@ static void x64_debug_structs_write(X64_Builder *builder, X64_Debug_Types types)
         // refers to them.
         for (Ast_Node_Index field = builder->nodes[node].first_child; field != AST_NODE_INDEX_NONE;
              field = builder->nodes[field].next_sibling) {
-            X64_Type type = x64_type_of_element_node(builder, builder->nodes[field].first_child);
-            builder->layouts[field].frame_offset = x64_debug_scalar_type_write(builder, types,
-                                                                               type);
+            X64_Type type = x64_type_of_node(builder, builder->nodes[field].first_child);
+            builder->layouts[field].frame_offset = x64_debug_type_write(builder, types, type);
         }
 
         builder->layouts[node].frame_offset = (uint32_t)(writer->length - types.unit_start);
@@ -10372,7 +10398,7 @@ static void x64_debug_structs_write(X64_Builder *builder, X64_Debug_Types types)
         size_t offset_bytes = 0;
         for (Ast_Node_Index field = builder->nodes[node].first_child; field != AST_NODE_INDEX_NONE;
              field = builder->nodes[field].next_sibling) {
-            X64_Type type = x64_type_of_element_node(builder, builder->nodes[field].first_child);
+            X64_Type type = x64_type_of_node(builder, builder->nodes[field].first_child);
             x64_debug_member_write(writer, builder->nodes[field].payload.field.name,
                                    builder->layouts[field].frame_offset, offset_bytes);
             offset_bytes += x64_type_word_count(builder, type) * X64_WORD_SIZE_BYTES;

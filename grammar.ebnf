@@ -442,8 +442,11 @@ return_type =
     { ws , "," , ws , return_plain_type } , ws , ")" ;
 
 (* A type that is returned is a name, with the type arguments of a polymorphic struct, or carets
-   and then such a name. It declares no type parameter, because only the parameters do. *)
-return_plain_type = qualified_name , [ ws , type_arguments ] | "^" , ws , return_plain_type ;
+   and then such a name, or an array slice of such a type, `[]Byte`, which is a value, while an
+   array is not. It declares no type parameter, because only the parameters do. *)
+return_plain_type = [ "[" , ws , "]" , ws ] , returned_element_type ;
+
+returned_element_type = qualified_name , [ ws , type_arguments ] | "^" , ws , returned_element_type ;
 
 (* At least one statement. Blank lines are allowed before, between and after statements, and are
    not statements. The body is indented exactly one level, 4 spaces. A tab, or any other number of

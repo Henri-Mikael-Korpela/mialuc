@@ -1037,7 +1037,7 @@ static bool parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure
 
     Token const *first = parse_token_current(parser);
     if (first->kind != TOKEN_KIND_IDENTIFIER && first->kind != TOKEN_KIND_CARET &&
-        first->kind != TOKEN_KIND_PARENTHESIS_LEFT) {
+        first->kind != TOKEN_KIND_PARENTHESIS_LEFT && first->kind != TOKEN_KIND_BRACKET_LEFT) {
         return true;
     }
 
@@ -1057,6 +1057,17 @@ static bool parse_procedure_return_type(Parser *parser, Ast_Node_Index procedure
     size_t type_count = 0;
     // Every type consumes a token, so there are fewer types than tokens, which bounds the loop.
     for (size_t type = 0; type < parser->token_count; type += 1) {
+        // An array slice is returned as the address and the number of its elements, `[]Byte`,
+        // and an array is not, since its elements are in the frame of the procedure that returns.
+        if (parse_token_current(parser)->kind == TOKEN_KIND_BRACKET_LEFT) {
+            parse_token_advance(parser);
+            if (parse_token_current(parser)->kind != TOKEN_KIND_BRACKET_RIGHT) {
+                (void)parse_fail(parser, STR("']', because an array slice is returned, which has "
+                                             "no length, and an array is not"));
+                return false;
+            }
+            parse_token_advance(parser);
+        }
         // Every caret consumes a token, so there are fewer carets than tokens.
         for (size_t i = 0; i < parser->token_count; i += 1) {
             if (parse_token_current(parser)->kind != TOKEN_KIND_CARET) {

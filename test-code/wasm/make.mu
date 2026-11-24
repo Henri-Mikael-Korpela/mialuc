@@ -62,6 +62,23 @@ passed_to_procedures :: proc() Int ->
     fill_squares(values)
     return sum(values) + sum(values[1:3])
 
+/// The elements outlive the procedure that made them, which a dynamic array cannot, so a procedure
+/// can return them, and a struct can keep them.
+squares :: proc(count: Int) []Int ->
+    result := make([]Int, count)
+    for i in 0..<count ->
+        result[i] = i * i
+    return result
+
+Table :: struct ->
+    values: []Int
+    name: Str
+
+outlive_the_procedure :: proc() Int ->
+    table := Table { values = squares(10), name = "squares" }
+    defer destroy(table.values)
+    return sum(table.values) + sum(table.values[1:3]) + length_of(table.name) * 1000
+
 /// Memory that is destroyed and made again many times, which reuses the blocks that are given back.
 made_again_and_again :: proc() Int ->
     total := 0

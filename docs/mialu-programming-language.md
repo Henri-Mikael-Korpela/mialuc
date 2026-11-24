@@ -1682,7 +1682,7 @@ sum :: proc(elements: []Int) Int ->
     return total
 ```
 
-`sum(a)` adds all the elements of `a`, and `sum(a[0:3])` the first three. A slice can be passed on to another procedure, and it can be sliced again. Because a slice views the elements of the frame of the procedure that defines the array, it cannot outlive it, so a slice cannot be the type of a global variable or of a returned value either. A `for` statement can go through the elements of a slice, see [For statements](#for-statements).
+`sum(a)` adds all the elements of `a`, and `sum(a[0:3])` the first three. A slice can be passed on to another procedure, and it can be sliced again. A slice is a value, the address of the elements and their number, so it can also be returned, as in `middle :: proc(values: []Int) []Int`, and kept in a field of a struct, see [Structs](#structs), but not in a global variable. It is good as long as the elements that it views are: a slice of an array is good until the procedure that defines the array returns, so a slice of it must not be returned from that procedure or kept anywhere that outlives it, and a slice of elements that [`make`](#make) made is good until they are destroyed. A `for` statement can go through the elements of a slice, see [For statements](#for-statements).
 
 A range of elements is assigned to with `=` and a slice on the left. The value on the right is an array or a slice, and it must have as many elements as the range, or else the program traps. The elements are copied, and the copy is right also when the two ranges overlap:
 
@@ -1779,7 +1779,7 @@ Person :: struct ->
     name: Str
 ```
 
-The type of a field can be `Int`, `Bool`, `Byte`, `Str`, another struct or a [pointer](#pointers) but it cannot be an [array or an array slice](#arrays).
+The type of a field can be `Int`, `Bool`, `Byte`, `Str`, another struct, a [pointer](#pointers) or an [array slice](#array-slices), such as `bytes: []Byte`, but it cannot be an [array](#arrays) or a [dynamic array](#dynamic-arrays), whose elements are in the frame of a procedure.
 
 The fields of a struct must have names unique to the fieldset. A struct cannot contain itself, since it would never end, as in a field `next: Person` of `Person`, and not through other structs. A pointer to the struct is not the struct, so a field `next: ^Person` is fine because it's a pointer whose size can be determined without the knowing the full struct definition.
 

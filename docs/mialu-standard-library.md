@@ -20,16 +20,49 @@ main :: proc() Int ->
     return count
 ```
 
-The definitions of an imported file are all part of the program, whether it calls them or not, so a file that uses the system, such as `filesystem` and `process`, which are for Windows, does not build for the WebAssembly targets. `math` and `version` only use the language itself, and so they work on every target.
+The definitions of an imported file are all part of the program, whether it calls them or not, so a file that uses the system, such as `filesystem` and `process`, which are for Windows, does not build for the WebAssembly targets. `allocator`, `math` and `version` only use the language itself, and so they work on every target.
 
 The files are in the directory [src/mialu-std](../src/mialu-std) of the project, which a compiler that is built from the project reads, and in the directory `lib` next to `mialuc.exe` in a [release](releasing.md), which is looked in first. A file that is in neither is an error that says where it looked. See [Standard library](mialu-programming-language.md#standard-library) in the specification.
 
 | File | Imported as | Targets | What it is for |
 |---|---|---|---|
+| [allocator.mu](../src/mialu-std/allocator.mu) | `import "mu:allocator"` | all | An arena, which gives out pieces of memory that the program gives it, and gives them back all at once. |
 | [math.mu](../src/mialu-std/math.mu) | `import "mu:math"` | all | The smaller and the larger of two numbers, and a number held between two others. |
 | [version.mu](../src/mialu-std/version.mu) | `import "mu:version"` | all | Whether a text is a version of the form `MAJOR.MINOR.PATCH`. |
 | [filesystem.mu](../src/mialu-std/filesystem.mu) | `import "mu:filesystem"` | `x64-win32` | Files: opening, reading, writing and closing them, and the standard input. |
 | [process.mu](../src/mialu-std/process.mu) | `import "mu:process"` | `x64-win32` | The command line that the program was started with. |
+
+## allocator
+
+An allocator gives out memory in pieces. It does not own the memory: the program gives it a buffer, an array slice of bytes that it made, such as with [`make`](mialu-programming-language.md#make), or that is an array of a procedure, and gives the buffer back itself, after nothing uses the allocator any more. An allocator has no constructor and no destructor: it is a struct, made with a struct literal.
+
+`Arena_Allocator` is an arena: it gives out its memory from the start to the end, one piece after the other, at multiples of `ARENA_ALIGNMENT_BYTES`, which is 8, so that a piece can hold values of any type when the memory starts at such a multiple, as what `make` makes does. It never gives back one piece, only all of them at once, so giving out a piece is a few instructions, and nothing needs to remember the pieces. That suits memory that lives as long as one task, such as the answer to one request.
+
+| Field | What it is |
+|---|---|
+| `memory: []Byte` | The memory that the pieces are given out of. |
+| `used: Int` | How many bytes of the memory are given out, which is 0 for an arena that has given out nothing. |
+
+| Procedure | What it does |
+|---|---|
+| `arena_allocate(arena: ^Arena_Allocator, size: Int) ([]Byte, Bool)` | Gives out `size` bytes, which are zero, and whether there was room for them. When there is none, or `size` is below zero, the bytes are none and the arena is as it was. |
+| `arena_reset(arena: ^Arena_Allocator)` | Gives back everything that the arena gave out, which must not be used any more. |
+| `arena_remaining(arena: ^Arena_Allocator) Int` | Gives the number of bytes that the arena can still give out in one piece. |
+| `arena_aligned(offset: Int) Int` | Gives `offset` rounded up to a multiple of `ARENA_ALIGNMENT_BYTES`. |
+
+```
+import "mu:allocator"
+
+answer :: proc() Int ->
+    memory := make([]Byte, 4096)
+    defer destroy(memory)
+    arena := mu.Arena_Allocator { memory = memory, used = 0 }
+    line, is_given := mu.arena_allocate(%arena, 80)
+    if not is_given ->
+        return 1
+    line[0] = 72
+    return 0
+```
 
 ## math
 
