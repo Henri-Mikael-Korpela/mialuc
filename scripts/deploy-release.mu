@@ -40,7 +40,11 @@ VERSION_PATH :: "VERSION"
 OUTPUT_PATH :: "deploy-release.tmp"
 
 COMMAND_BYTES :: 512
+
+/// The memory that the output of a command is read into at first, and the most that it grows to,
+/// as it doubles while the output does not fit in it.
 OUTPUT_BYTES :: 1024
+OUTPUT_BYTES_MAX :: 16777216
 
 /// Appends the characters of `text`, which are one byte each, to the first `length` bytes of
 /// `buffer`, and gives the new length. The buffer must have room for them.
@@ -85,48 +89,59 @@ ask :: proc(question: Str) Bool ->
     return error == .NONE and count > 0 and is_yes
 
 /// Runs the command in the first `length` bytes of `command` through the shell, with its output
-/// written to the file of the output, and reads that into `output`, which has the output without
-/// the line feeds at its end and a zero after it. Gives how many bytes the output has, and whether
-/// the command ended well, which git says with the exit code 0.
-git :: proc(command: []Byte, length: Int, output: []Byte) (Int, Bool) ->
+/// written to the file of the output, and gives the output without the line feeds at its end, and
+/// whether the command ended well, which git says with the exit code 0. The output is in memory
+/// that is made for it, with a zero after it, so the caller gives it back with `destroy`, also
+/// when the command failed, and then it is empty.
+git :: proc(command: []Byte, length: Int) ([]Byte, Bool) ->
     total := text_append(command, length, " > " ++ OUTPUT_PATH)
     command[total] = 0
     status := system(%command[0])
     if status not= 0 ->
         remove(str_to_c_str(OUTPUT_PATH))
-        return 0, false
+        return make([]Byte, 0), false
 
+    // The output is read again into memory that is twice as large while it fills the memory, as
+    // there may be more of it.
     wide_path := [128]Byte { .. = 0 }
-    count, error := mu.file_read_all(OUTPUT_PATH, wide_path[:], output[:length_of(output) - 1])
-    remove(str_to_c_str(OUTPUT_PATH))
-    if error not= .NONE ->
-        return 0, false
-    trimmed := trimmed_length(output[:count])
-    output[trimmed] = 0
-    return trimmed, true
+    size := OUTPUT_BYTES
+    for ->
+        output := make([]Byte, size)
+        count, error := mu.file_read_all(OUTPUT_PATH, wide_path[:], output[:size - 1])
+        if error not= .NONE ->
+            destroy(output)
+            remove(str_to_c_str(OUTPUT_PATH))
+            return make([]Byte, 0), false
+        if count < size - 1 or size >= OUTPUT_BYTES_MAX ->
+            remove(str_to_c_str(OUTPUT_PATH))
+            trimmed := trimmed_length(output[:count])
+            output[trimmed] = 0
+            return output[:trimmed], true
+        destroy(output)
+        size *= 2
 
 /// Runs `git` with the arguments, which have no quotes, like `git`.
-git_arguments :: proc(arguments: Str, output: []Byte) (Int, Bool) ->
+git_arguments :: proc(arguments: Str) ([]Byte, Bool) ->
     command := [COMMAND_BYTES]Byte { .. = 0 }
     length := text_append(command[:], 0, "git ")
     length = text_append(command[:], length, arguments)
-    count, is_ok := git(command[:], length, output)
-    return count, is_ok
+    output, is_ok := git(command[:], length)
+    return output, is_ok
 
 /// Runs `git` with the arguments, then a space, `value` and `suffix`, like `git`.
-git_with :: proc(arguments: Str, value: Str, suffix: Str, output: []Byte) (Int, Bool) ->
+git_with :: proc(arguments: Str, value: Str, suffix: Str) ([]Byte, Bool) ->
     command := [COMMAND_BYTES]Byte { .. = 0 }
     length := text_append(command[:], 0, "git ")
     length = text_append(command[:], length, arguments)
     length = byte_append(command[:], length, 32)
     length = text_append(command[:], length, value)
     length = text_append(command[:], length, suffix)
-    count, is_ok := git(command[:], length, output)
-    return count, is_ok
+    output, is_ok := git(command[:], length)
+    return output, is_ok
 
 /// Makes the tag `tag` that has the message `Release ` and `version`, which is of the commit that is
 /// checked out, and with `is_replacing` it is the tag that exists, made again. Gives whether it was.
-tag_make :: proc(tag: Str, version: Str, is_replacing: Bool, output: []Byte) Bool ->
+tag_make :: proc(tag: Str, version: Str, is_replacing: Bool) Bool ->
     command := [COMMAND_BYTES]Byte { .. = 0 }
     length := text_append(command[:], 0, "git tag ")
     if is_replacing ->
@@ -138,7 +153,8 @@ tag_make :: proc(tag: Str, version: Str, is_replacing: Bool, output: []Byte) Boo
     length = text_append(command[:], length, "Release ")
     length = text_append(command[:], length, version)
     length = byte_append(command[:], length, 34)
-    count, is_ok := git(command[:], length, output)
+    output, is_ok := git(command[:], length)
+    destroy(output)
     return is_ok
 
 main :: proc() Int ->
@@ -168,66 +184,71 @@ main :: proc() Int ->
     tag_length = text_append(tag_bytes[:], tag_length, version)
     tag, is_tag_text := utf8_decode(tag_bytes[:tag_length])
 
-    output := [OUTPUT_BYTES]Byte { .. = 0 }
-
-    // The workflow only releases a tag that is on main.
-    count, is_ok := git_arguments("rev-parse --abbrev-ref HEAD", output[:])
+    // Each output is in its own memory, which is given back when the program ends, as the text that
+    // is read from it views it.
+    branch_output, is_ok := git_arguments("rev-parse --abbrev-ref HEAD")
+    defer destroy(branch_output)
     if not is_ok ->
         return 2
-    branch, is_branch_text := utf8_decode(output[:count])
+    branch, is_branch_text := utf8_decode(branch_output)
     if branch not= "main" ->
         say("The current branch is ", branch)
         return fail("A release is made from main.")
 
     // What is not committed would not be in the release. Untracked files do not matter.
-    count1, is_ok1 := git_arguments("status --porcelain --untracked-files=no", output[:])
+    status_output, is_ok1 := git_arguments("status --porcelain --untracked-files=no")
+    defer destroy(status_output)
     if not is_ok1 ->
         return 2
-    if count1 > 0 ->
+    if length_of(status_output) > 0 ->
         puts("There are uncommitted changes. Commit them first:")
-        changes, is_changes_text := utf8_decode(output[:count1])
+        changes, is_changes_text := utf8_decode(status_output)
         puts(str_to_c_str(changes))
         return 1
 
-    count2, is_ok2 := git_arguments("fetch origin main --tags", output[:])
+    fetch_output, is_ok2 := git_arguments("fetch origin main --tags")
+    defer destroy(fetch_output)
     if not is_ok2 ->
         return 2
 
-    count3, is_ok3 := git_arguments("rev-list --count HEAD..origin/main", output[:])
+    behind_output, is_ok3 := git_arguments("rev-list --count HEAD..origin/main")
+    defer destroy(behind_output)
     if not is_ok3 ->
         return 2
-    behind, is_behind_text := utf8_decode(output[:count3])
+    behind, is_behind_text := utf8_decode(behind_output)
     if behind not= "0" ->
         say("Commits that origin/main has and main does not: ", behind)
         return fail("Pull first.")
 
     // The fetch above brought the tags of GitHub, so a tag that is only there is found too.
     is_replacing := false
-    count4, is_ok4 := git_with("tag --list", tag, "", output[:])
+    tags_output, is_ok4 := git_with("tag --list", tag, "")
+    defer destroy(tags_output)
     if not is_ok4 ->
         return 2
-    if count4 > 0 ->
+    if length_of(tags_output) > 0 ->
         // `~0` is the commit of the tag, which is what a tag with a message points to through.
-        count5, is_ok5 := git_with("log -1 --oneline", tag, "~0", output[:])
+        tag_commit_output, is_ok5 := git_with("log -1 --oneline", tag, "~0")
+        defer destroy(tag_commit_output)
         if not is_ok5 ->
             return 2
-        tag_commit, is_tag_commit_text := utf8_decode(output[:count5])
+        tag_commit, is_tag_commit_text := utf8_decode(tag_commit_output)
         printf("The tag %s ", str_to_c_str(tag))
         say("already exists, on: ", tag_commit)
         if not ask("Replace the tag with a new release of the current commit? [y/n]") ->
             return fail("Cancelled. To release a new version, bump it first with scripts/bump-version.mu.")
         is_replacing = true
 
-    // The count is kept in its own memory, because the text is where the output was read to.
-    ahead_output := [16]Byte { .. = 0 }
-    count6, is_ok6 := git_arguments("rev-list --count origin/main..HEAD", ahead_output[:])
+    ahead_output, is_ok6 := git_arguments("rev-list --count origin/main..HEAD")
+    defer destroy(ahead_output)
     if not is_ok6 ->
         return 2
-    ahead, is_ahead_text := utf8_decode(ahead_output[:count6])
-    count7, is_ok7 := git_arguments("log -1 --oneline", output[:])
+    ahead, is_ahead_text := utf8_decode(ahead_output)
+    commit_output, is_ok7 := git_arguments("log -1 --oneline")
+    defer destroy(commit_output)
     if not is_ok7 ->
         return 2
-    commit, is_commit_text := utf8_decode(output[:count7])
+    commit, is_commit_text := utf8_decode(commit_output)
     say("Version: ", version)
     say("Commit:  ", commit)
     say("New commits of main to push: ", ahead)
@@ -239,15 +260,17 @@ main :: proc() Int ->
             return fail("Cancelled.")
 
     // The commits go first, so that the tag is never on a commit that GitHub does not have on main.
-    count8, is_ok8 := git_arguments("push origin main", output[:])
+    push_output, is_ok8 := git_arguments("push origin main")
+    defer destroy(push_output)
     if not is_ok8 ->
         return 2
-    if not tag_make(tag, version, is_replacing, output[:]) ->
+    if not tag_make(tag, version, is_replacing) ->
         return 2
     push_arguments := "push origin"
     if is_replacing ->
         push_arguments = "push --force origin"
-    count9, is_ok9 := git_with(push_arguments, tag, "", output[:])
+    tag_push_output, is_ok9 := git_with(push_arguments, tag, "")
+    defer destroy(tag_push_output)
     if not is_ok9 ->
         return 2
 

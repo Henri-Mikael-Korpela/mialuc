@@ -22,6 +22,11 @@
 /// slash could name. The connection is closed after each answer, and a request is answered before the
 /// next one is read.
 ///
+/// The memory of the answers is made once, with `make`, and an answer takes its buffers from it as
+/// an arena of `mu:allocator`, which is reset after each answer, so the buffers are not on the stack
+/// and nothing of one answer is left for the next. A module of the playground can be larger than the
+/// arena, so its memory is made for its size, and given back after it is sent.
+///
 /// It is built by CMake with the target `mialudoc`, which runs `mialuc build --target x64-win32`,
 /// and it works on Windows only, as the standard library does for now. The Dockerfile of the project
 /// runs it under Wine, so it is the server of the playground on the other systems too.
@@ -61,8 +66,6 @@
 ///     a variable, so `a - a / b * b` is written where C writes `a % b`.
 ///   - MISSING: arguments of `main`, so the command line is read with `mu:process` and split by hand,
 ///     and the quotes that it may have are not looked at.
-///   - MISSING: an array slice as the result of a procedure, so `split_request_line` gives where a
-///     part starts instead of the part.
 ///   - MISSING: a `Rune` as a `Byte`. A rune literal is compared with a `Byte` with `==`, but it has no
 ///     order with one, and it is not an argument for a parameter of a `Byte`, so the numbers of the
 ///     characters are written, such as 48 for `'0'`, or the compared byte is made an `Int`.
@@ -77,9 +80,7 @@
 ///     declared once with one number, and a line is printed in parts.
 ///   - MISSING: a `return` with no value, to leave a procedure that has no result early. `render_line`
 ///     and `emit_document_cards` have an `Int` result that is always 0, only to have one.
-///   - MISSING: a field that is an array slice, or an array of `Byte`, in a struct, so the buffer of an
-///     `Output` is a parameter of every procedure that puts something in the page, and the chunk of
-///     a `Line_Reader` is one of `read_line`.
+///   - MISSING: an array in a struct, so the levels of the lists of `Render` are digits of an `Int`.
 ///   - MISSING: short circuit for `and` and `or`, see `byte_is`.
 ///   - MISSING: a check that a procedure with a result returns on every path. `mialuc` builds one that
 ///     ends without a `return`, and it then runs on into whatever follows, which stopped this server
@@ -89,6 +90,7 @@
 ///     `emit_text` for each of its lines.
 package mialudoc
 
+import "mu:allocator"
 import "mu:filesystem"
 import "mu:process"
 import foreign libc
@@ -160,6 +162,11 @@ LINE_BYTES :: 16384
 PATH_BYTES :: 1024
 DIRECTORY_BYTES :: 256
 TITLE_BYTES :: 256
+
+/// The memory of the answer to one request, which the buffers of the answer are taken from, and
+/// which is given back all at once when the answer is sent. An answer takes at most a few of the
+/// buffers above at once, as a procedure gives back what it took when it returns.
+REQUEST_ARENA_BYTES :: 1048576
 LIST_LEVELS :: 6
 
 STATUS_OK :: 200
@@ -312,6 +319,10 @@ trim_end :: proc(bytes: []Byte) Int ->
         end = start
     return end
 
+/// The bytes without the spaces at their start and at their end.
+trim :: proc(bytes: []Byte) []Byte ->
+    return bytes[trim_start(bytes):trim_end(bytes)]
+
 /// Whether a byte can be in the name of a document: a letter, a digit, `-` or `_`.
 is_name_byte :: proc(value: Byte) Bool ->
     if value >= 48 and value <= 57 ->
@@ -414,63 +425,72 @@ has_head_end :: proc(bytes: []Byte) Bool ->
 /// put after that is dropped.
 Output :: struct ->
     client: Int
+    /// The bytes that are not sent yet are at the start of it.
+    buffer: []Byte
     used: Int
     is_open: Bool
 
-flush :: proc(out: ^Output, buffer: []Byte) ->
+/// Makes the Output of a page for the client, whose buffer is taken from the arena of the request.
+/// An Output that got no buffer, as the arena had no room, drops what is put in it.
+output_make :: proc(client: Int, arena: ^mu.Arena_Allocator, size: Int) Output ->
+    buffer, _ := mu.arena_allocate(arena, size)
+    return Output { client = client, buffer = buffer, used = 0, is_open = true }
+
+flush :: proc(out: ^Output) ->
     if out.used > 0 and out.is_open ->
-        out.is_open = send_all(out.client, buffer[0:out.used])
+        out.is_open = send_all(out.client, out.buffer[0:out.used])
     out.used = 0
 
-emit_byte :: proc(out: ^Output, buffer: []Byte, value: Byte) ->
-    if out.used >= length_of(buffer) ->
-        flush(out, buffer)
-    buffer[out.used] = value
-    out.used += 1
+emit_byte :: proc(out: ^Output, value: Byte) ->
+    if out.used >= length_of(out.buffer) ->
+        flush(out)
+    if out.used < length_of(out.buffer) ->
+        out.buffer[out.used] = value
+        out.used += 1
 
-emit_text :: proc(out: ^Output, buffer: []Byte, text: Str) ->
+emit_text :: proc(out: ^Output, text: Str) ->
     for character in text ->
         encoded := cast([4]Byte)character
         for index in 0..<utf8_length(character) ->
-            emit_byte(out, buffer, encoded[index])
+            emit_byte(out, encoded[index])
 
 /// Puts a byte of text in the page, where `&`, `<`, `>` and `"` are what HTML has for them.
-emit_escaped_byte :: proc(out: ^Output, buffer: []Byte, value: Byte) ->
+emit_escaped_byte :: proc(out: ^Output, value: Byte) ->
     if value == '&' ->
-        emit_text(out, buffer, "&amp;")
+        emit_text(out, "&amp;")
     else if value == '<' ->
-        emit_text(out, buffer, "&lt;")
+        emit_text(out, "&lt;")
     else if value == '>' ->
-        emit_text(out, buffer, "&gt;")
+        emit_text(out, "&gt;")
     else if value == '"' ->
-        emit_text(out, buffer, "&quot;")
+        emit_text(out, "&quot;")
     else ->
-        emit_byte(out, buffer, value)
+        emit_byte(out, value)
 
-emit_escaped :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) ->
+emit_escaped :: proc(out: ^Output, bytes: []Byte) ->
     for value in bytes ->
-        emit_escaped_byte(out, buffer, value)
+        emit_escaped_byte(out, value)
 
 /// Puts text in the page without the marks of Markdown that it has, for a place that shows no
 /// styles, such as the title of a tab.
-emit_plain :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) ->
+emit_plain :: proc(out: ^Output, bytes: []Byte) ->
     for value in bytes ->
         if cast(Int)value not= BACKTICK and cast(Int)value not= STAR ->
-            emit_escaped_byte(out, buffer, value)
+            emit_escaped_byte(out, value)
 
 /// Puts the name that a heading has as a link target: the letters in lower case, the digits, `-` and
 /// `_`, and a `-` for a space, which is what the links of the documents expect.
-emit_slug :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) ->
+emit_slug :: proc(out: ^Output, bytes: []Byte) ->
     for value in bytes ->
         if value >= 65 and value <= 90 ->
-            emit_byte(out, buffer, int_to_byte(cast(Int)value + 32))
+            emit_byte(out, int_to_byte(cast(Int)value + 32))
         else if value == ' ' ->
-            emit_byte(out, buffer, int_to_byte(45))
+            emit_byte(out, int_to_byte(45))
         else if is_name_byte(value) or value >= 128 ->
-            emit_byte(out, buffer, value)
+            emit_byte(out, value)
 
 /// Puts a link target: a link to `name.md` is a link to the page `name`, which has no suffix.
-emit_href :: proc(out: ^Output, buffer: []Byte, url: []Byte) ->
+emit_href :: proc(out: ^Output, url: []Byte) ->
     index := 0
     for index < length_of(url) ->
         if bytes_start_with(url[index:], ".md") ->
@@ -478,7 +498,7 @@ emit_href :: proc(out: ^Output, buffer: []Byte, url: []Byte) ->
             if after == length_of(url) or byte_is(url, after, HASH) ->
                 index = after
                 continue
-        emit_escaped_byte(out, buffer, url[index])
+        emit_escaped_byte(out, url[index])
         index += 1
 
 // ---------------------------------------------------------------------------------------------
@@ -526,7 +546,7 @@ open_path :: proc(path: []Byte, wide_path: []Byte) (mu.File, mu.File_Error) ->
     return file, error
 
 /// Sends the file at `path` as it is, in chunks, and gives the code of the answer.
-send_file :: proc(client: Int, path: []Byte, content_type: Str, with_body: Bool) Int ->
+send_file :: proc(client: Int, arena: ^mu.Arena_Allocator, path: []Byte, content_type: Str, with_body: Bool) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
     file, open_error := open_path(path, wide_path[:])
     if open_error not= .NONE ->
@@ -541,9 +561,9 @@ send_file :: proc(client: Int, path: []Byte, content_type: Str, with_body: Bool)
     if not with_body ->
         return STATUS_OK
 
-    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    chunk, _ := mu.arena_allocate(arena, CHUNK_BYTES)
     for ->
-        count, read_error := mu.file_read(file, chunk[:])
+        count, read_error := mu.file_read(file, chunk)
         if read_error not= .NONE or count == 0 ->
             break
         if not send_all(client, chunk[0:count]) ->
@@ -556,49 +576,49 @@ send_file :: proc(client: Int, path: []Byte, content_type: Str, with_body: Bool)
 
 /// Puts the start of a page: the head, with the style sheet, and the bar at the top. `title` is
 /// the text of the tab. MISSING: a string constant of many lines.
-emit_page_start :: proc(out: ^Output, buffer: []Byte, title: []Byte) ->
-    emit_text(out, buffer, "<!doctype html>\n<html lang='en'>\n<head>\n<meta charset='utf-8'>\n")
-    emit_text(out, buffer, "<meta name='viewport' content='width=device-width, initial-scale=1'>\n<title>")
-    emit_plain(out, buffer, title)
-    emit_text(out, buffer, " · Mialu</title>\n<link rel='icon' href='/logo.png'>\n<style>\n")
-    emit_text(out, buffer, ":root { --bg: #090b10; --surface: #11141b; --raised: #171b24; --line: #242a37; --text: #d9dde7; --muted: #8e97ac; --accent: #ff8a1f; --accent-2: #ff4d2e; --gold: #ffc43d; color-scheme: dark; }\n")
-    emit_text(out, buffer, "* { box-sizing: border-box; }\n")
-    emit_text(out, buffer, "html { scroll-behavior: smooth; scroll-padding-top: 5rem; }\n")
-    emit_text(out, buffer, "body { margin: 0; color: var(--text); font: 16px/1.7 system-ui, 'Segoe UI', Roboto, sans-serif; background: radial-gradient(900px 500px at 85% -10%, rgba(255, 98, 46, .16), transparent 60%), radial-gradient(800px 500px at -10% 10%, rgba(255, 196, 61, .08), transparent 60%), var(--bg); background-attachment: fixed; min-height: 100vh; }\n")
-    emit_text(out, buffer, "a { color: var(--gold); text-decoration: none; } a:hover { color: var(--accent); text-decoration: underline; }\n")
-    emit_text(out, buffer, ".bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: .75rem; padding: .6rem 1.5rem; background: rgba(9, 11, 16, .75); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }\n")
-    emit_text(out, buffer, ".bar a { display: flex; align-items: center; gap: .6rem; color: var(--text); font-weight: 650; letter-spacing: .02em; text-decoration: none; }\n")
-    emit_text(out, buffer, ".bar img { width: 30px; height: 30px; }\n")
-    emit_text(out, buffer, ".bar nav { display: flex; gap: .25rem; margin-left: 1rem; }\n")
-    emit_text(out, buffer, ".bar nav a { padding: .3rem .8rem; border-radius: 8px; color: var(--muted); font-weight: 500; letter-spacing: 0; }\n")
-    emit_text(out, buffer, ".bar nav a:hover { color: var(--text); background: var(--raised); }\n")
-    emit_text(out, buffer, ".bar nav a[aria-current='page'] { color: var(--text); background: var(--raised); }\n")
-    emit_text(out, buffer, "main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.5rem 6rem; }\n")
-    emit_text(out, buffer, "h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 2.2em 0 .6em; font-weight: 700; letter-spacing: -.01em; }\n")
-    emit_text(out, buffer, "h1 { font-size: 2.4rem; margin-top: 0; background: linear-gradient(90deg, var(--gold), var(--accent) 55%, var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }\n")
-    emit_text(out, buffer, "h2 { font-size: 1.6rem; padding-bottom: .35em; border-bottom: 1px solid var(--line); } h3 { font-size: 1.25rem; } h4 { font-size: 1.05rem; }\n")
-    emit_text(out, buffer, "p, ul, ol, table, blockquote, pre { margin: 0 0 1.1em; } li { margin: .2em 0; } li > ul, li > ol { margin: .2em 0 .2em; }\n")
-    emit_text(out, buffer, "code { font: .9em/1.5 'Cascadia Code', 'Cascadia Mono', Consolas, 'SFMono-Regular', monospace; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: .1em .4em; color: #ffd9a8; }\n")
-    emit_text(out, buffer, "pre { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.2rem; overflow-x: auto; box-shadow: 0 8px 30px rgba(0, 0, 0, .35); }\n")
-    emit_text(out, buffer, "pre code { background: none; border: 0; padding: 0; color: #e6e9f1; font-size: .88rem; }\n")
-    emit_text(out, buffer, "blockquote { border-left: 3px solid var(--accent); background: rgba(255, 138, 31, .07); border-radius: 0 10px 10px 0; padding: .6rem 1.1rem; color: #e8d9c6; } blockquote p { margin: .4em 0; }\n")
-    emit_text(out, buffer, ".table { overflow-x: auto; margin: 0 0 1.2em; border: 1px solid var(--line); border-radius: 12px; } table { border-collapse: collapse; width: 100%; margin: 0; font-size: .93rem; }\n")
-    emit_text(out, buffer, "th, td { text-align: left; padding: .55rem .9rem; border-bottom: 1px solid var(--line); vertical-align: top; } th { background: var(--surface); color: var(--gold); font-weight: 650; } tr:last-child td { border-bottom: 0; } tbody tr:hover { background: rgba(255, 255, 255, .025); }\n")
-    emit_text(out, buffer, "hr { border: 0; border-top: 1px solid var(--line); margin: 2rem 0; }\n")
-    emit_text(out, buffer, ".hero { text-align: center; padding: 3.5rem 0 2rem; } .hero img { width: min(260px, 60vw); height: auto; filter: drop-shadow(0 0 40px rgba(255, 98, 46, .45)); }\n")
-    emit_text(out, buffer, ".hero h1 { font-size: clamp(2.8rem, 8vw, 4.5rem); margin: .2em 0 .1em; letter-spacing: -.03em; } .hero p { color: var(--muted); font-size: 1.15rem; margin: 0; }\n")
-    emit_text(out, buffer, ".grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 1rem; list-style: none; padding: 0; margin: 2rem 0 0; }\n")
-    emit_text(out, buffer, ".card { display: block; height: 100%; padding: 1.1rem 1.25rem; background: linear-gradient(160deg, var(--raised), var(--surface)); border: 1px solid var(--line); border-radius: 14px; color: var(--text); transition: transform .15s, border-color .15s, box-shadow .15s; }\n")
-    emit_text(out, buffer, ".card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 10px 34px rgba(255, 98, 46, .18); text-decoration: none; color: var(--text); }\n")
-    emit_text(out, buffer, ".card strong { display: block; font-size: 1.05rem; line-height: 1.35; } .card span { display: block; margin-top: .35rem; color: var(--muted); font: .8rem 'Cascadia Mono', Consolas, monospace; }\n")
-    emit_text(out, buffer, ".label { text-transform: uppercase; letter-spacing: .14em; font-size: .78rem; color: var(--muted); margin: 3rem 0 0; }\n")
-    emit_text(out, buffer, "footer { text-align: center; color: var(--muted); font-size: .85rem; padding-bottom: 3rem; }\n")
-    emit_text(out, buffer, "</style>\n</head>\n<body>\n<div class='bar'><a href='/'><img src='/logo.png' alt=''>Mialu</a>")
-    emit_text(out, buffer, "<nav aria-label='Pages'><a href='/' aria-current='page'>Documentation</a>")
-    emit_text(out, buffer, "<a href='/tools/playground'>Playground</a><a href='/tools/internals'>Compiler internals</a></nav></div>\n")
+emit_page_start :: proc(out: ^Output, title: []Byte) ->
+    emit_text(out, "<!doctype html>\n<html lang='en'>\n<head>\n<meta charset='utf-8'>\n")
+    emit_text(out, "<meta name='viewport' content='width=device-width, initial-scale=1'>\n<title>")
+    emit_plain(out, title)
+    emit_text(out, " · Mialu</title>\n<link rel='icon' href='/logo.png'>\n<style>\n")
+    emit_text(out, ":root { --bg: #090b10; --surface: #11141b; --raised: #171b24; --line: #242a37; --text: #d9dde7; --muted: #8e97ac; --accent: #ff8a1f; --accent-2: #ff4d2e; --gold: #ffc43d; color-scheme: dark; }\n")
+    emit_text(out, "* { box-sizing: border-box; }\n")
+    emit_text(out, "html { scroll-behavior: smooth; scroll-padding-top: 5rem; }\n")
+    emit_text(out, "body { margin: 0; color: var(--text); font: 16px/1.7 system-ui, 'Segoe UI', Roboto, sans-serif; background: radial-gradient(900px 500px at 85% -10%, rgba(255, 98, 46, .16), transparent 60%), radial-gradient(800px 500px at -10% 10%, rgba(255, 196, 61, .08), transparent 60%), var(--bg); background-attachment: fixed; min-height: 100vh; }\n")
+    emit_text(out, "a { color: var(--gold); text-decoration: none; } a:hover { color: var(--accent); text-decoration: underline; }\n")
+    emit_text(out, ".bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: .75rem; padding: .6rem 1.5rem; background: rgba(9, 11, 16, .75); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }\n")
+    emit_text(out, ".bar a { display: flex; align-items: center; gap: .6rem; color: var(--text); font-weight: 650; letter-spacing: .02em; text-decoration: none; }\n")
+    emit_text(out, ".bar img { width: 30px; height: 30px; }\n")
+    emit_text(out, ".bar nav { display: flex; gap: .25rem; margin-left: 1rem; }\n")
+    emit_text(out, ".bar nav a { padding: .3rem .8rem; border-radius: 8px; color: var(--muted); font-weight: 500; letter-spacing: 0; }\n")
+    emit_text(out, ".bar nav a:hover { color: var(--text); background: var(--raised); }\n")
+    emit_text(out, ".bar nav a[aria-current='page'] { color: var(--text); background: var(--raised); }\n")
+    emit_text(out, "main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.5rem 6rem; }\n")
+    emit_text(out, "h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 2.2em 0 .6em; font-weight: 700; letter-spacing: -.01em; }\n")
+    emit_text(out, "h1 { font-size: 2.4rem; margin-top: 0; background: linear-gradient(90deg, var(--gold), var(--accent) 55%, var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }\n")
+    emit_text(out, "h2 { font-size: 1.6rem; padding-bottom: .35em; border-bottom: 1px solid var(--line); } h3 { font-size: 1.25rem; } h4 { font-size: 1.05rem; }\n")
+    emit_text(out, "p, ul, ol, table, blockquote, pre { margin: 0 0 1.1em; } li { margin: .2em 0; } li > ul, li > ol { margin: .2em 0 .2em; }\n")
+    emit_text(out, "code { font: .9em/1.5 'Cascadia Code', 'Cascadia Mono', Consolas, 'SFMono-Regular', monospace; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: .1em .4em; color: #ffd9a8; }\n")
+    emit_text(out, "pre { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.2rem; overflow-x: auto; box-shadow: 0 8px 30px rgba(0, 0, 0, .35); }\n")
+    emit_text(out, "pre code { background: none; border: 0; padding: 0; color: #e6e9f1; font-size: .88rem; }\n")
+    emit_text(out, "blockquote { border-left: 3px solid var(--accent); background: rgba(255, 138, 31, .07); border-radius: 0 10px 10px 0; padding: .6rem 1.1rem; color: #e8d9c6; } blockquote p { margin: .4em 0; }\n")
+    emit_text(out, ".table { overflow-x: auto; margin: 0 0 1.2em; border: 1px solid var(--line); border-radius: 12px; } table { border-collapse: collapse; width: 100%; margin: 0; font-size: .93rem; }\n")
+    emit_text(out, "th, td { text-align: left; padding: .55rem .9rem; border-bottom: 1px solid var(--line); vertical-align: top; } th { background: var(--surface); color: var(--gold); font-weight: 650; } tr:last-child td { border-bottom: 0; } tbody tr:hover { background: rgba(255, 255, 255, .025); }\n")
+    emit_text(out, "hr { border: 0; border-top: 1px solid var(--line); margin: 2rem 0; }\n")
+    emit_text(out, ".hero { text-align: center; padding: 3.5rem 0 2rem; } .hero img { width: min(260px, 60vw); height: auto; filter: drop-shadow(0 0 40px rgba(255, 98, 46, .45)); }\n")
+    emit_text(out, ".hero h1 { font-size: clamp(2.8rem, 8vw, 4.5rem); margin: .2em 0 .1em; letter-spacing: -.03em; } .hero p { color: var(--muted); font-size: 1.15rem; margin: 0; }\n")
+    emit_text(out, ".grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 1rem; list-style: none; padding: 0; margin: 2rem 0 0; }\n")
+    emit_text(out, ".card { display: block; height: 100%; padding: 1.1rem 1.25rem; background: linear-gradient(160deg, var(--raised), var(--surface)); border: 1px solid var(--line); border-radius: 14px; color: var(--text); transition: transform .15s, border-color .15s, box-shadow .15s; }\n")
+    emit_text(out, ".card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 10px 34px rgba(255, 98, 46, .18); text-decoration: none; color: var(--text); }\n")
+    emit_text(out, ".card strong { display: block; font-size: 1.05rem; line-height: 1.35; } .card span { display: block; margin-top: .35rem; color: var(--muted); font: .8rem 'Cascadia Mono', Consolas, monospace; }\n")
+    emit_text(out, ".label { text-transform: uppercase; letter-spacing: .14em; font-size: .78rem; color: var(--muted); margin: 3rem 0 0; }\n")
+    emit_text(out, "footer { text-align: center; color: var(--muted); font-size: .85rem; padding-bottom: 3rem; }\n")
+    emit_text(out, "</style>\n</head>\n<body>\n<div class='bar'><a href='/'><img src='/logo.png' alt=''>Mialu</a>")
+    emit_text(out, "<nav aria-label='Pages'><a href='/' aria-current='page'>Documentation</a>")
+    emit_text(out, "<a href='/tools/playground'>Playground</a><a href='/tools/internals'>Compiler internals</a></nav></div>\n")
 
-emit_page_end :: proc(out: ^Output, buffer: []Byte) ->
-    emit_text(out, buffer, "</main>\n<footer>Served by mialudoc, which is written in Mialu.</footer>\n</body>\n</html>\n")
+emit_page_end :: proc(out: ^Output) ->
+    emit_text(out, "</main>\n<footer>Served by mialudoc, which is written in Mialu.</footer>\n</body>\n</html>\n")
 
 // ---------------------------------------------------------------------------------------------
 // Markdown
@@ -606,7 +626,7 @@ emit_page_end :: proc(out: ^Output, buffer: []Byte) ->
 
 /// Puts the text of a line of Markdown as HTML: `code`, **bold**, *emphasis*, [links](url) and
 /// the characters that a backslash makes literal.
-render_inline :: proc(out: ^Output, buffer: []Byte, text: []Byte) ->
+render_inline :: proc(out: ^Output, text: []Byte) ->
     index := 0
     for index < length_of(text) ->
         value := text[index]
@@ -615,27 +635,27 @@ render_inline :: proc(out: ^Output, buffer: []Byte, text: []Byte) ->
         if cast(Int)value == BACKTICK ->
             end := find_byte(text, index + 1, BACKTICK)
             if end >= 0 ->
-                emit_text(out, buffer, "<code>")
-                emit_escaped(out, buffer, text[index + 1:end])
-                emit_text(out, buffer, "</code>")
+                emit_text(out, "<code>")
+                emit_escaped(out, text[index + 1:end])
+                emit_text(out, "</code>")
                 index = end + 1
                 continue
 
         if cast(Int)value == STAR and byte_is(text, index + 1, STAR) ->
             end := find_pair(text, index + 2, STAR)
             if end > index + 2 ->
-                emit_text(out, buffer, "<strong>")
-                render_inline(out, buffer, text[index + 2:end])
-                emit_text(out, buffer, "</strong>")
+                emit_text(out, "<strong>")
+                render_inline(out, text[index + 2:end])
+                emit_text(out, "</strong>")
                 index = end + 2
                 continue
 
         if cast(Int)value == STAR and rest > 1 and not byte_is(text, index + 1, SPACE) ->
             end := find_byte(text, index + 1, STAR)
             if end > index + 1 ->
-                emit_text(out, buffer, "<em>")
-                render_inline(out, buffer, text[index + 1:end])
-                emit_text(out, buffer, "</em>")
+                emit_text(out, "<em>")
+                render_inline(out, text[index + 1:end])
+                emit_text(out, "</em>")
                 index = end + 1
                 continue
 
@@ -644,21 +664,21 @@ render_inline :: proc(out: ^Output, buffer: []Byte, text: []Byte) ->
             if middle >= 0 and byte_is(text, middle + 1, LEFT_PARENTHESIS) ->
                 end := find_byte(text, middle + 2, RIGHT_PARENTHESIS)
                 if end >= 0 ->
-                    emit_text(out, buffer, "<a href=\"")
-                    emit_href(out, buffer, text[middle + 2:end])
-                    emit_text(out, buffer, "\">")
-                    render_inline(out, buffer, text[index + 1:middle])
-                    emit_text(out, buffer, "</a>")
+                    emit_text(out, "<a href=\"")
+                    emit_href(out, text[middle + 2:end])
+                    emit_text(out, "\">")
+                    render_inline(out, text[index + 1:middle])
+                    emit_text(out, "</a>")
                     index = end + 1
                     continue
 
         if value == '\\' and rest > 1 ->
             if is_punctuation(text[index + 1]) ->
-                emit_escaped_byte(out, buffer, text[index + 1])
+                emit_escaped_byte(out, text[index + 1])
                 index += 2
                 continue
 
-        emit_escaped_byte(out, buffer, value)
+        emit_escaped_byte(out, value)
         index += 1
 
 /// What is known about the Markdown that has been read: which block is open, so that the line that
@@ -676,21 +696,21 @@ Render :: struct ->
     indents: Int
     numbered: Int
 
-close_paragraph :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+close_paragraph :: proc(out: ^Output, state: ^Render) ->
     if state.in_paragraph ->
-        emit_text(out, buffer, "</p>\n")
+        emit_text(out, "</p>\n")
         state.in_paragraph = false
 
-close_quote :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+close_quote :: proc(out: ^Output, state: ^Render) ->
     if state.in_quote ->
-        emit_text(out, buffer, "</p></blockquote>\n")
+        emit_text(out, "</p></blockquote>\n")
         state.in_quote = false
 
-close_table :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+close_table :: proc(out: ^Output, state: ^Render) ->
     if state.in_table ->
         if state.table_row == 1 ->
-            emit_text(out, buffer, "</thead><tbody>")
-        emit_text(out, buffer, "</tbody></table></div>\n")
+            emit_text(out, "</thead><tbody>")
+        emit_text(out, "</tbody></table></div>\n")
         state.in_table = false
 
 /// A number to the power of an exponent.
@@ -712,26 +732,26 @@ with_digit :: proc(packed: Int, base: Int, place: Int, value: Int) Int ->
     return packed + change * power(base, place)
 
 /// Closes the innermost level of list, and the item that is open in it.
-close_list_level :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+close_list_level :: proc(out: ^Output, state: ^Render) ->
     if digit_at(state.numbered, 2, state.list_depth - 1) == 1 ->
-        emit_text(out, buffer, "</li></ol>\n")
+        emit_text(out, "</li></ol>\n")
     else ->
-        emit_text(out, buffer, "</li></ul>\n")
+        emit_text(out, "</li></ul>\n")
     state.list_depth -= 1
 
-close_lists :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
+close_lists :: proc(out: ^Output, state: ^Render) ->
     for state.list_depth > 0 ->
-        close_list_level(out, buffer, state)
+        close_list_level(out, state)
 
 /// Closes the blocks that a list item can be followed by without ending the list.
-close_flow :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
-    close_paragraph(out, buffer, state)
-    close_quote(out, buffer, state)
-    close_table(out, buffer, state)
+close_flow :: proc(out: ^Output, state: ^Render) ->
+    close_paragraph(out, state)
+    close_quote(out, state)
+    close_table(out, state)
 
-close_everything :: proc(out: ^Output, buffer: []Byte, state: ^Render) ->
-    close_flow(out, buffer, state)
-    close_lists(out, buffer, state)
+close_everything :: proc(out: ^Output, state: ^Render) ->
+    close_flow(out, state)
+    close_lists(out, state)
 
 /// Gives how many bytes the marker of a list item takes, `- `, `* ` or `12. `, and whether it is a
 /// number. It is 0 when the text does not start with one.
@@ -757,8 +777,8 @@ is_table_separator :: proc(text: []Byte) Bool ->
 
 /// Puts the cells of a row of a table, which are between the `|` of the line, but not those that are
 /// in `code` or have a backslash before them.
-render_table_row :: proc(out: ^Output, buffer: []Byte, text: []Byte, is_head: Bool) ->
-    emit_text(out, buffer, "<tr>")
+render_table_row :: proc(out: ^Output, text: []Byte, is_head: Bool) ->
+    emit_text(out, "<tr>")
     cell_start := 1
     is_code := false
     is_escaped := false
@@ -772,59 +792,59 @@ render_table_row :: proc(out: ^Output, buffer: []Byte, text: []Byte, is_head: Bo
         if cast(Int)value == BACKTICK ->
             is_code = not is_code
         if value == '|' and not is_code ->
-            render_table_cell(out, buffer, text[cell_start:position], is_head)
+            render_table_cell(out, text[cell_start:position], is_head)
             cell_start = position + 1
     if cell_start < length_of(text) ->
         rest := text[cell_start:]
         if trim_start(rest) < length_of(rest) ->
-            render_table_cell(out, buffer, rest, is_head)
-    emit_text(out, buffer, "</tr>")
+            render_table_cell(out, rest, is_head)
+    emit_text(out, "</tr>")
 
-render_table_cell :: proc(out: ^Output, buffer: []Byte, cell: []Byte, is_head: Bool) ->
-    trimmed := cell[trim_start(cell):trim_end(cell)]
+render_table_cell :: proc(out: ^Output, cell: []Byte, is_head: Bool) ->
+    trimmed := trim(cell)
     if is_head ->
-        emit_text(out, buffer, "<th>")
+        emit_text(out, "<th>")
     else ->
-        emit_text(out, buffer, "<td>")
-    render_inline(out, buffer, trimmed)
+        emit_text(out, "<td>")
+    render_inline(out, trimmed)
     if is_head ->
-        emit_text(out, buffer, "</th>")
+        emit_text(out, "</th>")
     else ->
-        emit_text(out, buffer, "</td>")
+        emit_text(out, "</td>")
 
 /// Puts the HTML of one line of Markdown, and keeps in `state` what the next line needs to know.
-render_line :: proc(out: ^Output, buffer: []Byte, state: ^Render, line: []Byte) Int ->
+render_line :: proc(out: ^Output, state: ^Render, line: []Byte) Int ->
     indent := trim_start(line)
     text := line[indent:]
 
     if state.in_code ->
         if bytes_start_with(text, "```") ->
-            emit_text(out, buffer, "</code></pre>\n")
+            emit_text(out, "</code></pre>\n")
             state.in_code = false
             return 0
         skip := indent
         if skip > state.code_indent ->
             skip = state.code_indent
-        emit_escaped(out, buffer, line[skip:])
-        emit_text(out, buffer, "\n")
+        emit_escaped(out, line[skip:])
+        emit_text(out, "\n")
         return 0
 
     if length_of(text) == 0 ->
-        close_flow(out, buffer, state)
+        close_flow(out, state)
         return 0
 
     if bytes_start_with(text, "```") ->
         if indent == 0 ->
-            close_lists(out, buffer, state)
-        close_flow(out, buffer, state)
+            close_lists(out, state)
+        close_flow(out, state)
         language := text[3:]
-        language = language[trim_start(language):trim_end(language)]
+        language = trim(language)
         if length_of(language) > 0 ->
-            emit_text(out, buffer, "<pre><code class=\"language-")
-            emit_escaped(out, buffer, language)
-            emit_text(out, buffer, "\">")
+            emit_text(out, "<pre><code class=\"language-")
+            emit_escaped(out, language)
+            emit_text(out, "\">")
         else ->
-            emit_text(out, buffer, "<pre><code>")
+            emit_text(out, "<pre><code>")
         state.in_code = true
         state.code_indent = indent
         return 0
@@ -834,119 +854,128 @@ render_line :: proc(out: ^Output, buffer: []Byte, state: ^Render, line: []Byte) 
         for byte_is(text, level, HASH) ->
             level += 1
         if level <= 6 and byte_is(text, level, SPACE) ->
-            close_everything(out, buffer, state)
+            close_everything(out, state)
             heading := text[level + 1:]
-            emit_text(out, buffer, "<h")
-            emit_byte(out, buffer, int_to_byte(48 + level))
-            emit_text(out, buffer, " id=\"")
-            emit_slug(out, buffer, heading)
-            emit_text(out, buffer, "\">")
-            render_inline(out, buffer, heading)
-            emit_text(out, buffer, "</h")
-            emit_byte(out, buffer, int_to_byte(48 + level))
-            emit_text(out, buffer, ">\n")
+            emit_text(out, "<h")
+            emit_byte(out, int_to_byte(48 + level))
+            emit_text(out, " id=\"")
+            emit_slug(out, heading)
+            emit_text(out, "\">")
+            render_inline(out, heading)
+            emit_text(out, "</h")
+            emit_byte(out, int_to_byte(48 + level))
+            emit_text(out, ">\n")
             return 0
 
     if bytes_are(text, "---") ->
-        close_everything(out, buffer, state)
-        emit_text(out, buffer, "<hr>\n")
+        close_everything(out, state)
+        emit_text(out, "<hr>\n")
         return 0
 
     if indent == 0 and text[0] == '>' ->
-        close_paragraph(out, buffer, state)
-        close_table(out, buffer, state)
-        close_lists(out, buffer, state)
+        close_paragraph(out, state)
+        close_table(out, state)
+        close_lists(out, state)
         content := text[1:]
         if byte_is(content, 0, SPACE) ->
             content = content[1:]
         if not state.in_quote ->
-            emit_text(out, buffer, "<blockquote><p>")
+            emit_text(out, "<blockquote><p>")
             state.in_quote = true
         if length_of(content) == 0 ->
-            emit_text(out, buffer, "</p><p>")
+            emit_text(out, "</p><p>")
         else ->
-            render_inline(out, buffer, content)
-            emit_text(out, buffer, "\n")
+            render_inline(out, content)
+            emit_text(out, "\n")
         return 0
 
     if indent == 0 and text[0] == '|' ->
-        close_paragraph(out, buffer, state)
-        close_quote(out, buffer, state)
-        close_lists(out, buffer, state)
+        close_paragraph(out, state)
+        close_quote(out, state)
+        close_lists(out, state)
         if not state.in_table ->
-            emit_text(out, buffer, "<div class=\"table\"><table><thead>")
+            emit_text(out, "<div class=\"table\"><table><thead>")
             state.in_table = true
             state.table_row = 0
-            render_table_row(out, buffer, text, true)
+            render_table_row(out, text, true)
         else if state.table_row == 1 ->
-            emit_text(out, buffer, "</thead><tbody>")
+            emit_text(out, "</thead><tbody>")
             if not is_table_separator(text) ->
-                render_table_row(out, buffer, text, false)
+                render_table_row(out, text, false)
         else ->
-            render_table_row(out, buffer, text, false)
+            render_table_row(out, text, false)
         state.table_row += 1
         return 0
 
     marker, is_numbered := list_marker(text)
     if marker > 0 ->
-        close_paragraph(out, buffer, state)
-        close_quote(out, buffer, state)
-        close_table(out, buffer, state)
+        close_paragraph(out, state)
+        close_quote(out, state)
+        close_table(out, state)
         // The levels that are deeper than this item are over.
         for state.list_depth > 0 and indent < digit_at(state.indents, 256, state.list_depth - 1) ->
-            close_list_level(out, buffer, state)
+            close_list_level(out, state)
         if state.list_depth > 0 and indent == digit_at(state.indents, 256, state.list_depth - 1) ->
-            emit_text(out, buffer, "</li><li>")
+            emit_text(out, "</li><li>")
         else if state.list_depth < LIST_LEVELS ->
             if is_numbered ->
-                emit_text(out, buffer, "<ol><li>")
+                emit_text(out, "<ol><li>")
                 state.numbered = with_digit(state.numbered, 2, state.list_depth, 1)
             else ->
-                emit_text(out, buffer, "<ul><li>")
+                emit_text(out, "<ul><li>")
                 state.numbered = with_digit(state.numbered, 2, state.list_depth, 0)
             state.indents = with_digit(state.indents, 256, state.list_depth, indent)
             state.list_depth += 1
         else ->
-            emit_text(out, buffer, "</li><li>")
-        render_inline(out, buffer, text[marker:])
+            emit_text(out, "</li><li>")
+        render_inline(out, text[marker:])
         return 0
 
     // A line that is indented goes on with the item that is open, and any other ends the list.
     if state.list_depth > 0 and indent > 0 ->
-        emit_text(out, buffer, "\n")
-        render_inline(out, buffer, text)
+        emit_text(out, "\n")
+        render_inline(out, text)
         return 0
-    close_lists(out, buffer, state)
-    close_quote(out, buffer, state)
-    close_table(out, buffer, state)
+    close_lists(out, state)
+    close_quote(out, state)
+    close_table(out, state)
     if state.in_paragraph ->
-        emit_text(out, buffer, "\n")
+        emit_text(out, "\n")
     else ->
-        emit_text(out, buffer, "<p>")
+        emit_text(out, "<p>")
         state.in_paragraph = true
-    render_inline(out, buffer, text)
+    render_inline(out, text)
     return 0
 
 /// Reads the lines of a file through a chunk of bytes that is read at once.
 Line_Reader :: struct ->
     file: mu.File
+    /// The bytes that are read at once, of which `count` are read and the ones from `position` on
+    /// are not taken yet.
+    chunk: []Byte
     position: Int
     count: Int
+
+/// Makes a reader of the lines of `file`, whose chunk is taken from the arena. A reader that got no
+/// chunk, as the arena had no room, reads no lines.
+line_reader_make :: proc(file: mu.File, arena: ^mu.Arena_Allocator) Line_Reader ->
+    chunk, _ := mu.arena_allocate(arena, CHUNK_BYTES)
+    return Line_Reader { file = file, chunk = chunk, position = 0, count = 0 }
 
 /// Reads the next line into `line`, without its end, and gives how long it is, and whether there was
 /// a line. A line that does not fit is cut where `line` ends, and the rest of it is dropped.
 /// MISSING: `file_read_line` of the standard library reads a byte at a time, which is too slow for this.
-read_line :: proc(reader: ^Line_Reader, chunk: []Byte, line: []Byte) (Int, Bool) ->
+read_line :: proc(reader: ^Line_Reader, line: []Byte) (Int, Bool) ->
     length := 0
     has_line := false
     for ->
         if reader.position >= reader.count ->
-            count, error := mu.file_read(reader.file, chunk)
+            count, error := mu.file_read(reader.file, reader.chunk)
             if error not= .NONE or count == 0 ->
                 break
             reader.position = 0
             reader.count = count
-        value := chunk[reader.position]
+        value := reader.chunk[reader.position]
         reader.position += 1
         has_line = true
         if value == '\n' ->
@@ -961,19 +990,21 @@ read_line :: proc(reader: ^Line_Reader, chunk: []Byte, line: []Byte) (Int, Bool)
     return length, true
 
 /// Reads the whole file and puts it in the page as HTML.
-render_document :: proc(out: ^Output, buffer: []Byte, file: mu.File) ->
-    chunk := [CHUNK_BYTES]Byte { .. = 0 }
-    line := [LINE_BYTES]Byte { .. = 0 }
-    reader := Line_Reader { file = file, position = 0, count = 0 }
+render_document :: proc(out: ^Output, arena: ^mu.Arena_Allocator, file: mu.File) ->
+    // What is taken from the arena is given back when this returns, for what the page puts next.
+    mark := arena.used
+    defer arena.used = mark
+    line, _ := mu.arena_allocate(arena, LINE_BYTES)
+    reader := line_reader_make(file, arena)
     state := Render { in_code = false, code_indent = 0, in_paragraph = false, in_quote = false, in_table = false, table_row = 0, list_depth = 0, indents = 0, numbered = 0 }
     for ->
-        length, has_line := read_line(%reader, chunk[:], line[:])
+        length, has_line := read_line(%reader, line)
         if not has_line ->
             break
-        render_line(out, buffer, %state, line[0:length])
+        render_line(out, %state, line[0:length])
     if state.in_code ->
-        emit_text(out, buffer, "</code></pre>\n")
-    close_everything(out, buffer, %state)
+        emit_text(out, "</code></pre>\n")
+    close_everything(out, %state)
 
 // ---------------------------------------------------------------------------------------------
 // The pages
@@ -988,17 +1019,18 @@ make_path :: proc(path: []Byte, directory: []Byte, before: Str, name: []Byte, af
 
 /// Puts the title of the document at `path` in `title`, which is the text of its first heading, and
 /// gives how long it is. It is `fallback` when there is no heading.
-read_title :: proc(path: []Byte, title: []Byte, fallback: []Byte) Int ->
+read_title :: proc(arena: ^mu.Arena_Allocator, path: []Byte, title: []Byte, fallback: []Byte) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
     file, open_error := open_path(path, wide_path[:])
     if open_error not= .NONE ->
         return put_bytes(title, 0, fallback)
     defer mu.file_close(file)
 
-    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    mark := arena.used
+    defer arena.used = mark
     line := [TITLE_BYTES]Byte { .. = 0 }
-    reader := Line_Reader { file = file, position = 0, count = 0 }
-    length, has_line := read_line(%reader, chunk[:], line[:])
+    reader := line_reader_make(file, arena)
+    length, has_line := read_line(%reader, line[:])
     if has_line and bytes_start_with(line[0:length], "# ") ->
         return put_bytes(title, 0, line[2:length])
     return put_bytes(title, 0, fallback)
@@ -1006,7 +1038,7 @@ read_title :: proc(path: []Byte, title: []Byte, fallback: []Byte) Int ->
 /// Puts a card for each document of the directory `docs`, which is a link to its page and has its
 /// title. The files are found with `FindFirstFileA`, and are in the order that the system gives them,
 /// which is the one of their names.
-emit_document_cards :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
+emit_document_cards :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte) Int ->
     pattern_bytes := [PATH_BYTES]Byte { .. = 0 }
     pattern_length := make_path(pattern_bytes[:], directory, "/docs/", pattern_bytes[0:0], "*.md")
     pattern, is_text := utf8_decode(pattern_bytes[0:pattern_length])
@@ -1017,7 +1049,7 @@ emit_document_cards :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int
     handle := FindFirstFileA(str_to_c_str(pattern), %data[0])
     if handle == INVALID_HANDLE ->
         return 0
-    emit_text(out, buffer, "<ul class=\"grid\">\n")
+    emit_text(out, "<ul class=\"grid\">\n")
     for ->
         name_length := 0
         for name_length < FIND_NAME_BYTES and data[FIND_DATA_NAME + name_length] not= 0 ->
@@ -1028,38 +1060,37 @@ emit_document_cards :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int
             path := [PATH_BYTES]Byte { .. = 0 }
             path_length := make_path(path[:], directory, "/docs/", name, ".md")
             title := [TITLE_BYTES]Byte { .. = 0 }
-            title_length := read_title(path[0:path_length], title[:], name)
-            emit_text(out, buffer, "<li><a class=\"card\" href=\"/")
-            emit_escaped(out, buffer, name)
-            emit_text(out, buffer, "\"><strong>")
-            render_inline(out, buffer, title[0:title_length])
-            emit_text(out, buffer, "</strong><span>")
-            emit_escaped(out, buffer, file_name)
-            emit_text(out, buffer, "</span></a></li>\n")
+            title_length := read_title(arena, path[0:path_length], title[:], name)
+            emit_text(out, "<li><a class=\"card\" href=\"/")
+            emit_escaped(out, name)
+            emit_text(out, "\"><strong>")
+            render_inline(out, title[0:title_length])
+            emit_text(out, "</strong><span>")
+            emit_escaped(out, file_name)
+            emit_text(out, "</span></a></li>\n")
         if FindNextFileA(handle, %data[0]) == 0 ->
             break
-    emit_text(out, buffer, "</ul>\n")
+    emit_text(out, "</ul>\n")
     FindClose(handle)
     return 0
 
 /// Sends the index page: the logo, and the list of the documents.
-send_index :: proc(client: Int, directory: []Byte, with_body: Bool) Int ->
+send_index :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, with_body: Bool) Int ->
     if not send_head(client, STATUS_OK, "OK", "text/html; charset=utf-8", -1) or not with_body ->
         return STATUS_OK
-    buffer := [OUTPUT_BYTES]Byte { .. = 0 }
-    out := Output { client = client, used = 0, is_open = true }
+    out := output_make(client, arena, OUTPUT_BYTES)
     title := [TITLE_BYTES]Byte { .. = 0 }
-    emit_page_start(%out, buffer[:], title[0:put_text(title[:], 0, "Documentation")])
-    emit_text(%out, buffer[:], "<main>\n<div class=\"hero\"><img src=\"/logo.png\" alt=\"The logo of Mialu\"><h1>Mialu</h1>")
-    emit_text(%out, buffer[:], "<p>The documentation of the programming language</p></div>\n")
-    emit_text(%out, buffer[:], "<p class=\"label\">Documents</p>\n")
-    emit_document_cards(%out, buffer[:], directory)
-    emit_page_end(%out, buffer[:])
-    flush(%out, buffer[:])
+    emit_page_start(%out, title[0:put_text(title[:], 0, "Documentation")])
+    emit_text(%out, "<main>\n<div class=\"hero\"><img src=\"/logo.png\" alt=\"The logo of Mialu\"><h1>Mialu</h1>")
+    emit_text(%out, "<p>The documentation of the programming language</p></div>\n")
+    emit_text(%out, "<p class=\"label\">Documents</p>\n")
+    emit_document_cards(%out, arena, directory)
+    emit_page_end(%out)
+    flush(%out)
     return STATUS_OK
 
 /// Sends the document `docs/<name>.md` as a page of HTML.
-send_document :: proc(client: Int, directory: []Byte, name: []Byte, with_body: Bool) Int ->
+send_document :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, name: []Byte, with_body: Bool) Int ->
     path := [PATH_BYTES]Byte { .. = 0 }
     path_length := make_path(path[:], directory, "/docs/", name, ".md")
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
@@ -1071,15 +1102,14 @@ send_document :: proc(client: Int, directory: []Byte, name: []Byte, with_body: B
     if not send_head(client, STATUS_OK, "OK", "text/html; charset=utf-8", -1) or not with_body ->
         return STATUS_OK
     title := [TITLE_BYTES]Byte { .. = 0 }
-    title_length := read_title(path[0:path_length], title[:], name)
+    title_length := read_title(arena, path[0:path_length], title[:], name)
 
-    buffer := [OUTPUT_BYTES]Byte { .. = 0 }
-    out := Output { client = client, used = 0, is_open = true }
-    emit_page_start(%out, buffer[:], title[0:title_length])
-    emit_text(%out, buffer[:], "<main>\n")
-    render_document(%out, buffer[:], file)
-    emit_page_end(%out, buffer[:])
-    flush(%out, buffer[:])
+    out := output_make(client, arena, OUTPUT_BYTES)
+    emit_page_start(%out, title[0:title_length])
+    emit_text(%out, "<main>\n")
+    render_document(%out, arena, file)
+    emit_page_end(%out)
+    flush(%out)
     return STATUS_OK
 
 // ---------------------------------------------------------------------------------------------
@@ -1170,18 +1200,18 @@ content_type_of :: proc(name: []Byte) Str ->
 
 /// Sends the file `name` of the directory `folder` of the project, which has a path that starts and
 /// ends with a slash, such as `/tests/wasm/`, and gives the code of the answer.
-send_static :: proc(client: Int, directory: []Byte, folder: Str, name: []Byte, with_body: Bool) Int ->
+send_static :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, folder: Str, name: []Byte, with_body: Bool) Int ->
     if not is_file_name(name) ->
         return send_error(client, STATUS_NOT_FOUND, "Not Found", with_body)
     path := [PATH_BYTES]Byte { .. = 0 }
     path_length := make_path(path[:], directory, folder, name, "")
-    return send_file(client, path[0:path_length], content_type_of(name), with_body)
+    return send_file(client, arena, path[0:path_length], content_type_of(name), with_body)
 
 /// Sends a page of the project that is a file, such as `/tests/wasm/playground.html`.
-send_page :: proc(client: Int, directory: []Byte, folder: Str, file_name: Str, with_body: Bool) Int ->
+send_page :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, folder: Str, file_name: Str, with_body: Bool) Int ->
     path := [PATH_BYTES]Byte { .. = 0 }
     path_length := make_path(path[:], directory, folder, path[0:0], file_name)
-    return send_file(client, path[0:path_length], "text/html; charset=utf-8", with_body)
+    return send_file(client, arena, path[0:path_length], "text/html; charset=utf-8", with_body)
 
 // ---------------------------------------------------------------------------------------------
 // JSON
@@ -1196,7 +1226,7 @@ hex_digit :: proc(value: Int) Byte ->
 /// Puts the bytes in the page as the inside of a JSON string. A carriage return is left out, as the
 /// text of a line on Windows has one before its line feed. With `strip_links` a link of Markdown,
 /// `[text](url)`, is only its text.
-emit_json_bytes :: proc(out: ^Output, buffer: []Byte, bytes: []Byte, strip_links: Bool) Int ->
+emit_json_bytes :: proc(out: ^Output, bytes: []Byte, strip_links: Bool) Int ->
     index := 0
     for index < length_of(bytes) ->
         value := bytes[index]
@@ -1205,7 +1235,7 @@ emit_json_bytes :: proc(out: ^Output, buffer: []Byte, bytes: []Byte, strip_links
             if middle >= 0 and byte_is(bytes, middle + 1, LEFT_PARENTHESIS) ->
                 end := find_byte(bytes, middle + 2, RIGHT_PARENTHESIS)
                 if end >= 0 ->
-                    emit_json_bytes(out, buffer, bytes[index + 1:middle], false)
+                    emit_json_bytes(out, bytes[index + 1:middle], false)
                     index = end + 1
                     continue
 
@@ -1214,93 +1244,95 @@ emit_json_bytes :: proc(out: ^Output, buffer: []Byte, bytes: []Byte, strip_links
         if value == '\r' and byte_is(bytes, index + 1, 10) ->
             index += 1
             continue
-        emit_json_byte(out, buffer, value)
+        emit_json_byte(out, value)
         index += 1
     return 0
 
 /// Puts a byte in the page as it is in a JSON string, which is itself unless it needs an escape.
-emit_json_byte :: proc(out: ^Output, buffer: []Byte, value: Byte) Int ->
+emit_json_byte :: proc(out: ^Output, value: Byte) Int ->
     if value == '"' ->
-        emit_text(out, buffer, "\\\"")
+        emit_text(out, "\\\"")
     else if value == '\\' ->
-        emit_text(out, buffer, "\\\\")
+        emit_text(out, "\\\\")
     else if value == '\n' ->
-        emit_text(out, buffer, "\\n")
+        emit_text(out, "\\n")
     else if value == '\t' ->
-        emit_text(out, buffer, "\\t")
+        emit_text(out, "\\t")
     else if value == '\r' ->
-        emit_text(out, buffer, "\\r")
+        emit_text(out, "\\r")
     else if value < 32 ->
-        emit_text(out, buffer, "\\u00")
-        emit_byte(out, buffer, hex_digit(cast(Int)value / 16))
-        emit_byte(out, buffer, hex_digit(cast(Int)value - cast(Int)value / 16 * 16))
+        emit_text(out, "\\u00")
+        emit_byte(out, hex_digit(cast(Int)value / 16))
+        emit_byte(out, hex_digit(cast(Int)value - cast(Int)value / 16 * 16))
     else ->
-        emit_byte(out, buffer, value)
+        emit_byte(out, value)
     return 0
 
 /// Puts the file `name` of the directory of the playground in the page as a JSON string, or `null`
 /// when it cannot be read, a chunk at a time, so that it can be larger than any buffer.
-emit_json_work_file :: proc(out: ^Output, buffer: []Byte, directory: []Byte, name: Str) Int ->
+emit_json_work_file :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte, name: Str) Int ->
     path := [PATH_BYTES]Byte { .. = 0 }
     path_length := work_path(path[:], directory, name)
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
     file, open_error := open_path(path[0:path_length], wide_path[:])
     if open_error not= .NONE ->
-        emit_text(out, buffer, "null")
+        emit_text(out, "null")
         return 0
     defer mu.file_close(file)
 
-    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    mark := arena.used
+    defer arena.used = mark
+    chunk, _ := mu.arena_allocate(arena, CHUNK_BYTES)
     is_carriage_return := false
-    emit_text(out, buffer, "\"")
+    emit_text(out, "\"")
     for ->
-        count, error := mu.file_read(file, chunk[:])
+        count, error := mu.file_read(file, chunk)
         if error not= .NONE or count == 0 ->
             break
         for index in 0..<count ->
             value := chunk[index]
             // A carriage return waits for the byte after it, which may be in the next chunk.
             if is_carriage_return and value not= '\n' ->
-                emit_json_byte(out, buffer, int_to_byte(13))
+                emit_json_byte(out, int_to_byte(13))
             is_carriage_return = value == '\r'
             if not is_carriage_return ->
-                emit_json_byte(out, buffer, value)
+                emit_json_byte(out, value)
     if is_carriage_return ->
-        emit_json_byte(out, buffer, int_to_byte(13))
-    emit_text(out, buffer, "\"")
+        emit_json_byte(out, int_to_byte(13))
+    emit_text(out, "\"")
     return 0
 
 /// Puts the bytes in the page as a JSON string.
-emit_json_string :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) Int ->
-    emit_text(out, buffer, "\"")
-    emit_json_bytes(out, buffer, bytes, false)
-    emit_text(out, buffer, "\"")
+emit_json_string :: proc(out: ^Output, bytes: []Byte) Int ->
+    emit_text(out, "\"")
+    emit_json_bytes(out, bytes, false)
+    emit_text(out, "\"")
     return 0
 
 /// Puts the bytes in the page as a JSON string of their lower case, which are all ASCII here.
-emit_json_lower :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) Int ->
-    emit_text(out, buffer, "\"")
+emit_json_lower :: proc(out: ^Output, bytes: []Byte) Int ->
+    emit_text(out, "\"")
     for value in bytes ->
         if value >= 65 and value <= 90 ->
-            emit_byte(out, buffer, int_to_byte(cast(Int)value + 32))
+            emit_byte(out, int_to_byte(cast(Int)value + 32))
         else ->
-            emit_byte(out, buffer, value)
-    emit_text(out, buffer, "\"")
+            emit_byte(out, value)
+    emit_text(out, "\"")
     return 0
 
 /// Puts the bytes in the page as a JSON string of their upper case, which are all ASCII here.
-emit_json_upper :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) Int ->
-    emit_text(out, buffer, "\"")
+emit_json_upper :: proc(out: ^Output, bytes: []Byte) Int ->
+    emit_text(out, "\"")
     for value in bytes ->
         if value >= 97 and value <= 122 ->
-            emit_byte(out, buffer, int_to_byte(cast(Int)value - 32))
+            emit_byte(out, int_to_byte(cast(Int)value - 32))
         else ->
-            emit_byte(out, buffer, value)
-    emit_text(out, buffer, "\"")
+            emit_byte(out, value)
+    emit_text(out, "\"")
     return 0
 
 /// Puts the base64 of the bytes in the page, with the `=` that fill the last group.
-emit_base64 :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) Int ->
+emit_base64 :: proc(out: ^Output, bytes: []Byte) Int ->
     index := 0
     for index < length_of(bytes) ->
         first := cast(Int)bytes[index]
@@ -1312,16 +1344,16 @@ emit_base64 :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) Int ->
             third = cast(Int)bytes[index + 2]
         group := first * 65536 + second * 256 + third
         high := group / 262144
-        emit_byte(out, buffer, base64_digit(high))
-        emit_byte(out, buffer, base64_digit(group / 4096 - high * 64))
+        emit_byte(out, base64_digit(high))
+        emit_byte(out, base64_digit(group / 4096 - high * 64))
         if index + 1 < length_of(bytes) ->
-            emit_byte(out, buffer, base64_digit(group / 64 - group / 4096 * 64))
+            emit_byte(out, base64_digit(group / 64 - group / 4096 * 64))
         else ->
-            emit_byte(out, buffer, int_to_byte(61))
+            emit_byte(out, int_to_byte(61))
         if index + 2 < length_of(bytes) ->
-            emit_byte(out, buffer, base64_digit(group - group / 64 * 64))
+            emit_byte(out, base64_digit(group - group / 64 * 64))
         else ->
-            emit_byte(out, buffer, int_to_byte(61))
+            emit_byte(out, int_to_byte(61))
         index += 3
     return 0
 
@@ -1363,26 +1395,28 @@ open_project_file :: proc(directory: []Byte, below: Str, wide_path: []Byte) (mu.
 
 /// The members of the enum `Token_Kind` of the tokenizer, each with the comment above it as its
 /// description. A comment about a group of members is not about the next one.
-emit_tokens :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
+emit_tokens :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
     file, open_error := open_project_file(directory, "/src/tokenizer.h", wide_path[:])
     if open_error not= .NONE ->
         return 0
     defer mu.file_close(file)
 
-    chunk := [CHUNK_BYTES]Byte { .. = 0 }
-    line := [LINE_BYTES]Byte { .. = 0 }
+    // What is taken from the arena is given back when this returns, for what the page puts next.
+    mark := arena.used
+    defer arena.used = mark
+    line, _ := mu.arena_allocate(arena, LINE_BYTES)
     comment := [1024]Byte { .. = 0 }
     comment_length := 0
-    reader := Line_Reader { file = file, position = 0, count = 0 }
+    reader := line_reader_make(file, arena)
     in_enum := false
     is_first := true
     for ->
-        length, has_line := read_line(%reader, chunk[:], line[:])
+        length, has_line := read_line(%reader, line)
         if not has_line ->
             break
         text := line[0:length]
-        stripped := text[trim_start(text):trim_end(text)]
+        stripped := trim(text)
         if not in_enum ->
             if bytes_are(stripped, "typedef enum {") ->
                 in_enum = true
@@ -1391,7 +1425,7 @@ emit_tokens :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
             break
         if bytes_start_with(stripped, "//") ->
             rest := stripped[2:]
-            rest = rest[trim_start(rest):trim_end(rest)]
+            rest = trim(rest)
             if comment_length > 0 ->
                 comment_length = put_byte(comment[:], comment_length, 32)
             comment_length = put_bytes(comment[:], comment_length, rest)
@@ -1441,21 +1475,21 @@ emit_tokens :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
         if is_first ->
             is_first = false
         else ->
-            emit_text(out, buffer, ",")
-        emit_text(out, buffer, "{\"name\":\"TOKEN_KIND_")
-        emit_bytes_text(out, buffer, name)
-        emit_text(out, buffer, "\",\"value\":")
+            emit_text(out, ",")
+        emit_text(out, "{\"name\":\"TOKEN_KIND_")
+        emit_bytes_text(out, name)
+        emit_text(out, "\",\"value\":")
         if has_value ->
-            emit_json_string(out, buffer, stripped[value_start:value_end])
+            emit_json_string(out, stripped[value_start:value_end])
         else ->
-            emit_text(out, buffer, "null")
-        emit_text(out, buffer, ",\"spelling\":")
+            emit_text(out, "null")
+        emit_text(out, ",\"spelling\":")
         if is_character ->
-            emit_json_string(out, buffer, stripped[value_start + 1:value_start + 2])
+            emit_json_string(out, stripped[value_start + 1:value_start + 2])
         else if is_keyword ->
-            emit_json_lower(out, buffer, name[8:])
+            emit_json_lower(out, name[8:])
         else ->
-            emit_text(out, buffer, "\"\"")
+            emit_text(out, "\"\"")
 
         category := "Multi-character"
         if is_keyword ->
@@ -1466,17 +1500,17 @@ emit_tokens :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
             category = "Names and literals"
         if list_has("INDENTATION COMMENT DOCUMENTATION_COMMENT END", name) ->
             category = "Layout and comments"
-        emit_text(out, buffer, ",\"category\":\"")
-        emit_text(out, buffer, category)
-        emit_text(out, buffer, "\",\"description\":")
-        emit_json_string(out, buffer, description)
-        emit_text(out, buffer, "}")
+        emit_text(out, ",\"category\":\"")
+        emit_text(out, category)
+        emit_text(out, "\",\"description\":")
+        emit_json_string(out, description)
+        emit_text(out, "}")
     return 0
 
 /// Puts the bytes in the page as they are, which are names that need no escape.
-emit_bytes_text :: proc(out: ^Output, buffer: []Byte, bytes: []Byte) Int ->
+emit_bytes_text :: proc(out: ^Output, bytes: []Byte) Int ->
     for value in bytes ->
-        emit_byte(out, buffer, value)
+        emit_byte(out, value)
     return 0
 
 /// The start of the lines of the comment of `ast.h` that describes a node, and what the lines that
@@ -1486,20 +1520,22 @@ AST_CONTINUATION :: " *   "
 
 /// Puts in `description` what the big comment of `ast.h` says of the node `name`, which is an entry
 /// ` * - `AST_NODE_TYPE_NAME`: text` and the lines that go on with it, and gives how long it is.
-find_ast_description :: proc(directory: []Byte, name: []Byte, description: []Byte) Int ->
+find_ast_description :: proc(arena: ^mu.Arena_Allocator, directory: []Byte, name: []Byte, description: []Byte) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
     file, open_error := open_project_file(directory, "/src/ast.h", wide_path[:])
     if open_error not= .NONE ->
         return 0
     defer mu.file_close(file)
 
-    chunk := [CHUNK_BYTES]Byte { .. = 0 }
-    line := [LINE_BYTES]Byte { .. = 0 }
-    reader := Line_Reader { file = file, position = 0, count = 0 }
+    // What is taken from the arena is given back when this returns, for what the page puts next.
+    mark := arena.used
+    defer arena.used = mark
+    line, _ := mu.arena_allocate(arena, LINE_BYTES)
+    reader := line_reader_make(file, arena)
     length := 0
     is_found := false
     for ->
-        count, has_line := read_line(%reader, chunk[:], line[:])
+        count, has_line := read_line(%reader, line)
         if not has_line ->
             break
         text := line[0:count]
@@ -1514,12 +1550,12 @@ find_ast_description :: proc(directory: []Byte, name: []Byte, description: []Byt
                 // The name is followed by a colon, and a space that is not part of the description.
                 if byte_is(rest, 0, 58) ->
                     rest = rest[1:]
-                rest = rest[trim_start(rest):trim_end(rest)]
+                rest = trim(rest)
                 length = put_bytes(description, 0, rest)
         else if is_found ->
             if bytes_start_with(text, AST_CONTINUATION) ->
                 rest := text[length_of(AST_CONTINUATION):]
-                rest = rest[trim_start(rest):trim_end(rest)]
+                rest = trim(rest)
                 length = put_byte(description, length, 32)
                 length = put_bytes(description, length, rest)
             else ->
@@ -1528,25 +1564,27 @@ find_ast_description :: proc(directory: []Byte, name: []Byte, description: []Byt
 
 /// The members of the enum `Ast_Node_Type` of `ast.h`, which is the first enum of the file, each
 /// with its group and its entry of the big comment.
-emit_ast_nodes :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
+emit_ast_nodes :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
     file, open_error := open_project_file(directory, "/src/ast.h", wide_path[:])
     if open_error not= .NONE ->
         return 0
     defer mu.file_close(file)
 
-    chunk := [CHUNK_BYTES]Byte { .. = 0 }
-    line := [LINE_BYTES]Byte { .. = 0 }
-    description := [2048]Byte { .. = 0 }
-    reader := Line_Reader { file = file, position = 0, count = 0 }
+    // What is taken from the arena is given back when this returns, for what the page puts next.
+    mark := arena.used
+    defer arena.used = mark
+    line, _ := mu.arena_allocate(arena, LINE_BYTES)
+    description, _ := mu.arena_allocate(arena, 2048)
+    reader := line_reader_make(file, arena)
     in_enum := false
     is_first := true
     for ->
-        length, has_line := read_line(%reader, chunk[:], line[:])
+        length, has_line := read_line(%reader, line)
         if not has_line ->
             break
         text := line[0:length]
-        stripped := text[trim_start(text):trim_end(text)]
+        stripped := trim(text)
         if not in_enum ->
             if bytes_are(stripped, "typedef enum {") ->
                 in_enum = true
@@ -1576,18 +1614,18 @@ emit_ast_nodes :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
             else if bytes_end_with(name, "_ASSIGNMENT") ->
                 category = "Statement"
 
-            description_length := find_ast_description(directory, name, description[:])
+            description_length := find_ast_description(arena, directory, name, description)
             if is_first ->
                 is_first = false
             else ->
-                emit_text(out, buffer, ",")
-            emit_text(out, buffer, "{\"name\":\"AST_NODE_TYPE_")
-            emit_bytes_text(out, buffer, name)
-            emit_text(out, buffer, "\",\"category\":\"")
-            emit_text(out, buffer, category)
-            emit_text(out, buffer, "\",\"description\":")
-            emit_json_string(out, buffer, description[0:description_length])
-            emit_text(out, buffer, "}")
+                emit_text(out, ",")
+            emit_text(out, "{\"name\":\"AST_NODE_TYPE_")
+            emit_bytes_text(out, name)
+            emit_text(out, "\",\"category\":\"")
+            emit_text(out, category)
+            emit_text(out, "\",\"description\":")
+            emit_json_string(out, description[0:description_length])
+            emit_text(out, "}")
     return 0
 
 /// The group of a reserved word. The specification lists them only as used, literal and unused, so the
@@ -1619,22 +1657,24 @@ keyword_category :: proc(word: []Byte, is_unused: Bool) Str ->
 
 /// The reserved words of the specification, which has them in three blocks of code below the heading
 /// "Reserved words": the keywords in use, the literal words and the unused keywords.
-emit_reserved_words :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
+emit_reserved_words :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
     file, open_error := open_project_file(directory, "/docs/mialu-programming-language.md", wide_path[:])
     if open_error not= .NONE ->
         return 0
     defer mu.file_close(file)
 
-    chunk := [CHUNK_BYTES]Byte { .. = 0 }
-    line := [LINE_BYTES]Byte { .. = 0 }
-    reader := Line_Reader { file = file, position = 0, count = 0 }
+    // What is taken from the arena is given back when this returns, for what the page puts next.
+    mark := arena.used
+    defer arena.used = mark
+    line, _ := mu.arena_allocate(arena, LINE_BYTES)
+    reader := line_reader_make(file, arena)
     in_section := false
     in_block := false
     blocks := 0
     is_first := true
     for ->
-        length, has_line := read_line(%reader, chunk[:], line[:])
+        length, has_line := read_line(%reader, line)
         if not has_line ->
             break
         text := line[0:length]
@@ -1673,25 +1713,25 @@ emit_reserved_words :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int
             if is_first ->
                 is_first = false
             else ->
-                emit_text(out, buffer, ",")
-            emit_text(out, buffer, "{\"word\":")
-            emit_json_string(out, buffer, word)
-            emit_text(out, buffer, ",\"status\":\"")
-            emit_text(out, buffer, status)
-            emit_text(out, buffer, "\",\"category\":\"")
-            emit_text(out, buffer, keyword_category(word, blocks == 2))
-            emit_text(out, buffer, "\",\"token\":")
+                emit_text(out, ",")
+            emit_text(out, "{\"word\":")
+            emit_json_string(out, word)
+            emit_text(out, ",\"status\":\"")
+            emit_text(out, status)
+            emit_text(out, "\",\"category\":\"")
+            emit_text(out, keyword_category(word, blocks == 2))
+            emit_text(out, "\",\"token\":")
             if blocks == 2 ->
-                emit_text(out, buffer, "null")
+                emit_text(out, "null")
             else ->
-                emit_text(out, buffer, "\"TOKEN_KIND_KEYWORD_")
+                emit_text(out, "\"TOKEN_KIND_KEYWORD_")
                 for value in word ->
                     if value >= 97 and value <= 122 ->
-                        emit_byte(out, buffer, int_to_byte(cast(Int)value - 32))
+                        emit_byte(out, int_to_byte(cast(Int)value - 32))
                     else ->
-                        emit_byte(out, buffer, value)
-                emit_text(out, buffer, "\"")
-            emit_text(out, buffer, "}")
+                        emit_byte(out, value)
+                emit_text(out, "\"")
+            emit_text(out, "}")
             start = end
     return 0
 
@@ -1713,19 +1753,21 @@ OPERATOR_PRECEDENCE_MAX :: 15
 
 /// Puts the rows of the table of operators that have the precedence, which are the rows of the
 /// section "Operators" of the specification that have four cells and a number in the third.
-emit_operators_of :: proc(out: ^Output, buffer: []Byte, directory: []Byte, wanted: Int, is_first: ^Bool) Int ->
+emit_operators_of :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte, wanted: Int, is_first: ^Bool) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
     file, open_error := open_project_file(directory, "/docs/mialu-programming-language.md", wide_path[:])
     if open_error not= .NONE ->
         return 0
     defer mu.file_close(file)
 
-    chunk := [CHUNK_BYTES]Byte { .. = 0 }
-    line := [LINE_BYTES]Byte { .. = 0 }
-    reader := Line_Reader { file = file, position = 0, count = 0 }
+    // What is taken from the arena is given back when this returns, for what the page puts next.
+    mark := arena.used
+    defer arena.used = mark
+    line, _ := mu.arena_allocate(arena, LINE_BYTES)
+    reader := line_reader_make(file, arena)
     in_section := false
     for ->
-        length, has_line := read_line(%reader, chunk[:], line[:])
+        length, has_line := read_line(%reader, line)
         if not has_line ->
             break
         text := line[0:length]
@@ -1749,15 +1791,14 @@ emit_operators_of :: proc(out: ^Output, buffer: []Byte, directory: []Byte, wante
                 count += 1
         if count not= 5 ->
             continue
-        // MISSING: an array slice as the result of a procedure, to have a `trim` that gives one.
         cell := text[bars[0] + 1:bars[1]]
-        operator_text := cell[trim_start(cell):trim_end(cell)]
+        operator_text := trim(cell)
         cell = text[bars[1] + 1:bars[2]]
-        description := cell[trim_start(cell):trim_end(cell)]
+        description := trim(cell)
         cell = text[bars[2] + 1:bars[3]]
-        precedence_text := cell[trim_start(cell):trim_end(cell)]
+        precedence_text := trim(cell)
         cell = text[bars[3] + 1:bars[4]]
-        example := cell[trim_start(cell):trim_end(cell)]
+        example := trim(cell)
         is_number := length_of(precedence_text) > 0
         for value in precedence_text ->
             if value < 48 or value > 57 ->
@@ -1781,31 +1822,31 @@ emit_operators_of :: proc(out: ^Output, buffer: []Byte, directory: []Byte, wante
         if is_first^ ->
             is_first^ = false
         else ->
-            emit_text(out, buffer, ",")
-        emit_text(out, buffer, "{\"operator\":")
-        emit_json_string(out, buffer, operator_text[operator_start:operator_end])
-        emit_text(out, buffer, ",\"description\":\"")
-        emit_json_bytes(out, buffer, description, true)
-        emit_text(out, buffer, "\",\"precedence\":")
-        emit_bytes_text(out, buffer, precedence_text)
-        emit_text(out, buffer, ",\"example\":")
-        emit_json_string(out, buffer, example)
-        emit_text(out, buffer, ",\"category\":\"")
-        emit_text(out, buffer, operator_category(precedence))
-        emit_text(out, buffer, "\"}")
+            emit_text(out, ",")
+        emit_text(out, "{\"operator\":")
+        emit_json_string(out, operator_text[operator_start:operator_end])
+        emit_text(out, ",\"description\":\"")
+        emit_json_bytes(out, description, true)
+        emit_text(out, "\",\"precedence\":")
+        emit_bytes_text(out, precedence_text)
+        emit_text(out, ",\"example\":")
+        emit_json_string(out, example)
+        emit_text(out, ",\"category\":\"")
+        emit_text(out, operator_category(precedence))
+        emit_text(out, "\"}")
     return 0
 
 /// Puts the operators, from the one that binds loosest to the one that binds tightest, with the
 /// operators that are not in expressions, whose precedence is 0, last.
-emit_operators :: proc(out: ^Output, buffer: []Byte, directory: []Byte) Int ->
+emit_operators :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte) Int ->
     is_first := true
     for wanted in 1..<=OPERATOR_PRECEDENCE_MAX ->
-        emit_operators_of(out, buffer, directory, wanted, %is_first)
-    emit_operators_of(out, buffer, directory, 0, %is_first)
+        emit_operators_of(out, arena, directory, wanted, %is_first)
+    emit_operators_of(out, arena, directory, 0, %is_first)
     return 0
 
 /// Sends the answer of /api/internals.
-send_internals :: proc(client: Int, directory: []Byte, with_body: Bool) Int ->
+send_internals :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, with_body: Bool) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
     file, open_error := open_project_file(directory, "/docs/mialu-programming-language.md", wide_path[:])
     if open_error not= .NONE ->
@@ -1814,18 +1855,17 @@ send_internals :: proc(client: Int, directory: []Byte, with_body: Bool) Int ->
 
     if not send_head(client, STATUS_OK, "OK", "application/json", -1) or not with_body ->
         return STATUS_OK
-    buffer := [OUTPUT_BYTES]Byte { .. = 0 }
-    out := Output { client = client, used = 0, is_open = true }
-    emit_text(%out, buffer[:], "{\"tokens\":[")
-    emit_tokens(%out, buffer[:], directory)
-    emit_text(%out, buffer[:], "],\"ast_nodes\":[")
-    emit_ast_nodes(%out, buffer[:], directory)
-    emit_text(%out, buffer[:], "],\"reserved_words\":[")
-    emit_reserved_words(%out, buffer[:], directory)
-    emit_text(%out, buffer[:], "],\"operators\":[")
-    emit_operators(%out, buffer[:], directory)
-    emit_text(%out, buffer[:], "]}")
-    flush(%out, buffer[:])
+    out := output_make(client, arena, OUTPUT_BYTES)
+    emit_text(%out, "{\"tokens\":[")
+    emit_tokens(%out, arena, directory)
+    emit_text(%out, "],\"ast_nodes\":[")
+    emit_ast_nodes(%out, arena, directory)
+    emit_text(%out, "],\"reserved_words\":[")
+    emit_reserved_words(%out, arena, directory)
+    emit_text(%out, "],\"operators\":[")
+    emit_operators(%out, arena, directory)
+    emit_text(%out, "]}")
+    flush(%out)
     return STATUS_OK
 
 // ---------------------------------------------------------------------------------------------
@@ -1873,7 +1913,6 @@ PLAYGROUND_DIRECTORY :: "/build/playground"
 SOURCE_BYTES_MAX :: 1048576
 COMPILE_TIMEOUT_MILLISECONDS :: 10000
 MESSAGE_BYTES :: 8192
-DATA_BYTES :: 300000
 
 /// What `run_compiler` gives when the compiler could not be started, and when it did not finish.
 RUN_FAILED :: -1
@@ -1984,6 +2023,20 @@ read_work_file :: proc(directory: []Byte, name: Str, data: []Byte) Int ->
         return -1
     return count
 
+/// The size of the file `name` of the directory of the playground in bytes, or 0 when it cannot be read.
+work_file_size :: proc(directory: []Byte, name: Str) Int ->
+    path := [PATH_BYTES]Byte { .. = 0 }
+    path_length := work_path(path[:], directory, name)
+    wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
+    file, open_error := open_path(path[0:path_length], wide_path[:])
+    if open_error not= .NONE ->
+        return 0
+    defer mu.file_close(file)
+    size : I64 = 0
+    if GetFileSizeEx(file.handle, %size) == 0 ->
+        return 0
+    return cast(Int)size
+
 /// Puts in `message` what the compiler said when it did not do what was asked, which is what it printed
 /// as errors, or else as output, and gives how long it is. It is 0 when the compiler did well.
 compiler_message :: proc(directory: []Byte, status: Int, errors_name: Str, output_name: Str, message: []Byte) Int ->
@@ -2006,7 +2059,7 @@ compiler_message :: proc(directory: []Byte, status: Int, errors_name: Str, outpu
 /// Goes through what `dump-ast` printed, which is the tokens, an empty line and then the tree, which starts with
 /// its root, the line `MODULE`. It says whether the tree is there. With `is_emitting` it puts the tree in the
 /// page as a JSON string, without the empty lines that end it, a line at a time so it can be of any size.
-walk_tree :: proc(out: ^Output, buffer: []Byte, directory: []Byte, is_emitting: Bool) Bool ->
+walk_tree :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte, is_emitting: Bool) Bool ->
     path := [PATH_BYTES]Byte { .. = 0 }
     path_length := work_path(path[:], directory, "ast.txt")
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
@@ -2015,15 +2068,17 @@ walk_tree :: proc(out: ^Output, buffer: []Byte, directory: []Byte, is_emitting: 
         return false
     defer mu.file_close(file)
 
-    chunk := [CHUNK_BYTES]Byte { .. = 0 }
-    line := [LINE_BYTES]Byte { .. = 0 }
-    reader := Line_Reader { file = file, position = 0, count = 0 }
+    // What is taken from the arena is given back when this returns, for what the page puts next.
+    mark := arena.used
+    defer arena.used = mark
+    line, _ := mu.arena_allocate(arena, LINE_BYTES)
+    reader := line_reader_make(file, arena)
     is_found := false
     was_empty := false
     is_first := true
     empty_lines := 0
     for ->
-        length, has_line := read_line(%reader, chunk[:], line[:])
+        length, has_line := read_line(%reader, line)
         if not has_line ->
             break
         if not is_found ->
@@ -2031,7 +2086,7 @@ walk_tree :: proc(out: ^Output, buffer: []Byte, directory: []Byte, is_emitting: 
                 is_found = true
                 if not is_emitting ->
                     break
-                emit_text(out, buffer, "\"")
+                emit_text(out, "\"")
             was_empty = length == 0
         if is_found ->
             // Empty lines are put when something follows them, so the ones at the end are left out.
@@ -2041,13 +2096,13 @@ walk_tree :: proc(out: ^Output, buffer: []Byte, directory: []Byte, is_emitting: 
                 if is_first ->
                     is_first = false
                 else ->
-                    emit_text(out, buffer, "\\n")
+                    emit_text(out, "\\n")
                 for step in 0..<empty_lines ->
-                    emit_text(out, buffer, "\\n")
+                    emit_text(out, "\\n")
                 empty_lines = 0
-                emit_json_bytes(out, buffer, line[0:length], false)
+                emit_json_bytes(out, line[0:length], false)
     if is_found and is_emitting ->
-        emit_text(out, buffer, "\"")
+        emit_text(out, "\"")
     return is_found
 
 /// Finds in the head of a request the length of its body, which is the header `Content-Length`, and
@@ -2073,7 +2128,7 @@ content_length_of :: proc(head: []Byte) Int ->
                 index += 1
             if matches ->
                 rest := field[15:]
-                rest = rest[trim_start(rest):trim_end(rest)]
+                rest = trim(rest)
                 digits, is_number := try_str_to_int(utf8_decode_or_empty(rest))
                 if is_number ->
                     return digits
@@ -2098,7 +2153,7 @@ write_all :: proc(file: mu.File, bytes: []Byte) Bool ->
 
 /// Writes the source of a request to `playground.mu`: first what came with the head, and then what the client
 /// still sends, until it has sent `length` bytes. It says whether all of it was written.
-receive_source :: proc(client: Int, directory: []Byte, first: []Byte, length: Int) Bool ->
+receive_source :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, first: []Byte, length: Int) Bool ->
     path := [PATH_BYTES]Byte { .. = 0 }
     path_length := work_path(path[:], directory, "playground.mu")
     text, is_text := utf8_decode(path[0:path_length])
@@ -2116,11 +2171,13 @@ receive_source :: proc(client: Int, directory: []Byte, first: []Byte, length: In
     if not write_all(file, part) ->
         return false
     received := length_of(part)
-    chunk := [CHUNK_BYTES]Byte { .. = 0 }
+    chunk, _ := mu.arena_allocate(arena, CHUNK_BYTES)
     for received < length ->
         wanted := length - received
-        if wanted > CHUNK_BYTES ->
-            wanted = CHUNK_BYTES
+        if wanted > length_of(chunk) ->
+            wanted = length_of(chunk)
+        if wanted == 0 ->
+            return false
         count := cast(Int)recv(client, %chunk[0], int_to_i32(wanted), 0)
         if count <= 0 ->
             return false
@@ -2130,22 +2187,21 @@ receive_source :: proc(client: Int, directory: []Byte, first: []Byte, length: In
     return true
 
 /// Sends an answer of /compile that has an error and nothing else.
-send_compile_failure :: proc(client: Int, message: []Byte) Int ->
+send_compile_failure :: proc(client: Int, arena: ^mu.Arena_Allocator, message: []Byte) Int ->
     if not send_head(client, STATUS_OK, "OK", "application/json", -1) ->
         return STATUS_OK
-    buffer := [BODY_BYTES * 8]Byte { .. = 0 }
-    out := Output { client = client, used = 0, is_open = true }
-    emit_text(%out, buffer[:], "{\"error\":")
-    emit_json_string(%out, buffer[:], message)
-    emit_text(%out, buffer[:], ",\"ast\":null,\"wasm\":null,\"wat\":null,\"asm\":null,\"asm_error\":null}")
-    flush(%out, buffer[:])
+    out := output_make(client, arena, BODY_BYTES * 8)
+    emit_text(%out, "{\"error\":")
+    emit_json_string(%out, message)
+    emit_text(%out, ",\"ast\":null,\"wasm\":null,\"wat\":null,\"asm\":null,\"asm_error\":null}")
+    flush(%out)
     return STATUS_OK
 
 /// Answers a request of /compile, whose head is `request[0:head_end]`: the source is the body, which is
 /// built for both targets of WebAssembly, and for the one of x64, to show its assembly.
 /// The syntax tree, the text of the module and the assembly are sent from their files, so they can be
-/// of any size. The module in base64 is held in memory, which holds 300 KB: a larger module is not sent.
-send_compile :: proc(client: Int, directory: []Byte, request: []Byte, head_end: Int) Int ->
+/// of any size. The module in base64 is read into memory that is made for its size, so it can be too.
+send_compile :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, request: []Byte, head_end: Int) Int ->
     length := content_length_of(request[0:head_end])
     if length < 0 ->
         return send_error(client, STATUS_BAD_REQUEST, "Bad Request", true)
@@ -2159,84 +2215,85 @@ send_compile :: proc(client: Int, directory: []Byte, request: []Byte, head_end: 
     work := [PATH_BYTES]Byte { .. = 0 }
     put_text(work[:], put_bytes(work[:], 0, directory), PLAYGROUND_DIRECTORY)
     CreateDirectoryA(%work[0], nil)
-    if not receive_source(client, directory, request[head_end:], length) ->
+    if not receive_source(client, arena, directory, request[head_end:], length) ->
         return send_error(client, STATUS_BAD_REQUEST, "Bad Request", true)
 
-    message := [MESSAGE_BYTES]Byte { .. = 0 }
+    message, _ := mu.arena_allocate(arena, MESSAGE_BYTES)
     tree_status := run_compiler(directory, "dump-ast playground.mu", "ast.txt", "ast.err")
     if tree_status == RUN_FAILED ->
-        at := put_text(message[:], 0, "Cannot find the compiler at ")
-        at = put_bytes(message[:], at, directory)
-        at = put_text(message[:], at, compiler_location(directory))
-        at = put_text(message[:], at, ". Build it first, see Getting Started.")
-        return send_compile_failure(client, message[0:at])
+        at := put_text(message, 0, "Cannot find the compiler at ")
+        at = put_bytes(message, at, directory)
+        at = put_text(message, at, compiler_location(directory))
+        at = put_text(message, at, ". Build it first, see Getting Started.")
+        return send_compile_failure(client, arena, message[0:at])
     assembly_status := run_compiler(directory, "dump-asm --target x64-win32 playground.mu", "asm.txt", "asm.err")
     wasm_status := run_compiler(directory, "build --target wasm playground.wasm playground.mu", "wasm.txt", "wasm.err")
     wat_status := run_compiler(directory, "build --target wat playground.wat playground.mu", "wat.txt", "wat.err")
 
     // The first target that did not build is the error, as the compiler says it.
-    error_length := compiler_message(directory, wasm_status, "wasm.err", "wasm.txt", message[:])
+    error_length := compiler_message(directory, wasm_status, "wasm.err", "wasm.txt", message)
     if error_length == 0 ->
-        error_length = compiler_message(directory, wat_status, "wat.err", "wat.txt", message[:])
+        error_length = compiler_message(directory, wat_status, "wat.err", "wat.txt", message)
     is_built := wasm_status == 0 and wat_status == 0
 
     if not send_head(client, STATUS_OK, "OK", "application/json", -1) ->
         return STATUS_OK
-    buffer := [OUTPUT_BYTES]Byte { .. = 0 }
-    out := Output { client = client, used = 0, is_open = true }
-    data := [DATA_BYTES]Byte { .. = 0 }
+    out := output_make(client, arena, OUTPUT_BYTES)
 
-    emit_text(%out, buffer[:], "{\"error\":")
+    emit_text(%out, "{\"error\":")
     if is_built ->
-        emit_text(%out, buffer[:], "null")
+        emit_text(%out, "null")
     else ->
-        emit_json_string(%out, buffer[:], message[0:error_length])
+        emit_json_string(%out, message[0:error_length])
 
-    emit_text(%out, buffer[:], ",\"ast\":")
-    if walk_tree(%out, buffer[:], directory, false) ->
-        walk_tree(%out, buffer[:], directory, true)
+    emit_text(%out, ",\"ast\":")
+    if walk_tree(%out, arena, directory, false) ->
+        walk_tree(%out, arena, directory, true)
     else ->
-        emit_text(%out, buffer[:], "null")
+        emit_text(%out, "null")
 
-    emit_text(%out, buffer[:], ",\"wasm\":")
-    count := read_work_file(directory, "playground.wasm", data[:])
-    if is_built and count >= 0 and count < DATA_BYTES ->
-        emit_text(%out, buffer[:], "\"")
-        emit_base64(%out, buffer[:], data[0:count])
-        emit_text(%out, buffer[:], "\"")
+    emit_text(%out, ",\"wasm\":")
+    // The module can be larger than the arena, so its memory is made for it, and given back when
+    // the answer is sent.
+    data := make([]Byte, work_file_size(directory, "playground.wasm"))
+    defer destroy(data)
+    count := read_work_file(directory, "playground.wasm", data)
+    if is_built and count > 0 and count == length_of(data) ->
+        emit_text(%out, "\"")
+        emit_base64(%out, data[0:count])
+        emit_text(%out, "\"")
     else ->
-        emit_text(%out, buffer[:], "null")
+        emit_text(%out, "null")
 
-    emit_text(%out, buffer[:], ",\"wat\":")
+    emit_text(%out, ",\"wat\":")
     if is_built ->
-        emit_json_work_file(%out, buffer[:], directory, "playground.wat")
+        emit_json_work_file(%out, arena, directory, "playground.wat")
     else ->
-        emit_text(%out, buffer[:], "null")
+        emit_text(%out, "null")
 
-    emit_text(%out, buffer[:], ",\"asm\":")
+    emit_text(%out, ",\"asm\":")
     if assembly_status == 0 ->
-        emit_json_work_file(%out, buffer[:], directory, "asm.txt")
+        emit_json_work_file(%out, arena, directory, "asm.txt")
     else ->
-        emit_text(%out, buffer[:], "null")
+        emit_text(%out, "null")
 
-    emit_text(%out, buffer[:], ",\"asm_error\":")
+    emit_text(%out, ",\"asm_error\":")
     if assembly_status == 0 ->
-        emit_text(%out, buffer[:], "null")
+        emit_text(%out, "null")
     else ->
-        error_length = compiler_message(directory, assembly_status, "asm.err", "asm.txt", message[:])
-        emit_json_string(%out, buffer[:], message[0:error_length])
-    emit_text(%out, buffer[:], "}")
-    flush(%out, buffer[:])
+        error_length = compiler_message(directory, assembly_status, "asm.err", "asm.txt", message)
+        emit_json_string(%out, message[0:error_length])
+    emit_text(%out, "}")
+    flush(%out)
     return STATUS_OK
 
 // ---------------------------------------------------------------------------------------------
 // Requests
 // ---------------------------------------------------------------------------------------------
 
-/// Gives where the two spaces of the line of a request, `GET /target HTTP/1.1`, are, which split it
-/// in the method, the target and the version, and whether the line has them. MISSING: an array slice
-/// as a result, so the three parts are not given as they are.
-split_request_line :: proc(line: []Byte) (Int, Int, Bool) ->
+/// Splits the line of a request, `GET /target HTTP/1.1`, at its two spaces, in the method, the target
+/// and the version, and says whether the line has them.
+split_request_line :: proc(line: []Byte) ([]Byte, []Byte, []Byte, Bool) ->
     first := -1
     second := -1
     for index in 0..<length_of(line) ->
@@ -2246,8 +2303,8 @@ split_request_line :: proc(line: []Byte) (Int, Int, Bool) ->
             else if second < 0 ->
                 second = index
     if first <= 0 or second <= first + 1 ->
-        return 0, 0, false
-    return first, second, true
+        return line[0:0], line[0:0], line[0:0], false
+    return line[0:first], line[first + 1:second], line[second + 1:], true
 
 /// Where the body of a request starts, which is after the empty line that ends its head, or -1.
 find_head_end :: proc(bytes: []Byte) Int ->
@@ -2257,7 +2314,7 @@ find_head_end :: proc(bytes: []Byte) Int ->
     return -1
 
 /// Answers the request that is in `request`, and gives the code of the answer.
-answer :: proc(client: Int, request: []Byte, directory: []Byte) Int ->
+answer :: proc(client: Int, arena: ^mu.Arena_Allocator, request: []Byte, directory: []Byte) Int ->
     line_end := 0
     for line_end < length_of(request) ->
         if request[line_end] == '\r' or request[line_end] == '\n' ->
@@ -2267,11 +2324,9 @@ answer :: proc(client: Int, request: []Byte, directory: []Byte) Int ->
         return send_error(client, STATUS_BAD_REQUEST, "Bad Request", true)
 
     line := request[0:line_end]
-    first, second, is_line := split_request_line(line)
-    if not is_line or not bytes_start_with(line[second + 1:], "HTTP/") ->
+    method, target, version, is_line := split_request_line(line)
+    if not is_line or not bytes_start_with(version, "HTTP/") ->
         return send_error(client, STATUS_BAD_REQUEST, "Bad Request", true)
-    method := line[0:first]
-    target := line[first + 1:second]
 
     is_head := bytes_are(method, "HEAD")
     is_post := bytes_are(method, "POST")
@@ -2289,33 +2344,35 @@ answer :: proc(client: Int, request: []Byte, directory: []Byte) Int ->
     if is_post ->
         head_end := find_head_end(request)
         if bytes_are(target, "/compile") and head_end >= 0 ->
-            return send_compile(client, directory, request, head_end)
+            return send_compile(client, arena, directory, request, head_end)
         return send_error(client, STATUS_METHOD_NOT_ALLOWED, "Method Not Allowed", true)
 
     if bytes_are(target, "/") ->
-        return send_index(client, directory, with_body)
+        return send_index(client, arena, directory, with_body)
     if bytes_are(target, "/logo.png") ->
         path := [PATH_BYTES]Byte { .. = 0 }
         path_length := make_path(path[:], directory, "/media/mialu-logo.png", path[0:0], "")
-        return send_file(client, path[0:path_length], "image/png", with_body)
+        return send_file(client, arena, path[0:path_length], "image/png", with_body)
     // The playground and the page of the internals of the compiler are files of the project, and so are
     // the programs that the playground offers as examples, which its page asks for.
     if bytes_are(target, "/tools/playground") ->
-        return send_page(client, directory, "/tests/wasm/", "playground.html", with_body)
+        return send_page(client, arena, directory, "/tests/wasm/", "playground.html", with_body)
     if bytes_are(target, "/tools/internals") ->
-        return send_page(client, directory, "/tests/wasm/", "internals.html", with_body)
+        return send_page(client, arena, directory, "/tests/wasm/", "internals.html", with_body)
     if bytes_are(target, "/api/internals") ->
-        return send_internals(client, directory, with_body)
+        return send_internals(client, arena, directory, with_body)
     if bytes_start_with(target, "/test-code/wasm/") ->
-        return send_static(client, directory, "/test-code/wasm/", target[length_of("/test-code/wasm/"):], with_body)
+        return send_static(client, arena, directory, "/test-code/wasm/", target[length_of("/test-code/wasm/"):], with_body)
     if bytes_start_with(target, "/tests/wasm/") ->
-        return send_static(client, directory, "/tests/wasm/", target[length_of("/tests/wasm/"):], with_body)
+        return send_static(client, arena, directory, "/tests/wasm/", target[length_of("/tests/wasm/"):], with_body)
     if length_of(target) > 1 and target[0] == '/' and is_name(target[1:]) ->
-        return send_document(client, directory, target[1:], with_body)
+        return send_document(client, arena, directory, target[1:], with_body)
     return send_error(client, STATUS_NOT_FOUND, "Not Found", with_body)
 
-/// Reads the request of a client, answers it, and closes the connection.
-serve_client :: proc(client: Int, directory: []Byte) ->
+/// Reads the request of a client, answers it, and closes the connection. Everything that the answer
+/// takes from the arena is given back after it.
+serve_client :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte) ->
+    defer mu.arena_reset(arena)
     // A client that does not send its request is cut off, so it does not hold the server. The
     // timeout is a `DWORD` of 4 bytes, the lowest first. MISSING: the sizes of integers in memory.
     timeout := [4]Byte { .. = 0 }
@@ -2323,10 +2380,10 @@ serve_client :: proc(client: Int, directory: []Byte) ->
     timeout[1] = int_to_byte(RECEIVE_TIMEOUT_MILLISECONDS / 256)
     setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, %timeout[0], 4)
 
-    request := [REQUEST_BYTES]Byte { .. = 0 }
-    count := receive_head(client, request[:])
+    request, _ := mu.arena_allocate(arena, REQUEST_BYTES)
+    count := receive_head(client, request)
     if count > 0 ->
-        code := answer(client, request[0:count], directory)
+        code := answer(client, arena, request[0:count], directory)
         log_request(request[0:count], code)
 
     shutdown(client, SD_SEND)
@@ -2432,9 +2489,15 @@ main :: proc() Int ->
         puts(str_to_c_str(name))
     fflush(nil)
 
+    // The memory of the answers is made once, and each answer takes what it needs from it, as an
+    // arena, which is given back all at once after the answer.
+    memory := make([]Byte, REQUEST_ARENA_BYTES)
+    defer destroy(memory)
+    arena := mu.Arena_Allocator { memory = memory, used = 0 }
+
     for ->
         client := accept(listener, nil, nil)
         if client == INVALID_SOCKET ->
             continue
-        serve_client(client, directory[0:directory_length])
+        serve_client(client, %arena, directory[0:directory_length])
     return 0
