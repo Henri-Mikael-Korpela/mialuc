@@ -160,7 +160,7 @@ static bool        main_constant_value_write              (Ast_Node const *nodes
 static void         main_type_row_print                    (Str source, Str name,
                                                             char const *text, char const *note,
                                                             Str value, char const *plain_value,
-                                                            Str doc);
+                                                            Str doc, char const *polymorphic);
 static Str          main_doc_comment_write                 (Str source, size_t offset, char *text,
                                                             size_t text_size_bytes);
 static Str          main_concatenated_value                (Ast_Node const *nodes,
@@ -215,7 +215,11 @@ static void         main_run_command_print_struct_sizes    (Str source, Parse_Re
 static void         main_run_command_print_tokens          (Array_Slice tokens);
 static void         main_run_command_print_types           (Str source, Parse_Result parse_result,
                                                             Semantic_Result semantic_result,
-                                                            size_t first_node);
+                                                            size_t first_node,
+                                                            Parse_Result specialized,
+                                                            Semantic_Result specialized_semantic,
+                                                            Array_Slice origins,
+                                                            Array_Slice copies);
 static Str          main_run_command_read_file             (char const *path, Array_Slice buffer);
 static bool         main_run_command_write_file            (char const *path, Array_Slice bytes);
 
@@ -671,6 +675,7 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
     command.reporter.texts = &texts;
     Parse_Result specialized_parse = parse_result;
     Semantic_Result specialized_semantic = semantic_result;
+    Array_Slice specialized_origins = array_slice_make(NULL, 0);
     bool is_specialized = command.mode == COMMAND_MODE_BUILD ||
                           command.mode == COMMAND_MODE_DUMP_ASM ||
                           command.mode == COMMAND_MODE_DUMP_TYPES ||
@@ -690,6 +695,7 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
         specialized_parse.nodes = specialized.nodes;
         specialized_parse.root = specialized.root;
         specialized_semantic = specialized.semantic;
+        specialized_origins = specialized.origins;
     }
 
     switch (command.mode) {
@@ -709,7 +715,9 @@ static int32_t main_run_command_front(Command command, Buffers const *buffers,
         return 0;
     case COMMAND_MODE_DUMP_TYPES:
         main_run_command_print_types(source, parse_result, semantic_result,
-                                     packages->imported_end);
+                                     packages->imported_end, specialized_parse,
+                                     specialized_semantic, specialized_origins,
+                                     buffers->specialize.positions);
         return 0;
     case COMMAND_MODE_INVALID:
         assert(false);
@@ -1035,8 +1043,22 @@ static bool main_type_text_write(Ast_Node const *nodes, Ast_Node_Index type_node
                 written = snprintf(text + length, text_size_bytes - length, "[]");
             }
         } else if (node->node_type == AST_NODE_TYPE_TYPE_NAME) {
-            return main_text_write(text + length, text_size_bytes - length,
-                                   node->payload.type_name.name);
+            // The `$` that declares a type parameter, as in `values: []$T`, is not part of the
+            // type, which is `[]T`.
+            Str name = node->payload.type_name.name;
+            size_t written_length = 0;
+            for (size_t i = 0; i < name.length; i += 1) {
+                if (name.bytes[i] == '$') {
+                    continue;
+                }
+                if (length + written_length + 1 >= text_size_bytes) {
+                    return false;
+                }
+                text[length + written_length] = name.bytes[i];
+                written_length += 1;
+            }
+            text[length + written_length] = '\0';
+            return true;
         } else {
             return false;
         }
@@ -1114,9 +1136,16 @@ static bool main_procedure_text_write(Ast_Node const *nodes, Ast_Node_Index proc
         if (nodes[child].node_type != AST_NODE_TYPE_PARAMETER) {
             break;
         }
+        // A type parameter that is given as a type, `$T: type_id`, has the `$` that declares it,
+        // which is not part of its name.
         Str name = nodes[child].payload.parameter.name;
-        written = snprintf(text + length, text_size_bytes - length, "%s%.*s: ",
-                           is_first ? "" : ", ", (int)name.length, (char const *)name.bytes);
+        char const *declaration = "";
+        if (ast_parameter_is_type(nodes, child)) {
+            declaration = "$";
+        }
+        written = snprintf(text + length, text_size_bytes - length, "%s%s%.*s: ",
+                           is_first ? "" : ", ", declaration, (int)name.length,
+                           (char const *)name.bytes);
         if (written < 0 || length + (size_t)written >= text_size_bytes) {
             return false;
         }
@@ -1698,10 +1727,13 @@ static void main_value_print(Str value, size_t bytes_max) {
 /**
  * Prints the line of `dump-types` for the name `name`, a view of the source, with `text` as the
  * type, see `main_run_command_print_types`. A `note` that is not empty is a sixth field, and a
- * `value` that is not empty is a seventh, after a sixth that is then empty when there is no note.
+ * `value` that is not empty is a seventh, after a sixth that is then empty when there is no note,
+ * `doc` an eighth and a `polymorphic` signature that is not empty a ninth, with the fields before
+ * them empty when there are none.
  */
 static void main_type_row_print(Str source, Str name, char const *text, char const *note,
-                                Str value, char const *plain_value, Str doc) {
+                                Str value, char const *plain_value, Str doc,
+                                char const *polymorphic) {
     // The names are views of the source, so the offset of a name is where its bytes are. A member
     // after a dot is not where its node starts, which is why the node is not used.
     // A name that the compiler made up and that is not in the source has no place to show.
@@ -1712,7 +1744,9 @@ static void main_type_row_print(Str source, Str name, char const *text, char con
     Str_Position position = str_position_at(source, name_offset);
     printf("%zu\t%zu\t%zu\t%.*s\t%s", position.line, position.column, name.length,
            (int)name.length, (char const *)name.bytes, text);
-    if (note[0] != '\0' || value.bytes != NULL || plain_value[0] != '\0' || doc.bytes != NULL) {
+    bool has_polymorphic = polymorphic[0] != '\0';
+    if (note[0] != '\0' || value.bytes != NULL || plain_value[0] != '\0' || doc.bytes != NULL ||
+        has_polymorphic) {
         printf("\t%s", note);
     }
     if (value.bytes != NULL) {
@@ -1720,12 +1754,17 @@ static void main_type_row_print(Str source, Str name, char const *text, char con
         main_value_print(value, MAIN_VALUE_BYTES_MAX);
     } else if (plain_value[0] != '\0') {
         printf("\t%s", plain_value);
-    } else if (doc.bytes != NULL) {
+    } else if (doc.bytes != NULL || has_polymorphic) {
         printf("\t");
     }
     if (doc.bytes != NULL) {
         printf("\t");
         main_value_print(doc, MAIN_DOC_BYTES_MAX);
+    } else if (has_polymorphic) {
+        printf("\t");
+    }
+    if (has_polymorphic) {
+        printf("\t%s", polymorphic);
     }
     printf("\n");
 }
@@ -1791,7 +1830,7 @@ static void main_struct_literal_rows_print(Str source, Ast_Node const *nodes, si
         char text[256] = "";
         if (field != AST_NODE_INDEX_NONE &&
             main_type_text_write(nodes, nodes[field].first_child, text, sizeof(text))) {
-            main_type_row_print(source, name, text, "", STR_EMPTY, "", STR_EMPTY);
+            main_type_row_print(source, name, text, "", STR_EMPTY, "", STR_EMPTY, "");
         }
     }
 }
@@ -1843,16 +1882,50 @@ static char const *main_built_in_signature(Str name) {
  * separated by tabs. The columns count bytes, as the other tools of the compiler do. A for
  * statement's iterator has the array or slice that it is an element of as a sixth field, and a
  * constant that is a string that `++` joined has the joined text as a seventh, and one that is a
- * number, a truth value or a rune has its value, see `main_type_row_print`. This is what an editor shows when the cursor rests on a name.
+ * number, a truth value or a rune has its value, see `main_type_row_print`. This is what an editor
+ * shows when the cursor rests on a name.
+ *
+ * The lines are of the program as it is written, `parse_result` with `semantic_result`, and the
+ * types are worked out in the program that the targets build, `specialized`, see `specialize`,
+ * whose nodes have their origins in `origins`, for every node that is copied there. So the call of
+ * a polymorphic procedure has the signature of the specialization that it calls, and a name that
+ * is given what it returns has the type that it returns for the types of the call, which is the
+ * type that is deduced. A polymorphic definition has no copy of its own, so its names have the
+ * types that are written, with the type parameters. `copies` holds an `Ast_Node_Index` for each
+ * node of the program as it is written, which is filled here.
  */
 static void main_run_command_print_types(Str source, Parse_Result parse_result,
-                                         Semantic_Result semantic_result, size_t first_node) {
+                                         Semantic_Result semantic_result, size_t first_node,
+                                         Parse_Result specialized,
+                                         Semantic_Result specialized_semantic, Array_Slice origins,
+                                         Array_Slice copies) {
     assert(parse_result.status == PARSE_STATUS_OK);
     assert(semantic_result.status == SEMANTIC_STATUS_OK);
+    assert(specialized_semantic.status == SEMANTIC_STATUS_OK);
+    assert(origins.length == specialized.nodes.length);
+    assert(copies.length >= parse_result.nodes.length);
 
     Ast_Node const *nodes = parse_result.nodes.elements;
     Semantic_Binding const *bindings = semantic_result.bindings.elements;
     Constant_Value const *constants = semantic_result.constants.elements;
+    Ast_Node const *copy_nodes = specialized.nodes.elements;
+    Semantic_Binding const *copy_bindings = specialized_semantic.bindings.elements;
+    Constant_Value const *copy_constants = specialized_semantic.constants.elements;
+    size_t copy_count = specialized.nodes.length;
+
+    // Where each node of the program as it is written is in the program that the targets build.
+    Ast_Node_Index *copy_of = copies.elements;
+    Ast_Node_Index const *origin_of = origins.elements;
+    for (size_t i = 0; i < parse_result.nodes.length; i += 1) {
+        copy_of[i] = AST_NODE_INDEX_NONE;
+    }
+    for (size_t i = 0; i < copy_count; i += 1) {
+        if (origin_of[i] != AST_NODE_INDEX_NONE) {
+            assert(origin_of[i] < parse_result.nodes.length);
+            copy_of[origin_of[i]] = (Ast_Node_Index)i;
+        }
+    }
+
     // The nodes of the imported files are before the ones of the program.
     for (Ast_Node_Index index = (Ast_Node_Index)first_node; index < parse_result.nodes.length;
          index += 1) {
@@ -1922,8 +1995,14 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
             break;
         case AST_NODE_TYPE_STRUCT_LITERAL:
             // The fields that are given a value have the type that the field of the struct has,
-            // which a literal without the name of its struct does not tell.
-            main_struct_literal_rows_print(source, nodes, parse_result.nodes.length, index);
+            // which a literal without the name of its struct does not tell. The struct of a
+            // polymorphic struct with its types is a specialization, which only the program that
+            // the targets build has.
+            if (copy_of[index] != AST_NODE_INDEX_NONE) {
+                main_struct_literal_rows_print(source, copy_nodes, copy_count, copy_of[index]);
+            } else {
+                main_struct_literal_rows_print(source, nodes, parse_result.nodes.length, index);
+            }
             continue;
         default:
             break;
@@ -1966,28 +2045,64 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
                                     nodes[enum_definition].payload.constant_definition.name)) {
                 continue;
             }
-        } else if (type_node != AST_NODE_INDEX_NONE) {
-            if (not main_type_text_write(nodes, type_node, text, sizeof(text))) {
+        } else {
+            // The type is worked out in the program that the targets build when the node is in it,
+            // see above, and else in the program as it is written.
+            Ast_Node const *type_nodes = nodes;
+            Semantic_Binding const *type_bindings = bindings;
+            Constant_Value const *type_constants = constants;
+            size_t type_node_count = parse_result.nodes.length;
+            Ast_Node_Index type_target = target;
+            Ast_Node_Index type_expression = expression;
+            Ast_Node_Index type_written = type_node;
+            Ast_Node_Index copy = copy_of[index];
+            if (copy != AST_NODE_INDEX_NONE) {
+                type_nodes = copy_nodes;
+                type_bindings = copy_bindings;
+                type_constants = copy_constants;
+                type_node_count = copy_count;
+                if (expression != AST_NODE_INDEX_NONE) {
+                    type_expression = copy;
+                }
+                if (type_node != AST_NODE_INDEX_NONE) {
+                    type_written = copy_nodes[copy].first_child;
+                }
+                // A definition is its own target, and a use of a name or a call has the target of
+                // its copy, which is a specialization for the call of a polymorphic procedure.
+                if (target == index) {
+                    type_target = copy;
+                } else if (target != AST_NODE_INDEX_NONE) {
+                    type_target = copy_bindings[copy].target;
+                }
+            }
+            bool is_known = false;
+            if (type_written != AST_NODE_INDEX_NONE) {
+                is_known = main_type_text_write(type_nodes, type_written, text, sizeof(text));
+            } else if (type_expression != AST_NODE_INDEX_NONE) {
+                is_known = main_expression_type_write(type_nodes, type_bindings, type_constants,
+                                                      type_node_count, type_expression, 0, text,
+                                                      sizeof(text));
+            } else if (type_target != AST_NODE_INDEX_NONE) {
+                is_known = main_definition_type_write(type_nodes, type_bindings, type_constants,
+                                                      type_node_count, type_target, 0, text,
+                                                      sizeof(text));
+            }
+            if (not is_known) {
                 continue;
             }
-        } else if (expression != AST_NODE_INDEX_NONE) {
-            if (not main_expression_type_write(nodes, bindings, constants,
-                                               parse_result.nodes.length, expression, 0, text,
-                                               sizeof(text))) {
-                continue;
-            }
-        } else if (target == AST_NODE_INDEX_NONE ||
-                   not main_definition_type_write(nodes, bindings, constants,
-                                                  parse_result.nodes.length, target, 0, text,
-                                                  sizeof(text))) {
-            continue;
         }
-        // The iterator of a for statement says what it is an element of.
+        // The iterator of a for statement says what it is an element of, which is worked out where
+        // its type is.
         char note[256] = "";
         if (target != AST_NODE_INDEX_NONE &&
             nodes[target].node_type == AST_NODE_TYPE_FOR_STATEMENT) {
-            main_iterator_note_write(nodes, bindings, constants, parse_result.nodes.length, target,
-                                     note, sizeof(note));
+            if (copy_of[target] != AST_NODE_INDEX_NONE) {
+                main_iterator_note_write(copy_nodes, copy_bindings, copy_constants, copy_count,
+                                         copy_of[target], note, sizeof(note));
+            } else {
+                main_iterator_note_write(nodes, bindings, constants, parse_result.nodes.length,
+                                         target, note, sizeof(note));
+            }
         }
         // A constant that is a string that `++` joined shows the text that it joined.
         Str value = main_concatenated_value(nodes, constants, parse_result.nodes.length, target);
@@ -2030,7 +2145,17 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
                                              sizeof(doc_text));
             }
         }
-        main_type_row_print(source, name, text, note, value, plain_value, doc);
+        // A call of a polymorphic procedure has the signature of its specialization as its
+        // type, and the signature of the procedure as it is written, with its type parameters.
+        char polymorphic[256] = "";
+        if (node->node_type == AST_NODE_TYPE_CALL && target != AST_NODE_INDEX_NONE &&
+            bindings[index].kind == SEMANTIC_BINDING_KIND_CONSTANT &&
+            ast_definition_is_polymorphic(nodes, target) &&
+            not main_procedure_text_write(nodes, nodes[target].first_child, polymorphic,
+                                          sizeof(polymorphic))) {
+            polymorphic[0] = '\0';
+        }
+        main_type_row_print(source, name, text, note, value, plain_value, doc, polymorphic);
     }
 }
 

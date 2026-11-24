@@ -479,6 +479,63 @@ test("a name that stores the result of a cast shows the type that the cast names
     });
 });
 
+test("a call of a polymorphic procedure shows the types that are deduced", async () => {
+    await withServer(async (request, notify) => {
+        await request("initialize", {
+            processId: null,
+            rootUri: null,
+            capabilities: {},
+            initializationOptions: { compilerPath: COMPILER },
+        });
+        notify("initialized", {});
+
+        const uri = "file:///polymorphism.mu";
+        const text = [
+            "package polymorphism",
+            "",
+            "Pair :: struct($T: type_id) ->",
+            "    first: T",
+            "    second: T",
+            "",
+            "add :: proc($T: type_id, a: T, b: T) T ->",
+            "    return a + b",
+            "",
+            "pair_of :: proc(a: $T, b: T) Pair(T) ->",
+            "    return Pair(T) { first = a, second = b }",
+            "",
+            "main :: proc() Int ->",
+            "    total := add(1.5, 2.5)",
+            "    pair := pair_of(1, 2)",
+            "    return pair.first",
+            "",
+        ].join("\n");
+        notify("textDocument/didOpen", {
+            textDocument: { uri, languageId: "mialu", version: 1, text },
+        });
+        const hover = (line, character) =>
+            request("textDocument/hover", { textDocument: { uri }, position: { line, character } })
+                .then((message) => message.result);
+
+        // The polymorphic procedure as it is written has its type parameters.
+        assert.match((await hover(6, 0)).contents.value,
+                     /add: proc\(\$T: type_id, a: T, b: T\) T/);
+        assert.match((await hover(6, 25)).contents.value, /a: T/);
+        // A call has the signature of its specialization, and the procedure that it is one of.
+        assert.strictEqual((await hover(13, 13)).contents.value,
+                           "```mialu\nadd: proc(a: F64, b: F64) F64\n```\n" +
+                           "specialization of\n```mialu\nadd: proc($T: type_id, a: T, b: T) T\n```");
+        // A name that is given what it returns has the type that is deduced, also a polymorphic
+        // struct with its types, and the fields of the struct have the types that it is given.
+        assert.match((await hover(13, 4)).contents.value, /total: F64/);
+        assert.match((await hover(14, 4)).contents.value, /pair: Pair\(Int\)/);
+        assert.match((await hover(15, 16)).contents.value, /first: Int/);
+        assert.match((await hover(3, 4)).contents.value, /first: T/);
+        // The keyword of the type of a type parameter says what it is.
+        assert.match((await hover(6, 18)).contents.value, /type_id[\s\S]*type of a type parameter/);
+        assert.strictEqual((await request("shutdown", null)).result, null);
+    });
+});
+
 test("publishes the error of a document that does not compile and clears it when it is fixed", async () => {
     await withServer(async (request, notify, notifications) => {
         await request("initialize", {

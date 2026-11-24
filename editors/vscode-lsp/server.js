@@ -127,13 +127,14 @@ function unquote(quoted) {
  * Turns the output of `mialuc dump-types` into the names with their types. A line of the output is
  * the line and the column of a name, both counted from 1 in bytes, the length of the name in bytes,
  * the name and the type, a note that some lines have, and after it the value of a constant that is
- * a string that `++` joined, as a string in double quotes, separated by tabs. A line that is not
- * like that is skipped.
+ * a string that `++` joined, as a string in double quotes, its documentation, and the signature of
+ * the polymorphic procedure that a call calls a specialization of, separated by tabs. A line that
+ * is not like that is skipped.
  */
 function namesFromOutput(output) {
     const names = [];
     for (const row of output.split("\n")) {
-        const [lineText, columnText, lengthText, name, type, note, value, doc] =
+        const [lineText, columnText, lengthText, name, type, note, value, doc, polymorphic] =
             row.replace(/\r$/, "").split("\t");
         const line = Number(lineText);
         const column = Number(columnText);
@@ -151,6 +152,7 @@ function namesFromOutput(output) {
             note: note ?? "",
             value: value ?? "",
             doc: unquote(doc ?? ""),
+            polymorphic: polymorphic ?? "",
         });
     }
     return names;
@@ -474,6 +476,12 @@ async function hover(uri, position) {
             // The text that the constant was joined to, as a string literal, so it is code too.
             value += "\nvalue\n" + codeBlock(entry.value);
         }
+        if (entry.polymorphic !== "") {
+            // The type of a call of a polymorphic procedure is the signature of the specialization
+            // that it calls, with the types that were deduced, and the procedure as it is written
+            // has its type parameters.
+            value += "\nspecialization of\n" + codeBlock(`${entry.name}: ${entry.polymorphic}`);
+        }
         return {
             contents: { kind: "markdown", value },
             range: {
@@ -482,7 +490,51 @@ async function hover(uri, position) {
             },
         };
     }
-    return null;
+    return keywordHover(bytes, offset, position.line);
+}
+
+/**
+ * What the keywords that are not names of anything are, for the hover that is on them, which the
+ * compiler has no line for. `type_id` is the type of a type parameter, which a reader meets in the
+ * signature of a polymorphic procedure or struct.
+ */
+const KEYWORD_DESCRIPTIONS = new Map([
+    ["type_id", "The type of a type parameter, as in `$T: type_id`: the parameter is a type, which "
+        + "each call or use gives, and the procedure or the struct is polymorphic."],
+]);
+
+/**
+ * Answers a hover on a keyword of `KEYWORD_DESCRIPTIONS` that the byte `offset` of the line
+ * `bytes`, the line `line` of the document, is on, or null when it is on none.
+ */
+function keywordHover(bytes, offset, line) {
+    const isWordByte = (byte) => (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5A)
+        || (byte >= 0x61 && byte <= 0x7A) || byte === 0x5F;
+    if (offset >= bytes.length || !isWordByte(bytes[offset])) {
+        return null;
+    }
+    let start = offset;
+    while (start > 0 && isWordByte(bytes[start - 1])) {
+        start -= 1;
+    }
+    let end = offset;
+    while (end < bytes.length && isWordByte(bytes[end])) {
+        end += 1;
+    }
+    const word = bytes.toString("utf8", start, end);
+    const description = KEYWORD_DESCRIPTIONS.get(word);
+    if (description === undefined) {
+        return null;
+    }
+    // The bytes before the word are ASCII or not, so the characters are counted from them.
+    const character = bytes.toString("utf8", 0, start).length;
+    return {
+        contents: { kind: "markdown", value: codeBlock(word) + "\n" + description },
+        range: {
+            start: { line, character },
+            end: { line, character: character + word.length },
+        },
+    };
 }
 
 /** The most characters of a value that an inline hint shows, which is cut with an ellipsis. */
