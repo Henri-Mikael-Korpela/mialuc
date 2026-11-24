@@ -320,13 +320,15 @@ trim :: proc(bytes: []Byte) []Byte ->
 
 /// Whether a byte can be in the name of a document: a letter, a digit, `-` or `_`.
 is_name_byte :: proc(value: Byte) Bool ->
-    if value >= 48 and value <= 57 ->
-        return true
-    if value >= 65 and value <= 90 ->
-        return true
-    if value >= 97 and value <= 122 ->
-        return true
-    return value == '-' or value == '_'
+    match value ->
+        case '0'..<='9' ->
+        case 'A'..<='Z' ->
+        case 'a'..<='z' ->
+        case '-' ->
+        case '_' ->
+            return true
+        case ->
+            return false
 
 is_name :: proc(bytes: []Byte) Bool ->
     if length_of(bytes) == 0 ->
@@ -338,13 +340,14 @@ is_name :: proc(bytes: []Byte) Bool ->
 
 /// Whether a byte is a punctuation mark of the ASCII range, which a backslash can make literal.
 is_punctuation :: proc(value: Byte) Bool ->
-    if value >= 33 and value <= 47 ->
-        return true
-    if value >= 58 and value <= 64 ->
-        return true
-    if value >= 91 and value <= 96 ->
-        return true
-    return value >= 123 and value <= 126
+    match value ->
+        case '!'..<='/' ->
+        case ':'..<='@' ->
+        case '['..<='`' ->
+        case '{'..<='~' ->
+            return true
+        case ->
+            return false
 
 // ---------------------------------------------------------------------------------------------
 // Sockets
@@ -452,16 +455,17 @@ emit_text :: proc(out: ^Output, text: Str) ->
 
 /// Puts a byte of text in the page, where `&`, `<`, `>` and `"` are what HTML has for them.
 emit_escaped_byte :: proc(out: ^Output, value: Byte) ->
-    if value == '&' ->
-        emit_text(out, "&amp;")
-    else if value == '<' ->
-        emit_text(out, "&lt;")
-    else if value == '>' ->
-        emit_text(out, "&gt;")
-    else if value == '"' ->
-        emit_text(out, "&quot;")
-    else ->
-        emit_byte(out, value)
+    match value ->
+        case '&' ->
+            emit_text(out, "&amp;")
+        case '<' ->
+            emit_text(out, "&lt;")
+        case '>' ->
+            emit_text(out, "&gt;")
+        case '"' ->
+            emit_text(out, "&quot;")
+        case ->
+            emit_byte(out, value)
 
 emit_escaped :: proc(out: ^Output, bytes: []Byte) ->
     for value in bytes ->
@@ -478,12 +482,17 @@ emit_plain :: proc(out: ^Output, bytes: []Byte) ->
 /// `_`, and a `-` for a space, which is what the links of the documents expect.
 emit_slug :: proc(out: ^Output, bytes: []Byte) ->
     for value in bytes ->
-        if value >= 65 and value <= 90 ->
-            emit_byte(out, int_to_byte(cast(Int)value + 32))
-        else if value == ' ' ->
-            emit_byte(out, int_to_byte(45))
-        else if is_name_byte(value) or value >= 128 ->
-            emit_byte(out, value)
+        match value ->
+            case 'A'..<='Z' ->
+                emit_byte(out, int_to_byte(cast(Int)value + 32))
+            case ' ' ->
+                emit_byte(out, int_to_byte(45))
+            case '0'..<='9' ->
+            case 'a'..<='z' ->
+            case '-' ->
+            case '_' ->
+            case 128..<=255 ->
+                emit_byte(out, value)
 
 /// Puts a link target: a link to `name.md` is a link to the page `name`, which has no suffix.
 emit_href :: proc(out: ^Output, url: []Byte) ->
@@ -1114,13 +1123,14 @@ send_document :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte
 
 /// Whether a byte can be in a word of code: a letter, a digit or `_`.
 is_word_byte :: proc(value: Byte) Bool ->
-    if value == '_' ->
-        return true
-    if value >= 48 and value <= 57 ->
-        return true
-    if value >= 65 and value <= 90 ->
-        return true
-    return value >= 97 and value <= 122
+    match value ->
+        case '_' ->
+        case '0'..<='9' ->
+        case 'A'..<='Z' ->
+        case 'a'..<='z' ->
+            return true
+        case ->
+            return false
 
 /// Whether the byte at `index` is a byte of a word of code, which is false when there is no byte there.
 is_word_at :: proc(bytes: []Byte, index: Int) Bool ->
@@ -1244,22 +1254,24 @@ emit_json_bytes :: proc(out: ^Output, bytes: []Byte, strip_links: Bool) Int ->
 
 /// Puts a byte in the page as it is in a JSON string, which is itself unless it needs an escape.
 emit_json_byte :: proc(out: ^Output, value: Byte) Int ->
-    if value == '"' ->
-        emit_text(out, "\\\"")
-    else if value == '\\' ->
-        emit_text(out, "\\\\")
-    else if value == '\n' ->
-        emit_text(out, "\\n")
-    else if value == '\t' ->
-        emit_text(out, "\\t")
-    else if value == '\r' ->
-        emit_text(out, "\\r")
-    else if value < 32 ->
-        emit_text(out, "\\u00")
-        emit_byte(out, hex_digit(cast(Int)value / 16))
-        emit_byte(out, hex_digit(cast(Int)value - cast(Int)value / 16 * 16))
-    else ->
-        emit_byte(out, value)
+    match value ->
+        case '"' ->
+            emit_text(out, "\\\"")
+        case '\\' ->
+            emit_text(out, "\\\\")
+        case '\n' ->
+            emit_text(out, "\\n")
+        case '\t' ->
+            emit_text(out, "\\t")
+        case '\r' ->
+            emit_text(out, "\\r")
+        case ->
+            if value < 32 ->
+                emit_text(out, "\\u00")
+                emit_byte(out, hex_digit(cast(Int)value / 16))
+                emit_byte(out, hex_digit(cast(Int)value - cast(Int)value / 16 * 16))
+            else ->
+                emit_byte(out, value)
     return 0
 
 /// Puts the file `name` of the directory of the playground in the page as a JSON string, or `null`
