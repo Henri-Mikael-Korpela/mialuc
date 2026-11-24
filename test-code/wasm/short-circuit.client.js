@@ -1,0 +1,38 @@
+// Each call prints its result with the number that the language gives. A division by zero or an index
+// outside of the elements would be a trap, which the guards before them must prevent.
+console.log("guarded_division(10, 2), 1:", guarded_division(10, 2));
+console.log("guarded_division(10, 0), 0:", guarded_division(10, 0));
+console.log("guarded_division(1, 1), 0:", guarded_division(1, 1));
+console.log("guarded_division_or(10, 2), 1:", guarded_division_or(10, 2));
+console.log("guarded_division_or(10, 0), 1:", guarded_division_or(10, 0));
+console.log("guarded_division_or(1, 1), 0:", guarded_division_or(1, 1));
+console.log("guarded_index(1), 1:", guarded_index(1));
+console.log("guarded_index(0), 0:", guarded_index(0));
+console.log("guarded_index(3), 0:", guarded_index(3));
+console.log("guarded_index(-1), 0:", guarded_index(-1));
+console.log("guarded_index_or(3), 1:", guarded_index_or(3));
+console.log("guarded_index_or(-1), 1:", guarded_index_or(-1));
+console.log("guarded_index_or(1), 1:", guarded_index_or(1));
+console.log("guarded_index_or(0), 0:", guarded_index_or(0));
+console.log("and_case(0, 0), 0:", and_case(0, 0));
+console.log("and_case(0, 1), 0:", and_case(0, 1));
+console.log("and_case(1, 0), 10:", and_case(1, 0));
+console.log("and_case(1, 1), 11:", and_case(1, 1));
+console.log("or_case(0, 0), 10:", or_case(0, 0));
+console.log("or_case(0, 1), 11:", or_case(0, 1));
+console.log("or_case(1, 0), 1:", or_case(1, 0));
+console.log("or_case(1, 1), 1:", or_case(1, 1));
+console.log("chain(0, 1, 1), 21:", chain(0, 1, 1));
+console.log("chain(0, 1, 0), 20:", chain(0, 1, 0));
+console.log("chain(1, 1, 0), 21:", chain(1, 1, 0));
+console.log("chain(1, 0, 0), 30:", chain(1, 0, 0));
+console.log("chain(1, 0, 1), 31:", chain(1, 0, 1));
+console.log("negated(0, 1), 21:", negated(0, 1));
+console.log("negated(0, 0), 20:", negated(0, 0));
+console.log("negated(1, 1), 10:", negated(1, 1));
+console.log("leading_non_spaces(5), 2:", leading_non_spaces(5));
+console.log("leading_non_spaces(2), 2:", leading_non_spaces(2));
+console.log("leading_non_spaces(0), 0:", leading_non_spaces(0));
+console.log("kept_values(10, 2), 917105:", kept_values(10, 2));
+console.log("kept_values(10, 0), 917095:", kept_values(10, 0));
+console.log("kept_values(1, 1), 907095:", kept_values(1, 1));

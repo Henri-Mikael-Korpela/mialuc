@@ -814,17 +814,22 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             wasm_text_write_instruction(&formatter->writer, STR("i64.ne"));
             break;
         case WASM_OPCODE_IF: {
-            // Only the block type that takes and leaves nothing is written by the compiler.
+            // The compiler writes the block type that takes and leaves nothing, and the one that
+            // leaves an `i32`, which is how `and` and `or` leave their value.
             size_t block_type_offset = formatter->offset;
             byte block_type = wasm_text_read_byte(formatter);
             if (formatter->status != WASM_TEXT_STATUS_OK) {
                 return false;
             }
-            if (block_type != WASM_BLOCK_TYPE_EMPTY) {
+            if (block_type != WASM_BLOCK_TYPE_EMPTY && block_type != WASM_TYPE_I32) {
                 return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED,
                                       block_type_offset);
             }
-            wasm_text_write_instruction(&formatter->writer, STR("if"));
+            if (block_type == WASM_TYPE_I32) {
+                wasm_text_write_instruction(&formatter->writer, STR("if (result i32)"));
+            } else {
+                wasm_text_write_instruction(&formatter->writer, STR("if"));
+            }
             formatter->writer.block_depth += 1;
             break;
         }

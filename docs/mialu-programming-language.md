@@ -766,7 +766,17 @@ can_enter :: proc(age: Int, has_ticket: Bool, is_banned: Bool) Bool ->
 
 A comparison binds tighter than all three, so `n >= low and n <= high` needs no grouping. `not` binds tighter than `and`, and `and` binds tighter than `or`, so `a or b and c` means `a or (b and c)`, and `a and not b or not a and b` is true when exactly one of `a` and `b` is. `not` binds looser than a comparison, so `not a == b` means `not (a == b)`, and it may be repeated: `not not a` is `a`. `and` and `or` are left associative. There are no parentheses yet, so the precedence is the only way to group.
 
-Both operands of `and` and `or` are always evaluated: there is no short circuit. That makes no difference for a value that is already computed, but in `d not= 0 and n / d > 1` the division still happens, and traps when `d` is zero.
+`and` and `or` short circuit: the right operand is only evaluated when the left one does not decide the result. `a and b` evaluates `b` only when `a` is `true`, and when `a` is `false` the result is `false` and `b` is left alone. `a or b` evaluates `b` only when `a` is `false`, and when `a` is `true` the result is `true`. So the right operand can rely on what the left one has checked, as in `d not= 0 and n / d > 1`, where the division is not done when `d` is zero, and `index < length_of(bytes) and bytes[index] == ' '`, where the element is not read when the index is outside of the bytes. An operand that is not evaluated has none of its effects either: a call in it is not made.
+
+```
+first_is_space :: proc(bytes: []Byte) Bool ->
+    return length_of(bytes) > 0 and bytes[0] == ' '
+
+can_divide :: proc(n: Int, d: Int) Bool ->
+    return d == 0 or n / d > 1
+```
+
+The operators are left associative, so in `a and b and c` the operand `c` is only evaluated when `a` and `b` are both `true`, and in `a or b and c` the operand `b` is evaluated when `a` is `false`, and `c` only after it, when `b` is `true`. `not` evaluates its one operand. An operand that is a constant has no effect to leave out, so a [constant expression](#constants) is the same with or without the short circuit.
 
 A word must be separated from what is next to it by whitespace, unlike a symbol, so `a and b` cannot be written `aandb`. `not=` is one token for the inequality, and the keyword `not` is a `not` that is not directly followed by `=`.
 

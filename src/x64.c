@@ -408,13 +408,15 @@ typedef struct {
  * that the place of the node wants, which an untyped constant becomes, and is of the kind
  * `X64_TYPE_KIND_NONE` when the place does not say. `stack_start` is the depth of the stack of
  * values when the node was entered, which is where its value goes, and `index` is the place of the
- * node among the children of its parent.
+ * node among the children of its parent. `short_jumps` is the chain of the jumps of an `and` or an
+ * `or` that skip its right operand, see `x64_short_circuit_write`.
  */
 typedef struct {
     X64_Type wanted;
     Ast_Node_Index node;
     uint32_t stack_start;
     uint32_t index;
+    uint32_t short_jumps;
     X64_Mode mode;
 } X64_Expression_Frame;
 
@@ -746,6 +748,11 @@ static bool         x64_node_type_is_jump        (Ast_Node_Type node_type);
 static bool         x64_cast_write               (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static bool         x64_operation_write          (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame);
+static bool         x64_short_circuit_write      (X64_Builder *builder,
+                                                  X64_Expression_Frame *parent,
+                                                  X64_Expression_Frame const *child);
+static bool         x64_short_circuit_end        (X64_Builder *builder,
                                                   X64_Expression_Frame const *frame);
 static size_t       x64_parameter_count          (X64_Builder const *builder,
                                                   Ast_Node_Index procedure);
@@ -3824,6 +3831,7 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
         .node = expression,
         .stack_start = (uint32_t)builder->stack_words,
         .index = 0,
+        .short_jumps = X64_JUMP_NONE,
         .mode = mode,
     };
 
@@ -3848,6 +3856,7 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
                     .node = first_child,
                     .stack_start = (uint32_t)builder->stack_words,
                     .index = 0,
+                    .short_jumps = X64_JUMP_NONE,
                     .mode = x64_child_mode(builder, frame, first_child),
                 };
                 frame_count += 1;
@@ -3868,9 +3877,15 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
 
         // What the parent does with the value of each child, and then the next sibling, or the
         // parent itself when there is none.
-        X64_Expression_Frame const *parent = &frames[frame_count - 2];
+        X64_Expression_Frame *parent = &frames[frame_count - 2];
         if (not x64_child_done(builder, parent, frame)) {
             return false;
+        }
+        if (frame->index == 0 && (builder->nodes[parent->node].node_type == AST_NODE_TYPE_AND ||
+                                  builder->nodes[parent->node].node_type == AST_NODE_TYPE_OR)) {
+            if (not x64_short_circuit_write(builder, parent, frame)) {
+                return false;
+            }
         }
         Ast_Node_Index next = builder->nodes[frame->node].next_sibling;
         if (next != AST_NODE_INDEX_NONE) {
@@ -3880,6 +3895,7 @@ static bool x64_expression_write(X64_Builder *builder, Ast_Node_Index expression
                 .node = next,
                 .stack_start = (uint32_t)builder->stack_words,
                 .index = index,
+                .short_jumps = X64_JUMP_NONE,
                 .mode = x64_child_mode(builder, parent, next),
             };
             is_descending = true;
@@ -4282,12 +4298,13 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
     }
 
     switch (expression->node_type) {
-    case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_AND:
+    case AST_NODE_TYPE_OR:
+        return x64_short_circuit_end(builder, frame);
+    case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_DIVISION:
     case AST_NODE_TYPE_MULTIPLICATION:
     case AST_NODE_TYPE_NOT:
-    case AST_NODE_TYPE_OR:
     case AST_NODE_TYPE_SUBTRACTION:
         return x64_operation_write(builder, frame);
     case AST_NODE_TYPE_ADDRESS_OF:
@@ -5565,20 +5582,18 @@ static bool x64_constant_write(X64_Builder *builder, X64_Expression_Frame const 
 }
 
 /**
- * Writes an arithmetic or logical operator, whose operands are on the stack of values: `+`, `-`,
- * `*` and `/` of two `Int` values, and `and`, `or` and `not` of `Bool` values. The result is an
- * `Int` or a `Bool` in the place of the first operand. Addition, subtraction and multiplication
- * wrap around, which is what the instructions do, and `idiv` traps when the divisor is zero or the
- * quotient does not fit, which stops the program. Every operand is evaluated, and `and` and `or`
- * are the instructions of the bits, which are right because a `Bool` is always 0 or 1. Returns
+ * Writes an arithmetic operator or `not`, whose operands are on the stack of values: `+`, `-`, `*`
+ * and `/` of two numbers, and `not` of a `Bool`. The result is a number or a `Bool` in the place of
+ * the first operand. Addition, subtraction and multiplication wrap around, which is what the
+ * instructions do, and `idiv` traps when the divisor is zero or the quotient does not fit, which
+ * stops the program. `and` and `or` are not written here, see `x64_short_circuit_write`. Returns
  * false after it recorded an error.
  */
 static bool x64_operation_write(X64_Builder *builder, X64_Expression_Frame const *frame) {
     Ast_Node_Index node = frame->node;
     Ast_Node_Type node_type = builder->nodes[node].node_type;
 
-    bool is_logical = node_type == AST_NODE_TYPE_AND || node_type == AST_NODE_TYPE_OR ||
-                      node_type == AST_NODE_TYPE_NOT;
+    bool is_logical = node_type == AST_NODE_TYPE_NOT;
     // The operands are `Int` values or floats of one type, which an untyped one takes.
     X64_Type operand_type = x64_type_make(X64_TYPE_KIND_INT);
     if (not is_logical) {
@@ -5622,9 +5637,6 @@ static bool x64_operation_write(X64_Builder *builder, X64_Expression_Frame const
     case AST_NODE_TYPE_ADDITION:
         x64_write_registers(builder, X64_OPCODE_ADD, X64_REGISTER_RCX, X64_REGISTER_RAX);
         break;
-    case AST_NODE_TYPE_AND:
-        x64_write_registers(builder, X64_OPCODE_AND, X64_REGISTER_RCX, X64_REGISTER_RAX);
-        break;
     case AST_NODE_TYPE_DIVISION:
         if (operand_type.kind == X64_TYPE_KIND_U64) {
             x64_write_divide_unsigned(builder, X64_REGISTER_RCX);
@@ -5637,9 +5649,6 @@ static bool x64_operation_write(X64_Builder *builder, X64_Expression_Frame const
         break;
     case AST_NODE_TYPE_NOT:
         x64_write_registers(builder, X64_OPCODE_XOR, X64_REGISTER_RCX, X64_REGISTER_RAX);
-        break;
-    case AST_NODE_TYPE_OR:
-        x64_write_registers(builder, X64_OPCODE_OR, X64_REGISTER_RCX, X64_REGISTER_RAX);
         break;
     case AST_NODE_TYPE_SUBTRACTION:
         x64_write_registers(builder, X64_OPCODE_SUB, X64_REGISTER_RCX, X64_REGISTER_RAX);
@@ -5658,6 +5667,53 @@ static bool x64_operation_write(X64_Builder *builder, X64_Expression_Frame const
     int32_t target = x64_stack_push(builder, 1);
     assert(target == first);
     x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+    return true;
+}
+
+/**
+ * Writes what an `and` or an `or` does after its left operand, whose value is on the top of the
+ * stack of values: the right operand is only evaluated when the left one does not decide the
+ * result, which for `and` is when it is `true` and for `or` when it is `false`. The value is tested
+ * with `test rax, rax` and a jump that skips the right operand is written, which joins the chain
+ * `short_jumps` of `parent`, and then the value is taken off the stack of values, so that the right
+ * operand leaves its value in the same place, and the left one stays there when the jump is taken,
+ * which is the result in that case, `false` for `and` and `true` for `or`. Returns false after it
+ * recorded an error.
+ */
+static bool x64_short_circuit_write(X64_Builder *builder, X64_Expression_Frame *parent,
+                                    X64_Expression_Frame const *child) {
+    assert(builder->stack_words == parent->stack_start + 1);
+
+    X64_Type bool_type = x64_type_make(X64_TYPE_KIND_BOOL);
+    if (not x64_type_accepts(builder, bool_type, child->node)) {
+        return x64_fail(builder, X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
+                        x64_expression_subject(builder, child->node));
+    }
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP,
+                     x64_stack_displacement(builder, builder->stack_words - 1, 1));
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_RAX, X64_REGISTER_RAX);
+    byte condition = X64_CONDITION_NOT_EQUAL;
+    if (builder->nodes[parent->node].node_type == AST_NODE_TYPE_AND) {
+        condition = X64_CONDITION_EQUAL;
+    }
+    x64_jump_write(builder, condition, &parent->short_jumps);
+    x64_stack_pop(builder, 1);
+    return true;
+}
+
+/**
+ * Writes the end of an `and` or an `or`, whose right operand has left its value in the place of the
+ * left one, where the jumps that skipped it come to as well, see `x64_short_circuit_write`: it
+ * checks the right operand, and makes the jumps go to the next instruction. Returns false after it
+ * recorded an error.
+ */
+static bool x64_short_circuit_end(X64_Builder *builder, X64_Expression_Frame const *frame) {
+    Ast_Node_Index right = builder->nodes[frame->node].last_child;
+    if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_BOOL), right)) {
+        return x64_fail(builder, X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
+                        x64_expression_subject(builder, right));
+    }
+    x64_jumps_resolve(builder, frame->short_jumps);
     return true;
 }
 

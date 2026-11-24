@@ -650,6 +650,9 @@ static bool            wasm_build_code_section_body_child     (Wasm_Builder *bui
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index parent,
                                                                Ast_Node_Index child);
+static void            wasm_short_circuit_write               (Wasm_Builder *builder,
+                                                               Ast_Node_Index parent,
+                                                               Ast_Node_Index child);
 static bool            wasm_build_code_section_body_element_assignment(Wasm_Builder *builder,
                                                                Ast_Node_Index definition,
                                                                Ast_Node_Index assignment);
@@ -6054,9 +6057,9 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
                             : WASM_OPCODE_I64_ADD);
         break;
     case AST_NODE_TYPE_AND:
-        // Both operands are on the stack, as 0 or 1, so the bitwise instruction is the logical
-        // one. There is no short circuit: both operands are always evaluated.
-        wasm_write_byte(&builder->writer, WASM_OPCODE_I32_AND);
+    case AST_NODE_TYPE_OR:
+        // The value is on the stack already: it is what the `if` that comes after the left
+        // operand leaves, see `wasm_short_circuit_write`.
         break;
     case AST_NODE_TYPE_CAST:
         if (wasm_cast_is_array(builder, current)) {
@@ -6068,9 +6071,6 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
     case AST_NODE_TYPE_NOT:
         // 1 for a 0 and 0 for a 1.
         wasm_write_byte(&builder->writer, WASM_OPCODE_I32_EQZ);
-        break;
-    case AST_NODE_TYPE_OR:
-        wasm_write_byte(&builder->writer, WASM_OPCODE_I32_OR);
         break;
     case AST_NODE_TYPE_CALL: {
         Semantic_Binding callee_binding = builder->bindings[current];
@@ -7691,6 +7691,38 @@ static bool wasm_build_code_section_body_array_literal(Wasm_Builder *builder,
 }
 
 /**
+ * Writes what an `and` or an `or` needs after its operand `child`, which is on the stack as a
+ * 0 or a 1, so that the right operand is only evaluated when the left one does not decide the
+ * result: `a and b` is `a`, then `if (result i32)`, `b`, `else`, `i32.const 0`, `end`, and `a or b`
+ * is `a`, then `if (result i32)`, `i32.const 1`, `else`, `b`, `end`. After the left operand the
+ * `if` is opened and after the right one it is closed, so the result is the one value that both
+ * branches leave.
+ */
+static void wasm_short_circuit_write(Wasm_Builder *builder, Ast_Node_Index parent,
+                                     Ast_Node_Index child) {
+    Ast_Node const *node = &builder->nodes[parent];
+    assert(node->node_type == AST_NODE_TYPE_AND || node->node_type == AST_NODE_TYPE_OR);
+
+    bool is_and = node->node_type == AST_NODE_TYPE_AND;
+    Wasm_Writer *writer = &builder->writer;
+    if (child == node->first_child) {
+        wasm_write_byte(writer, WASM_OPCODE_IF);
+        wasm_write_byte(writer, WASM_TYPE_I32);
+        if (not is_and) {
+            wasm_write_i32_const(writer, 1);
+            wasm_write_byte(writer, WASM_OPCODE_ELSE);
+        }
+        return;
+    }
+    assert(child == node->last_child);
+    if (is_and) {
+        wasm_write_byte(writer, WASM_OPCODE_ELSE);
+        wasm_write_i32_const(writer, 0);
+    }
+    wasm_write_byte(writer, WASM_OPCODE_END);
+}
+
+/**
  * Writes what the parent of an expression needs after the expression `child` was written. For an
  * array literal that is storing the element at its place in the frame. An `Int` element had the
  * address pushed before it, see `wasm_build_code_section_body_expression`, so it is one store, and
@@ -7704,6 +7736,10 @@ static bool wasm_build_code_section_body_child(Wasm_Builder *builder, Ast_Node_I
     assert(child < builder->node_count);
 
     Ast_Node_Type parent_type = builder->nodes[parent].node_type;
+    if (parent_type == AST_NODE_TYPE_AND || parent_type == AST_NODE_TYPE_OR) {
+        wasm_short_circuit_write(builder, parent, child);
+        return true;
+    }
     if (parent_type == AST_NODE_TYPE_ARRAY_LITERAL) {
         Ast_Node_Index type = builder->nodes[parent].first_child;
         Wasm_Type array_type = wasm_type_of_node(builder, type);

@@ -160,8 +160,9 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   after its child. Which operands have an address is for the target to tell: a variable, a field,
  *   an element of an array and what a pointer points to do.
  * - `AST_NODE_TYPE_AND`: two children, the left and the right operand, in that order. It is an
- *   expression of type `Bool` and the target requires both operands to be `Bool`. It binds
- *   tighter than `AST_NODE_TYPE_OR` and looser than `AST_NODE_TYPE_NOT`.
+ *   expression of type `Bool` and the target requires both operands to be `Bool`. The right
+ *   operand is only evaluated when the left one is `true`. It binds tighter than
+ *   `AST_NODE_TYPE_OR` and looser than `AST_NODE_TYPE_NOT`.
  * - `AST_NODE_TYPE_ARRAY_LITERAL`: first the `AST_NODE_TYPE_ARRAY_TYPE` that starts the literal,
  *   whose length is not omitted, and then one child per element, in the order of the source, each
  *   one an expression. `[const]Int { 1, 2, 3 }` and `[3]Int { 1, 2, 3 }` are array literals. In
@@ -376,7 +377,8 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   `not (a == b)`.
  * - `AST_NODE_TYPE_OR`: two children, the left and the right operand, in that order. It is an
  *   expression of type `Bool` with the lowest precedence of the operators, and the target
- *   requires both operands to be `Bool`.
+ *   requires both operands to be `Bool`. The right operand is only evaluated when the left one
+ *   is `false`.
  * - `AST_NODE_TYPE_PARAMETER`: one child, its type, which is a `AST_NODE_TYPE_TYPE_NAME`, an
  *   `AST_NODE_TYPE_POINTER_TYPE` or an `AST_NODE_TYPE_ARRAY_TYPE`. A type parameter, written
  *   `$T: type_id`, has the name without the `$` and the type name `type_id`, the word, as its type,
