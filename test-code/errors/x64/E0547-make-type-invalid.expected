@@ -1,0 +1,11 @@
+error[E0547]: 'make' makes an array slice, and the type at 'Byte' is not the type of one
+ --> test-code/errors/x64/E0547-make-type-invalid.mu:4:22
+  |
+2 |
+3 | main :: proc() Int ->
+4 |     bytes := make([4]Byte, 4)
+  |                      ^^^^ not the type of an array slice
+5 |     return 0
+  |
+  = note: 'make' allocates the elements of an array slice, which 'destroy' gives back
+  = help: write the type of an array slice, such as '[]Byte'

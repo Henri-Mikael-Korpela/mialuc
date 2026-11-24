@@ -103,6 +103,9 @@ typedef enum {
     // `main` in the source in the second case, and has `bytes` NULL in the first, which is about
     // no place in the source.
     X64_BUILD_STATUS_MAIN_INVALID,
+    // The first argument of `make` is not the type of an array slice, which is what `make` makes.
+    // The subject is the text of the type.
+    X64_BUILD_STATUS_MAKE_TYPE_INVALID,
     // Two cases of a match statement match a value in common. The subject is the word `case` of
     // the second.
     X64_BUILD_STATUS_MATCH_CASE_DUPLICATE,

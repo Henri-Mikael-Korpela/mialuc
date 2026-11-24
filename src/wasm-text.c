@@ -1119,9 +1119,22 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
             break;
         }
         case WASM_OPCODE_PREFIX_MISC: {
-            // Only `memory.copy` is written, from memory 0 to memory 0.
+            // Only `memory.copy`, from memory 0 to memory 0, and `memory.fill` of memory 0 are
+            // written.
             size_t sub_opcode_offset = formatter->offset;
             uint32_t sub_opcode = wasm_text_read_unsigned_32(formatter);
+            if (formatter->status != WASM_TEXT_STATUS_OK) {
+                return false;
+            }
+            if (sub_opcode == WASM_OPCODE_MISC_MEMORY_FILL) {
+                if (wasm_text_read_byte(formatter) != 0 ||
+                    formatter->status != WASM_TEXT_STATUS_OK) {
+                    return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED,
+                                          sub_opcode_offset);
+                }
+                wasm_text_write_instruction(&formatter->writer, STR("memory.fill"));
+                break;
+            }
             byte destination = wasm_text_read_byte(formatter);
             byte source = wasm_text_read_byte(formatter);
             if (formatter->status != WASM_TEXT_STATUS_OK) {
@@ -1132,6 +1145,21 @@ static bool wasm_text_format_functions_body_instructions(Wasm_Text_Formatter *fo
                                       sub_opcode_offset);
             }
             wasm_text_write_instruction(&formatter->writer, STR("memory.copy"));
+            break;
+        }
+        case WASM_OPCODE_MEMORY_GROW:
+        case WASM_OPCODE_MEMORY_SIZE: {
+            // The memory, which is memory 0.
+            size_t memory_offset = formatter->offset;
+            if (wasm_text_read_byte(formatter) != 0 || formatter->status != WASM_TEXT_STATUS_OK) {
+                return wasm_text_fail(formatter, WASM_TEXT_STATUS_MODULE_UNSUPPORTED,
+                                      memory_offset);
+            }
+            if (opcode == WASM_OPCODE_MEMORY_GROW) {
+                wasm_text_write_instruction(&formatter->writer, STR("memory.grow"));
+            } else {
+                wasm_text_write_instruction(&formatter->writer, STR("memory.size"));
+            }
             break;
         }
         case WASM_OPCODE_RETURN:

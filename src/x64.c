@@ -356,8 +356,9 @@ typedef struct {
     // The names of the enums and of their members that `type_info_of` gives, after the strings.
     size_t type_names_offset;
     size_t rdata_size_bytes;
-    // The number of imports, which is one more than the number of foreign procedures, because the
-    // first is `exit`, which the program ends with.
+    // The number of entries of the table of imports: the foreign procedures, the imports that no
+    // foreign procedure declares, the first of which is `exit`, which the program ends with, see
+    // `x64_fixed_import_count`, and the zero entry that ends the run of each library.
     size_t import_count;
 } X64_Layout;
 
@@ -536,6 +537,9 @@ typedef struct {
     // Whether the procedure that is being written makes temporary strings, which it gives back
     // when it returns.
     bool is_temporary_used;
+    // Whether the program calls `make` or `destroy`, which call `malloc`, `memset` and `free` of
+    // the C library, so that they are imported after `exit`, see `X64_MEMORY_IMPORT_NAMES`.
+    bool has_memory_imports;
     // The libraries that the program imports from, by the name of the file without `.dll`. The first
     // is the C library, which the program ends with `exit` of. The others are the libraries of the
     // system that foreign procedures are declared in, in the order of the first of them. They view
@@ -569,6 +573,18 @@ static bool         x64_call_is_append           (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
 static bool         x64_call_is_built_in         (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
+static bool         x64_call_is_destroy          (X64_Builder const *builder,
+                                                  Ast_Node_Index expression);
+static bool         x64_call_is_make             (X64_Builder const *builder,
+                                                  Ast_Node_Index expression);
+static bool         x64_destroy_write            (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame,
+                                                  bool is_result_used);
+static size_t       x64_fixed_import_count       (X64_Builder const *builder);
+static size_t       x64_fixed_names_size_bytes   (X64_Builder const *builder);
+static bool         x64_make_write               (X64_Builder *builder,
+                                                  X64_Expression_Frame const *frame,
+                                                  bool is_result_used);
 static bool         x64_call_is_try_str_to_int   (X64_Builder const *builder,
                                                   Ast_Node_Index expression);
 static bool         x64_call_is_utf8_decode      (X64_Builder const *builder,
@@ -1067,6 +1083,22 @@ STATIC_ASSERT(X64_FRAME_FIXED_SIZE_BYTES % X64_WORD_SIZE_BYTES == 0, x64_frame_f
 STATIC_ASSERT((int)X64_STRUCT_ALIGNMENT_BYTES == (int)X64_WORD_SIZE_BYTES, x64_struct_alignment_is_word);
 static char const X64_EXIT_NAME[] = "exit";
 
+// The procedures of the C library that `make` and `destroy` call: `malloc` makes the elements,
+// `memset` makes them zero, which is the default value of every type, and `free` gives them back.
+// They are imported right after `exit`, and only by a program that calls `make` or `destroy`, so
+// that every other program is built as it was before. The import of each is in the slot of the
+// import table that the enum below says.
+static char const *const X64_MEMORY_IMPORT_NAMES[] = {"malloc", "free", "memset"};
+enum {
+    X64_MEMORY_IMPORT_COUNT = 3,
+    X64_IMPORT_SLOT_MALLOC = 1,
+    X64_IMPORT_SLOT_FREE = 2,
+    X64_IMPORT_SLOT_MEMSET = 3,
+};
+STATIC_ASSERT(sizeof(X64_MEMORY_IMPORT_NAMES) / sizeof(X64_MEMORY_IMPORT_NAMES[0]) ==
+                  X64_MEMORY_IMPORT_COUNT,
+              x64_memory_import_names_are_counted);
+
 X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice constants,
                            Ast_Node_Index root, Array_Slice layout_buffer,
                            Array_Slice output_buffer, Array_Slice symbol_buffer,
@@ -1162,6 +1194,7 @@ X64_Build_Result x64_build(Array_Slice nodes, Array_Slice bindings, Array_Slice 
         .definition = AST_NODE_INDEX_NONE,
         .status = X64_BUILD_STATUS_OK,
         .is_temporary_used = false,
+        .has_memory_imports = false,
         .library_stems = {{0}},
         .library_count = 0,
         .constants = {{0}},
@@ -1266,6 +1299,11 @@ static bool x64_constants_collect(X64_Builder *builder) {
     // in. The libraries of the system come after it, as the procedures need them.
     builder->library_stems[0] = STR("msvcrt");
     builder->library_count = 1;
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (x64_call_is_make(builder, node) || x64_call_is_destroy(builder, node)) {
+            builder->has_memory_imports = true;
+        }
+    }
     Ast_Node_Index definition = builder->nodes[builder->module].first_child;
     // Every definition is a distinct node, so there cannot be more than there are nodes.
     for (size_t i = 0; i < builder->node_count && definition != AST_NODE_INDEX_NONE; i += 1) {
@@ -1414,11 +1452,12 @@ static bool x64_constants_collect(X64_Builder *builder) {
     }
 
     // Each library has its own run of the table of imports, which ends with a zero entry, so the
-    // places are known when all the libraries are. The first place is for `exit`.
+    // places are known when all the libraries are. The first places are for `exit`, and the
+    // procedures of the memory after it when the program has them.
     uint32_t import_slot = 0;
     for (uint32_t library = 0; library < builder->library_count; library += 1) {
         if (library == 0) {
-            import_slot += 1;
+            import_slot += (uint32_t)x64_fixed_import_count(builder);
         }
         for (size_t i = 0; i < builder->constant_count; i += 1) {
             if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN &&
@@ -1490,13 +1529,40 @@ static int x64_ascii_compare(char const *left, char const *right, size_t length)
 }
 
 /**
+ * Returns how many imports of the C library the program has that no foreign procedure declares:
+ * `exit`, and `malloc`, `free` and `memset` when it calls `make` or `destroy`. They are the first
+ * imports of the C library, in that order.
+ */
+static size_t x64_fixed_import_count(X64_Builder const *builder) {
+    if (builder->has_memory_imports) {
+        return 1 + X64_MEMORY_IMPORT_COUNT;
+    }
+    return 1;
+}
+
+/**
+ * Returns the size of the names of the imports that `x64_fixed_import_count` counts, in `.rdata`:
+ * each is a hint of two bytes, the name and a zero, at an even address.
+ */
+static size_t x64_fixed_names_size_bytes(X64_Builder const *builder) {
+    size_t size_bytes = x64_align_up(2 + sizeof(X64_EXIT_NAME), 2);
+    if (builder->has_memory_imports) {
+        for (size_t i = 0; i < X64_MEMORY_IMPORT_COUNT; i += 1) {
+            size_bytes += x64_align_up(2 + strlen(X64_MEMORY_IMPORT_NAMES[i]) + 1, 2);
+        }
+    }
+    return size_bytes;
+}
+
+/**
  * Returns how many entries the run of `library` has in each table of imports: one for each foreign
- * procedure in it, one for `exit` when it is the C library, and the zero entry that ends it.
+ * procedure in it, the ones that `x64_fixed_import_count` counts when it is the C library, and the
+ * zero entry that ends it.
  */
 static size_t x64_library_entry_count(X64_Builder const *builder, size_t library) {
     size_t count = 1;
     if (library == 0) {
-        count += 1;
+        count += x64_fixed_import_count(builder);
     }
     for (size_t i = 0; i < builder->constant_count; i += 1) {
         if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN &&
@@ -1509,10 +1575,11 @@ static size_t x64_library_entry_count(X64_Builder const *builder, size_t library
 
 /**
  * Returns where the name of the import of the foreign constant at `position` is, counted from the
- * start of `.rdata`. The names are in the order of the constants, after the name of `exit`.
+ * start of `.rdata`. The names are in the order of the constants, after the names of the imports
+ * that no foreign procedure declares, see `x64_fixed_names_size_bytes`.
  */
 static size_t x64_import_name_offset(X64_Builder const *builder, size_t position) {
-    size_t offset = builder->layout.names_offset + x64_align_up(2 + sizeof(X64_EXIT_NAME), 2);
+    size_t offset = builder->layout.names_offset + x64_fixed_names_size_bytes(builder);
     for (size_t i = 0; i < position; i += 1) {
         if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN) {
             Str name = ast_foreign_symbol(builder->nodes[builder->constants[i].definition]
@@ -1573,7 +1640,7 @@ static X64_Layout x64_layout_make(X64_Builder const *builder) {
 
     // A name is preceded by a hint of two bytes, which the loader uses to search faster, and ends
     // with a zero. It starts at an even address, so the size is made even.
-    size_t names_bytes = x64_align_up(2 + sizeof(X64_EXIT_NAME), 2);
+    size_t names_bytes = x64_fixed_names_size_bytes(builder);
     for (size_t i = 0; i < builder->constant_count; i += 1) {
         if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN) {
             Str name = ast_foreign_symbol(builder->nodes[builder->constants[i].definition]
@@ -1883,7 +1950,15 @@ static void x64_rdata_write(X64_Builder *builder) {
     for (size_t table = 0; table < 2; table += 1) {
         for (size_t library = 0; library < builder->library_count; library += 1) {
             if (library == 0) {
-                x64_write_u64(writer, X64_RDATA_RVA + layout->names_offset);
+                // `exit` and the procedures of the memory, whose names are one after the other.
+                size_t name_offset = layout->names_offset;
+                x64_write_u64(writer, X64_RDATA_RVA + name_offset);
+                name_offset += x64_align_up(2 + sizeof(X64_EXIT_NAME), 2);
+                for (size_t i = 0; builder->has_memory_imports && i < X64_MEMORY_IMPORT_COUNT;
+                     i += 1) {
+                    x64_write_u64(writer, X64_RDATA_RVA + name_offset);
+                    name_offset += x64_align_up(2 + strlen(X64_MEMORY_IMPORT_NAMES[i]) + 1, 2);
+                }
             }
             for (size_t i = 0; i < builder->constant_count; i += 1) {
                 if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN &&
@@ -1899,6 +1974,15 @@ static void x64_rdata_write(X64_Builder *builder) {
     x64_write_bytes(writer, (byte const *)X64_EXIT_NAME, sizeof(X64_EXIT_NAME));
     if ((2 + sizeof(X64_EXIT_NAME)) % 2 != 0) {
         x64_write_byte(writer, 0);
+    }
+    for (size_t i = 0; builder->has_memory_imports && i < X64_MEMORY_IMPORT_COUNT; i += 1) {
+        size_t length = strlen(X64_MEMORY_IMPORT_NAMES[i]);
+        x64_write_u16(writer, 0);
+        x64_write_bytes(writer, (byte const *)X64_MEMORY_IMPORT_NAMES[i], length);
+        x64_write_byte(writer, 0);
+        if ((2 + length + 1) % 2 != 0) {
+            x64_write_byte(writer, 0);
+        }
     }
     for (size_t i = 0; i < builder->constant_count; i += 1) {
         if (builder->constants[i].kind == X64_CONSTANT_KIND_FOREIGN) {
@@ -4059,6 +4143,14 @@ static Ast_Node_Index x64_child_first(X64_Builder const *builder, Ast_Node_Index
         }
         return AST_NODE_INDEX_NONE;
     }
+    // The first child of `make` is the type of what it makes, which is not written.
+    if (x64_call_is_make(builder, expression)) {
+        Ast_Node_Index type = builder->nodes[expression].first_child;
+        if (type == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        return builder->nodes[type].next_sibling;
+    }
     switch (builder->nodes[expression].node_type) {
     case AST_NODE_TYPE_ADDITION:
     case AST_NODE_TYPE_ADDRESS_OF:
@@ -4146,8 +4238,10 @@ static X64_Type x64_child_wanted(X64_Builder const *builder, X64_Expression_Fram
     }
     case AST_NODE_TYPE_CALL: {
         if (x64_call_is_built_in(builder, parent->node)) {
+            // The number of elements that `make` makes is an `Int`.
             if (str_equals(node->payload.call.name, STR("int_to_byte")) ||
-                str_equals(node->payload.call.name, STR("int_to_i32"))) {
+                str_equals(node->payload.call.name, STR("int_to_i32")) ||
+                str_equals(node->payload.call.name, STR("make"))) {
                 return x64_type_make(X64_TYPE_KIND_INT);
             }
             if (str_equals(node->payload.call.name, STR("str_to_c_str")) ||
@@ -4224,6 +4318,12 @@ static bool x64_expression_node_write(X64_Builder *builder, X64_Expression_Frame
     case AST_NODE_TYPE_CALL:
         if (x64_call_is_str_to_c_str(builder, node)) {
             return x64_str_to_c_str_write(builder, node);
+        }
+        if (x64_call_is_make(builder, node)) {
+            return x64_make_write(builder, frame, is_result_used);
+        }
+        if (x64_call_is_destroy(builder, node)) {
+            return x64_destroy_write(builder, frame, is_result_used);
         }
         if (x64_call_is_built_in(builder, node)) {
             return x64_built_in_write(builder, frame);
@@ -6314,6 +6414,132 @@ static bool x64_call_is_append(X64_Builder const *builder, Ast_Node_Index expres
 }
 
 /**
+ * Returns whether `expression` is a call of the built-in procedure `make`.
+ */
+static bool x64_call_is_make(X64_Builder const *builder, Ast_Node_Index expression) {
+    return x64_call_is_built_in(builder, expression) &&
+           str_equals(builder->nodes[expression].payload.call.name, STR("make"));
+}
+
+/**
+ * Returns whether `expression` is a call of the built-in procedure `destroy`.
+ */
+static bool x64_call_is_destroy(X64_Builder const *builder, Ast_Node_Index expression) {
+    return x64_call_is_built_in(builder, expression) &&
+           str_equals(builder->nodes[expression].payload.call.name, STR("destroy"));
+}
+
+/**
+ * Writes `make([]T, count)` of `frame`, whose count, the one argument that is written, is on the
+ * stack of values: the elements are made by `malloc` of the C library, and are made zero by
+ * `memset`, because zero is the default value of every type, and the value is the array slice of
+ * them, their address and `count`. The count must be from 0 to the most elements whose size fits in
+ * an `Int`, and `malloc` must give the memory, or the program stops with a breakpoint, as it does
+ * for an index that is out of bounds: the count is compared as an unsigned number, so a negative
+ * one is above the most. `malloc` of 0 bytes may give `NULL`, which could not be told from a failure,
+ * so at least one byte is asked for. `rax`, `rcx`, `rdx` and `r8` are used, which a call changes
+ * anyway, and the size is kept on the stack of values over the call of `malloc`. A call whose value
+ * is not used gives nothing back, which loses the memory, as the program asked. Returns false
+ * after it recorded an error.
+ */
+static bool x64_make_write(X64_Builder *builder, X64_Expression_Frame const *frame,
+                           bool is_result_used) {
+    Ast_Node_Index call = frame->node;
+    assert(x64_call_is_make(builder, call));
+
+    Str name = builder->nodes[call].payload.call.name;
+    Ast_Node_Index type_node = builder->nodes[call].first_child;
+    Ast_Node_Index count = AST_NODE_INDEX_NONE;
+    if (type_node != AST_NODE_INDEX_NONE) {
+        count = builder->nodes[type_node].next_sibling;
+    }
+    if (count == AST_NODE_INDEX_NONE ||
+        builder->nodes[count].next_sibling != AST_NODE_INDEX_NONE) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
+    }
+    X64_Type type = x64_type_of_node(builder, type_node);
+    if (type.kind != X64_TYPE_KIND_SLICE) {
+        return x64_fail(builder, X64_BUILD_STATUS_MAKE_TYPE_INVALID,
+                        x64_type_subject(builder, type_node));
+    }
+    if (not x64_type_accepts(builder, x64_type_make(X64_TYPE_KIND_INT), count)) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+    }
+    size_t stride = x64_type_stride_bytes(builder, x64_type_element(type));
+    assert(stride > 0);
+    int32_t count_place = x64_stack_displacement(builder, frame->stack_start, 1);
+
+    // `rax` is the count and `rcx` the most, and `rax` becomes the size, which is kept.
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RAX, X64_REGISTER_RBP, count_place);
+    x64_write_load_integer(builder, X64_REGISTER_RCX, INT64_MAX / (int64_t)stride);
+    x64_write_registers(builder, X64_OPCODE_CMP, X64_REGISTER_RCX, X64_REGISTER_RAX);
+    x64_write_trap_unless(builder, X64_CONDITION_BELOW_EQUAL);
+    x64_write_load_integer(builder, X64_REGISTER_RCX, (int64_t)stride);
+    x64_write_multiply(builder, X64_REGISTER_RAX, X64_REGISTER_RCX);
+    int32_t size_place = x64_stack_push(builder, 1);
+    x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, size_place);
+
+    // `malloc(size)` of at least one byte: `cmp rcx, 1` sets the carry for a size of 0, and
+    // `adc rcx, 0` adds it. A result of `NULL` is a failure.
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RCX);
+    static byte const AT_LEAST_ONE[] = {0x48, 0x83, 0xF9, 0x01, 0x48, 0x83, 0xD1, 0x00};
+    x64_write_bytes(&builder->writer, AT_LEAST_ONE, sizeof(AT_LEAST_ONE));
+    x64_write_call_import(builder, X64_IMPORT_SLOT_MALLOC);
+    x64_write_registers(builder, X64_OPCODE_TEST, X64_REGISTER_RAX, X64_REGISTER_RAX);
+    x64_write_trap_unless(builder, X64_CONDITION_NOT_EQUAL);
+
+    // `memset(address, 0, size)`, which gives the address back in `rax`.
+    x64_write_registers(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RCX);
+    x64_write_registers(builder, X64_OPCODE_XOR, X64_REGISTER_RDX, X64_REGISTER_RDX);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_R8, X64_REGISTER_RBP, size_place);
+    x64_write_call_import(builder, X64_IMPORT_SLOT_MEMSET);
+
+    // The count is read before the stack of values lets go of it, and the slice takes its place.
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, count_place);
+    x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+    if (is_result_used) {
+        int32_t target = x64_stack_push(builder, 2);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RAX, X64_REGISTER_RBP, target);
+        x64_write_memory(builder, X64_OPCODE_STORE, X64_REGISTER_RCX, X64_REGISTER_RBP,
+                         target + X64_WORD_SIZE_BYTES);
+    }
+    return true;
+}
+
+/**
+ * Writes `destroy(elements)` of `frame`, whose argument, an array slice that `make` made, is on the
+ * stack of values: `free` of the C library gives the memory of its elements back. The slice is a
+ * value, so it keeps its address, which the program must not use again. A slice that `make` did not
+ * make is a mistake that is not found, as it is not in C. `destroy` gives nothing, so it is a
+ * statement. Returns false after it recorded an error.
+ */
+static bool x64_destroy_write(X64_Builder *builder, X64_Expression_Frame const *frame,
+                              bool is_result_used) {
+    Ast_Node_Index call = frame->node;
+    assert(x64_call_is_destroy(builder, call));
+
+    Str name = builder->nodes[call].payload.call.name;
+    Ast_Node_Index argument = builder->nodes[call].first_child;
+    if (argument == AST_NODE_INDEX_NONE ||
+        builder->nodes[argument].next_sibling != AST_NODE_INDEX_NONE) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
+    }
+    if (x64_expression_type(builder, argument).kind != X64_TYPE_KIND_SLICE) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+    }
+    if (is_result_used) {
+        return x64_fail(builder, X64_BUILD_STATUS_CALL_RESULT_MISSING, name);
+    }
+
+    // The address is the first of the two words of the slice.
+    int32_t slice = x64_stack_displacement(builder, frame->stack_start, 2);
+    x64_write_memory(builder, X64_OPCODE_LOAD, X64_REGISTER_RCX, X64_REGISTER_RBP, slice);
+    x64_write_call_import(builder, X64_IMPORT_SLOT_FREE);
+    x64_stack_pop(builder, builder->stack_words - frame->stack_start);
+    return true;
+}
+
+/**
  * Writes `str_to_c_str` of `call`, which makes a copy of the string with a zero after it in the
  * temporary storage, and puts its address on the stack of values. A string that is known when the
  * program is compiled is copied with stores of 8 bytes, see `x64_c_str_write`, and any other `Str`,
@@ -6842,6 +7068,21 @@ static X64_Type x64_leaf_type(X64_Builder const *builder, Ast_Node_Index express
                 tuple.definition = AST_NODE_INDEX_NONE;
                 tuple.length = str_equals(name, STR("utf8_decode")) ? 3 : 2;
                 return tuple;
+            }
+            // `make` gives an array slice of the type that it is given, which must be one, see
+            // `x64_make_write`, and `destroy` gives nothing.
+            if (str_equals(name, STR("make"))) {
+                if (node->first_child == AST_NODE_INDEX_NONE) {
+                    return x64_type_make(X64_TYPE_KIND_NONE);
+                }
+                X64_Type made = x64_type_of_node(builder, node->first_child);
+                if (made.kind != X64_TYPE_KIND_SLICE) {
+                    return x64_type_make(X64_TYPE_KIND_NONE);
+                }
+                return made;
+            }
+            if (str_equals(name, STR("destroy"))) {
+                return x64_type_make(X64_TYPE_KIND_NONE);
             }
             return x64_type_make(X64_TYPE_KIND_INT);
         }

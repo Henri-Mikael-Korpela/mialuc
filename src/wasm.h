@@ -140,11 +140,17 @@ enum {
     WASM_OPCODE_LOCAL_SET = 0x21,
     WASM_OPCODE_LOCAL_TEE = 0x22,
     WASM_OPCODE_LOOP = 0x03,
+    // The size of the memory in pages, and the growing of it by a number of pages, which gives the
+    // size before, or -1 when it cannot grow. Each is followed by the memory, which is memory 0.
+    WASM_OPCODE_MEMORY_GROW = 0x40,
+    WASM_OPCODE_MEMORY_SIZE = 0x3F,
     // The prefix of the instructions that came after the first version of the format, and the
-    // second byte of `memory.copy`, the only one of them that the compiler writes. Both of the
-    // memory operands that follow it are memory 0.
+    // second bytes of `memory.copy` and `memory.fill`, the only ones of them that the compiler
+    // writes. The memory operands that follow them are memory 0: two of them for `memory.copy`, and
+    // one for `memory.fill`.
     WASM_OPCODE_PREFIX_MISC = 0xFC,
     WASM_OPCODE_MISC_MEMORY_COPY = 0x0A,
+    WASM_OPCODE_MISC_MEMORY_FILL = 0x0B,
     WASM_OPCODE_RETURN = 0x0F,
     WASM_OPCODE_UNREACHABLE = 0x00,
 
@@ -248,6 +254,9 @@ typedef enum {
     // An index, or the end of a slice, that is not an `Int`.
     WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
     WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
+    // The first argument of `make` is not the type of an array slice, which is what `make` makes.
+    // The subject is the text of the type.
+    WASM_BUILD_STATUS_MAKE_TYPE_INVALID,
     // Two cases of one match statement whose patterns match a value in common: the same value,
     // ranges that overlap or a value inside a range. The second could never run. The subject is
     // its word `case`.

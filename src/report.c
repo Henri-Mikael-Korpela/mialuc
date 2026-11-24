@@ -742,6 +742,12 @@ static Report_Entry const REPORT_ENTRIES[REPORT_CODE_COUNT] = {
                 "the length of an array is known when the program is compiled",
         .help = "compare slices of the parts that have the same length, as in 'a[0:2] == b[0:2]'",
     },
+    [ERROR_CODE_MAKE_TYPE_INVALID] = {
+        .title = "'make' makes an array slice, and the type at '{subject}' is not the type of one",
+        .label = "not the type of an array slice",
+        .note = "'make' allocates the elements of an array slice, which 'destroy' gives back",
+        .help = "write the type of an array slice, such as '[]Byte'",
+    },
     [ERROR_CODE_COMPARISON_ARRAY_KIND_MISMATCH] = {
         .title = "{detail} cannot be compared with {other}",
         .label = "these two are not compared with each other",
@@ -1059,6 +1065,7 @@ static Error_Code const REPORT_X64_CODES[] = {
     [X64_BUILD_STATUS_IDENTIFIER_NOT_VALUE] = ERROR_CODE_IDENTIFIER_NOT_VALUE,
     [X64_BUILD_STATUS_INDEX_TYPE_INVALID] = ERROR_CODE_INDEX_TYPE_INVALID,
     [X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID] = ERROR_CODE_LOGICAL_OPERAND_TYPE_INVALID,
+    [X64_BUILD_STATUS_MAKE_TYPE_INVALID] = ERROR_CODE_MAKE_TYPE_INVALID,
     [X64_BUILD_STATUS_MATCH_CASE_DUPLICATE] = ERROR_CODE_MATCH_CASE_DUPLICATE,
     [X64_BUILD_STATUS_MATCH_PARTIAL_INVALID] = ERROR_CODE_MATCH_PARTIAL_INVALID,
     [X64_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT] = ERROR_CODE_MATCH_PATTERN_NOT_CONSTANT,
@@ -1126,6 +1133,7 @@ static Error_Code const REPORT_WASM_CODES[] = {
     [WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE] = ERROR_CODE_IDENTIFIER_NOT_VALUE,
     [WASM_BUILD_STATUS_INDEX_TYPE_INVALID] = ERROR_CODE_INDEX_TYPE_INVALID,
     [WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID] = ERROR_CODE_LOGICAL_OPERAND_TYPE_INVALID,
+    [WASM_BUILD_STATUS_MAKE_TYPE_INVALID] = ERROR_CODE_MAKE_TYPE_INVALID,
     [WASM_BUILD_STATUS_MATCH_CASE_DUPLICATE] = ERROR_CODE_MATCH_CASE_DUPLICATE,
     [WASM_BUILD_STATUS_MATCH_PARTIAL_INVALID] = ERROR_CODE_MATCH_PARTIAL_INVALID,
     [WASM_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT] = ERROR_CODE_MATCH_PATTERN_NOT_CONSTANT,

@@ -196,7 +196,10 @@ static Ast_Node_Index const AST_NODE_INDEX_NONE = UINT32_MAX;
  *   is the exception: the node that comes right after it in the node buffer, before its argument,
  *   is an `AST_NODE_TYPE_STRING_LITERAL` that is not the child of any node, where the analysis
  *   writes the text of the number, as it does for `AST_NODE_TYPE_CONCATENATION`, because the
- *   argument must be a constant and the call is a constant string.
+ *   argument must be a constant and the call is a constant string. A call of the built-in `make`
+ *   is the other exception: its first child is the type of what it makes, such as the
+ *   `AST_NODE_TYPE_ARRAY_TYPE` of `[]Byte` in `make([]Byte, 16)`, which is not an expression, and
+ *   the arguments follow it.
  * - `AST_NODE_TYPE_CALL_STATEMENT`: one child, an `AST_NODE_TYPE_CALL` whose value, if it has
  *   one, is dropped. It is a statement of a procedure body.
  * - `AST_NODE_TYPE_CAST`: one child, the operand, as `b` in `cast(Int)b`. The name of the type that

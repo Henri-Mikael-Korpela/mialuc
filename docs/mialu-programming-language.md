@@ -67,6 +67,8 @@
   - [str_to_c_str](#str_to_c_str)
   - [try_str_to_int](#try_str_to_int)
   - [utf8_decode](#utf8_decode)
+  - [make](#make)
+  - [destroy](#destroy)
 - [Scope resolution](#scope-resolution)
 - [Attributes](#attributes)
 - [Foreign procedures](#foreign-procedures)
@@ -1710,7 +1712,7 @@ sum_of_squares :: proc(count: Int) Int ->
 
 `dynamic` is a [keyword](#reserved-words). The elements can be the values that the elements of an array can be. The variable can be given its type, as in `numbers : [dynamic]Int`, which is the same as `numbers := [dynamic]Int`, and a dynamic array has no other value than the empty one: it cannot be given the elements of an array literal, and it cannot be assigned to as a whole, or copied.
 
-A dynamic array is its elements, how many there are, and how many there is room for. The elements are in the [temporary storage](#str_to_c_str) of the program, which a procedure gives back when it returns. When `append` finds that there is no room for the values that are given to it, it makes room for twice as many elements as there will be, in the temporary storage, and copies the elements that there are to it, and the place that the elements had stays used until the procedure returns. So the elements of a dynamic array are good until the procedure that defines it returns, and a dynamic array must not leave it: it cannot be a parameter or the type of a returned value, of a global variable or of a field of a struct, which are an error as the type of an array is. Temporary storage has a fixed size, and a program that makes more room than fits in it is stopped.
+A dynamic array is its elements, how many there are, and how many there is room for. The elements are in the [temporary storage](#str_to_c_str) of the program, which a procedure gives back when it returns. When `append` finds that there is no room for the values that are given to it, it makes room for twice as many elements as there will be, in the temporary storage, and copies the elements that there are to it, and the place that the elements had stays used until the procedure returns. So the elements of a dynamic array are good until the procedure that defines it returns, and a dynamic array must not leave it: it cannot be a parameter or the type of a returned value, of a global variable or of a field of a struct, which are an error as the type of an array is. Temporary storage has a fixed size, and a program that makes more room than fits in it is stopped. Elements that outlive the procedure are made with [`make`](#make), which gives an array slice of them.
 
 An element is read and assigned with an index, as for an array, `squares[2]`, which traps when the index is not below the number of elements, and a `for` statement goes through the elements, see [For statements](#for-statements). A slice of a dynamic array, `squares[1:3]` and `squares[:]`, is a view of its elements as it is of an array, see [Array slices](#array-slices), and it is what a procedure that is given some of the elements takes, because a dynamic array is not itself a parameter. The slice has the elements that there are when it is made, so elements that `append` adds after that are not in it, and when `append` has moved the elements to another place the slice views the place that they were at, which is still there until the procedure returns, so a slice should be made again after an `append`. An index is checked against the number of elements, and not against the room, so the elements that `append` has not added are not there. The number of elements is `length_of(squares)`, see [length_of](#length_of).
 
@@ -2271,6 +2273,8 @@ A built-in procedure is a procedure that the language has, and that is called li
 | [`str_to_c_str`](#str_to_c_str) | a `Str` | a `C_Str`, a copy of it that ends with a zero |
 | [`try_str_to_int`](#try_str_to_int) | a `Str` | two values: the `Int` that it is, and whether it is one |
 | [`utf8_decode`](#utf8_decode) | an array or an array slice of `Byte` | two values: the `Str` of the bytes, and whether they are valid UTF-8 |
+| [`make`](#make) | the type of an array slice, and an `Int` | an array slice of that many elements that are zero, in memory that outlives the procedure |
+| [`destroy`](#destroy) | an array slice that `make` made | nothing: the memory of its elements is given back |
 
 ### append
 
@@ -2413,6 +2417,40 @@ The bytes are valid when they are UTF-8 as [RFC 3629](https://www.rfc-editor.org
 When the bytes are not valid, the first value is the empty string and the second is `false`, so a program that does not look at the second value gets a string with no characters, and not part of the bytes. The first value can be left out with the name `_`, as above. A call that is given one name, as in `text := utf8_decode(bytes)`, is an error, since it gives two values, and so is a call that is given another number of names. An argument that is not an array or an array slice of `Byte`, such as an array of `Int` or a `Str`, is an error.
 
 The `Str` is a view of the bytes that are given, and not a copy, like a [slice of a string](#strings): nothing is allocated, and the string is good as long as the bytes are, which for an array is until the procedure that has it returns. A string that is returned from a procedure that made it from the array of that procedure points at bytes that are gone. The bytes are not changed by it, and a change to them afterwards is seen by the string, so bytes that are decoded should not be changed while the string is used. The bytes are checked once, when the program runs, which takes as long as there are bytes.
+
+### make
+
+`make` allocates memory while the program runs: it makes the elements of an [array slice](#array-slices), and gives the slice of them. Its first argument is the type of the slice, which is a type and not a value, and its second is the number of elements, an `Int`:
+
+```
+bytes := make([]Byte, 16)
+defer destroy(bytes)
+bytes[0] = 255
+```
+
+`bytes` is a `[]Byte` of 16 elements. Every element is zero, which is the default value of every type, see [Variables](#variables), so the elements of a `[]Int` are 0, of a `[]Bool` are `false`, of a `[]Str` are the empty string, and the fields of a struct are their default values too. The elements are used like those of any slice: an element is read and assigned with an index that is checked, a for statement goes through them, `length_of` gives their number, and a slice of them views some of them.
+
+The difference from an array, and from a [dynamic array](#dynamic-arrays), is how long the elements live. The elements of an array are in the frame of the procedure that defines it, and the elements of a dynamic array in the temporary storage, and both are gone when the procedure returns. The elements that `make` makes are not: they are in memory of their own, and they live until [`destroy`](#destroy) gives them back, whichever procedure that is, so a slice of them can be passed on and kept. The memory is managed by hand, as in C: memory that is never destroyed is lost until the program ends, and the elements must not be used after they are destroyed.
+
+The type must be the type of an array slice, `[]T`, whose elements can be the types that the elements of an array can be: `make([4]Byte, 4)`, `make([dynamic]Byte, 4)` and `make(Byte, 4)` are errors. A count that is below zero, or so large that the size of the elements does not fit in the memory, stops the program, as an index that is out of bounds does, and so does memory that the system does not give. A count of zero makes an empty slice. The memory comes from `malloc` of the C library for the `x64-win32` target, and from a heap that the module keeps at the end of its memory for the `wasm` target, see [Compilation targets](#compilation-targets).
+
+### destroy
+
+`destroy` gives back the memory of the elements of an array slice that [`make`](#make) made, so that it can be used again. It takes the slice and gives nothing, so it is a statement, and it is the natural statement of a [`defer`](#defer) right after the `make`:
+
+```
+sum_of_squares :: proc(count: Int) Int ->
+    squares := make([]Int, count)
+    defer destroy(squares)
+    for i in 0..<count ->
+        squares[i] = i * i
+    total := 0
+    for square in squares ->
+        total += square
+    return total
+```
+
+The slice is a value, so `destroy` does not change it: it keeps the address of the elements that are gone, and it must not be used again, nor any other slice of the same elements, which is a mistake that the program does not find, as it is not in C. Destroying the same elements twice, or a slice that `make` did not make, such as a slice of an array, is a mistake of the same kind. A slice of the elements that starts after the first is not what `make` gave, so it is the slice that `make` gave that is destroyed. An argument that is not an array slice is an error, and so is a call of `destroy` whose value is used.
 
 ## Scope resolution
 

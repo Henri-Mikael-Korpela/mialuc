@@ -47,7 +47,37 @@ enum {
     // several fields of a struct each have more slots than any module can use, and the walk must
     // end.
     WASM_STRUCT_STEP_MAX = 1 << 20,
+    // The heap that `make` and `destroy` use, see `wasm_build_heap_functions`. Each block of it has
+    // a header of two 32-bit values before the elements: the size of the block in bytes, and the
+    // address of the next block that is free, which only a free block uses. The size is a multiple
+    // of 8, so that the elements of every block are aligned like the elements of the stack.
+    WASM_HEAP_FUNCTION_COUNT = 2,
+    WASM_HEAP_GLOBAL_COUNT = 2,
+    WASM_HEAP_HEADER_SIZE_BYTES = 8,
+    WASM_HEAP_HEADER_NEXT_OFFSET_BYTES = 4,
+    WASM_HEAP_ALIGNMENT_BYTES = 8,
+    // A page is 2 to the power of this, so a number of bytes is made a number of pages by a shift.
+    WASM_MEMORY_PAGE_SHIFT = 16,
 };
+
+// The globals of the heap, in the order of their indexes, see `wasm_heap_global_index`.
+typedef enum {
+    // The address after the last block, where the next block that is not reused starts.
+    WASM_HEAP_GLOBAL_END,
+    // The address of the header of the first block that is free, or 0 when none is.
+    WASM_HEAP_GLOBAL_FREE,
+} Wasm_Heap_Global;
+
+// The functions of the heap, in the order of their indexes, see `wasm_heap_function_index`.
+typedef enum {
+    // Takes a size in bytes and gives the address of that many bytes that are zero.
+    WASM_HEAP_FUNCTION_ALLOCATE,
+    // Takes an address that the first gave, or 0, and makes its block free.
+    WASM_HEAP_FUNCTION_FREE,
+} Wasm_Heap_Function;
+
+STATIC_ASSERT(WASM_MEMORY_PAGE_SIZE_BYTES == 1 << WASM_MEMORY_PAGE_SHIFT,
+              wasm_memory_page_shift_is_size);
 
 // What the walk over the slots of a struct answers when it has to stop, because the struct is
 // inside itself or is too large.
@@ -267,6 +297,11 @@ typedef struct {
     // Whether the module has a table with its functions, which it has when a pointer to a
     // procedure can be made or called, see `wasm_data_measure`.
     bool has_table;
+    // Whether the module has a heap, which it has when the program calls `make` or `destroy`: the
+    // memory after the stack, which grows when it is full, the two globals that keep where it ends
+    // and the first block that is free, and the two functions that allocate and free a block, see
+    // `wasm_build_heap_functions`.
+    bool has_heap;
 } Wasm_Builder;
 
 /**
@@ -475,6 +510,22 @@ static size_t          wasm_global_slot_index                 (Wasm_Builder cons
                                                                Ast_Node_Index global);
 static size_t          wasm_global_slot_count                 (Wasm_Builder const *builder);
 static void            wasm_build_global_section              (Wasm_Builder *builder);
+static void            wasm_build_code_section_body_make      (Wasm_Builder *builder,
+                                                               Ast_Node_Index procedure,
+                                                               Ast_Node_Index call);
+static void            wasm_build_heap_functions              (Wasm_Builder *builder);
+static bool            wasm_call_is_destroy                   (Wasm_Builder const *builder,
+                                                               Ast_Node_Index call);
+static bool            wasm_call_is_make                      (Wasm_Builder const *builder,
+                                                               Ast_Node_Index call);
+static size_t          wasm_heap_function_index               (Wasm_Builder const *builder,
+                                                               Wasm_Heap_Function function);
+static size_t          wasm_heap_global_index                 (Wasm_Builder const *builder,
+                                                               Wasm_Heap_Global global);
+static size_t          wasm_heap_start_bytes                  (Wasm_Builder const *builder);
+static void            wasm_heap_trap_write                   (Wasm_Writer *writer);
+static size_t          wasm_memory_page_count                 (Wasm_Builder const *builder);
+static size_t          wasm_signature_count                   (Wasm_Builder const *builder);
 static bool            wasm_data_measure                      (Wasm_Builder *builder);
 static Wasm_Type       wasm_signature_return_type             (Wasm_Builder const *builder,
                                                                Ast_Node_Index signature,
@@ -923,6 +974,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slic
         .has_data = false,
         .has_stack = false,
         .has_table = false,
+        .has_heap = false,
     };
 
     // Only the constant definitions are functions. A global variable is a global of the module.
@@ -967,7 +1019,7 @@ Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slic
         if (builder.has_memory) {
             wasm_build_memory_section(&builder);
         }
-        if (wasm_global_slot_count(&builder) > 0 || builder.has_stack) {
+        if (wasm_global_slot_count(&builder) > 0 || builder.has_stack || builder.has_heap) {
             wasm_build_global_section(&builder);
         }
         is_ok = wasm_build_export_section(&builder, root, definition_count);
@@ -1070,10 +1122,15 @@ static bool wasm_data_measure(Wasm_Builder *builder) {
     bool has_address_of = false;
     bool has_pointer = false;
     bool has_procedure_pointer = false;
+    bool has_heap = false;
     size_t reflection_bytes = 0;
     for (size_t i = 0; i < builder->node_count; i += 1) {
         if (builder->nodes[i].node_type == AST_NODE_TYPE_TYPE_INFO_OF) {
             reflection_bytes += wasm_type_info_region_bytes(builder, (Ast_Node_Index)i);
+        }
+        if (wasm_call_is_make(builder, (Ast_Node_Index)i) ||
+            wasm_call_is_destroy(builder, (Ast_Node_Index)i)) {
+            has_heap = true;
         }
         if (builder->nodes[i].node_type == AST_NODE_TYPE_PROCEDURE_TYPE) {
             has_procedure_pointer = true;
@@ -1135,7 +1192,10 @@ static bool wasm_data_measure(Wasm_Builder *builder) {
     // module that has a pointer type or follows a pointer needs one as well, also when it takes no
     // address itself, because a caller from JavaScript can pass the address of something it wrote.
     builder->has_memory = has_literal || has_array_type || has_array_literal || has_address_of ||
-                          has_pointer || reflection_bytes > 0;
+                          has_pointer || reflection_bytes > 0 || has_heap;
+    // The elements that `make` makes are in the memory, after everything else, see
+    // `wasm_heap_start_bytes`.
+    builder->has_heap = has_heap;
     // A variable whose address is taken is on the stack, in the frame of its procedure, like the
     // elements of an array literal.
     builder->has_stack = has_array_literal || has_address_of;
@@ -1554,7 +1614,12 @@ static void wasm_build_global_section(Wasm_Builder *builder) {
     if (builder->has_stack) {
         stack_global_count = 1;
     }
-    wasm_write_unsigned(&builder->writer, wasm_global_slot_count(builder) + stack_global_count);
+    size_t heap_global_count = 0;
+    if (builder->has_heap) {
+        heap_global_count = WASM_HEAP_GLOBAL_COUNT;
+    }
+    wasm_write_unsigned(&builder->writer,
+                        wasm_global_slot_count(builder) + stack_global_count + heap_global_count);
 
     Ast_Node_Index global = builder->nodes[builder->module].first_child;
     // Every definition is a distinct node, so there cannot be more than there are nodes.
@@ -1659,6 +1724,23 @@ static void wasm_build_global_section(Wasm_Builder *builder) {
         wasm_write_byte(&builder->writer, WASM_OPCODE_END);
     }
 
+    // The globals of the heap come last: where it ends, which is where the memory ended when the
+    // module started, because the heap has nothing in it then, and the first block that is free,
+    // which is none, the address 0, because nothing was freed.
+    if (builder->has_heap) {
+        int64_t const starts[WASM_HEAP_GLOBAL_COUNT] = {
+            (int64_t)wasm_heap_start_bytes(builder),
+            0,
+        };
+        for (size_t i = 0; i < WASM_HEAP_GLOBAL_COUNT; i += 1) {
+            wasm_write_byte(&builder->writer, WASM_TYPE_I32);
+            wasm_write_byte(&builder->writer, WASM_GLOBAL_MUTABLE);
+            wasm_write_byte(&builder->writer, WASM_OPCODE_I32_CONST);
+            wasm_write_signed(&builder->writer, starts[i]);
+            wasm_write_byte(&builder->writer, WASM_OPCODE_END);
+        }
+    }
+
     wasm_block_end(&builder->writer, section);
 }
 
@@ -1670,6 +1752,21 @@ static size_t wasm_stack_global_index(Wasm_Builder const *builder) {
     assert(builder->has_stack);
 
     return wasm_global_slot_count(builder);
+}
+
+/**
+ * Returns the index of the global of the heap `global`, which is after the globals of the program
+ * and the stack pointer, see `wasm_build_global_section`. The module has it when `has_heap` is set.
+ */
+static size_t wasm_heap_global_index(Wasm_Builder const *builder, Wasm_Heap_Global global) {
+    assert(builder->has_heap);
+    assert((size_t)global < WASM_HEAP_GLOBAL_COUNT);
+
+    size_t index = wasm_global_slot_count(builder) + (size_t)global;
+    if (builder->has_stack) {
+        index += 1;
+    }
+    return index;
 }
 
 /**
@@ -1686,18 +1783,17 @@ static void wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module
     assert(builder->nodes[module].node_type == AST_NODE_TYPE_MODULE);
 
     // The types of the procedures are followed by the signature of each type of a pointer to a
-    // procedure that no procedure has the signature of first, see `wasm_signature_canonical`.
-    size_t signature_count = 0;
-    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
-        if (builder->nodes[node].node_type == AST_NODE_TYPE_PROCEDURE_TYPE &&
-            wasm_signature_canonical(builder, node) == node) {
-            signature_count += 1;
-        }
+    // procedure that no procedure has the signature of first, see `wasm_signature_canonical`, and
+    // then by the types of the functions of the heap, when the module has one.
+    size_t signature_count = wasm_signature_count(builder);
+    size_t heap_function_count = 0;
+    if (builder->has_heap) {
+        heap_function_count = WASM_HEAP_FUNCTION_COUNT;
     }
 
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_TYPE);
-    wasm_write_unsigned(&builder->writer,
-                        builder->foreign_count + definition_count + signature_count);
+    wasm_write_unsigned(&builder->writer, builder->foreign_count + definition_count +
+                                              signature_count + heap_function_count);
 
     // Every function is in one of the two passes, and the foreign ones are first.
     for (int pass = 0; pass < 2; pass += 1) {
@@ -1726,7 +1822,44 @@ static void wasm_build_type_section(Wasm_Builder *builder, Ast_Node_Index module
         }
     }
 
+    // `allocate` takes a size and gives an address, and `free` takes an address, all 32-bit.
+    if (builder->has_heap) {
+        static byte const ALLOCATE_TYPE[] = {WASM_TYPE_FUNCTION, 1, WASM_TYPE_I32, 1,
+                                             WASM_TYPE_I32};
+        static byte const FREE_TYPE[] = {WASM_TYPE_FUNCTION, 1, WASM_TYPE_I32, 0};
+        wasm_write_bytes(&builder->writer, ALLOCATE_TYPE, sizeof(ALLOCATE_TYPE));
+        wasm_write_bytes(&builder->writer, FREE_TYPE, sizeof(FREE_TYPE));
+    }
+
     wasm_block_end(&builder->writer, section);
+}
+
+/**
+ * Returns the number of types of pointers to procedures that the type section has after the types
+ * of the functions, which are the procedure types whose signature no node before them has, see
+ * `wasm_signature_canonical`.
+ */
+static size_t wasm_signature_count(Wasm_Builder const *builder) {
+    size_t count = 0;
+    for (Ast_Node_Index node = 0; node < builder->node_count; node += 1) {
+        if (builder->nodes[node].node_type == AST_NODE_TYPE_PROCEDURE_TYPE &&
+            wasm_signature_canonical(builder, node) == node) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+/**
+ * Returns the index of the function of the heap `function`, which comes after the functions of
+ * the program, so that no procedure has another index because of it. The module has it when
+ * `has_heap` is set.
+ */
+static size_t wasm_heap_function_index(Wasm_Builder const *builder, Wasm_Heap_Function function) {
+    assert(builder->has_heap);
+    assert((size_t)function < WASM_HEAP_FUNCTION_COUNT);
+
+    return builder->foreign_count + builder->definition_count + (size_t)function;
 }
 
 /**
@@ -1846,6 +1979,21 @@ static void wasm_build_import_section(Wasm_Builder *builder, Ast_Node_Index modu
  */
 static void wasm_build_memory_section(Wasm_Builder *builder) {
     assert(builder->has_memory);
+
+    size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_MEMORY);
+    wasm_write_unsigned(&builder->writer, 1);
+    wasm_write_byte(&builder->writer, WASM_MEMORY_LIMITS_MIN_ONLY);
+    wasm_write_unsigned(&builder->writer, wasm_memory_page_count(builder));
+    wasm_block_end(&builder->writer, section);
+}
+
+/**
+ * Returns the number of pages that the memory has when the module starts: enough for the data, and
+ * the stack of the arrays when there is one, and at least one. The heap has no pages then, and
+ * grows the memory when it needs to, see `wasm_heap_start_bytes`.
+ */
+static size_t wasm_memory_page_count(Wasm_Builder const *builder) {
+    assert(builder->has_memory);
     assert(builder->data_size_bytes <= INT32_MAX);
 
     size_t page_count = (builder->data_size_bytes + WASM_MEMORY_PAGE_SIZE_BYTES - 1) /
@@ -1858,12 +2006,17 @@ static void wasm_build_memory_section(Wasm_Builder *builder) {
     if (page_count == 0) {
         page_count = 1;
     }
+    return page_count;
+}
 
-    size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_MEMORY);
-    wasm_write_unsigned(&builder->writer, 1);
-    wasm_write_byte(&builder->writer, WASM_MEMORY_LIMITS_MIN_ONLY);
-    wasm_write_unsigned(&builder->writer, page_count);
-    wasm_block_end(&builder->writer, section);
+/**
+ * Returns the address where the heap starts, which is the end of the memory that the module starts
+ * with, so that it is after the data and the stack and nothing else is ever there.
+ */
+static size_t wasm_heap_start_bytes(Wasm_Builder const *builder) {
+    assert(builder->has_heap);
+
+    return wasm_memory_page_count(builder) * WASM_MEMORY_PAGE_SIZE_BYTES;
 }
 
 /**
@@ -1921,11 +2074,20 @@ static void wasm_build_data_section(Wasm_Builder *builder) {
 static void wasm_build_function_section(Wasm_Builder *builder, size_t definition_count) {
     assert(definition_count <= builder->node_count);
 
+    size_t heap_function_count = 0;
+    if (builder->has_heap) {
+        heap_function_count = WASM_HEAP_FUNCTION_COUNT;
+    }
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_FUNCTION);
-    wasm_write_unsigned(&builder->writer, definition_count);
+    wasm_write_unsigned(&builder->writer, definition_count + heap_function_count);
     for (size_t i = 0; i < definition_count; i += 1) {
         // The types of the imported functions come first.
         wasm_write_unsigned(&builder->writer, builder->foreign_count + i);
+    }
+    // The types of the functions of the heap are the last of the type section.
+    for (size_t i = 0; i < heap_function_count; i += 1) {
+        wasm_write_unsigned(&builder->writer, builder->foreign_count + definition_count +
+                                                  wasm_signature_count(builder) + i);
     }
     wasm_block_end(&builder->writer, section);
 }
@@ -2047,8 +2209,12 @@ static bool wasm_build_code_section(Wasm_Builder *builder, Ast_Node_Index module
     assert(module < builder->node_count);
     assert(definition_count <= builder->node_count);
 
+    size_t heap_function_count = 0;
+    if (builder->has_heap) {
+        heap_function_count = WASM_HEAP_FUNCTION_COUNT;
+    }
     size_t section = wasm_section_begin(&builder->writer, WASM_SECTION_ID_CODE);
-    wasm_write_unsigned(&builder->writer, definition_count);
+    wasm_write_unsigned(&builder->writer, definition_count + heap_function_count);
 
     Ast_Node_Index definition =
         wasm_function_find(builder, builder->nodes[module].first_child, false);
@@ -2060,9 +2226,214 @@ static bool wasm_build_code_section(Wasm_Builder *builder, Ast_Node_Index module
         }
         definition = wasm_function_find(builder, builder->nodes[definition].next_sibling, false);
     }
+    if (builder->has_heap) {
+        wasm_build_heap_functions(builder);
+    }
 
     wasm_block_end(&builder->writer, section);
     return true;
+}
+
+/**
+ * Writes the bodies of the two functions of the heap, which `make` and `destroy` call, see
+ * `Wasm_Heap_Function`. The heap is the memory after what the module starts with, and a block of
+ * it is a header and the bytes of the elements, see `WASM_HEAP_HEADER_SIZE_BYTES`. A block that is
+ * freed goes to the front of a list of free blocks, and `allocate` takes the first free block that
+ * is large enough, which it makes zero, so that the elements have the default value of their type.
+ * When no free block is large enough, the block is made at the end of the heap, which grows the
+ * memory by as many pages as it needs. Memory that has just grown is zero already. A size that does
+ * not fit in the 32-bit addresses of the memory, or memory that cannot grow, traps, as running out
+ * of the stack does. A block is not split or joined with others, which keeps the code short, at the
+ * cost of memory that a program that frees blocks of many sizes wastes.
+ */
+static void wasm_build_heap_functions(Wasm_Builder *builder) {
+    assert(builder->has_heap);
+
+    Wasm_Writer *writer = &builder->writer;
+    size_t end_global = wasm_heap_global_index(builder, WASM_HEAP_GLOBAL_END);
+    size_t free_global = wasm_heap_global_index(builder, WASM_HEAP_GLOBAL_FREE);
+
+    // `allocate`: the parameter is the size, local 0, and the four locals after it are the size of
+    // the block, the block before the one that is looked at, which is 0 for the first, the block
+    // that is looked at, and the end of the new block, all 32-bit.
+    size_t const size = 0;
+    size_t const need = 1;
+    size_t const previous = 2;
+    size_t const block = 3;
+    size_t const end = 4;
+    size_t body = wasm_block_begin(writer);
+    wasm_write_unsigned(writer, 1);
+    wasm_write_unsigned(writer, 4);
+    wasm_write_byte(writer, WASM_TYPE_I32);
+
+    // The size of the block is the size rounded up to the alignment, and at least that, so that
+    // two blocks never have one address.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, size);
+    wasm_write_i32_const(writer, WASM_HEAP_ALIGNMENT_BYTES - 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_i32_const(writer, -WASM_HEAP_ALIGNMENT_BYTES);
+    wasm_write_byte(writer, WASM_OPCODE_I32_AND);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, need);
+    // A size so large that the rounding goes past 2^32 is 0 now, which is less than the size.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, size);
+    wasm_write_byte(writer, WASM_OPCODE_I32_LT_U);
+    wasm_heap_trap_write(writer);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, need);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+    wasm_write_byte(writer, WASM_OPCODE_IF);
+    wasm_write_byte(writer, WASM_BLOCK_TYPE_EMPTY);
+    wasm_write_i32_const(writer, WASM_HEAP_ALIGNMENT_BYTES);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, need);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    // The free blocks are looked through from the first, in a block that the loop leaves when the
+    // list ends: `previous` is 0 and `block` is the first.
+    wasm_write_i32_const(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, previous);
+    wasm_write_byte(writer, WASM_OPCODE_GLOBAL_GET);
+    wasm_write_unsigned(writer, free_global);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, block);
+    wasm_write_byte(writer, WASM_OPCODE_BLOCK);
+    wasm_write_byte(writer, WASM_BLOCK_TYPE_EMPTY);
+    wasm_write_byte(writer, WASM_OPCODE_LOOP);
+    wasm_write_byte(writer, WASM_BLOCK_TYPE_EMPTY);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+    wasm_write_byte(writer, WASM_OPCODE_BR_IF);
+    wasm_write_unsigned(writer, 1);
+    // A block whose size is at least the size that is needed is taken out of the list: the one
+    // before it, or the global of the first, gets the one after it.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, need);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GE_U);
+    wasm_write_byte(writer, WASM_OPCODE_IF);
+    wasm_write_byte(writer, WASM_BLOCK_TYPE_EMPTY);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, previous);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQZ);
+    wasm_write_byte(writer, WASM_OPCODE_IF);
+    wasm_write_byte(writer, WASM_BLOCK_TYPE_EMPTY);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, WASM_HEAP_HEADER_NEXT_OFFSET_BYTES);
+    wasm_write_byte(writer, WASM_OPCODE_GLOBAL_SET);
+    wasm_write_unsigned(writer, free_global);
+    wasm_write_byte(writer, WASM_OPCODE_ELSE);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, previous);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, WASM_HEAP_HEADER_NEXT_OFFSET_BYTES);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_STORE,
+                                  WASM_HEAP_HEADER_NEXT_OFFSET_BYTES);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    // Its bytes are made zero, all of them, and its address is the result.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_i32_const(writer, WASM_HEAP_HEADER_SIZE_BYTES);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_i32_const(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, 0);
+    wasm_write_byte(writer, WASM_OPCODE_PREFIX_MISC);
+    wasm_write_unsigned(writer, WASM_OPCODE_MISC_MEMORY_FILL);
+    wasm_write_byte(writer, 0x00);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_i32_const(writer, WASM_HEAP_HEADER_SIZE_BYTES);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_byte(writer, WASM_OPCODE_RETURN);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    // Otherwise the next block is looked at.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, previous);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_LOAD, WASM_HEAP_HEADER_NEXT_OFFSET_BYTES);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_SET, block);
+    wasm_write_byte(writer, WASM_OPCODE_BR);
+    wasm_write_unsigned(writer, 0);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+
+    // A new block at the end of the heap, whose end must not pass 2^32.
+    wasm_write_byte(writer, WASM_OPCODE_GLOBAL_GET);
+    wasm_write_unsigned(writer, end_global);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, block);
+    wasm_write_i32_const(writer, WASM_HEAP_HEADER_SIZE_BYTES);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, need);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, end);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_byte(writer, WASM_OPCODE_I32_LT_U);
+    wasm_heap_trap_write(writer);
+    // The memory grows by the pages that the end is past it, which is `(end - 1) / page + 1` pages
+    // in all, less the pages that it has: `previous` holds that number for a while.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+    wasm_write_i32_const(writer, WASM_MEMORY_PAGE_SHIFT);
+    wasm_write_byte(writer, WASM_OPCODE_I32_SHR_U);
+    wasm_write_i32_const(writer, 1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_byte(writer, WASM_OPCODE_MEMORY_SIZE);
+    wasm_write_byte(writer, 0x00);
+    wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, previous);
+    wasm_write_i32_const(writer, 0);
+    wasm_write_byte(writer, WASM_OPCODE_I32_GT_S);
+    wasm_write_byte(writer, WASM_OPCODE_IF);
+    wasm_write_byte(writer, WASM_BLOCK_TYPE_EMPTY);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, previous);
+    wasm_write_byte(writer, WASM_OPCODE_MEMORY_GROW);
+    wasm_write_byte(writer, 0x00);
+    wasm_write_i32_const(writer, -1);
+    wasm_write_byte(writer, WASM_OPCODE_I32_EQ);
+    wasm_heap_trap_write(writer);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    // The header gets the size, and the heap ends after the block.
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, need);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_STORE, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, end);
+    wasm_write_byte(writer, WASM_OPCODE_GLOBAL_SET);
+    wasm_write_unsigned(writer, end_global);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, block);
+    wasm_write_i32_const(writer, WASM_HEAP_HEADER_SIZE_BYTES);
+    wasm_write_byte(writer, WASM_OPCODE_I32_ADD);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_block_end(writer, body);
+
+    // `free`: the parameter is the address, local 0. The address 0 is no block, so nothing is done
+    // for it. Any other block goes to the front of the list of free blocks.
+    size_t const address = 0;
+    body = wasm_block_begin(writer);
+    wasm_write_unsigned(writer, 0);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, address);
+    wasm_write_byte(writer, WASM_OPCODE_IF);
+    wasm_write_byte(writer, WASM_BLOCK_TYPE_EMPTY);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, address);
+    wasm_write_i32_const(writer, WASM_HEAP_HEADER_SIZE_BYTES);
+    wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+    wasm_write_byte(writer, WASM_OPCODE_GLOBAL_GET);
+    wasm_write_unsigned(writer, free_global);
+    wasm_write_memory_instruction(writer, WASM_OPCODE_I32_STORE,
+                                  WASM_HEAP_HEADER_NEXT_OFFSET_BYTES);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, address);
+    wasm_write_i32_const(writer, WASM_HEAP_HEADER_SIZE_BYTES);
+    wasm_write_byte(writer, WASM_OPCODE_I32_SUB);
+    wasm_write_byte(writer, WASM_OPCODE_GLOBAL_SET);
+    wasm_write_unsigned(writer, free_global);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_write_byte(writer, WASM_OPCODE_END);
+    wasm_block_end(writer, body);
+}
+
+/**
+ * Writes `if`, `unreachable` and `end`, which stop the function of the heap when the value on the
+ * stack is true. The functions of the heap are not procedures of the program, so they do not use
+ * `wasm_structured_trap`, which counts the blocks of a procedure.
+ */
+static void wasm_heap_trap_write(Wasm_Writer *writer) {
+    wasm_write_byte(writer, WASM_OPCODE_IF);
+    wasm_write_byte(writer, WASM_BLOCK_TYPE_EMPTY);
+    wasm_write_byte(writer, WASM_OPCODE_UNREACHABLE);
+    wasm_write_byte(writer, WASM_OPCODE_END);
 }
 
 /**
@@ -3267,6 +3638,37 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
 
     Str name = builder->nodes[call].payload.call.name;
 
+    // `make` takes the type of an array slice and the number of its elements, an `Int`, and
+    // `destroy` takes an array slice and gives nothing.
+    if (wasm_call_is_make(builder, call)) {
+        Ast_Node_Index type_node = builder->nodes[call].first_child;
+        if (wasm_children_count(builder, call) != 2) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
+        }
+        if (wasm_type_of_node(builder, type_node).kind != WASM_VALUE_TYPE_SLICE) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_MAKE_TYPE_INVALID,
+                             wasm_type_subject(builder, type_node));
+        }
+        Ast_Node_Index count = builder->nodes[type_node].next_sibling;
+        if (not wasm_expression_is_accepted(builder, wasm_type_make(WASM_VALUE_TYPE_INT), count)) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        }
+        return true;
+    }
+    if (wasm_call_is_destroy(builder, call)) {
+        if (wasm_children_count(builder, call) != 1) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
+        }
+        Ast_Node_Index argument = builder->nodes[call].first_child;
+        if (wasm_expression_type(builder, argument).kind != WASM_VALUE_TYPE_SLICE) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
+        }
+        if (not is_result_unused) {
+            return wasm_fail(builder, WASM_BUILD_STATUS_CALL_RESULT_MISSING, name);
+        }
+        return true;
+    }
+
     // A built-in procedure takes one argument, which was written already. `length_of` takes an
     // array or an array slice, and an array was made into a slice of all its elements, so the
     // length is on the stack either way. `int_to_byte` takes an `Int`.
@@ -4038,6 +4440,15 @@ static bool wasm_expression_fail(Wasm_Builder *builder, Ast_Node_Index definitio
 
     Ast_Node const *node = &builder->nodes[expression];
     if (node->node_type == AST_NODE_TYPE_CALL) {
+        // A built-in procedure has no signature, and its arguments say what is wrong, such as a
+        // type that `make` does not make, or else it is one that gives nothing, such as `destroy`.
+        if (wasm_call_is_built_in(builder, expression)) {
+            if (not wasm_build_code_section_body_call(builder, expression, false)) {
+                return false;
+            }
+            return wasm_fail(builder, WASM_BUILD_STATUS_CALL_RESULT_MISSING,
+                             node->payload.call.name);
+        }
         if (wasm_call_signature(builder, expression) == AST_NODE_INDEX_NONE) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE,
                              node->payload.call.name);
@@ -4322,6 +4733,21 @@ static Wasm_Type wasm_expression_type(Wasm_Builder const *builder, Ast_Node_Inde
             // `wasm_call_result_type`.
             if (wasm_call_is_try_str_to_int(builder, expression) ||
                 wasm_call_is_utf8_decode(builder, expression)) {
+                return wasm_type_make(WASM_VALUE_TYPE_NONE);
+            }
+            // `make` gives an array slice of the type that it is given, which must be one, and
+            // `destroy` gives nothing.
+            if (wasm_call_is_make(builder, expression)) {
+                if (node->first_child == AST_NODE_INDEX_NONE) {
+                    return wasm_type_make(WASM_VALUE_TYPE_NONE);
+                }
+                Wasm_Type made = wasm_type_of_node(builder, node->first_child);
+                if (made.kind != WASM_VALUE_TYPE_SLICE) {
+                    return wasm_type_make(WASM_VALUE_TYPE_NONE);
+                }
+                return made;
+            }
+            if (wasm_call_is_destroy(builder, expression)) {
                 return wasm_type_make(WASM_VALUE_TYPE_NONE);
             }
             return wasm_type_make(WASM_VALUE_TYPE_INT);
@@ -5656,6 +6082,19 @@ static bool wasm_build_code_section_body_node(Wasm_Builder *builder, Ast_Node_In
             wasm_build_code_section_body_utf8_decode(builder, procedure);
             break;
         }
+        if (wasm_call_is_make(builder, current)) {
+            wasm_build_code_section_body_make(builder, procedure, current);
+            break;
+        }
+        if (wasm_call_is_destroy(builder, current)) {
+            // The address and the length of the slice are on the stack, and `free` takes the
+            // address.
+            wasm_write_byte(&builder->writer, WASM_OPCODE_DROP);
+            wasm_write_byte(&builder->writer, WASM_OPCODE_CALL);
+            wasm_write_unsigned(&builder->writer,
+                                wasm_heap_function_index(builder, WASM_HEAP_FUNCTION_FREE));
+            break;
+        }
         if (callee_binding.kind == SEMANTIC_BINDING_KIND_NONE &&
             str_equals(node->payload.call.name, STR("try_str_to_int"))) {
             wasm_build_code_section_body_try_str_to_int(builder, procedure);
@@ -6452,6 +6891,13 @@ static Ast_Node_Index wasm_expression_child_first(Wasm_Builder const *builder,
     Ast_Node const *node = &builder->nodes[expression];
     if (node->node_type == AST_NODE_TYPE_ARRAY_LITERAL) {
         assert(node->first_child != AST_NODE_INDEX_NONE);
+        return builder->nodes[node->first_child].next_sibling;
+    }
+    // The first child of `make` is the type of what it makes, which is not code.
+    if (wasm_call_is_make(builder, expression)) {
+        if (node->first_child == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
         return builder->nodes[node->first_child].next_sibling;
     }
     // A field access, a struct literal and the address of something are written as a whole by their
@@ -10641,6 +11087,62 @@ static bool wasm_call_is_append(Wasm_Builder const *builder, Ast_Node_Index call
     return builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
            wasm_call_is_built_in(builder, call) &&
            str_equals(builder->nodes[call].payload.call.name, STR("append"));
+}
+
+/**
+ * Returns whether `call` is a call of the built-in procedure `make`.
+ */
+static bool wasm_call_is_make(Wasm_Builder const *builder, Ast_Node_Index call) {
+    assert(call < builder->node_count);
+
+    return builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
+           wasm_call_is_built_in(builder, call) &&
+           str_equals(builder->nodes[call].payload.call.name, STR("make"));
+}
+
+/**
+ * Returns whether `call` is a call of the built-in procedure `destroy`.
+ */
+static bool wasm_call_is_destroy(Wasm_Builder const *builder, Ast_Node_Index call) {
+    assert(call < builder->node_count);
+
+    return builder->nodes[call].node_type == AST_NODE_TYPE_CALL &&
+           wasm_call_is_built_in(builder, call) &&
+           str_equals(builder->nodes[call].payload.call.name, STR("destroy"));
+}
+
+/**
+ * Writes `make([]T, count)` of `call`, which `wasm_build_code_section_body_call` checked, and whose
+ * count is on the stack as an `Int`: the elements are a block of the heap, which `allocate` makes
+ * zero, and the value is the array slice of them, their address and the count. The count must be
+ * from 0 to the most elements whose size fits in the 32-bit addresses of the memory, or the module
+ * traps, as it does for an index that is out of bounds: it is compared as an unsigned number, so a
+ * negative one is above the most.
+ */
+static void wasm_build_code_section_body_make(Wasm_Builder *builder, Ast_Node_Index procedure,
+                                              Ast_Node_Index call) {
+    assert(wasm_call_is_make(builder, call));
+
+    Wasm_Type type = wasm_type_of_node(builder, builder->nodes[call].first_child);
+    assert(type.kind == WASM_VALUE_TYPE_SLICE);
+    size_t stride = wasm_type_stride_bytes(builder, wasm_type_element(type));
+    assert(stride > 0);
+    size_t count = wasm_scratch_local_index(builder, procedure, WASM_SCRATCH_TEMPORARY_64);
+    Wasm_Writer *writer = &builder->writer;
+
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_TEE, count);
+    wasm_write_byte(writer, WASM_OPCODE_I64_CONST);
+    wasm_write_signed(writer, (int64_t)(INT32_MAX / stride));
+    wasm_write_byte(writer, WASM_OPCODE_I64_GT_U);
+    wasm_structured_trap(builder);
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, count);
+    wasm_write_byte(writer, WASM_OPCODE_I32_WRAP_I64);
+    wasm_write_i32_const(writer, (int64_t)stride);
+    wasm_write_byte(writer, WASM_OPCODE_I32_MUL);
+    wasm_write_byte(writer, WASM_OPCODE_CALL);
+    wasm_write_unsigned(writer, wasm_heap_function_index(builder, WASM_HEAP_FUNCTION_ALLOCATE));
+    wasm_write_local_instruction(writer, WASM_OPCODE_LOCAL_GET, count);
+    wasm_write_byte(writer, WASM_OPCODE_I32_WRAP_I64);
 }
 
 /**

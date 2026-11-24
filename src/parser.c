@@ -2433,6 +2433,26 @@ static Ast_Node_Index parse_call(Parser *parser) {
         return AST_NODE_INDEX_NONE;
     }
 
+    // The built-in `make` takes the type of what it makes before its other arguments, as in
+    // `make([]Byte, 16)`, and a type is not an expression, so it is parsed as one here, by the name
+    // of the call. Whether the type is one that `make` makes is for the target to tell.
+    bool is_make = str_equals(name->payload.identifier.text, STR("make"));
+    if (is_make && parse_token_current(parser)->kind != TOKEN_KIND_PARENTHESIS_RIGHT) {
+        Ast_Node_Index type = parse_type(parser, STR("the type of the array slice to make"));
+        if (type == AST_NODE_INDEX_NONE) {
+            return AST_NODE_INDEX_NONE;
+        }
+        parse_node_append_child(parser, call, type);
+        // A call with the type alone is parsed, so that the target can say what is missing.
+        if (parse_token_current(parser)->kind != TOKEN_KIND_COMMA) {
+            if (not parse_token_expect(parser, TOKEN_KIND_PARENTHESIS_RIGHT, STR("',' or ')'"))) {
+                return AST_NODE_INDEX_NONE;
+            }
+            return call;
+        }
+        parse_token_advance(parser);
+    }
+
     if (parse_token_current(parser)->kind != TOKEN_KIND_PARENTHESIS_RIGHT) {
         // Every argument consumes a token, so there are fewer arguments than tokens, which bounds
         // the loop.

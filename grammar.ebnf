@@ -109,6 +109,10 @@
      - `utf8_decode` is a built-in procedure like `length_of`. It takes an array or an array slice of
        `Byte` and gives two values, a `Str` and a `Bool`, so it is a call that is only accepted as
        the value of the definition of two names, `text, is_ok := utf8_decode(bytes)`.
+     - `make` is a built-in procedure that takes the type of an array slice and an `Int`, the number
+       of its elements, and gives an array slice of that many elements that are zero, in memory that
+       outlives the procedure. `destroy` is a built-in procedure like `length_of` that takes such an
+       array slice and gives its memory back, and gives nothing, so it can only be a statement.
      - `cast(Type)` converts between the types that have a conversion: the type is `Int` and the
        value a `Byte`, a `Bool`, an `Int`, a `Rune` or a float, or the type is a float and the value
        a `Byte`, an `Int` or a float, or the type is `Rune` and the value a `Byte` or a `Rune`, or
@@ -766,8 +770,12 @@ gap = { " " | "\t" | "\r" | "\n" | comment | "\n" , ws , documentation_comment }
    are separated by commas and can be none. A call is an expression, and a line that is only a call
    is a statement, whose value is thrown away. The compiler checks that the name is a procedure,
    that there are as many arguments as the procedure has parameters, and that each argument has
-   the type of its parameter. *)
-call = qualified_name , ws , "(" , ws , [ arguments , ws ] , ")" ;
+   the type of its parameter. The built-in procedure `make` takes the type of what it makes as its
+   first argument, as in `make([]Byte, 16)`, which is a type and not an expression, and the
+   compiler checks that it is the type of an array slice. *)
+call = make_call | qualified_name , ws , "(" , ws , [ arguments , ws ] , ")" ;
+
+make_call = "make" , ws , "(" , ws , type , [ ws , "," , ws , arguments ] , ws , ")" ;
 
 (* A name, or a name with the name of a package before it and a dot, which is how a definition of a
    file that is imported is written: `mu.file_open`. The dot has no space around it. *)

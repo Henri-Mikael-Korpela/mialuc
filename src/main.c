@@ -1188,6 +1188,12 @@ static bool main_definition_type_write(Ast_Node const *nodes, Semantic_Binding c
         }
         if (value_node->node_type == AST_NODE_TYPE_CALL &&
             binding.kind == SEMANTIC_BINDING_KIND_NONE) {
+            // `make` gives a value of the type that it is given as its first argument.
+            if (str_equals(value_node->payload.call.name, STR("make")) &&
+                value_node->first_child != AST_NODE_INDEX_NONE) {
+                return main_type_text_write(nodes, value_node->first_child, text,
+                                            text_size_bytes);
+            }
             // The first value of a built-in procedure.
             return main_built_in_result_write(value_node->payload.call.name, 0, text,
                                               text_size_bytes);
@@ -1719,6 +1725,12 @@ static char const *main_built_in_signature(Str name) {
     }
     if (str_equals(name, STR("utf8_decode"))) {
         return "proc(bytes: [N]Byte | []Byte) (Str, Bool)";
+    }
+    if (str_equals(name, STR("make"))) {
+        return "proc(type: []T, count: Int) []T";
+    }
+    if (str_equals(name, STR("destroy"))) {
+        return "proc(elements: []T)";
     }
     return NULL;
 }
