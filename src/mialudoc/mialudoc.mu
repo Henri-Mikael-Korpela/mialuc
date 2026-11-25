@@ -36,7 +36,8 @@
 /// The Markdown that it understands is what the documents of the project use: headings, paragraphs,
 /// lists that are nested, tables, block quotes, fenced code, and `code`, **bold**, *emphasis* and
 /// [links](#in-this-page) in a line. A link to `name.md` is a link to `/name`. A line of HTML in
-/// a document is shown as text.
+/// a document is shown as text. Fenced code that is marked `mialu` has its comments, literals,
+/// keywords and types in colors.
 ///
 /// MISSING FEATURES. mialudoc is written to find what Mialu is missing for a program of this kind, and
 /// where it had to work around one, a comment that starts with `MISSING:` says what the language
@@ -606,6 +607,7 @@ emit_page_start :: proc(out: ^Output, title: []Byte) ->
     emit_text(out, "code { font: .9em/1.5 'Cascadia Code', 'Cascadia Mono', Consolas, 'SFMono-Regular', monospace; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: .1em .4em; color: #ffd9a8; }\n")
     emit_text(out, "pre { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.2rem; overflow-x: auto; box-shadow: 0 8px 30px rgba(0, 0, 0, .35); }\n")
     emit_text(out, "pre code { background: none; border: 0; padding: 0; color: #e6e9f1; font-size: .88rem; }\n")
+    emit_text(out, ".tok-c { color: #7d879c; font-style: italic; } .tok-s { color: #a6e39b; } .tok-n { color: #ffd36e; } .tok-k { color: #ff8a5b; } .tok-t { color: #7fd1ff; }\n")
     emit_text(out, "blockquote { border-left: 3px solid var(--accent); background: rgba(255, 138, 31, .07); border-radius: 0 10px 10px 0; padding: .6rem 1.1rem; color: #e8d9c6; } blockquote p { margin: .4em 0; }\n")
     emit_text(out, ".table { overflow-x: auto; margin: 0 0 1.2em; border: 1px solid var(--line); border-radius: 12px; } table { border-collapse: collapse; width: 100%; margin: 0; font-size: .93rem; }\n")
     emit_text(out, "th, td { text-align: left; padding: .55rem .9rem; border-bottom: 1px solid var(--line); vertical-align: top; } th { background: var(--surface); color: var(--gold); font-weight: 650; } tr:last-child td { border-bottom: 0; } tbody tr:hover { background: rgba(255, 255, 255, .025); }\n")
@@ -700,6 +702,7 @@ Render :: struct ->
     list_depth: Int
     indents: Int
     numbered: Int
+    is_mialu_code: Bool
 
 close_paragraph :: proc(out: ^Output, state: ^Render) ->
     if state.in_paragraph ->
@@ -830,7 +833,10 @@ render_line :: proc(out: ^Output, state: ^Render, line: []Byte) Int ->
         skip := indent
         if skip > state.code_indent ->
             skip = state.code_indent
-        emit_escaped(out, line[skip:])
+        if state.is_mialu_code ->
+            emit_mialu(out, line[skip:])
+        else ->
+            emit_escaped(out, line[skip:])
         emit_text(out, "\n")
         return 0
 
@@ -852,6 +858,7 @@ render_line :: proc(out: ^Output, state: ^Render, line: []Byte) Int ->
             emit_text(out, "<pre><code>")
         state.in_code = true
         state.code_indent = indent
+        state.is_mialu_code = bytes_are(language, "mialu")
         return 0
 
     if indent == 0 and text[0] == '#' ->
@@ -1001,7 +1008,7 @@ render_document :: proc(out: ^Output, arena: ^mu.Arena_Allocator, file: mu.File)
     defer arena.used = mark
     line, _ := mu.arena_allocate(arena, LINE_BYTES)
     reader := line_reader_make(file, arena)
-    state := Render { in_code = false, code_indent = 0, in_paragraph = false, in_quote = false, in_table = false, table_row = 0, list_depth = 0, indents = 0, numbered = 0 }
+    state := Render { in_code = false, code_indent = 0, in_paragraph = false, in_quote = false, in_table = false, table_row = 0, list_depth = 0, indents = 0, numbered = 0, is_mialu_code = false }
     for ->
         length, has_line := read_line(%reader, line)
         if not has_line ->
@@ -1307,6 +1314,98 @@ emit_json_work_file :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory:
         emit_json_byte(out, int_to_byte(13))
     emit_text(out, "\"")
     return 0
+
+/// Where the string literal or the rune literal that starts at `start` ends, which is after its closing
+/// quote, or at the end of the line when it has none. A backslash escapes the byte after it.
+literal_end :: proc(bytes: []Byte, start: Int, is_rune: Bool) Int ->
+    index := start + 1
+    for index < length_of(bytes) ->
+        match bytes[index] ->
+            case '\\' ->
+                index += 1
+            case '"' ->
+                if not is_rune ->
+                    return index + 1
+            case '\'' ->
+                if is_rune ->
+                    return index + 1
+        index += 1
+    return length_of(bytes)
+
+/// Where the word that starts at `start` ends, which is its first byte that is not one of a word.
+word_end :: proc(bytes: []Byte, start: Int) Int ->
+    end := start
+    for is_word_at(bytes, end) ->
+        end += 1
+    return end
+
+/// Where the number that starts at `start` ends: its digits, letters and `_`, such as `0x2A` and
+/// `1_000`, and the fraction of a float, such as `.5`, which is a `.` that has a digit after it.
+number_end :: proc(bytes: []Byte, start: Int) Int ->
+    end := word_end(bytes, start)
+    for end < length_of(bytes) and bytes[end] == '.' and is_digit_at(bytes, end + 1) ->
+        end = word_end(bytes, end + 1)
+    return end
+
+/// Whether a word has a letter in lower case, which tells a type such as `Int` from a constant such
+/// as `LIMIT`.
+has_lower_case :: proc(word: []Byte) Bool ->
+    for value in word ->
+        match value ->
+            case 'a'..<='z' ->
+                return true
+    return false
+
+/// The kind of a word of Mialu code, which is the end of the name of its style, `k` for a keyword, `n`
+/// for a literal word and `t` for a type, which starts with a letter in upper case and is not all of
+/// them. It is empty for a word that has no style, such as the name of a variable.
+word_kind :: proc(word: []Byte) Str ->
+    if list_has("and break case cast const continue defer dynamic else enum for foreign if import in match not or package proc return struct type_id type_info_of union", word) ->
+        return "k"
+    if list_has("false nil true", word) ->
+        return "n"
+    match word[0] ->
+        case 'A'..<='Z' ->
+            if has_lower_case(word) ->
+                return "t"
+    return ""
+
+/// Puts a line of Mialu code in the page with its comments, strings, runes, numbers, keywords and
+/// types in a `span` of a style, `tok-` and its kind. A line is highlighted on its own, which is
+/// enough because no token of Mialu has more than one line.
+emit_mialu :: proc(out: ^Output, bytes: []Byte) ->
+    index := 0
+    for index < length_of(bytes) ->
+        end := index + 1
+        kind := ""
+        match bytes[index] ->
+            case '/' ->
+                if index + 1 < length_of(bytes) and bytes[index + 1] == '/' ->
+                    end = length_of(bytes)
+                    kind = "c"
+            case '"' ->
+                end = literal_end(bytes, index, false)
+                kind = "s"
+            case '\'' ->
+                end = literal_end(bytes, index, true)
+                kind = "s"
+            case '0'..<='9' ->
+                end = number_end(bytes, index)
+                kind = "n"
+            case '_' ->
+            case 'A'..<='Z' ->
+            case 'a'..<='z' ->
+                end = word_end(bytes, index)
+                kind = word_kind(bytes[index:end])
+        if length_of(kind) == 0 ->
+            emit_escaped(out, bytes[index:end])
+        else ->
+            emit_text(out, "<span class=\"tok-")
+            emit_text(out, kind)
+            emit_text(out, "\">")
+            emit_escaped(out, bytes[index:end])
+            emit_text(out, "</span>")
+        index = end
 
 /// Puts the bytes in the page as a JSON string.
 emit_json_string :: proc(out: ^Output, bytes: []Byte) Int ->

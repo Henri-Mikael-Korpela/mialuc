@@ -106,7 +106,7 @@ Mialu source code is a sequence of Unicode characters, encoded in UTF-8. Source 
 
 For block definitions, Mialu doesn't use curly brackets like C, C# or Java for defining blocks. Instead, Mialu borrows its indentation-based syntax from Python, so the structure of the code is defined by its indentation, like this
 
-```
+```mialu
 foo :: proc() Int ->
     x := 4
     if x > 5 ->
@@ -116,7 +116,7 @@ foo :: proc() Int ->
 
 instead of this:
 
-```
+```mialu
 foo :: proc() Int {
     x := 4
     if x > 5 {
@@ -138,7 +138,7 @@ Mialu doesn't need semicolons (`;`) to separate statements. Each statement is on
 
 A comment is text for the reader of the code, which does not change what the program does. There are two kinds, and both are made of lines, because Mialu is line-based:
 
-```
+```mialu
 // A comment on a line of its own.
 
 /// A documentation comment describes the definition below it.
@@ -165,7 +165,7 @@ Mialu has reserved words that cannot be used as names for identifiers. Reserved 
 
 Reserved words are categorized into used and unused keywords and literal words. Mialu has the following keywords in use, in alphabetical order:
 
-```
+```mialu
 and
 break
 case cast const continue
@@ -185,7 +185,7 @@ union
 
 There are also literal words, which look like keywords but are actually literals, because each one is a value and not a part of the syntax of a statement. In alphabetical order they are:
 
-```
+```mialu
 false nil true
 ```
 
@@ -193,7 +193,7 @@ false nil true
 
 Mialu also defines the following unused keywords. They are reserved for possible future use:
 
-```
+```mialu
 abstract alias as async await
 catch class
 delete distinct do
@@ -224,7 +224,7 @@ Identifiers can contain alphanumeric characters and underscores. Case matters fo
 
 Every Mialu source file belongs to a package, and says which one with a package definition:
 
-```
+```mialu
 package helloworld
 
 main :: proc() Int ->
@@ -233,7 +233,7 @@ main :: proc() Int ->
 
 The package definition is `package` and the name of the package, on a line of its own, written in the first column. It is required: a source file without it is an error, and so is a source file that has more than one. It is the first thing in the file, with the exception of [comments](#comments) and blank lines, which can be above it and below it, so everything else, including `import foreign` and every definition, comes after it:
 
-```
+```mialu
 // Greets the world.
 
 package helloworld // The name of the package.
@@ -259,7 +259,7 @@ The definitions of an imported file are part of the program that is built: a pro
 
 An import statement brings the definitions of another source file into the program. It is `import` and a path in quotes, on a line of its own, written in the first column, below the [package definition](#packages) and above the definitions that use it:
 
-```
+```mialu
 package program
 
 import "mu:filesystem"
@@ -304,7 +304,7 @@ The following primitive data types are reserved for possible future use:
 
 There's only one boolean value type, `Bool`, which is either `true` or `false`, which are [literal words](#literal-words):
 
-```
+```mialu
 ready : Bool = true
 ```
 
@@ -318,7 +318,7 @@ A comparison such as `x > 5` is an expression of type `Bool`, see [Comparison op
 
 A `Rune` is one Unicode character. Underneath it is a 32-bit number, the code point of the character, which goes from 0 to 0x10FFFF, so it holds a letter of any alphabet, a kanji, an emoji or a control character alike. A rune literal is a character between single quotes:
 
-```
+```mialu
 letter : Rune = 'A'
 kanji : Rune = '芋'
 emoji : Rune = '🚀'
@@ -327,7 +327,7 @@ inferred := 'é'
 
 A character that cannot be written as itself, or is hard to see, is written as an escape sequence: a backslash and what stands for the character, as in `'\n'` for a new line and `'\u0123'` for U+0123.
 
-```
+```mialu
 newline : Rune = '\n'
 quote : Rune = '\''
 unicode_char : Rune = '\u0123'
@@ -376,7 +376,7 @@ The integer type that numbers are by default is `Int`, a signed 64-bit integer: 
 
 The prefixes are lowercase only, so that a literal has one spelling, and there is no octal literal. An underscore `_` is a digit separator, which makes a long number easier to read and does not change its value: `1_000_000`, `0b1111_0000` and `0xFF_FF` are 1000000, 240 and 65535. A separator must be between two digits, so `1__000`, `1_` and `0x_FF` are errors, and `_1` is an identifier and not a number. The digits can be grouped in any way, but the convention is three digits in decimal and four in binary and hexadecimal.
 
-```
+```mialu
 count : Int = 42
 million := 1_000_000
 flags := 0b1111_0000
@@ -387,7 +387,7 @@ A literal is the same untyped integer whatever its base, which is an `Int` where
 
 A negative number is written as a signed integer literal: a `-` directly followed by the digits of an integer literal, in any base, with no space between them. `-5`, `-112`, `-0x10` and `-0b101` are signed literals, whose values are -5, -112, -16 and -5.
 
-```
+```mialu
 temperature := -5
 offset : Int = -112
 deltas := [const]Int { -1, 0, 1 }
@@ -407,7 +407,7 @@ An `Int` is not converted implicitly: it is not a `Bool`, it is not a `Byte`, an
 
 An `I32` is a signed 32-bit integer: it holds the numbers from -2147483648 to 2147483647. It is the type of the `int` of C, which is what it is for: a procedure of the C library that takes or gives an `int` is declared with an `I32`, see [Foreign procedures in the C library](#foreign-procedures-in-the-c-library), and so is a procedure of JavaScript that takes numbers of 32 bits, which are plain numbers there and not a `BigInt`, see [Foreign procedures in WebAssembly](#foreign-procedures-in-webassembly). The default value of an `I32` is `0`.
 
-```
+```mialu
 level : I32 = 3
 limit : I32 : 2147483647
 
@@ -425,7 +425,7 @@ An `I32` takes the same place in memory as an `Int` does, which is 8 bytes in a 
 
 An `I64` is a signed 64-bit integer: it holds the numbers from -9223372036854775808 to 9223372036854775807, which are the numbers of an `Int`. It is not another name for `Int`, but a type of its own with the same size, in the way that an `I32` is of its own: nothing is converted to it or from it implicitly, so `n : I64 = count` is an error when `count` is an `Int`, and so is `a + count` for an `I64` `a`. It is for what has a size that is said, which is the `long long`, the `int64_t` and the `size_t` of the C library, and a number of 64 bits of JavaScript, which is a `BigInt` there, as an `Int` is, see [Foreign procedures](#foreign-procedures). A procedure that is declared with an `I64` says what it takes and gives, where an `Int` says that it is a number like any other of the program. The default value of an `I64` is `0`.
 
-```
+```mialu
 size : I64 = 5_000_000_000
 limit : I64 : 9223372036854775807
 
@@ -441,7 +441,7 @@ An `I64` and an `Int` are each made the other with a [cast](#casts), `cast(Int)n
 
 A `U32` is an unsigned 32-bit integer: it holds the numbers from 0 to 4294967295, and a `U64` is an unsigned 64-bit integer, which holds the numbers from 0 to 18446744073709551615. Each is a type of its own, as an `I32` and an `I64` are: nothing is converted to them or from them implicitly, so `n : U32 = count` is an error when `count` is an `Int`, and so is `a + count` for a `U32` `a`. They are for what has a size and no sign, which is the `unsigned int`, the `DWORD`, the `unsigned long long`, the `QWORD` and the flags and sizes of the system libraries, see [Foreign procedures](#foreign-procedures). The default value of both is `0`.
 
-```
+```mialu
 GENERIC_READ : U32 : 0x80000000
 size : U64 = 5_000_000_000
 
@@ -465,7 +465,7 @@ An untyped integer from 0 to 255, which is a literal, a constant without a type 
 
 A `Byte` can be compared with `==` and `not=` to a rune, which is how a character is looked for in bytes: `b == 'A'` holds when the byte is 65, and `b == '\n'` when it is the new line, which is a rune that is written as an [escape sequence](#characters). The rune must be known when the program is compiled, so a rune literal or a constant, and it must be in the ASCII range, from 0 to 127, because a character in that range is one byte in UTF-8, and is the byte that has its number, which no other character is. A rune above 127, such as `'é'`, takes more than one byte, so `b == 'é'` is an error, and so is comparing a `Byte` with a `Rune` that is a variable, which can be any character. The order of the two is not defined, so `b < 'z'` is an error, and a rune can come on either side. A `Byte` above 127 is never the same as a rune in the range:
 
-```
+```mialu
 is_line_end :: proc(b: Byte) Bool ->
     return b == '\n' or b == '\r'
 ```
@@ -478,7 +478,7 @@ There are two floating point types: `F32` is a 32-bit floating point number, the
 
 A number with a fractional part is a float literal: decimal digits, a dot and decimal digits, such as `1.42`, `42.4445` or `0.5`.
 
-```
+```mialu
 my_float := 1.42
 other_float := 42.4445
 negative := -0.5
@@ -490,7 +490,7 @@ A float literal is not an integer: `1.0` and `1` are different literals, and an 
 
 A float literal is untyped, like an integer literal, and it is an `F32` or an `F64` where one is wanted, and an `F64` where nothing says, as in `x := 1.42`, which is the default type of a float, see [Untyped constants](#untyped-constants). A literal that is too large for an `F32`, above about 3.4e38, is an error where an `F32` is wanted, and it is rounded to the nearest number of the type, so `0.1` is not exactly 0.1 in either. Arithmetic and comparisons of float literals are known when the program is compiled, as they are for integer literals, so `1.5 + 2.25` is the untyped float 3.75, and dividing by zero is an error there.
 
-```
+```mialu
 scale :: proc(x: F32, factor: F32) F32 ->
     return x * factor + 1.0
 
@@ -511,7 +511,7 @@ The result of an `F32` is the same on every target, because the operations are t
 
 A string literal is the text between a pair of double quotes, on one line:
 
-```
+```mialu
 "Hello, world"
 ```
 
@@ -535,7 +535,7 @@ A `Str` value is never converted to a `C_Str` implicitly. The built-in procedure
 
 A character is a Unicode code point, which is what a [`Rune`](#characters) holds, and it takes one to four bytes. A string is subscripted by the character, and not by the byte. The subscript `s[i]` is the `Rune` of the character at the index `i`, which is counted from 0, and `length_of(s)` is the number of characters, see [length_of](#length_of):
 
-```
+```mialu
 s := "äiti"
 first := s[0]
 second := s[1]
@@ -546,7 +546,7 @@ count := length_of(s)
 
 A part of a string is taken with a range, `s[low:high]`, which is a string and not a `Rune`. The range is half-open, like the range of a [for statement](#for-statements) and the slice of an [array](#array-slices): it has the characters from `low` up to, and not including, `high`, so its length is `high - low`, and like the subscript, the bounds count characters and not bytes:
 
-```
+```mialu
 text := "Hello, World!"
 
 a := text[0:5]
@@ -559,7 +559,7 @@ b := text[7:12]
 
 The characters of a string are gone through by a [for statement](#for-statements) as well, with the iterator a `Rune`, which does not walk over the string again for each one, as the subscript does:
 
-```
+```mialu
 for character in "Héllo" ->
     ...
 ```
@@ -570,7 +570,7 @@ A program that needs the bytes of a string, and not its characters, should conve
 
 Strings are joined with `++`, which has the same precedence as `+` and `-` and is left associative. It takes two strings, or a string and a rune on either side, and a rune is joined as its UTF-8 bytes, so `"Hello" ++ ' ' ++ "world" ++ '🚀'` is the string `"Hello world🚀"`. Both operands must be constants, see [Constants](#constants), because the joining is done when the program is compiled: the program has the joined text as one string, like a string literal, and nothing is joined when it runs. `++` does not allocate, and an operand that is known only when the program runs, such as a variable or the result of a call, is an error. Two runes are not joined, and neither is a number, so `'a' ++ 'b'` and `"count: " ++ 3` are errors. The result is an untyped string, so it can be given to a `C_Str` too, unless an operand is a constant that was given the type `Str`, and then the result is a `Str`. The joined text of all the constants of a program is limited in size, and a program that has more is rejected.
 
-```
+```mialu
 GREETING :: "Hello"
 SEPARATOR :: ','
 TITLE : Str : '«' ++ GREETING ++ SEPARATOR ++ " world" ++ '»'
@@ -647,7 +647,7 @@ An assignment changes the value of a variable that is defined already. It is a s
 
 The plain assignment `=` gives the variable a new value of its type, whatever the type is: `x = 5` for an `Int`, and `p = Person { age = 30, name = "Bob" }` for a struct object, which replaces all of its fields. The value must be of the type of the variable, so `x = true` is an error for an `Int`. An array is not assigned to as a whole.
 
-```
+```mialu
 foo :: proc() Int ->
     x := 4
     x = 5
@@ -656,7 +656,7 @@ foo :: proc() Int ->
 
 `foo` returns 5. The value is evaluated first, with the value that the variable has before the assignment, so `x = x * 2 + 1` doubles `x` and adds 1. It is a statement and not an expression, so a value cannot be assigned to two variables in a row, and each assignment keeps the value that the variable has until the next one: a variable that is assigned to twice has the last value. A variable can be given the value of another one, and two variables are swapped with the help of a third:
 
-```
+```mialu
 swap :: proc() Int ->
     a := 3
     b := 7
@@ -679,7 +679,7 @@ A compound assignment operator applies an arithmetic operator to the variable an
 
 `+=` is the addition assignment: it adds the value to the variable and stores the sum in the variable, so `x += 5` leaves `x` 5 more than it was:
 
-```
+```mialu
 foo :: proc() Int ->
     x := 4
     x += 5
@@ -688,7 +688,7 @@ foo :: proc() Int ->
 
 `foo` returns 9. `/=` is the division assignment: it divides the variable by the value and stores the quotient in the variable, so `x /= 2` leaves `x` halved, truncated toward zero like the `/` operator:
 
-```
+```mialu
 foo :: proc() Int ->
     x := 20
     x /= 4
@@ -697,7 +697,7 @@ foo :: proc() Int ->
 
 `foo` returns 5. `*=` is the multiplication assignment: it multiplies the variable by the value and stores the product in the variable, so `x *= 3` leaves `x` tripled:
 
-```
+```mialu
 foo :: proc() Int ->
     x := 6
     x *= 7
@@ -706,7 +706,7 @@ foo :: proc() Int ->
 
 `foo` returns 42. `-=` is the subtraction assignment: it subtracts the value from the variable and stores the difference in the variable, so `x -= 2` leaves `x` 2 less than it was:
 
-```
+```mialu
 foo :: proc() Int ->
     x := 9
     x -= 4
@@ -728,7 +728,7 @@ A comparison takes two operands and is an expression of type `Bool`, so it can b
 | `a > b` | `true` when `a` is greater than `b` |
 | `a >= b` | `true` when `a` is greater than or equal to `b` |
 
-```
+```mialu
 is_positive :: proc(n: Int) Bool ->
     return n > 0
 
@@ -738,7 +738,7 @@ is_even :: proc(n: Int) Bool ->
 
 Both operands must have the same type, because nothing is converted. Two [`Int`](#integers) values can be compared with all six operators, and the comparison is signed. Two [`Rune`](#characters) values can be compared with all six operators too, and the comparison is of their code points. Two [floats](#floating-point-numbers) of one type can be compared with all six operators too, and an untyped float is of that type there, so `x < 0.5` is allowed whether `x` is an `F32` or an `F64`. A comparison with not a number is false, except `not=`, which is true. `Int`, `Byte`, `Rune` and the floats are the only types that have an order, so `<`, `<=`, `>` and `>=` are defined for them only. Two [`Bool`](#booleans) values can be compared with `==` and `not=`, so `a not= b` holds when exactly one of them is `true`. Two pointers can be compared with `==` and `not=` as well, and so can two [pointers to procedures](#pointers-to-procedures), see [Null and lifetime](#null-and-lifetime). Two members of one [enum](#enumerations) can be compared with `==` and `not=` too. Two [`Byte`](#bytes) values can be compared with all six operators, and the comparison is of the numbers from 0 to 255; an untyped integer from 0 to 255 is a `Byte` when the other operand is one, so `b >= 65` is allowed, but a `Byte` is never compared with an `Int`. Two [strings](#strings) can be compared with `==` and `not=`: they are the same when they have the same length and the same bytes, so `"go"` is not the same as `"gone"` or `"Go"`, and `""` is the same as the empty string only. A string has no order, so `<`, `<=`, `>` and `>=` are errors for strings, and so is the comparison of a [`C_Str`](#c-strings), which has no length that is known, with anything. An operand is a `Str` or an untyped string, such as a literal, which is a `Str` there. The comparison of two constants is a constant, which is worked out when the program is compiled, so `SAME :: "a" == "b"` is the untyped truth value `false`. Strings that are known only when the program runs are compared then, byte by byte, and the comparison stops at the first byte that differs. Two arrays, two dynamic arrays or two array slices of the same type of elements, such as `Byte` or `Int`, can be compared with `==` and `not=` too, but not an array, a dynamic array and a slice with each other, see [Comparing arrays and slices](#comparing-arrays-and-slices). A `Byte` can be compared with `==` and `not=` to a rune that is known when the program is compiled and is in the ASCII range, see [Bytes](#bytes). Example:
 
-```
+```mialu
 is_help :: proc(command: Str) Bool ->
     return command == "help" or command == "-h"
 ```
@@ -753,7 +753,7 @@ is_help :: proc(command: Str) Bool ->
 | `a or b` | `true` when at least one of `a` and `b` is `true` |
 | `not a` | `true` when `a` is `false`, and `false` when `a` is `true` |
 
-```
+```mialu
 in_range :: proc(n: Int, low: Int, high: Int) Bool ->
     return n >= low and n <= high
 
@@ -768,7 +768,7 @@ A comparison binds tighter than all three, so `n >= low and n <= high` needs no 
 
 `and` and `or` short circuit: the right operand is only evaluated when the left one does not decide the result. `a and b` evaluates `b` only when `a` is `true`, and when `a` is `false` the result is `false` and `b` is left alone. `a or b` evaluates `b` only when `a` is `false`, and when `a` is `true` the result is `true`. So the right operand can rely on what the left one has checked, as in `d not= 0 and n / d > 1`, where the division is not done when `d` is zero, and `index < length_of(bytes) and bytes[index] == ' '`, where the element is not read when the index is outside of the bytes. An operand that is not evaluated has none of its effects either: a call in it is not made.
 
-```
+```mialu
 first_is_space :: proc(bytes: []Byte) Bool ->
     return length_of(bytes) > 0 and bytes[0] == ' '
 
@@ -789,7 +789,7 @@ A word must be separated from what is next to it by whitespace, unlike a symbol,
 
 `%` is the address of operator. It is written before its operand, which must have an address, such as a variable, a field, an element, or what a pointer points to, and gives a pointer to it. `^` is the dereference operator. It is written after an expression whose value is a pointer, and gives what the pointer points to, so a chain of pointers reads from left to right, as in `pp^^`. It binds like `.` and `[ ]`, and `p^` can be assigned to, with `=` and with the compound assignment operators.
 
-```
+```mialu
 increment :: proc() Int ->
     x := 4
     p := %x
@@ -839,13 +839,13 @@ A cast to `Int` of a `Byte`, a `Bool`, an `I32`, an `I64` or a `Rune` never lose
 | `F32` | `F32` | The same number. |
 | `F64` | `F64` | The same number. |
 
-```
+```mialu
 count := cast(Int)small + cast(Int)flag
 ```
 
 The cast of a rune to bytes makes an array of 4 bytes, which is used like the array that an array literal makes: it has a length, 4, it can be subscripted, gone through by a for statement and passed as an array slice, and it is in the frame of the procedure that makes it, so it does not outlive that. The bytes are those of the character in UTF-8, so `cast([4]Byte)'A'` is `[0x41, 0, 0, 0]`, `cast([4]Byte)'é'` is `[0xC3, 0xA9, 0, 0]`, `cast([4]Byte)'芋'` is `[0xE8, 0x8A, 0x8B, 0]` and `cast([4]Byte)'🚀'` is `[0xF0, 0x9F, 0x9A, 0x80]`. The bytes after the encoding are zero, so the array of an ASCII character is a C string of one character, and the number of bytes of the encoding is found by counting the bytes before the first zero, except for the character with the code point 0, which is one byte that is zero.
 
-```
+```mialu
 encode :: proc(character: Rune) Int ->
     bytes := cast([4]Byte)character
     length := 0
@@ -867,20 +867,20 @@ A cast binds like `%`: it is written before an operand, which can have subscript
 
 A constant is an immutable value with a name, and it is visible in the whole module, also above where it is defined. It is defined by placing two subsequent colons after an identifier:
 
-```
+```mialu
 CONSTANT_NAME :: value
 ```
 
 Constants are commonly used to define procedures:
 
-```
+```mialu
 sum :: proc(a: Int, b: Int) Int ->
     return a + b
 ```
 
 A constant can also be a [struct](#structs) or an [enum](#enumerations), which are types, the [member of an enum](#enumerations), or a value that is known when the program is compiled, which is written on its own line:
 
-```
+```mialu
 LIMIT :: 100
 GREETING :: "Hello, world"
 DEBUG :: true
@@ -892,7 +892,7 @@ Arithmetic in a constant expression is exact. A step whose result does not fit i
 
 A literal has no type of its own. `200` is an untyped integer: a number without a size, which becomes the type that the place where it is used wants, when its value fits in that type. The same goes for every constant that is defined without a type, such as `LIMIT :: 200`, and for every constant expression of them, such as `LIMIT / 2`. So one constant can be given to an `Int` and to a `Byte`:
 
-```
+```mialu
 LIMIT :: 200
 
 both :: proc() Int ->
@@ -918,7 +918,7 @@ An untyped string is a `C_Str` where one is wanted, such as for a parameter of a
 
 A constant can be given a type, which is written between its two colons, `name : Type : value`. A typed constant has that type, like a variable, and it is not converted, so it is used only where a value of its type is:
 
-```
+```mialu
 MASK : Byte : 0x0F
 COUNT : Int : 3
 NAME : Str : "Mialu"
@@ -934,7 +934,7 @@ That is how a literal is written once and used with every type that can hold it:
 
 A variable is a name for a value that is local to a procedure. It is defined by a name followed by `:=` and its initial value, which is an expression:
 
-```
+```mialu
 x := 4
 ```
 
@@ -942,13 +942,13 @@ The type of the variable is deduced from the initial value. It is implicit. `x` 
 
 The type can also be written explicitly, between the `:` and the `=`:
 
-```
+```mialu
 x : Int = 5
 ```
 
 When the type is written, the value can be left out. The variable then has the default value of its type, and it can be given another one with an assignment later:
 
-```
+```mialu
 x : Int
 p : Person
 ```
@@ -965,7 +965,7 @@ The values of a call of a procedure that returns several values are defined toge
 
 A global variable is a variable that is defined at file scope, outside of every procedure. It is written like a variable, with the attribute `static` before the `:`, and it starts in the first column like a constant:
 
-```
+```mialu
 counter #(static) := 0
 
 next :: proc() Int ->
@@ -977,7 +977,7 @@ A global variable has static storage duration, which is what the `static` attrib
 
 The type of a global variable is deduced from its initial value, or written between the `:` and the `=`, as for any variable:
 
-```
+```mialu
 ready #(static) : Bool = false
 ```
 
@@ -989,7 +989,7 @@ The initial value is a constant expression, such as `0`, `"calls"`, `true` or `L
 
 An if statement runs a block of statements only when a condition holds. It is written like in C, but the condition has no parentheses. The `->` after the condition starts the block, which is the lines that are indented one level deeper than the `if`, so an indented block takes the place of the curly braces:
 
-```
+```mialu
 foo :: proc() Int ->
     x := 4
     if x > 5 ->
@@ -1003,7 +1003,7 @@ Here `foo` returns 2, because `x > 5` does not hold, so the block of the `if` is
 
 A condition is an expression of type `Bool`: a comparison such as `x + 1 > y * 2`, which can use everything that an expression can, or a `Bool` that is stored in a variable or a parameter, or `true` and `false`. There is no implicit conversion to `Bool`, as in C: a condition that is an `Int`, such as `if x ->` or `if 1 ->`, is an error, and so is a string.
 
-```
+```mialu
 foo :: proc(n: Int) Int ->
     big := n > 100
     if big ->
@@ -1013,7 +1013,7 @@ foo :: proc(n: Int) Int ->
 
 An `else` branch runs when the condition does not hold. An `else if` is an `else` that has an `if` in it, so there can be any number of them, and the first condition that holds picks the block. The branches are tried in the order that they are written, and at most one of them runs. An `else` that comes last takes the case that none of the conditions holds:
 
-```
+```mialu
 foo :: proc() Int ->
     x := 4
     if x > 5 ->
@@ -1028,7 +1028,7 @@ foo :: proc() Int ->
 
 If statements can be inside the blocks of other if statements, as many as 32 levels deep:
 
-```
+```mialu
 foo :: proc() Int ->
     x := 4
     if x > 5 ->
@@ -1046,7 +1046,7 @@ A block is a scope, see [Scope resolution](#scope-resolution): a variable that i
 
 A match statement compares one value, which is called its subject, with the patterns of the cases below it, and runs the block of the first case whose pattern the value matches. It is the `switch` of C, but it matches strings, enums and ranges as well as numbers. After `match` comes the subject, which is any expression, and the `->` after it starts the cases, which are indented one level deeper than the `match`. Each case is the word `case`, a pattern and `->`, and its block is indented one level deeper still:
 
-```
+```mialu
 describe :: proc(x: Int) Str ->
     match x ->
         case 5 ->
@@ -1061,7 +1061,7 @@ describe :: proc(x: Int) Str ->
 
 The subject is an integer, which is an `Int`, a `Byte`, an `I32`, an `I64`, a `U32` or a `U64`, a `Str` or an enum. A pattern is known when the program is compiled: a literal, a [constant](#constants), or arithmetic of them such as `LIMIT + 1` or `0 - 1`, or a signed literal such as `-1`. It must be of the type of the subject, and an untyped one becomes it when it fits, so a pattern of a `Byte` is a number from 0 to 255, or a rune of the ASCII range, as described after the ranges below. A pattern that is a variable or a call is an error, because what it matches would not be known until the program runs. A string matches a pattern when it has the same bytes, so `"go"` does not match `"gone"` or `"Go"`, and `""` matches the empty string only:
 
-```
+```mialu
 command_number :: proc(command: Str) Int ->
     match command ->
         case "go" ->
@@ -1074,7 +1074,7 @@ command_number :: proc(command: Str) Int ->
 
 An integer can be matched with a range, which is written as in a [for statement](#for-statements): `first..<end` has the numbers from `first` up to, and not including, `end`, and `first..<=end` includes `end`. Both ends are constants, and a range with no numbers, such as `5..<5`, is an error, because it could never match:
 
-```
+```mialu
 classify :: proc(n: Int) Str ->
     match n ->
         case 0 ->
@@ -1089,7 +1089,7 @@ classify :: proc(n: Int) Str ->
 
 A `Byte` can also be matched with a rune that is known when the program is compiled and is in the ASCII range, from 0 to 127, as it is [compared with one](#bytes): the rune is the byte that is its UTF-8 encoding. A rune is a pattern and an end of a range, so a range of characters is a range of bytes, and a number and a rune can be the two ends of one range. A rune above 127, such as `'é'`, is an error, because it is not one byte, and so is a rune as a pattern of any other subject. This is how a character is classified without a chain of comparisons:
 
-```
+```mialu
 is_name_byte :: proc(value: Byte) Bool ->
     match value ->
         case '0'..<='9' ->
@@ -1110,7 +1110,7 @@ No two cases may match a value in common: a pattern that is the same as one abov
 
 A case that has no block, because the next line is another case, runs the block of the next case that has one. That is how cases share a block, as cases without statements in between do in C. The last case must have a block. It is the same for every type of subject, and the patterns are constants of the type, such as a code that a library gives as a `U32`:
 
-```
+```mialu
 is_weekend :: proc(day: Int) Bool ->
     match day ->
         case 6 ->
@@ -1120,7 +1120,7 @@ is_weekend :: proc(day: Int) Bool ->
             return false
 ```
 
-```
+```mialu
 ERROR_FILE_NOT_FOUND : U32 : 2
 ERROR_PATH_NOT_FOUND : U32 : 3
 ERROR_ACCESS_DENIED : U32 : 5
@@ -1138,7 +1138,7 @@ error_from :: proc(code: U32) File_Error ->
 
 The subject can be an enum. The patterns are then members of that enum, written with a dot only, such as `.RED`, because the enum is the one of the subject, or with the name of the enum, such as `Color.RED`. The member of another enum is an error, and so is a range, as members have no order. A match of an enum must have a case for every member of the enum, or a default case, so a member that is added to the enum later is an error in every match that does not handle it, instead of a value that the match skips without a word:
 
-```
+```mialu
 Color :: enum Int ->
     RED
     GREEN
@@ -1156,7 +1156,7 @@ color_name :: proc(color: Color) Str ->
 
 A match of an enum that is meant to leave members out has the [attribute](#attributes) `partial`, which is written after `match`. Then nothing runs for the members that it has no case for:
 
-```
+```mialu
 warm_color_name :: proc(color: Color) Str ->
     match #(partial) color ->
         case .RED ->
@@ -1168,7 +1168,7 @@ warm_color_name :: proc(color: Color) Str ->
 
 The block of a case is a block like that of an `if`: it is a scope, see [Scope resolution](#scope-resolution), so two cases can define variables of the same name, it can have any statement, also another match statement, and a `defer` in it runs when the case ends. A match statement is not a loop or a scope that a `break` leaves, so a `break` or a `continue` in a case belongs to the loop around the match:
 
-```
+```mialu
 sum_of_multiples_of_three :: proc(limit: Int) Int ->
     total := 0
     for i in 0..<limit ->
@@ -1186,7 +1186,7 @@ A match statement can be [deferred](#defer), like an if statement, with `defer m
 
 A for statement runs a block of statements once for each number in a range. There is also a [infinite loop](#infinite-loops), and a loop can be left early or skipped ahead with [`break` and `continue`](#break-and-continue). After `for` comes the name of the iterator, then the keyword `in`, and then the range. The `->` after the range starts the block, which is indented one level deeper than the `for`, like the block of an `if`:
 
-```
+```mialu
 sum_to_nine :: proc() Int ->
     total := 0
     for i in 1..<10 ->
@@ -1196,7 +1196,7 @@ sum_to_nine :: proc() Int ->
 
 Here `sum_to_nine` returns 45, because the block runs for `i` equal to 1, 2, and so on up to 9. The range is written `first..<end`, where `first` is the number that the iterator starts at and the loop stops before it reaches `end`, so the end is not part of the range, which is an exclusive range. `first..<=end` is an inclusive range, which also runs the block for `end`:
 
-```
+```mialu
 sum_to_ten :: proc() Int ->
     total := 0
     for i in 1..<=10 ->
@@ -1208,7 +1208,7 @@ sum_to_ten :: proc() Int ->
 
 The first number and the end are expressions of type `Int`, so they can be numbers, names, calls and arithmetic, and they are read once, before the loop starts, in the order they are written. So changing a variable that the end came from inside the block does not change the number of times that the block runs. `..<` and `..<=` are single tokens, like `->`, so no space may be written inside them, and a range needs the whole of one: `0..3` is an error.
 
-```
+```mialu
 sum_between :: proc(low: Int, high: Int) Int ->
     total := 0
     for i in low..<=high ->
@@ -1220,7 +1220,7 @@ The iterator is a variable of type `Int` that exists only in the block of the st
 
 The block of a for statement is a block like that of an `if`: it can define variables, which are in scope in the rest of the block, and it can have if statements, `return`, `break` and `continue` statements and other loops. A `return` in the block ends the procedure at once. For statements and if statements can be inside each other, as many as 32 levels deep:
 
-```
+```mialu
 count_pairs :: proc(n: Int) Int ->
     count := 0
     for row in 0..<n ->
@@ -1232,7 +1232,7 @@ count_pairs :: proc(n: Int) Int ->
 
 The elements of an array or of an array slice can be gone through as well. Instead of a range, the expression after `in` is the array or the slice, and the block runs once for each element, in order from the first. The iterator is a copy of the element, which has the type of the elements, an `Int` for an array of `Int`:
 
-```
+```mialu
 sum_of_elements :: proc() Int ->
     a := [const]Int { 1, 2, 3, 4, 5 }
     total := 0
@@ -1243,7 +1243,7 @@ sum_of_elements :: proc() Int ->
 
 `sum_of_elements` returns 15. A for statement is told to go through a range by the `..<` or `..<=` in it, so one without such an operator must have an array, a slice or a string after `in`, and `for x in 5 ->` is an error. The address and the length of what is gone through are read once, before the loop, but the elements are read as the loop goes on, so a change to an element that has not been reached yet in the block is seen by it. The iterator is a copy of an element, so it cannot be used to change one, and the same rules as for the iterator of a range hold: it cannot be assigned to, it is not in scope in the expression, and `break` and `continue` work as in any loop. An array with no elements runs the block no times. To change the elements, write the index of each:
 
-```
+```mialu
 fill :: proc() Int ->
     a := [5]Int { .. = 0 }
     for i in 0..<5 ->
@@ -1253,7 +1253,7 @@ fill :: proc() Int ->
 
 The characters of a string can be gone through the same way. The expression after `in` is a `Str`, and the block runs once for each character, in order from the first, with the iterator a `Rune`: the code point of the character, which is what the subscript of a string gives too, see [Strings](#strings):
 
-```
+```mialu
 count_vowels :: proc(text: Str) Int ->
     count := 0
     for character in text ->
@@ -1266,7 +1266,7 @@ count_vowels :: proc(text: Str) Int ->
 
 A for statement with no iterator and no range is an infinite loop, like `for(;;)` and `while(true)` in C. It is written `for ->`, and the block, which is indented one level deeper, runs again and again until a `break` or a `return` leaves it. Example:
 
-```
+```mialu
 count_up_to :: proc(limit: Int) Int ->
     count := 0
     for ->
@@ -1280,7 +1280,7 @@ count_up_to :: proc(limit: Int) Int ->
 
 A for statement with only a condition is a loop that goes on while the condition is true, like `while` in C. It is written `for` and a condition of type `Bool`, such as `for length > 0 ->`, and the block, which is indented one level deeper, runs again and again as long as the condition is true. The condition is tested before each pass, so the block does not run at all when it is false from the start, and a `continue` goes back to the test. A `break` and a `return` leave the loop as in any other, and so does the condition becoming false. Example:
 
-```
+```mialu
 count_up_to :: proc(limit: Int) Int ->
     count := 0
     for count < limit ->
@@ -1294,7 +1294,7 @@ The condition is worked out again for each pass, so it is not a constant, and it
 
 A scope statement is a block of statements that is not the branch of an `if` or the body of a loop. It is written `->` alone on a line, and the block, which is indented one level deeper, runs once, from the first statement to the last:
 
-```
+```mialu
 add_eleven :: proc(x: Int) Int ->
     total := x
     ->
@@ -1308,7 +1308,7 @@ A scope statement is a scope like the block of an `if`, see [Scope resolution](#
 
 A scope can have a label, which is written before the `->`. A label is the character `:` directly followed by a name, with no space in between, such as `:outer`:
 
-```
+```mialu
 find_first :: proc(limit: Int) Int ->
     found := 0
     :search ->
@@ -1323,7 +1323,7 @@ The name of a label follows the rules of an [identifier](#identifiers), so a key
 
 An if statement, a for statement and a [infinite loop](#infinite-loops) can have a label as well. It is written before the `if` or the `for` on the same line, with a space after it:
 
-```
+```mialu
 :check if n > 5 ->
     ...
 else ->
@@ -1342,7 +1342,7 @@ The label belongs to the whole statement. For an if statement that is the `if` w
 
 `break` leaves the innermost loop or scope that it is in, and the statement after it runs next. `continue` ends the current pass of the loop and starts the next one: in an infinite loop that is the first statement of the block again, and in a for statement with a range it is the next number of the range, or the end of the loop when there are no more. The iterator is stepped after a `continue` the same way as after a block that runs to its end, so an inclusive range that ends at the largest `Int` also ends. Both are statements of one word on a line of their own:
 
-```
+```mialu
 sum_of_odd_numbers :: proc(n: Int) Int ->
     total := 0
     for i in 1..<=n ->
@@ -1362,7 +1362,7 @@ first_multiple :: proc(factor: Int, limit: Int) Int ->
 
 They work in infinite loops and in for statements with a range alike, and they can be in the blocks of if statements that are inside the loop. They belong to the innermost loop only, so a `break` in an inner loop does not leave the outer one. The block of an `if` is not a scope to leave, so a `break` in it leaves the loop or scope around the `if`:
 
-```
+```mialu
 count_pairs :: proc(n: Int) Int ->
     pairs := 0
     for row in 0..<n ->
@@ -1375,7 +1375,7 @@ count_pairs :: proc(n: Int) Int ->
 
 A [scope statement](#scopes) can be left with a `break` as well, and so can a labeled if statement, see below. A `break` without a label leaves the innermost loop or scope, whichever is nearer, so in a scope inside a loop it leaves the scope and the loop goes on. `continue` is only for loops: it goes on with the innermost loop, also when scopes are in between.
 
-```
+```mialu
 break_early :: proc() Int ->
     x := 1
     ->
@@ -1389,7 +1389,7 @@ break_early :: proc() Int ->
 
 `break_early()` returns 4. A `break` can name a statement to leave by the name of its label, written after `break` without the `:`. It leaves that scope, loop or if statement, and everything in between, so it can leave several at once:
 
-```
+```mialu
 break_early_with_label :: proc() Int ->
     x := 1
     ->
@@ -1407,7 +1407,7 @@ break_early_with_label :: proc() Int ->
 
 A `break` with a label can leave a [labeled if statement](#scopes) from any of its branches, also from a loop inside it, and then the statement after the if statement runs next. A `break` without a label passes an if statement, labeled or not, and leaves the loop or scope around it, because the block of an `if` is not a scope:
 
-```
+```mialu
 classify :: proc(n: Int) Int ->
     x := 0
     :check if n > 5 ->
@@ -1427,7 +1427,7 @@ classify :: proc(n: Int) Int ->
 
 A labeled loop is left with `break` and its label from anywhere inside it, also from an inner loop. `continue` and the label of a loop goes on with the next pass of that loop, ending the inner loops on the way, which is what a plain `continue` cannot do from an inner loop:
 
-```
+```mialu
 count_triangle :: proc(n: Int) Int ->
     total := 0
     :rows for row in 0..<n ->
@@ -1446,7 +1446,7 @@ A `break` that is not inside a loop or a scope, and a `continue` that is not ins
 
 A defer statement is the word `defer` and a statement after it on the same line. The statement does not run where the `defer` is, but when the block that the `defer` is in is left, which is why it is called a deferred statement. Its use is to keep what undoes something next to what does it, such as closing a file right below the line that opens it, so that no way out of the block forgets it:
 
-```
+```mialu
 copy_file :: proc(source: C_Str, target: C_Str) Int ->
     input := open_file(source)
     defer close_file(input)
@@ -1466,7 +1466,7 @@ Both files are closed whichever `return` leaves `copy_file`. A block is left in 
 
 The deferred statements of a block run in the reverse order of their `defer`s, the last one first, so what was set up last is undone first. When a jump leaves several blocks at once, the deferred statements of the innermost block run first, then the ones of the block around it, and so on out to the block that it leaves:
 
-```
+```mialu
 trace #(static) := 0
 
 note :: proc(digit: Int) ->
@@ -1490,7 +1490,7 @@ A `defer` belongs to the block that it is in, and not to the procedure, unlike i
 
 A deferred statement reads the variables when it runs, not when the `defer` is reached, so it sees what the block did after the `defer`:
 
-```
+```mialu
 last_value :: proc() ->
     x := 1
     defer note(x)
@@ -1499,7 +1499,7 @@ last_value :: proc() ->
 
 `last_value()` notes 7. A `return` computes its value first, and then the deferred statements run, so they cannot change the value that is returned, but what they do to something outside the procedure, such as what a pointer points to or a global variable, is seen after the call:
 
-```
+```mialu
 return_value_comes_first :: proc() Int ->
     x := 1
     defer x += 10
@@ -1514,7 +1514,7 @@ increment_after_return :: proc(counter: ^Int) Int ->
 
 The statement after `defer` is an assignment, a call, or an if statement, a match statement, a for statement, an infinite loop or a scope statement, with or without a label. A deferred if statement has its `else if` and `else` lines below it as usual, and the `defer` is written on the `if` line only. `defer ->` defers a scope, which is how a block of statements is deferred together:
 
-```
+```mialu
 defer_a_block :: proc() ->
     defer ->
         note(3)
@@ -1554,7 +1554,7 @@ An array is a sequence of elements of certain type. The number of elements is th
 
 For compile-time arrays, the length is known when the program is compiled, and it never changes, it is fixed. An array lives on the stack of the procedure that defines it: it requires no memory allocation, and it is gone when the procedure returns. Example compile-time array initialization:
 
-```
+```mialu
 a := [const]Int { 3, 6, 9 }
 ```
 
@@ -1566,19 +1566,19 @@ Currently, arrays of arrays are not supported.
 
 An array literal gives the elements of an array. It is the type of the array followed by the elements between braces, which are separated by commas:
 
-```
+```mialu
 a := [5]Int { 1, 2, 3, 4, 5 }
 ```
 
 When the length of the type is the keyword `const` instead of a number, the length is the number of elements in the literal. This is the way to write a literal without counting the elements:
 
-```
+```mialu
 a := [const]Int { 1, 2, 3, 4, 5 }
 ```
 
 The length can also be a constant, or arithmetic of constants, so a length that is written once is not repeated as a number where it is used, and an array that is `SIZE` bytes is `[SIZE]Byte`:
 
-```
+```mialu
 SIZE :: 4096
 HEADER : Int : 16
 
@@ -1590,7 +1590,7 @@ The expression is worked out when the program is compiled, as the value of a [co
 
 `a` above is of type `[5]Int`, which is deduced from the value like the type of any variable. A literal that has a number as its length must have exactly that many elements, so `[3]Int { 1, 2 }` is an error. A literal must have a number, a constant or `const` as its length, so `[]Int { 1, 2 }` is an error: that is the type of an array slice, which has no elements of its own, see [Array slices](#array-slices). The elements are expressions of the type of the elements, and there may be none, so `[const]Int { }` is an array of length zero. The elements can be on lines of their own, and a comma can come after the last one:
 
-```
+```mialu
 names := [const]Str {
     "Bob",
     "Alice",
@@ -1599,7 +1599,7 @@ names := [const]Str {
 
 An array whose elements all have the same value is written with `..` in place of the elements, as `.. = value`, which says that the value is the value of every element. This is the way to make an array of zeros, or a buffer, without writing every element:
 
-```
+```mialu
 zeros := [5]Int { .. = 0 }
 buffer := [64]Byte { .. = 0 }
 flags := [8]Bool { .. = true }
@@ -1609,7 +1609,7 @@ flags := [8]Bool { .. = true }
 
 A variable of an array type is defined with an array literal, and not with another array or a call: `b := a` is an error, because an array is not copied by a definition. The type can be written as well, as long as the literal has the number of elements that it says:
 
-```
+```mialu
 a : [3]Int = [const]Int { 7, 8, 9 }
 ```
 
@@ -1623,7 +1623,7 @@ An array cannot be the type of a parameter, of a global variable (except for the
 
 The element at an index is written with the index between square brackets after the array, which is called a subscript. The index is an expression of type `Int`:
 
-```
+```mialu
 array_element_access :: proc() Int ->
     a := [const]Int { 1, 2, 3, 4, 5 }
     return a[0] + a[a[0] + 1]
@@ -1633,7 +1633,7 @@ array_element_access :: proc() Int ->
 
 An element is a place that can be assigned to. The plain assignment `=` works on an element like on a variable, and the assignment operators `+=`, `-=`, `*=` and `/=` work on an element of type `Int` like they do on a variable:
 
-```
+```mialu
 array_element_assignment :: proc() Int ->
     a := [const]Int { 1, 2, 3, 4, 5 }
     a[0] = 10
@@ -1647,7 +1647,7 @@ array_element_assignment :: proc() Int ->
 
 Two arrays, two [dynamic arrays](#dynamic-arrays) or two array slices can be compared with `==` and `not=`: they are the same when they have the same number of elements and every element is the same as the one at its place in the other, which is what a [for statement](#for-statements) over both that compared the elements one by one would find. Both are arrays, or both are dynamic arrays, or both are slices. Two arrays must have the same length, which is known when the program is compiled, also when it is the value of a constant expression such as `[SIZE * 2]Int`, so two arrays of different lengths are an error, which says both lengths, and the parts of them that are as long are compared as slices instead, as in `a[0:2] == b[0:2]`. Two dynamic arrays or two slices of different lengths are compared, and are not the same. The three kinds are not compared with each other, even when their elements are the same, because the length of an array is known when the program is compiled, the length of a dynamic array changes, and a slice views some of the elements of another, so an array with a dynamic array, an array with a slice and a dynamic array with a slice are errors. A slice of each is compared instead, as in `fixed[:] == growing[:]`, which is also how an array is compared with a slice. The elements of both must be of one type, and of a type that `==` compares: `Int`, `I32`, `I64`, `U32`, `U64`, `Byte`, `Rune`, `Bool`, a member of an [enum](#enumerations), a [pointer](#pointers) or a [pointer to a procedure](#pointers-to-procedures):
 
-```
+```mialu
 is_header :: proc(bytes: []Byte) Bool ->
     magic := [const]Byte { 0x7F, 0x45, 0x4C, 0x46 }
     if length_of(bytes) < 4 ->
@@ -1677,7 +1677,7 @@ An array slice is a view of some of the elements of an array. Its type is `[]` f
 
 A slice is made of an array, of a [dynamic array](#dynamic-arrays), or of another slice, by writing two indexes, the low bound and the high bound, separated by a colon, between the square brackets. It is a half-open range: it includes the element at the low bound and excludes the one at the high bound. So the slice `a[1:4]` has the elements 1 through 3 of `a`, and its length is 3, which is the high bound minus the low bound:
 
-```
+```mialu
 sum_of_middle :: proc() Int ->
     a := [const]Int { 1, 2, 3, 4, 5 }
     return sum(a[1:4])
@@ -1685,14 +1685,14 @@ sum_of_middle :: proc() Int ->
 
 `sum_of_middle` returns 9, which is 2 + 3 + 4. The bounds are expressions of type `Int`. The low bound must not be above the high bound, and the high bound must not be above the length of what is sliced, or else the program traps. So `a[2:2]` is a slice with no elements, and `a[0:5]` has all five elements of `a`. The indexes of a slice start at zero again, so `a[1:4][0]` is `a[1]`, and a slice of a slice is relative to the first one. A slice can be the value of a variable, and then its type is deduced, or it can be written:
 
-```
+```mialu
 middle := a[1:4]
 everything : []Int = a
 ```
 
 Either bound can be left out. A slice without a low bound starts at the first element, as if the low bound were 0, and one without a high bound goes to the last, as if the high bound were the length of what is sliced, so for the array `a` of 6 elements these four slices are the same, and have all of them:
 
-```
+```mialu
 a[0:6]
 a[:6]
 a[0:]
@@ -1703,7 +1703,7 @@ a[:]
 
 An array can be given where a slice is wanted: the slice then has all the elements of the array. That is the case for an argument of a call and for the value of a variable with a slice type. This is how a procedure takes some elements, whatever the length of the array they come from is. When the length of the array between the brackets of a parameter is left out, the parameter is a slice, not an array:
 
-```
+```mialu
 sum :: proc(elements: []Int) Int ->
     total := 0
     for x in elements ->
@@ -1715,7 +1715,7 @@ sum :: proc(elements: []Int) Int ->
 
 A range of elements is assigned to with `=` and a slice on the left. The value on the right is an array or a slice, and it must have as many elements as the range, or else the program traps. The elements are copied, and the copy is right also when the two ranges overlap:
 
-```
+```mialu
 array_element_range_assignment :: proc() Int ->
     a := [const]Int { 1, 2, 3, 4, 5 }
     a[0:3] = [const]Int { 10, 20, 30 }
@@ -1730,7 +1730,7 @@ The number of elements of an array or an array slice is given by the built-in pr
 
 A dynamic array is an array that grows: it has no length that is known when the program is compiled, and it starts with no elements, and elements are added to its end with the built-in procedure [`append`](#append). Its type is `[dynamic]` followed by the type of the elements, so `[dynamic]Int` is a dynamic array of `Int` values, and `[dynamic]Int` as a value is an empty one, which has no elements and no braces:
 
-```
+```mialu
 sum_of_squares :: proc(count: Int) Int ->
     squares := [dynamic]Int
     for i in 0..<count ->
@@ -1759,7 +1759,7 @@ An enumeration, or enum, is a type with a fixed set of named members with values
 - an integer type (like `Int`) for values of its members and
 - `->` to mark the beginning of enum members on each subsequent line, indented one level deeper:
 
-```
+```mialu
 Color :: enum Int ->
     RED
     GREEN
@@ -1772,7 +1772,7 @@ The integer types that are reserved for the future, such as `I8` and `U16`, will
 
 A member can be referenced by writing the name of its enum and a dot, such as `Color.RED`:
 
-```
+```mialu
 color := Color.RED
 DEFAULT_COLOR :: Color.RED
 ```
@@ -1802,7 +1802,7 @@ In the future, the language spec and implementation will address the following i
 
 A struct is a record type: a name for a fixed set of fields, each with a name and a type. A struct is defined as a [constant](#constants) whose value is `struct ->` followed by its fields, one on each line, indented one level deeper than the line of the definition. A field is its name, a colon and its type:
 
-```
+```mialu
 Person :: struct ->
     age: Int
     name: Str
@@ -1814,13 +1814,13 @@ The fields of a struct must have names unique to the fieldset. A struct cannot c
 
 A value of a struct type is called a struct object. It is constructed by a struct literal: the name of the struct and then the fields that are given a value between braces, each of them the name of the field:
 
-```
+```mialu
 p := Person { age = 30, name = "Bob" }
 ```
 
 The fields can be given in any order, and each field at most once. A comma can come after the last one (trailing comma), which is the convention when the fields are on lines of their own. The literal can be spread over several lines, as long as every line is indented by a multiple of 4 spaces like any line:
 
-```
+```mialu
 p := Person {
     age = 30,
     name = "Bob",
@@ -1846,7 +1846,7 @@ Two struct types are different types even if they share the same fields of the s
 
 A field of a struct object is read by writing a dot and its name after the object, such as `p.age`. Example:
 
-```
+```mialu
 p := Person { age = 30, name = "Bob" }
 p.age = 31
 ```
@@ -1855,7 +1855,7 @@ A field is read or assigned through a variable, a parameter, an element of an ar
 
 A field can be of another struct type:
 
-```
+```mialu
 Point :: struct ->
     x: Int
     y: Int
@@ -1867,7 +1867,7 @@ Line :: struct ->
 
 or an anonymous struct, which is defined where the field is:
 
-```
+```mialu
 Info :: struct ->
     name: Str
     age: Int
@@ -1879,7 +1879,7 @@ Info :: struct ->
 
 A struct that is defined where the field cannot be referred to by name. Fields can still be accessed via dot operator, like in the following example:
 
-```
+```mialu
 create_nested_struct_object :: proc() Str ->
     info := Info {
         name = "Bob",
@@ -1895,7 +1895,7 @@ create_nested_struct_object :: proc() Str ->
 
 The elements of an [array](#arrays) or array slice can be struct objects. Example:
 
-```
+```mialu
 persons := [const]Person {
     Person { age = 30, name = "Bob", },
     Person { age = 25, name = "Alice", },
@@ -1911,7 +1911,7 @@ In Mialu, a union is not a separate named type but a group of fields in a [struc
 
 Because the tagger is always there, a program never has to guess which member is stored, and the compiler can check it instead. This check is based on a `match` construct. It is denoted by `union match`, followed by the field name and by `case`s for each value of the field of the enumeration type. Example:
 
-```
+```mialu
 Token_Kind :: enum Int ->
     IDENTIFIER
     INTEGER_LITERAL
@@ -1932,7 +1932,7 @@ Token :: struct ->
 
 A field of a case is read or assigned only where the compiler can tell from the program which member it is. The compiler can narrow this down using `if` statement whose condition compares the field that is matched of that object with the member of the case using `==`, with the member on either side. Example narrowing for the token example above:
 
-```
+```mialu
 if token.kind == .INTEGER_LITERAL ->
     return token.integer_literal.value
 else if token.kind == .IDENTIFIER ->
@@ -1958,7 +1958,7 @@ An `Enum_Member_Type_Info` is an ordinary [struct](#structs) that has these fiel
 - `name`, a `Str` with the name of the member, such as `"GREEN"`,
 - `value`, an `Int` with the number of the member, which is its place among the members, counted from 0.
 
-```
+```mialu
 Color :: enum Int ->
     RED
     GREEN
@@ -2005,7 +2005,7 @@ It has the following fields:
 
 A pointer is the address of a value: it says where the value is, so that the value can be read and changed by code that does not have the variable that holds it, such as another procedure. The type of a pointer is a caret, `^`, followed by the type of the value that it points to, so `^Int` is a pointer to an `Int`, `^Str` is a pointer to a `Str`, `^Bool` is a pointer to a `Bool` and `^Person` is a pointer to a [struct object](#struct-objects). What is pointed to can be a pointer again, with one more caret: `^^Int` is a pointer to a pointer to an `Int`. A pointer cannot point to an [array or an array slice](#arrays), because those are addresses of their elements already. The type of a pointer is written where any type is: for a variable, a parameter, a field of a struct, the elements of an array, as in `[const]^Int` and `[]^Int`, and the return type of a procedure. Spaces may be written after a caret, but the convention is none.
 
-```
+```mialu
 pointer_with_explicit_type :: proc() Int ->
     x := 4
     p : ^Int = %x
@@ -2030,7 +2030,7 @@ A parameter, the iterator of a for statement and a global variable have no addre
 
 The pointer points to the variable and not to a copy of its value, so the pointer sees every change of the variable, and the variable every change through the pointer:
 
-```
+```mialu
 see_changes_of_variable :: proc() Int ->
     x := 1
     p := %x
@@ -2046,7 +2046,7 @@ see_changes_of_variable :: proc() Int ->
 
 `^` is written after an expression whose value is a pointer, and gives what the pointer points to. It is written after, so that a chain of pointers reads from left to right: `p^` and `pp^^`. Following a pointer is an expression, and it can also be assigned to, with `=` and with the operators `+=`, `-=`, `*=` and `/=` for an `Int`, like a variable can:
 
-```
+```mialu
 swap :: proc(a: ^Int, b: ^Int) ->
     temp := a^
     a^ = b^
@@ -2067,7 +2067,7 @@ The value that is assigned through a pointer must be of the type that the pointe
 
 A field of a pointer to a struct is written with a dot, like the field of a struct object, and means the field of the struct object that the pointer points to: `p.age` is the same as `p^.age`. This is the recommended way to write it, because it reads the same for a pointer as for a struct object, so a procedure that takes a pointer to a struct and one that takes the struct object read alike, and a change from one to the other changes the type and not the uses. The field can be read and assigned to like the field of a variable, with `=` and with the operators for an `Int`, such as `p.age += 1`:
 
-```
+```mialu
 birthday :: proc(p: ^Person) ->
     p.age += 1
 
@@ -2088,7 +2088,7 @@ A pointer that is `nil` is followed by a field as it is by `^`, which traps, see
 
 `nil` is the null pointer, a pointer that points to nothing, like `NULL` in C. It is a [literal word](#literal-words), and a value of every pointer type: it is a `^Int` where a `^Int` is wanted, a `^Person` where that is, and so on, so it can be the value of a variable that has a pointer type, an argument, a returned value, a field of a struct literal and an element of an array literal. A pointer that is defined with a type and without a value, as in `p : ^Int`, is `nil` as well, and so is a field of a struct whose literal has empty braces, `Node {}`. A field that is a pointer is written out in any other literal, as `next = nil`.
 
-```
+```mialu
 read_or_default :: proc(p: ^Int, default: Int) Int ->
     if p == nil ->
         return default
@@ -2103,7 +2103,7 @@ nil_as_argument :: proc() Int ->
 
 Pointers are compared with `==` and `not=`, which are defined for two pointers of the same type, or for a pointer and `nil`. Two pointers are equal when they hold the same address, which is when they point to the very same variable or element: the pointers to two variables are different also when the variables have the same value. A pointer has no order, so `<` and the others are errors, like for a `Bool`. The comparison is how code finds out that a pointer can be followed, and how a chain of structs is gone through until it ends:
 
-```
+```mialu
 Node :: struct ->
     value: Int
     next: ^Node
@@ -2121,7 +2121,7 @@ sum_list :: proc(first: ^Node) Int ->
 
 Following a `nil` pointer is an error at run time: the program traps, see [WebAssembly](#webassembly). A pointer is not checked in any other way. A pointer to a variable, or to an element of an array, is good for as long as the procedure that has the variable or the array runs, because they are gone when it returns. So a procedure can return a pointer to something that outlives it, such as a variable of its caller that it was given a pointer to, as `choose` does below, but a pointer to its own variable points to nothing after it returns. The target cannot tell a pointer to something that is gone: following it reads and writes the memory where the variable was, which another procedure may be using by then.
 
-```
+```mialu
 choose :: proc(a: ^Int, b: ^Int, first: Bool) ^Int ->
     if first ->
         return a
@@ -2132,7 +2132,7 @@ choose :: proc(a: ^Int, b: ^Int, first: Bool) ^Int ->
 
 A field of a struct can be a pointer. It can point to a struct of the same kind, which a field of that struct type cannot do, since a struct would contain itself: a pointer is only an address, so the struct has a fixed size.
 
-```
+```mialu
 Node :: struct ->
     value: Int
     next: ^Node
@@ -2150,14 +2150,14 @@ follow_pointers_in_structs :: proc() Int ->
 
 Procedures are blocks of code that perform a specific task. They can be defined by placing the keyword `proc` after an identifier, followed by a list of parameters and an optional return type:
 
-```
+```mialu
 procedure_name :: proc(param1: Type1, param2: Type2) ReturnType ->
     // procedure body
 ```
 
 A procedure parameter list can be empty, and the return type can be omitted if the procedure does not return a value. A procedure can also return several values, see [Multiple return values](#multiple-return-values). Example of a procedure with no parameters and no return type:
 
-```
+```mialu
 procedure_name :: proc() ->
     // procedure body
 ```
@@ -2168,7 +2168,7 @@ A procedure body consists of a series of statements, which are variable definiti
 
 A procedure is called by writing its name and, between parentheses, a value for each of its parameters, separated by commas. The parentheses are written also when there are no arguments:
 
-```
+```mialu
 forty :: proc() Int ->
     return 40
 
@@ -2191,7 +2191,7 @@ The call must match the procedure:
 
 The procedure is looked up in the module scope, so it can be defined above or below the procedure that calls it, and a procedure can call itself, which makes it recursive:
 
-```
+```mialu
 factorial :: proc(n: Int) Int ->
     if n <= 1 ->
         return 1
@@ -2202,7 +2202,7 @@ Mialu does not check that a recursion ends, and every call takes space of the st
 
 A procedure that has no return type returns nothing, so its call has no value and cannot be used as one: `x := log(1)` and `return log(1)` are errors when `log` has no return type. A call can also be a statement of its own, on a line by itself, and then the value is thrown away when there is one:
 
-```
+```mialu
 ignores_result :: proc(n: Int) Int ->
     double(n)
     return n
@@ -2212,7 +2212,7 @@ ignores_result :: proc(n: Int) Int ->
 
 A procedure can return several values. Its return types are written between parentheses and separated by commas, and a `return` statement gives a value for each of them, separated by commas, in the same order:
 
-```
+```mialu
 divide :: proc(a: Int, b: Int) (Int, Int) ->
     return a / b, a - a / b * b
 
@@ -2226,7 +2226,7 @@ The values can be of different types, and any type that a procedure can return, 
 
 The values of a call are taken by defining a variable for each of them, with the names separated by commas before `:=`. The first name gets the first value, the second name the second one, and so on, and each variable has the type of its value:
 
-```
+```mialu
 use_divide :: proc() Int ->
     quotient, remainder := divide(31, 4)
     return quotient * 10 + remainder
@@ -2248,7 +2248,7 @@ A procedure is not a value that can be stored, but a pointer to it is. The type 
 
 The name of a procedure that is not called is a pointer to it. A variable that holds one is called by writing its name and the arguments, like the name of a procedure:
 
-```
+```mialu
 add :: proc(a: Int, b: Int) Int ->
     return a + b
 
@@ -2265,7 +2265,7 @@ Both return 20. The type of `proc_p` is written in the first one and deduced fro
 
 A pointer to a procedure can be a variable, a parameter, a field of a [struct](#structs) and an element of an [array](#arrays) or an array slice, as any other type can. Passing one to another procedure is how a procedure is told what to do for each element, or how to combine two values:
 
-```
+```mialu
 double :: proc(n: Int) Int ->
     return n * 2
 
@@ -2311,7 +2311,7 @@ A built-in procedure is a procedure that the language has, and that is called li
 
 `append` puts values at the end of a [dynamic array](#dynamic-arrays). It takes the address of the variable that is the dynamic array, `%numbers`, and then one or more values, which are of the type of the elements, and it gives nothing, so it is a statement. The values are added in the order that they are written, so `append(%numbers, 2, 4, 8)` is the same as `append(%numbers, 2)`, `append(%numbers, 4)` and `append(%numbers, 8)`, except that it makes room once:
 
-```
+```mialu
 numbers := [dynamic]Int
 append(%numbers, 2)
 append(%numbers, 4, 8)
@@ -2323,7 +2323,7 @@ The address is needed because the dynamic array is changed, which is `%` as for 
 
 `length_of` gives the number of elements of an array, a dynamic array or an array slice, or the number of characters of a string, as an `Int`. It takes one argument, and it is called like any procedure:
 
-```
+```mialu
 length_of_array :: proc() Int ->
     a := [const]Int { 1, 2, 3, 4, 5 }
     return length_of(a)
@@ -2348,7 +2348,7 @@ The [members of an enum](#static-reflection) are an array, so `length_of` gives 
 
 `int_to_byte` makes a `Byte` of an `Int`. An `Int` is never a `Byte` without it, whatever its value, because its value is known only when the program runs, see [Bytes](#bytes). It takes one `Int`, and gives a `Byte` that has the same number, and when the number is not from 0 to 255 there is no `Byte` that has it, so the program is stopped, as it is for an index that is outside of an array:
 
-```
+```mialu
 to_byte :: proc(n: Int) Byte ->
     return int_to_byte(n)
 ```
@@ -2359,7 +2359,7 @@ to_byte :: proc(n: Int) Byte ->
 
 `int_to_i32` makes an `I32` of an `Int` or an `I64`, which is not a cast because they may not fit in 32 bits, see [32-bit integers](#32-bit-integers) and [64-bit integers](#64-bit-integers). It takes one `Int` or one `I64`, and gives an `I32` that has the same number, and when the number is not from -2147483648 to 2147483647 there is no `I32` that has it, so the program is stopped, as it is by `int_to_byte`:
 
-```
+```mialu
 to_i32 :: proc(n: Int) I32 ->
     return int_to_i32(n)
 ```
@@ -2370,7 +2370,7 @@ to_i32 :: proc(n: Int) I32 ->
 
 `int_to_str` makes the decimal text of an integer, a string. It is the only built-in procedure that is a [constant](#constants): its argument must be known when the program is compiled, so a literal, a constant or a constant expression, whose type is untyped, `Int`, `I32` or `I64`, and the text is made then. The result is one string, like a string literal, so nothing is made when the program runs, and it can be joined with `++`, compared, measured, given to a constant, or given to a `C_Str`, as any other constant string. A negative number has a minus sign before its digits, and there are no other characters: no plus sign, no leading zeros and no separators.
 
-```
+```mialu
 MAJOR :: 1
 MINOR :: 20
 
@@ -2383,7 +2383,7 @@ VERSION :: int_to_str(MAJOR) ++ '.' ++ int_to_str(MINOR)
 
 A `Str` value is never converted to a `C_Str` implicitly. A string literal, and a constant that is an untyped string, is not a `Str` yet: it is a `C_Str` where one is wanted, which is the same as `str_to_c_str` of it, see [Untyped constants](#untyped-constants). `str_to_c_str` makes a `C_Str` of a `Str` explicitly, and the `C_Str` it gives can be kept in a variable, passed on or returned. Example:
 
-```
+```mialu
 package greetings
 
 import foreign libc
@@ -2409,7 +2409,7 @@ See [Compilation targets](#compilation-targets) for which targets have it, and w
 
 `try_str_to_int` makes an `Int` of a `Str`, when the string is the text of one. It takes one `Str`, or an untyped string such as a literal, and it gives two values, which is why the call is written as the definition of two names, see [Multiple return values](#multiple-return-values): the first is the number, an `Int`, and the second is a `Bool` that says whether the string was a number at all.
 
-```
+```mialu
 parse_port :: proc(text: Str) Int ->
     port, is_ok := try_str_to_int(text)
     if not is_ok or port > 65535 ->
@@ -2431,7 +2431,7 @@ The string is converted when the program runs, also when it is a literal, so the
 
 `utf8_decode` makes a `Str` of bytes, which is how a program that has bytes, from a file or from the C library, gets text that the string operations work on: the subscript, the range, `length_of` and the for statement of a [string](#strings). It takes one array or array slice of `Byte`, and it gives two values, which is why the call is written as the definition of two names, see [Multiple return values](#multiple-return-values): the first is the `Str`, and the second is a `Bool` that says whether the bytes were valid UTF-8. A `Str` is always valid UTF-8, so a conversion that cannot be sure of that has to say so, and it is the only way to a `Str` that is not a constant:
 
-```
+```mialu
 text_of :: proc(bytes: []Byte) Str ->
     text, is_ok := utf8_decode(bytes)
     if not is_ok ->
@@ -2453,7 +2453,7 @@ The `Str` is a view of the bytes that are given, and not a copy, like a [slice o
 
 `make` allocates memory while the program runs: it makes the elements of an [array slice](#array-slices), and gives the slice of them. Its first argument is the type of the slice, which is a type and not a value, and its second is the number of elements, an `Int`:
 
-```
+```mialu
 bytes := make([]Byte, 16)
 defer destroy(bytes)
 bytes[0] = 255
@@ -2469,7 +2469,7 @@ The type must be the type of an array slice, `[]T`, whose elements can be the ty
 
 `destroy` gives back the memory of the elements of an array slice that [`make`](#make) made, so that it can be used again. It takes the slice and gives nothing, so it is a statement, and it is the natural statement of a [`defer`](#defer) right after the `make`:
 
-```
+```mialu
 sum_of_squares :: proc(count: Int) Int ->
     squares := make([]Int, count)
     defer destroy(squares)
@@ -2493,7 +2493,7 @@ Every name that is used refers to something that is declared, and the compiler f
 
 A name is looked up in the local scope of the procedure that uses it first, and then in the module scope. So a procedure can use a constant that is defined outside of it:
 
-```
+```mialu
 NAME :: "Bob"
 
 get_name :: proc() Str ->
@@ -2527,7 +2527,7 @@ Scope resolution is about names only. Whether the value of a name has the right 
 
 An attribute gives a definition a property that its syntax does not say. The attributes of a definition are written as an attribute list after its name, before the `:`. An attribute list begins with `#`, and each attribute in it is a name surrounded by parentheses:
 
-```
+```mialu
 counter #(static) := 0
 ```
 
@@ -2543,7 +2543,7 @@ Parametric polymorphism lets a procedure or a struct be written once for values 
 
 A procedure is polymorphic when a parameter declares a type parameter. A parameter whose type is the keyword `type_id` is a type parameter itself, and it is written with `$` directly before its name, which says that the name is declared there. The other parameters and the return type use the name without the `$`:
 
-```
+```mialu
 add :: proc($T: type_id, a: T, b: T) T ->
     return a + b
 
@@ -2557,7 +2557,7 @@ The calls do not give `T`: its type is deduced from the arguments. The type of e
 
 A type parameter can be declared in the type of a parameter instead, by writing the `$` there. It is declared at its first use, and the other uses are written without it:
 
-```
+```mialu
 larger :: proc(a: $T, b: T) T ->
     if a > b ->
         return a
@@ -2581,7 +2581,7 @@ Each type parameter is one type in a call. When two arguments give it different 
 
 A type parameter whose type no argument says, such as one that is only the return type, cannot be deduced, and a call that does not give it is an error. Such a call gives every parameter, the type parameters as well, which are given types, as the arguments of the parameters of the type `type_id`:
 
-```
+```mialu
 zero :: proc($T: type_id) T ->
     nothing : T
     return nothing
@@ -2600,7 +2600,7 @@ The specialization of a procedure is called the name of the procedure and its ty
 
 A struct is polymorphic when it has type parameters, which are written between parentheses after `struct`, each of them `$T: type_id`. The fields use the names of the type parameters as types:
 
-```
+```mialu
 Pair :: struct($T: type_id) ->
     first: T
     second: T
@@ -2612,7 +2612,7 @@ Labeled :: struct($K: type_id, $V: type_id) ->
 
 A polymorphic struct is not a type until it is given types, which are written between parentheses after its name, as many as it has type parameters: `Pair(Int)` is a struct whose fields are an `Int` each, and `Labeled(Str, Pair(Int))` one whose key is a `Str` and whose value is a `Pair(Int)`. Such a type is written anywhere a type is: as the type of a variable, of a parameter, of a field or of what a procedure returns, and before the braces of a [struct literal](#structs):
 
-```
+```mialu
 pair := Pair(Int) { first = 1, second = 2 }
 labeled : Labeled(Str, Pair(Int))
 ```
@@ -2621,7 +2621,7 @@ Each list of types makes one specialization of the struct, a struct of its own, 
 
 A polymorphic procedure can take or give a polymorphic struct with its own type parameters, and the type of an argument is matched with it as with any other type, so `T` of the parameter `pair: Pair($T)` is `Int` for an argument of the type `Pair(Int)`:
 
-```
+```mialu
 pair_of :: proc(a: $T, b: T) Pair(T) ->
     return Pair(T) { first = a, second = b }
 
@@ -2633,7 +2633,7 @@ swapped :: proc(pair: Pair($T)) Pair(T) ->
 
 A program can call procedures that are not written in Mialu but in another language, which is JavaScript, the C library or a library of the system. They are called foreign procedures, and the language that they are in is the foreign target. Two things are needed: an import, which says where the procedures come from, and a foreign block, which lists the ones that the program uses, with their parameters and return types:
 
-```
+```mialu
 package alert_hello
 
 import foreign js "functions"
@@ -2649,7 +2649,7 @@ print_hello :: proc() ->
 
 A foreign block is `foreign js ->` or `foreign libc ->` in the first column, and below it, indented one level, the procedures, one on each line. A program can have any number of blocks. A foreign procedure is written like a procedure, but where its body would be it has `...`, which stands for the code that is somewhere else:
 
-```
+```mialu
 foreign js ->
     add :: proc(a: Int, b: Int) Int -> ...
     log :: proc(message: Str) -> ...
@@ -2667,7 +2667,7 @@ The target makes a foreign procedure an imported function of the module. See [We
 
 A library of the system, such as `Kernel32` of Windows, is imported with a name that the program chooses and the library in quotes, and its procedures are declared in a block that has the name:
 
-```
+```mialu
 import foreign kernel32 "system:Kernel32.lib"
 
 foreign kernel32 #(default_calling_convention("system")) ->
@@ -2713,7 +2713,7 @@ The recommendation of [Strings](#strings), to go through a `Str` by byte and to 
 
 The other direction is the built-in procedure [`utf8_decode`](#utf8_decode), which makes a `Str` of bytes and says whether they are valid UTF-8. The conversion that this section describes would give a `[]Byte` that has the address and the length in bytes of the string, which are the two words that a `Str` is already, so there is nothing to compute and nothing to copy. How it is written is not decided: it could be a [cast](#casts), such as `cast([]Byte)text`, or a [built-in procedure](#built-in-procedures). The `[]Byte` that it gives is read only, since a string is immutable.
 
-```
+```mialu
 byte_count :: proc(text: Str) Int ->
     bytes := cast([]Byte)text
     return length_of(bytes)
@@ -2745,7 +2745,7 @@ This implementation would have not required any specialization of the procedure 
 
 Here's an example of how this would work:
 
-```
+```mialu
 Person :: struct ->
     age: Int
     name: Str
@@ -2766,14 +2766,14 @@ foo :: proc() Int ->
 
 The bar procedure would actually be represented this way:
 
-```
+```mialu
 bar :: proc(age: Int) Int ->
     return p.age
 ```
 
 If you have multiple fields in a struct
 
-```
+```mialu
 Restaurant :: struct ->
     name: Str
     location: Str
@@ -2782,7 +2782,7 @@ Restaurant :: struct ->
 
 and the interface also included multiple fields like this
 
-```
+```mialu
 Company :: interface ->
     location: Str
     name: Str
@@ -2793,7 +2793,7 @@ get_location :: proc(c: Company) Str ->
 
 then the parameters would work this way then:
 
-```
+```mialu
 get_location :: proc(location: Str, name: Str) Str ->
     return p.location
 ```
