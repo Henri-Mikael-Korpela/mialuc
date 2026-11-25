@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mialu Compiler Architecture</title>
+    <style>
+        :root {
+            --background: #1e1e1e;
+            --background-panel: #252526;
+            --border: #3c3c3c;
+            --text: #d4d4d4;
+            --text-muted: #858585;
+            --accent: #0e639c;
+            --font-code: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+            /* One color for each kind of part, for a dark surface. */
+            --front: #3987e5;
+            --middle: #199e70;
+            --back: #d95926;
+            --support: #c98500;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: var(--background);
+            color: var(--text);
+            font: 14px/1.5 system-ui, sans-serif;
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 16px;
+            padding: 8px 16px;
+            background: var(--background-panel);
+            border-bottom: 1px solid var(--border);
+        }
+
+        header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+
+        .brand { display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
+
+        nav { display: flex; flex-wrap: wrap; gap: 4px; }
+
+        nav a {
+            padding: 4px 10px;
+            border-radius: 2px;
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+
+        nav a:hover { color: var(--text); }
+        nav a[aria-current="page"] { background: var(--background); color: var(--text); }
+
+        main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+
+        .intro { margin: 0 0 16px; color: var(--text-muted); max-width: 75ch; }
+        code { font-family: var(--font-code); font-size: 12px; }
+
+        .key { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 12px; padding: 0; list-style: none; color: var(--text-muted); font-size: 12px; }
+        .key li { display: flex; align-items: center; gap: 6px; }
+        .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+
+        .diagram { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 2px; background: var(--background-panel); }
+
+        .stage { cursor: pointer; outline: none; }
+        .stage rect { fill: var(--background); stroke: var(--kind); stroke-width: 1.5; transition: fill 0.1s; }
+        .stage:hover rect { fill: #2d2d30; }
+        .stage:focus-visible rect { stroke: var(--text); stroke-width: 2.5; }
+        .stage[aria-pressed="true"] rect { fill: var(--kind); fill-opacity: 0.3; }
+        .stage .name { fill: var(--text); font: 600 14px system-ui, sans-serif; }
+        .stage .file { fill: var(--text-muted); font: 11px var(--font-code); }
+
+        .bar rect { fill: var(--background); stroke: var(--support); stroke-width: 1.5; stroke-dasharray: 5 4; }
+        .stage.bar rect { stroke-dasharray: 5 4; }
+
+        .edge { fill: none; stroke: var(--text-muted); stroke-width: 1.5; }
+        .edge.support { stroke-dasharray: 4 4; }
+        .arrow { fill: var(--text-muted); }
+        .edge-label { fill: var(--text-muted); font: 11px system-ui, sans-serif; }
+        .lane { fill: var(--text-muted); font: 600 10px system-ui, sans-serif; letter-spacing: 0.08em; }
+
+        .detail {
+            margin-top: 16px;
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--kind, var(--accent));
+            border-radius: 2px;
+            background: var(--background-panel);
+        }
+
+        .detail h2 { margin: 0 0 2px; font-size: 16px; }
+        .detail .files { margin: 0 0 8px; color: var(--text-muted); }
+        .detail p { margin: 0 0 8px; max-width: 80ch; }
+        .detail ul { margin: 0; padding-left: 20px; max-width: 80ch; }
+
+        h2.section {
+            margin: 24px 0 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 6px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+        th { color: var(--text-muted); font-size: 12px; font-weight: 600; }
+        td:first-child { white-space: nowrap; }
+    </style>
+</head>
+<body>
+    <header>
+        <a class="brand" href="/"><img src="/logo.png" alt="" width="24" height="24"><h1>Mialu</h1></a>
+        <nav aria-label="Pages">
+            <a href="/">Documentation</a>
+            <a href="/tools/playground">Playground</a>
+            <a href="/tools/internals">Compiler internals</a>
+            <a href="/tools/architecture" aria-current="page">Architecture</a>
+            <a href="/tools/stats">Source statistics</a>
+        </nav>
+    </header>
+
+    <main>
+        <p class="intro">
+            How <code>mialuc</code>, the compiler of Mialu, which is written in C, turns a source file into a program.
+            The stages run one after the other, in the order of the arrows, and each is one file of <code>src</code>.
+            Choose a stage to read what it takes, what it gives and where its code is.
+        </p>
+
+        <ul class="key" aria-label="Kinds of parts">
+            <li><span class="swatch" style="background: var(--front)"></span>Front end: reads the source</li>
+            <li><span class="swatch" style="background: var(--middle)"></span>Middle: understands the program</li>
+            <li><span class="swatch" style="background: var(--back)"></span>Back end: makes the output</li>
+            <li><span class="swatch" style="background: var(--support)"></span>Support: used by the stages</li>
+        </ul>
+
+        <svg class="diagram" id="diagram" viewBox="0 0 960 500" role="group" aria-label="The stages of the compiler"></svg>
+
+        <div class="detail" id="detail" aria-live="polite"></div>
+
+        <h2 class="section">The commands</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th scope="col">Mode</th><th scope="col">Stages that run</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>build</code>, <code>run</code></td><td>Everything, to the target that is chosen: <code>x64-win32</code>, <code>wasm</code> or <code>wat</code>. <code>run</code> then starts the program.</td></tr>
+                    <tr><td><code>dump-asm</code></td><td>Everything, to the x64 text.</td></tr>
+                    <tr><td><code>dump-ast</code></td><td>The tokenizer and the parser: the tokens and the syntax tree as written.</td></tr>
+                    <tr><td><code>dump-types</code></td><td>Up to the specializer: the type of each name, with the copies that it makes.</td></tr>
+                    <tr><td><code>dump-outline</code>, <code>dump-struct-sizes</code></td><td>Up to the semantic analysis: what an editor shows for a file.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <script>
+        "use strict";
+
+        const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+        const WIDTH = 200;
+        const HEIGHT = 64;
+
+        // The parts, with where they are in the diagram. `kind` is the color. The files are in `src`.
+        const STAGES = [
+            {
+                id: "source", name: "Source", file: "a .mu file", kind: "front", x: 20, y: 70,
+                gives: "Text that is UTF-8. Its size is limited, and a file that cannot be read is an error of its own.",
+                points: ["The program is one file, which imports others.", "The same text is shown in an error, with the line and the place."],
+            },
+            {
+                id: "tokenizer", name: "Tokenizer", file: "tokenizer.c", kind: "front", x: 260, y: 70,
+                gives: "The tokens of the source: names, reserved words, operators, literals and comments.",
+                points: [
+                    "Comments are tokens, for the sake of tools, but the parser never sees them: main.c takes them out first.",
+                    "The text of string literals is written to a buffer that the tokens view.",
+                    "The kinds of tokens are listed on the page of the compiler internals.",
+                ],
+            },
+            {
+                id: "packages", name: "Packages", file: "package.c", kind: "front", x: 500, y: 70,
+                gives: "The files that the program imports, tokenized and parsed before it, into the same buffer of nodes.",
+                points: [
+                    "import \"mu:filesystem\" names a file of a vendor: mu is the standard library, src/mialu-std, or lib next to the compiler in a release.",
+                    "After the program is parsed, the definitions of the imported files are merged into it.",
+                    "A node can be asked which file it came from, so an error names the right one.",
+                ],
+            },
+            {
+                id: "parser", name: "Parser", file: "parser.c, ast.c", kind: "front", x: 740, y: 70,
+                gives: "The syntax tree, as a flat buffer of nodes, with a module node as the root.",
+                points: [
+                    "The grammar is written in EBNF in grammar.ebnf.",
+                    "A node refers to others by their index, so the tree can be moved and copied freely.",
+                    "ast.c has what is asked of nodes, such as whether a definition is polymorphic, and prints the tree for dump-ast.",
+                ],
+            },
+            {
+                id: "semantic", name: "Semantic analysis", file: "semantic.c", kind: "middle", x: 740, y: 210,
+                gives: "A binding for each use of a name, and the type and the constant value of each node.",
+                points: [
+                    "Finds the errors of names and types that the front end cannot.",
+                    "Evaluates what must be known when the program is compiled.",
+                    "dump-types shows its result.",
+                ],
+            },
+            {
+                id: "constants", name: "Constants", file: "constant.c", kind: "support", x: 740, y: 320,
+                gives: "The values of the expressions that are evaluated when the program is compiled.",
+                points: [
+                    "Integers of every size, floats, runes and strings.",
+                    "The text that ++ joins is written to a buffer that the syntax tree views for as long as it is used.",
+                ],
+            },
+            {
+                id: "specialize", name: "Specializer", file: "specialize.c", kind: "middle", x: 500, y: 210,
+                gives: "A program with no polymorphic definitions: one copy of a procedure or struct for each set of types that is used.",
+                points: [
+                    "A copy is named with its types, such as add(Int), which no name of the program can be.",
+                    "Calls and uses that give the same types share a copy.",
+                    "The program is analyzed once more, so the targets meet no type parameters.",
+                ],
+            },
+            {
+                id: "wasm", name: "WebAssembly", file: "wasm.c", kind: "back", x: 260, y: 170,
+                gives: "A module of WebAssembly, in the binary format.",
+                points: [
+                    "Runs in a browser: the playground compiles with this target.",
+                    "Shares its constants of the format with wasm-text.c.",
+                ],
+            },
+            {
+                id: "x64", name: "x64 Windows", file: "x64.c", kind: "back", x: 260, y: 250,
+                gives: "The machine code of a Windows executable, with debug information.",
+                points: [
+                    "Calls the foreign procedures that a program declares, such as those of Kernel32 and libc.",
+                    "x64_struct_size_bytes gives the size of a struct, which dump-struct-sizes shows.",
+                ],
+            },
+            {
+                id: "wasm-text", name: "Wasm text", file: "wasm-text.c", kind: "back", x: 20, y: 170,
+                gives: "The text format, wat, which is read from the bytes of the module.",
+                points: ["Reads the binary that wasm.c wrote, so the two cannot disagree.", "The playground shows it next to the program."],
+            },
+            {
+                id: "x64-text", name: "x64 text", file: "x64-text.c", kind: "back", x: 20, y: 250,
+                gives: "The assembly of the machine code, for dump-asm.",
+                points: ["Reads the bytes of x64.c, with its symbols."],
+            },
+            {
+                id: "driver", name: "Driver", file: "main.c, process.c", kind: "support", x: 20, y: 330,
+                gives: "The command line, the buffers and the order of the stages.",
+                points: [
+                    "Reads the mode (build, run, dump-ast, dump-asm, dump-outline, dump-struct-sizes or dump-types) and the target (x64-win32, wasm or wat).",
+                    "Makes the memory of the stages once, and stops at the first error, which it hands to the errors module.",
+                    "process.c starts the program for run, and knows whether the terminal has color.",
+                ],
+            },
+            {
+                id: "report", name: "Errors", file: "report.c, diagnostic.c", kind: "support", x: 20, y: 420, wide: true,
+                gives: "The text of every error, in one place.",
+                points: [
+                    "A stage says what went wrong with a status, a view of the source and sometimes a number. report.c knows what to say about it.",
+                    "Every kind of error has a code, E and four digits, listed in the error codes document.",
+                    "diagnostic.c lays the error out as Rust does: the title, the place, the lines and a mark under the place, in color when the terminal has it.",
+                ],
+            },
+        ];
+
+        // The arrows, as points. A dashed one is a part that is used and not a step.
+        const EDGES = [
+            { points: [[220, 102], [260, 102]] },
+            { points: [[460, 102], [500, 102]] },
+            { points: [[700, 102], [740, 102]] },
+            { points: [[840, 134], [840, 210]], label: "tree", at: [850, 176] },
+            { points: [[740, 242], [700, 242]] },
+            { points: [[500, 242], [480, 242], [480, 202], [460, 202]] },
+            { points: [[500, 242], [480, 242], [480, 282], [460, 282]] },
+            { points: [[260, 202], [220, 202]] },
+            { points: [[260, 282], [220, 282]] },
+            { points: [[840, 320], [840, 274]], dashed: true },
+        ];
+
+        const LANES = [
+            { text: "FRONT END", x: 20, y: 56 },
+            { text: "MIDDLE", x: 500, y: 196 },
+            { text: "BACK END", x: 20, y: 156 },
+        ];
+
+        const element = (name, attributes = {}, text = "") => {
+            const node = document.createElementNS(SVG_NAMESPACE, name);
+            for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+            if (text !== "") node.textContent = text;
+            return node;
+        };
+
+        const diagram = document.getElementById("diagram");
+        const detail = document.getElementById("detail");
+        const buttons = new Map();
+
+        function drawEdges() {
+            for (const edge of EDGES) {
+                const points = edge.points;
+                const [x, y] = points[points.length - 1];
+                const [fromX, fromY] = points[points.length - 2];
+                const angle = Math.atan2(y - fromY, x - fromX);
+                // The line ends where the arrowhead starts.
+                const shown = points.slice(0, -1).concat([[x - 8 * Math.cos(angle), y - 8 * Math.sin(angle)]]);
+                diagram.append(element("polyline", { class: edge.dashed ? "edge support" : "edge", points: shown.map((point) => point.join(",")).join(" ") }));
+                const side = (offset) => `${x - 9 * Math.cos(angle) - offset * Math.sin(angle)},${y - 9 * Math.sin(angle) + offset * Math.cos(angle)}`;
+                diagram.append(element("polygon", { class: "arrow", points: `${x},${y} ${side(4)} ${side(-4)}` }));
+                if (edge.label) diagram.append(element("text", { class: "edge-label", x: edge.at[0], y: edge.at[1] }, edge.label));
+            }
+        }
+
+        function drawStages() {
+            for (const stage of STAGES) {
+                const width = stage.wide ? 920 : WIDTH;
+                const group = element("g", {
+                    class: stage.wide ? "stage bar" : "stage",
+                    tabindex: "0", role: "button", "aria-pressed": "false",
+                    "aria-label": `${stage.name}, ${stage.file}`,
+                    style: `--kind: var(--${stage.kind})`,
+                });
+                group.append(
+                    element("rect", { x: stage.x, y: stage.y, width, height: HEIGHT, rx: 3 }),
+                    element("text", { class: "name", x: stage.x + 14, y: stage.y + 28 }, stage.name),
+                    element("text", { class: "file", x: stage.x + 14, y: stage.y + 47 }, stage.file),
+                );
+                group.addEventListener("click", () => show(stage.id));
+                group.addEventListener("keydown", (event) => {
+                    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); show(stage.id); }
+                });
+                buttons.set(stage.id, group);
+                diagram.append(group);
+            }
+            for (const lane of LANES) diagram.append(element("text", { class: "lane", x: lane.x, y: lane.y }, lane.text));
+        }
+
+        function show(id) {
+            const stage = STAGES.find((candidate) => candidate.id === id);
+            for (const [key, button] of buttons) button.setAttribute("aria-pressed", String(key === id));
+            detail.style.setProperty("--kind", `var(--${stage.kind})`);
+            const title = document.createElement("h2");
+            title.textContent = stage.name;
+            const files = document.createElement("p");
+            files.className = "files";
+            files.textContent = `src/${stage.file.split(", ").join(", src/")}`.replace("src/a .mu file", "the file that is compiled");
+            const gives = document.createElement("p");
+            gives.textContent = stage.gives;
+            const list = document.createElement("ul");
+            for (const point of stage.points) {
+                const item = document.createElement("li");
+                item.textContent = point;
+                list.append(item);
+            }
+            detail.replaceChildren(title, files, gives, list);
+            try { history.replaceState(null, "", `#${id}`); } catch (failure) { /* The choice is not remembered. */ }
+        }
+
+        drawEdges();
+        drawStages();
+        const wanted = location.hash.slice(1);
+        show(STAGES.some((stage) => stage.id === wanted) ? wanted : "tokenizer");
+    </script>
+</body>
+</html>

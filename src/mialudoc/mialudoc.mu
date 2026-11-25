@@ -13,6 +13,7 @@
 ///     /tools/playground       the playground, `tests/wasm/playground.html`
 ///     /tools/internals        the page of the internals of the compiler, `tests/wasm/internals.html`
 ///     /api/internals          the tokens, syntax tree nodes, reserved words and operators of the compiler, as JSON
+///     /tools/architecture     the page of the architecture of the compiler, `tests/wasm/architecture.html`
 ///     /tools/stats            the page of the source statistics, `tests/wasm/stats.html`
 ///     /api/stats              the lines of the C code and of the Mialu code of the project, as JSON
 ///     /compile                the source of a program in the body of a POST, built by the compiler, as JSON
@@ -622,7 +623,7 @@ emit_page_start :: proc(out: ^Output, title: []Byte) ->
     emit_text(out, "footer { text-align: center; color: var(--muted); font-size: .85rem; padding-bottom: 3rem; }\n")
     emit_text(out, "</style>\n</head>\n<body>\n<div class='bar'><a href='/'><img src='/logo.png' alt=''>Mialu</a>")
     emit_text(out, "<nav aria-label='Pages'><a href='/' aria-current='page'>Documentation</a>")
-    emit_text(out, "<a href='/tools/playground'>Playground</a><a href='/tools/internals'>Compiler internals</a><a href='/tools/stats'>Source statistics</a></nav></div>\n")
+    emit_text(out, "<a href='/tools/playground'>Playground</a><a href='/tools/internals'>Compiler internals</a><a href='/tools/architecture'>Architecture</a><a href='/tools/stats'>Source statistics</a></nav></div>\n")
 
 emit_page_end :: proc(out: ^Output) ->
     emit_text(out, "</main>\n<footer>Served by mialudoc, which is written in Mialu.</footer>\n</body>\n</html>\n")
@@ -2637,6 +2638,8 @@ answer :: proc(client: Int, arena: ^mu.Arena_Allocator, request: []Byte, directo
         return send_page(client, arena, directory, "/tests/wasm/", "internals.html", with_body)
     if bytes_are(target, "/api/internals") ->
         return send_internals(client, arena, directory, with_body)
+    if bytes_are(target, "/tools/architecture") ->
+        return send_page(client, arena, directory, "/tests/wasm/", "architecture.html", with_body)
     if bytes_are(target, "/tools/stats") ->
         return send_page(client, arena, directory, "/tests/wasm/", "stats.html", with_body)
     if bytes_are(target, "/api/stats") ->
