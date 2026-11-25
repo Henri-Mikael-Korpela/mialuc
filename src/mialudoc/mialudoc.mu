@@ -1972,12 +1972,16 @@ send_internals :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byt
 // asks for them, one part of the project at a time, and the answer is JSON:
 //
 //     {"groups": [{"name": "Compiler sources", "language": "C", "files": 18, "lines": 40000,
-//                  "code": 33000, "comments": 4000, "blanks": 3000}, ...]}
+//                  "code": 33000, "comments": 4000, "blanks": 3000, "functions": 900}, ...]}
 //
 // A line is blank when it has nothing but spaces, a line of a comment is one that has nothing else, and
 // the others are source lines, also when a comment follows the code. In C a comment is `//` and
 // `/* */`, which can be of many lines, and in Mialu it is `//` and the `///` of a document. A line
 // that ends a block comment and goes on with code is a source line.
+//
+// A function in C is a `{` that follows a `)` outside of every other `{`, as the definition of a
+// function does, so a prototype is not one. In Mialu it is a line that has `:: proc(`, except the
+// declaration of a foreign procedure, which ends with `...`.
 // ---------------------------------------------------------------------------------------------
 
 LINE_BLANK :: 0
@@ -1985,13 +1989,14 @@ LINE_COMMENT :: 1
 LINE_CODE :: 2
 
 /// How many files and lines a part of the project has, and how the lines are divided: every line is
-/// blank, a line of a comment or a source line.
+/// blank, a line of a comment or a source line. `functions` is how many functions are defined.
 Line_Count :: struct ->
     files: Int
     lines: Int
     code: Int
     comments: Int
     blanks: Int
+    functions: Int
 
 /// Where the first byte is that is not a space, a tab or a control character, which is the length
 /// of the bytes when there is none.
@@ -2037,6 +2042,49 @@ line_kind :: proc(line: []Byte, is_c: Bool, is_in_comment: ^Bool) Int ->
         return line_kind_after_comment(text[end + 2:])
     return LINE_CODE
 
+/// Whether the line of code `text` of a C file has the `{` that starts the body of a function: one
+/// that follows a `)` and is not inside another `{`. `depth` is how many `{` are open, which this
+/// changes by what the line opens and closes. Literals and the comment at the end of the line are
+/// left out, and so is a line of the preprocessor.
+c_line_starts_function :: proc(text: []Byte, depth: ^Int) Bool ->
+    if length_of(text) == 0 or text[0] == '#' ->
+        return false
+    is_function := false
+    is_after_paren := false
+    index := 0
+    for index < length_of(text) ->
+        value := text[index]
+        match value ->
+            case '"' ->
+                index = literal_end(text, index, false) - 1
+            case '\'' ->
+                index = literal_end(text, index, true) - 1
+            case '/' ->
+                if index + 1 < length_of(text) and text[index + 1] == '/' ->
+                    index = length_of(text)
+            case '{' ->
+                if depth^ == 0 and is_after_paren ->
+                    is_function = true
+                depth^ += 1
+            case '}' ->
+                depth^ -= 1
+        if value > 32 ->
+            is_after_paren = value == ')'
+        index += 1
+    return is_function
+
+/// Whether `text` has `part` somewhere in it.
+bytes_have :: proc(text: []Byte, part: Str) Bool ->
+    for index in 0..<length_of(text) ->
+        if bytes_start_with(text[index:], part) ->
+            return true
+    return false
+
+/// Whether the line of code `text` of a Mialu file defines a procedure, which a foreign one that
+/// ends with `...` does not.
+line_defines_procedure :: proc(text: []Byte) Bool ->
+    return bytes_have(text, ":: proc(") and not bytes_end_with(text, "...")
+
 /// Counts the lines of the file at `path` in `count`. A file that cannot be opened is not counted.
 /// The memory that it takes from the arena is given back after it.
 count_file :: proc(arena: ^mu.Arena_Allocator, path: []Byte, is_c: Bool, count: ^Line_Count) ->
@@ -2050,19 +2098,27 @@ count_file :: proc(arena: ^mu.Arena_Allocator, path: []Byte, is_c: Bool, count: 
         line, _ := mu.arena_allocate(arena, LINE_BYTES)
         reader := line_reader_make(file, arena)
         is_in_comment := false
+        depth := 0
         count.files += 1
         for ->
             length, has_line := read_line(%reader, line)
             if not has_line ->
                 break
             count.lines += 1
-            kind := line_kind(line[0:length], is_c, %is_in_comment)
+            text := line[0:length]
+            kind := line_kind(text, is_c, %is_in_comment)
             if kind == LINE_BLANK ->
                 count.blanks += 1
             else if kind == LINE_COMMENT ->
                 count.comments += 1
             else ->
                 count.code += 1
+                code := text[first_visible(text):]
+                if is_c ->
+                    if c_line_starts_function(code, %depth) ->
+                        count.functions += 1
+                else if line_defines_procedure(code) ->
+                    count.functions += 1
 
 /// Puts a number that is not negative in the page.
 emit_number :: proc(out: ^Output, number: Int) ->
@@ -2082,7 +2138,7 @@ emit_count_field :: proc(out: ^Output, name: Str, number: Int) ->
 /// puts the part of the project that they are in the page, as an object of the answer. Parts of
 /// the same name are one part for the page. `is_first` is false after the first part.
 emit_stats_group :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte, name: Str, language: Str, folder: Str, extension: Str, is_first: ^Bool) ->
-    count := Line_Count { files = 0, lines = 0, code = 0, comments = 0, blanks = 0 }
+    count := Line_Count { files = 0, lines = 0, code = 0, comments = 0, blanks = 0, functions = 0 }
     is_c := language == "C"
 
     pattern_bytes := [PATH_BYTES]Byte { .. = 0 }
@@ -2128,6 +2184,7 @@ emit_stats_group :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []
     emit_count_field(out, "code", count.code)
     emit_count_field(out, "comments", count.comments)
     emit_count_field(out, "blanks", count.blanks)
+    emit_count_field(out, "functions", count.functions)
     emit_text(out, "}")
 
 /// Sends the answer of /api/stats.
