@@ -22,10 +22,14 @@
 #include <windows.h>
 
 enum {
-    // The longest path that the system functions below take, and room for the suffix that is added.
+    /**
+     * The longest path that the system functions below take, and room for the suffix that is added.
+     */
     PROCESS_PATH_SIZE_BYTES = MAX_PATH + 8,
-    // The longest command line that `CreateProcess` takes is 32767 characters and the zero after
-    // them.
+    /**
+     * The longest command line that `CreateProcess` takes is 32767 characters and the zero after
+     * them.
+     */
     PROCESS_COMMAND_LINE_SIZE_BYTES = 32768,
 };
 

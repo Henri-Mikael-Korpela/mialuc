@@ -19,15 +19,21 @@
 #include <mialu/x64.h>
 
 enum {
-    // The codes are numbers below this, and the catalog has a place for each of them, so that the
-    // text of an error is found by its code without a search. The numbers that are not used are
-    // empty places.
+    /**
+     * The codes are numbers below this, and the catalog has a place for each of them, so that the
+     * text of an error is found by its code without a search.
+     * The numbers that are not used are empty places.
+     */
     REPORT_CODE_COUNT = 1000,
-    // The most bytes of the name, or of whatever else the error is about, that go into its text. A
-    // longer one is cut and ends with `...`, so that an error is a few lines, whatever the program
-    // has.
+    /**
+     * The most bytes of the name, or of whatever else the error is about, that go into its text.
+     * A longer one is cut and ends with `...`, so that an error is a few lines, whatever the
+     * program has.
+     */
     REPORT_SUBJECT_LENGTH_MAX = 80,
-    // The most bytes of each part of an error after the text of the catalog is filled in.
+    /**
+     * The most bytes of each part of an error after the text of the catalog is filled in.
+     */
     REPORT_PART_SIZE_BYTES = 2048,
 };
 

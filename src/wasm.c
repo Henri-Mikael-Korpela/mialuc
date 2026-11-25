@@ -12,67 +12,104 @@
 // The constants of the binary format are in wasm.h, because wasm-text.c reads what this writes.
 
 enum {
-    // The deepest expression that can be written. The writer keeps the path from the root of the
-    // expression in a fixed array instead of recursing. Left associative operators nest to the
-    // left, so `a + b + c + ...` is as deep as it has operators. A longer chain is rejected.
+    /**
+     * The deepest expression that can be written.
+     * The writer keeps the path from the root of the expression in a fixed array instead of
+     * recursing.
+     * Left associative operators nest to the left, so `a + b + c + ...` is as deep as it has
+     * operators.
+     * A longer chain is rejected.
+     */
     WASM_EXPRESSION_DEPTH_MAX = 1024,
-    // The most statement lists that can be open at once while the statements of a procedure are
-    // written: the body, and for each nested if statement the statement itself and its current
-    // block, which is two for each of the blocks that the parser accepts inside each other, see
-    // `AST_BLOCK_DEPTH_MAX`. A deferred statement is written again where its block is left, at the
-    // depth of the jump that leaves it, so on top of those come the frame of the jump and of the
-    // deferred statement, the lists of the deferred statement, which is in at least one block
-    // already, and the frame of a jump inside it, which does not write deferred statements, because
-    // a `defer` cannot be in another.
+    /**
+     * The most statement lists that can be open at once while the statements of a procedure are
+     * written:
+     * the body, and for each nested if statement the statement itself and its current block, which
+     * is two for each of the blocks that the parser accepts inside each other, see
+     * `AST_BLOCK_DEPTH_MAX`.
+     * A deferred statement is written again where its block is left, at the depth of the jump that
+     * leaves it, so on top of those come the frame of the jump and of the deferred statement, the
+     * lists of the deferred statement, which is in at least one block already, and the frame of a
+     * jump inside it, which does not write deferred statements, because a `defer` cannot be in
+     * another.
+     */
     WASM_STATEMENT_DEPTH_MAX = 4 * AST_BLOCK_DEPTH_MAX + 4,
-    // The size of the stack in memory that the arrays of the running procedures are on. Arrays are
-    // not in locals, because an array slice refers to elements by address. A recursion that
-    // needs more traps, see `wasm_frame_enter`.
+    /**
+     * The size of the stack in memory that the arrays of the running procedures are on.
+     * Arrays are not in locals, because an array slice refers to elements by address.
+     * A recursion that needs more traps, see `wasm_frame_enter`.
+     */
     WASM_STACK_SIZE_BYTES = 1024 * 1024,
-    // An element is an `Int`, which is 8 bytes. The shift multiplies an index by that size, and is
-    // also the alignment of a load or a store of an element, as a power of two.
+    /**
+     * An element is an `Int`, which is 8 bytes.
+     * The shift multiplies an index by that size, and is also the alignment of a load or a store of
+     * an element, as a power of two.
+     */
     WASM_ELEMENT_SIZE_BYTES = 8,
     WASM_ELEMENT_SIZE_SHIFT = 3,
-    // The largest number a `Byte` holds.
+    /**
+     * The largest number a `Byte` holds.
+     */
     WASM_BYTE_MAX = 255,
-    // An element of the members of an enum is an `Enum_Member_Type_Info`, which has the name of the
-    // member, a `Str` of two slots, and its number, an `Int` of one. Every slot takes 8 bytes in
-    // memory, see `wasm_type_stride_bytes`.
+    /**
+     * An element of the members of an enum is an `Enum_Member_Type_Info`, which has the name of the
+     * member, a `Str` of two slots, and its number, an `Int` of one.
+     * Every slot takes 8 bytes in memory, see `wasm_type_stride_bytes`.
+     */
     WASM_ENUM_MEMBER_INFO_SLOT_COUNT = 3,
-    // The most structs that are open at once while the fields of a struct are walked, which is how
-    // far structs can be inside each other, as a field of a struct that is a struct. A struct that
-    // has itself as a field is infinitely large, and is found by going deeper than this.
+    /**
+     * The most structs that are open at once while the fields of a struct are walked, which is how
+     * far structs can be inside each other, as a field of a struct that is a struct.
+     * A struct that has itself as a field is infinitely large, and is found by going deeper than
+     * this.
+     */
     WASM_STRUCT_DEPTH_MAX = 64,
-    // The most fields that a walk over a struct visits. Structs whose fields are structs with
-    // several fields of a struct each have more slots than any module can use, and the walk must
-    // end.
+    /**
+     * The most fields that a walk over a struct visits.
+     * Structs whose fields are structs with several fields of a struct each have more slots than
+     * any module can use, and the walk must end.
+     */
     WASM_STRUCT_STEP_MAX = 1 << 20,
-    // The heap that `make` and `destroy` use, see `wasm_build_heap_functions`. Each block of it has
-    // a header of two 32-bit values before the elements: the size of the block in bytes, and the
-    // address of the next block that is free, which only a free block uses. The size is a multiple
-    // of 8, so that the elements of every block are aligned like the elements of the stack.
+    /**
+     * The heap that `make` and `destroy` use, see `wasm_build_heap_functions`.
+     * Each block of it has a header of two 32-bit values before the elements:
+     * the size of the block in bytes, and the address of the next block that is free, which only a
+     * free block uses.
+     * The size is a multiple of 8, so that the elements of every block are aligned like the
+     * elements of the stack.
+     */
     WASM_HEAP_FUNCTION_COUNT = 2,
     WASM_HEAP_GLOBAL_COUNT = 2,
     WASM_HEAP_HEADER_SIZE_BYTES = 8,
     WASM_HEAP_HEADER_NEXT_OFFSET_BYTES = 4,
     WASM_HEAP_ALIGNMENT_BYTES = 8,
-    // A page is 2 to the power of this, so a number of bytes is made a number of pages by a shift.
+    /**
+     * A page is 2 to the power of this, so a number of bytes is made a number of pages by a shift.
+     */
     WASM_MEMORY_PAGE_SHIFT = 16,
 };
 
 // The globals of the heap, in the order of their indexes, see `wasm_heap_global_index`.
 typedef enum {
-    // The address after the last block, where the next block that is not reused starts.
+    /**
+     * The address after the last block, where the next block that is not reused starts.
+     */
     WASM_HEAP_GLOBAL_END,
-    // The address of the header of the first block that is free, or 0 when none is.
+    /**
+     * The address of the header of the first block that is free, or 0 when none is.
+     */
     WASM_HEAP_GLOBAL_FREE,
 } Wasm_Heap_Global;
 
 // The functions of the heap, in the order of their indexes, see `wasm_heap_function_index`.
 typedef enum {
-    // Takes a size in bytes and gives the address of that many bytes that are zero.
+    /**
+     * Takes a size in bytes and gives the address of that many bytes that are zero.
+     */
     WASM_HEAP_FUNCTION_ALLOCATE,
-    // Takes an address that the first gave, or 0, and makes its block free.
+    /**
+     * Takes an address that the first gave, or 0, and makes its block free.
+     */
     WASM_HEAP_FUNCTION_FREE,
 } Wasm_Heap_Function;
 
@@ -126,9 +163,12 @@ typedef enum {
     WASM_VALUE_TYPE_BOOL,
     WASM_VALUE_TYPE_BYTE,
     WASM_VALUE_TYPE_C_STR,
-    // A dynamic array, `[dynamic]Int`: as a value the address of its first element and its number of
-    // elements, like an array slice, and the variable that holds it has a third value, the number of
-    // elements that there is room for, which it has in the frame.
+    /**
+     * A dynamic array, `[dynamic]Int`:
+     * as a value the address of its first element and its number of elements, like an array slice,
+     * and the variable that holds it has a third value, the number of elements that there is room
+     * for, which it has in the frame.
+     */
     WASM_VALUE_TYPE_DYNAMIC,
     WASM_VALUE_TYPE_ENUM,
     WASM_VALUE_TYPE_ENUM_LITERAL,
@@ -197,20 +237,30 @@ typedef enum {
     WASM_SCRATCH_TEMPORARY_64,
     WASM_SCRATCH_FIRST,
     WASM_SCRATCH_SECOND,
-    // The address of the element that a statement assigns to.
+    /**
+     * The address of the element that a statement assigns to.
+     */
     WASM_SCRATCH_ADDRESS,
     WASM_SCRATCH_TEMPORARY_32,
-    // The address of the array literals of the procedure, see `wasm_frame_enter`.
+    /**
+     * The address of the array literals of the procedure, see `wasm_frame_enter`.
+     */
     WASM_SCRATCH_FRAME,
-    // Whether two strings are the same so far, which is kept with `WASM_SCRATCH_FIRST`,
-    // `WASM_SCRATCH_SECOND` and `WASM_SCRATCH_TEMPORARY_32`, see
-    // `wasm_build_code_section_body_string_comparison`.
+    /**
+     * Whether two strings are the same so far, which is kept with `WASM_SCRATCH_FIRST`,
+     * `WASM_SCRATCH_SECOND` and `WASM_SCRATCH_TEMPORARY_32`, see
+     * `wasm_build_code_section_body_string_comparison`.
+     */
     WASM_SCRATCH_STRING,
-    // The address of the first byte that `utf8_decode` checks, see
-    // `wasm_build_code_section_body_utf8_decode`.
+    /**
+     * The address of the first byte that `utf8_decode` checks, see
+     * `wasm_build_code_section_body_utf8_decode`.
+     */
     WASM_SCRATCH_BYTES,
-    // The only scratch locals that are not integers: they hold an `F32` and an `F64` between
-    // instructions.
+    /**
+     * The only scratch locals that are not integers:
+     * they hold an `F32` and an `F64` between instructions.
+     */
     WASM_SCRATCH_TEMPORARY_F32,
     WASM_SCRATCH_TEMPORARY_F64,
 } Wasm_Scratch;

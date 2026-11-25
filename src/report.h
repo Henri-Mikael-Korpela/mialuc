@@ -71,7 +71,10 @@ typedef enum {
     ERROR_CODE_RUNE_LITERAL_ENCODING_INVALID = 116,
     ERROR_CODE_RUNE_LITERAL_TOO_LONG = 117,
     ERROR_CODE_RUNE_LITERAL_UNTERMINATED = 118,
-    // 119 was a backslash in a string, which is an escape sequence now. A code is never used again.
+    /**
+     * 119 was a backslash in a string, which is an escape sequence now.
+     * A code is never used again.
+     */
     ERROR_CODE_STRING_LITERAL_ENCODING_INVALID = 120,
     ERROR_CODE_STRING_LITERAL_UNTERMINATED = 121,
     ERROR_CODE_TOKEN_LIMIT = 122,

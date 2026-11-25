@@ -20,13 +20,19 @@
 static uint32_t const PACKAGE_INDENTATION_LEVEL_TOP = 0;
 
 enum {
-    // The most definitions that one imported file has, which the names of its references are
-    // looked up among.
+    /**
+     * The most definitions that one imported file has, which the names of its references are looked
+     * up among.
+     */
     PACKAGE_DEFINITION_COUNT_MAX = 4096,
-    // The longest path of a file of the library, with the directory.
+    /**
+     * The longest path of a file of the library, with the directory.
+     */
     PACKAGE_PATH_SIZE_BYTES_MAX = 4096,
-    // How many `import foreign` of the files are remembered, to leave out the ones that are the
-    // same as an earlier one.
+    /**
+     * How many `import foreign` of the files are remembered, to leave out the ones that are the
+     * same as an earlier one.
+     */
     PACKAGE_FOREIGN_IMPORT_COUNT_MAX = 32,
 };
 

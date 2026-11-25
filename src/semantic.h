@@ -12,10 +12,14 @@
 // node has that is not a use of a name.
 typedef enum {
     SEMANTIC_BINDING_KIND_CONSTANT,
-    // A global variable, which is defined at file scope and can be assigned to.
+    /**
+     * A global variable, which is defined at file scope and can be assigned to.
+     */
     SEMANTIC_BINDING_KIND_GLOBAL,
-    // A `break` or a `continue`: the target is the loop or scope statement that it leaves or goes
-    // on with.
+    /**
+     * A `break` or a `continue`:
+     * the target is the loop or scope statement that it leaves or goes on with.
+     */
     SEMANTIC_BINDING_KIND_JUMP_TARGET,
     SEMANTIC_BINDING_KIND_NONE,
     SEMANTIC_BINDING_KIND_PARAMETER,
@@ -52,111 +56,200 @@ typedef struct {
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
-    // The name that an assignment assigns to is not a variable, but a parameter or a constant.
+    /**
+     * The name that an assignment assigns to is not a variable, but a parameter or a constant.
+     */
     SEMANTIC_STATUS_ASSIGNMENT_TARGET_NOT_VARIABLE,
-    // An attribute list names the same attribute twice. The subject is the second one.
+    /**
+     * An attribute list names the same attribute twice.
+     * The subject is the second one.
+     */
     SEMANTIC_STATUS_ATTRIBUTE_DUPLICATE,
-    // An attribute that the language does not have.
+    /**
+     * An attribute that the language does not have.
+     */
     SEMANTIC_STATUS_ATTRIBUTE_UNKNOWN,
-    // The name that an assignment assigns to is the iterator of a for statement, which is
-    // read-only.
+    /**
+     * The name that an assignment assigns to is the iterator of a for statement, which is
+     * read-only.
+     */
     SEMANTIC_STATUS_ASSIGNMENT_TARGET_ITERATOR,
-    // The name that is called is not a procedure: a variable, a parameter or a constant string.
+    /**
+     * The name that is called is not a procedure:
+     * a variable, a parameter or a constant string.
+     */
     SEMANTIC_STATUS_CALL_TARGET_NOT_PROCEDURE,
-    // An operand of `++` that is not known when the program is compiled, such as a variable or a
-    // call, because the text of the result is made then. The subject is the first name or string
-    // of the expression.
+    /**
+     * An operand of `++` that is not known when the program is compiled, such as a variable or a
+     * call, because the text of the result is made then.
+     * The subject is the first name or string of the expression.
+     */
     SEMANTIC_STATUS_CONCATENATION_NOT_CONSTANT,
-    // The argument of `int_to_str` that is not known when the program is compiled, such as a
-    // variable, because the text of the number is made then. The subject is the first name or
-    // number of the expression.
+    /**
+     * The argument of `int_to_str` that is not known when the program is compiled, such as a
+     * variable, because the text of the number is made then.
+     * The subject is the first name or number of the expression.
+     */
     SEMANTIC_STATUS_INT_TO_STR_NOT_CONSTANT,
-    // The length of an array type, `[SIZE]Int`, is not known when the program is compiled, such as
-    // the name of a variable. The subject is the first name in it.
+    /**
+     * The length of an array type, `[SIZE]Int`, is not known when the program is compiled, such as
+     * the name of a variable.
+     * The subject is the first name in it.
+     */
     SEMANTIC_STATUS_ARRAY_LENGTH_NOT_CONSTANT,
-    // The length of an array type is a constant that is not an integer, or is below zero, such as
-    // `[1.5]Int` and `[0 - 1]Int`. The subject is the first name in it.
+    /**
+     * The length of an array type is a constant that is not an integer, or is below zero, such as
+     * `[1.5]Int` and `[0 - 1]Int`.
+     * The subject is the first name in it.
+     */
     SEMANTIC_STATUS_ARRAY_LENGTH_INVALID,
-    // A constant that is defined in terms of itself. The subject is the name where the circle
-    // closes.
+    /**
+     * A constant that is defined in terms of itself.
+     * The subject is the name where the circle closes.
+     */
     SEMANTIC_STATUS_CONSTANT_CYCLE,
-    // A constant expression that divides by zero. The subject is its first name, or the
-    // definition that it is in.
+    /**
+     * A constant expression that divides by zero.
+     * The subject is its first name, or the definition that it is in.
+     */
     SEMANTIC_STATUS_CONSTANT_DIVISION_BY_ZERO,
-    // The value of a constant is not known when the program is compiled, such as a call or a
-    // variable. The subject is the name of the constant.
+    /**
+     * The value of a constant is not known when the program is compiled, such as a call or a
+     * variable.
+     * The subject is the name of the constant.
+     */
     SEMANTIC_STATUS_CONSTANT_NOT_CONSTANT,
-    // An operator of a constant expression is given operands that it does not take, such as
-    // `true + 1`. The subject is the first name of the expression, or the definition that it is
-    // in.
+    /**
+     * An operator of a constant expression is given operands that it does not take, such as
+     * `true + 1`.
+     * The subject is the first name of the expression, or the definition that it is in.
+     */
     SEMANTIC_STATUS_CONSTANT_OPERAND_TYPE_INVALID,
-    // A constant expression whose value does not fit in an `Int`. The subject is its first name, or
-    // the definition that it is in.
+    /**
+     * A constant expression whose value does not fit in an `Int`.
+     * The subject is its first name, or the definition that it is in.
+     */
     SEMANTIC_STATUS_CONSTANT_OVERFLOW,
-    // The strings that `++` joins in the constants of the program have more bytes together than
-    // the text buffer has room for. The subject is its first name or string, or the definition that
-    // it is in.
+    /**
+     * The strings that `++` joins in the constants of the program have more bytes together than the
+     * text buffer has room for.
+     * The subject is its first name or string, or the definition that it is in.
+     */
     SEMANTIC_STATUS_CONSTANT_TEXT_TOO_LONG,
-    // A constant expression that is nested deeper than `CONSTANT_EXPRESSION_DEPTH_MAX`, with the
-    // constants that it goes through. The subject is the name or the definition where it was.
+    /**
+     * A constant expression that is nested deeper than `CONSTANT_EXPRESSION_DEPTH_MAX`, with the
+     * constants that it goes through.
+     * The subject is the name or the definition where it was.
+     */
     SEMANTIC_STATUS_CONSTANT_TOO_DEEP,
-    // A typed constant whose type is not `Int`, `Byte`, `Bool` or `Str`. The subject is its name.
+    /**
+     * A typed constant whose type is not `Int`, `Byte`, `Bool` or `Str`.
+     * The subject is its name.
+     */
     SEMANTIC_STATUS_CONSTANT_TYPE_INVALID,
-    // The value of a typed constant is of another type, such as a string for an `Int`. The
-    // subject is its name.
+    /**
+     * The value of a typed constant is of another type, such as a string for an `Int`.
+     * The subject is its name.
+     */
     SEMANTIC_STATUS_CONSTANT_TYPE_MISMATCH,
-    // An untyped integer that does not fit in the `Byte` that it must be, such as 300. The subject
-    // is the name of the constant, or the first name of the comparison.
+    /**
+     * An untyped integer that does not fit in the `Byte` that it must be, such as 300.
+     * The subject is the name of the constant, or the first name of the comparison.
+     */
     SEMANTIC_STATUS_CONSTANT_VALUE_NOT_REPRESENTABLE,
-    // A `defer` inside the statement of another `defer`. The subject is the inner `defer`.
+    /**
+     * A `defer` inside the statement of another `defer`.
+     * The subject is the inner `defer`.
+     */
     SEMANTIC_STATUS_DEFER_NESTED,
-    // A `defer` of a statement that cannot be deferred: a variable definition, which would be gone
-    // as soon as it is made, or a `return`, a `break` or a `continue`, which would leave the block
-    // while it is being left. The subject is the `defer`.
+    /**
+     * A `defer` of a statement that cannot be deferred:
+     * a variable definition, which would be gone as soon as it is made, or a `return`, a `break` or
+     * a `continue`, which would leave the block while it is being left.
+     * The subject is the `defer`.
+     */
     SEMANTIC_STATUS_DEFER_STATEMENT_INVALID,
     SEMANTIC_STATUS_DEFINITION_NAME_DUPLICATE,
-    // Two members of one enum with the same name. The subject is the second one.
+    /**
+     * Two members of one enum with the same name.
+     * The subject is the second one.
+     */
     SEMANTIC_STATUS_ENUM_MEMBER_DUPLICATE,
-    // Two fields of one struct with the same name. The subject is the second one.
+    /**
+     * Two fields of one struct with the same name.
+     * The subject is the second one.
+     */
     SEMANTIC_STATUS_FIELD_NAME_DUPLICATE,
-    // A second `import foreign` of one target, `js` or `libc`. The subject is the name of its
-    // object for `js`, and the word `libc` for `libc`.
+    /**
+     * A second `import foreign` of one target, `js` or `libc`.
+     * The subject is the name of its object for `js`, and the word `libc` for `libc`.
+     */
     SEMANTIC_STATUS_FOREIGN_IMPORT_DUPLICATE,
-    // A foreign procedure without an `import foreign` of its target before it. The subject is its
-    // name.
+    /**
+     * A foreign procedure without an `import foreign` of its target before it.
+     * The subject is its name.
+     */
     SEMANTIC_STATUS_FOREIGN_IMPORT_MISSING,
-    // A global variable without the `static` attribute. The subject is its name.
+    /**
+     * A global variable without the `static` attribute.
+     * The subject is its name.
+     */
     SEMANTIC_STATUS_GLOBAL_NOT_STATIC,
-    // The initial value of a global variable is not known when the program is compiled. The subject
-    // is the name of the global variable.
+    /**
+     * The initial value of a global variable is not known when the program is compiled.
+     * The subject is the name of the global variable.
+     */
     SEMANTIC_STATUS_GLOBAL_VALUE_NOT_CONSTANT,
     SEMANTIC_STATUS_IDENTIFIER_UNKNOWN,
-    // A `break` that is not in a loop or a scope.
+    /**
+     * A `break` that is not in a loop or a scope.
+     */
     SEMANTIC_STATUS_BREAK_OUTSIDE_SCOPE,
-    // A `break` or a `continue` inside a deferred statement that leaves it, or goes on with a loop
-    // around it. The subject is the word of the jump.
+    /**
+     * A `break` or a `continue` inside a deferred statement that leaves it, or goes on with a loop
+     * around it.
+     * The subject is the word of the jump.
+     */
     SEMANTIC_STATUS_JUMP_OUT_OF_DEFER,
-    // A `continue` that is not in the block of a loop.
+    /**
+     * A `continue` that is not in the block of a loop.
+     */
     SEMANTIC_STATUS_JUMP_OUTSIDE_LOOP,
-    // A statement with the label of a statement around it.
+    /**
+     * A statement with the label of a statement around it.
+     */
     SEMANTIC_STATUS_LABEL_DUPLICATE,
-    // A `continue` with the label of a statement that is not a loop.
+    /**
+     * A `continue` with the label of a statement that is not a loop.
+     */
     SEMANTIC_STATUS_LABEL_NOT_LOOP,
-    // A `break` or a `continue` with a label that no statement around it has.
+    /**
+     * A `break` or a `continue` with a label that no statement around it has.
+     */
     SEMANTIC_STATUS_LABEL_UNKNOWN,
-    // An attribute of a match statement that the language does not have, which has `partial`
-    // only. The subject is the attribute.
+    /**
+     * An attribute of a match statement that the language does not have, which has `partial` only.
+     * The subject is the attribute.
+     */
     SEMANTIC_STATUS_MATCH_ATTRIBUTE_UNKNOWN,
     SEMANTIC_STATUS_OK,
     SEMANTIC_STATUS_PARAMETER_NAME_DUPLICATE,
     SEMANTIC_STATUS_PARAMETER_NAME_SHADOWS,
-    // A `return` inside a deferred statement, which runs while the block is being left, maybe by
-    // another `return`. The subject is the word `return`.
+    /**
+     * A `return` inside a deferred statement, which runs while the block is being left, maybe by
+     * another `return`.
+     * The subject is the word `return`.
+     */
     SEMANTIC_STATUS_RETURN_IN_DEFER,
-    // An argument that is not a type where a call gives a type to a type parameter, `$T: type_id`.
-    // The subject is the name of the call.
+    /**
+     * An argument that is not a type where a call gives a type to a type parameter, `$T: type_id`.
+     * The subject is the name of the call.
+     */
     SEMANTIC_STATUS_TYPE_ARGUMENT_INVALID,
-    // A type is an argument of a call where a value is wanted. The subject is the name of the call.
+    /**
+     * A type is an argument of a call where a value is wanted.
+     * The subject is the name of the call.
+     */
     SEMANTIC_STATUS_TYPE_ARGUMENT_MISPLACED,
     SEMANTIC_STATUS_VARIABLE_NAME_DUPLICATE,
     SEMANTIC_STATUS_VARIABLE_NAME_SHADOWS,

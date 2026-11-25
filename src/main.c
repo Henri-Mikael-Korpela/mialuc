@@ -31,15 +31,21 @@
 #endif
 
 enum {
-    // Bounds the text of a string that `dump-types` prints as the value of a constant, in bytes.
-    // The rest is left out, so that an editor is not given the whole of a long string for each use
-    // of the constant.
+    /**
+     * Bounds the text of a string that `dump-types` prints as the value of a constant, in bytes.
+     * The rest is left out, so that an editor is not given the whole of a long string for each use
+     * of the constant.
+     */
     MAIN_VALUE_BYTES_MAX = 400,
-    // Bounds the text of the documentation comment that `dump-types` prints for a name, in bytes. The
-    // rest is left out, like that of a value.
+    /**
+     * Bounds the text of the documentation comment that `dump-types` prints for a name, in bytes.
+     * The rest is left out, like that of a value.
+     */
     MAIN_DOC_BYTES_MAX = 4000,
-    // Bounds the absolute path of the source file that a debug build writes into the program. It
-    // is the longest path that Windows has, so any path that the system resolves fits.
+    /**
+     * Bounds the absolute path of the source file that a debug build writes into the program.
+     * It is the longest path that Windows has, so any path that the system resolves fits.
+     */
     SOURCE_PATH_SIZE_BYTES_MAX = 32 * 1024,
 };
 

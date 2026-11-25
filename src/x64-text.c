@@ -18,42 +18,62 @@
 // says what it is that it points at.
 
 enum {
-    // The structures of the file, see `x64_headers_write` in x64.c.
+    /**
+     * The structures of the file, see `x64_headers_write` in x64.c.
+     */
     X64_TEXT_DOS_POINTER_OFFSET = 0x3C,
     X64_TEXT_FILE_HEADER_SIZE_BYTES = 24,
     X64_TEXT_SECTION_HEADER_SIZE_BYTES = 40,
     X64_TEXT_IMPORT_DESCRIPTOR_SIZE_BYTES = 20,
-    // An entry of the table of imports is the address of the name of an import.
+    /**
+     * An entry of the table of imports is the address of the name of an import.
+     */
     X64_TEXT_IMPORT_ENTRY_SIZE_BYTES = 8,
-    // A name of an import is preceded by a hint of two bytes.
+    /**
+     * A name of an import is preceded by a hint of two bytes.
+     */
     X64_TEXT_IMPORT_HINT_SIZE_BYTES = 2,
     X64_TEXT_DIRECTORY_OFFSET = 112,
     X64_TEXT_DIRECTORY_IMPORT = 1,
     X64_TEXT_DIRECTORY_ADDRESS = 12,
     X64_TEXT_DIRECTORY_SIZE_BYTES = 8,
-    // The names of the imports and of the library are short, and a name that does not end within
-    // this many bytes is not read, so that a damaged file cannot make the loop that reads it run
-    // long.
+    /**
+     * The names of the imports and of the library are short, and a name that does not end within
+     * this many bytes is not read, so that a damaged file cannot make the loop that reads it run
+     * long.
+     */
     X64_TEXT_NAME_LENGTH_MAX = 256,
     X64_TEXT_REGISTER_COUNT = 16,
-    // The longest decimal number that is written: `UINT64_MAX` has 20 digits.
+    /**
+     * The longest decimal number that is written:
+     * `UINT64_MAX` has 20 digits.
+     */
     X64_TEXT_DECIMAL_DIGITS_MAX = 20,
     X64_TEXT_HEXADECIMAL_DIGITS_MAX = 16,
-    // The first 8 bytes of the section for the temporary storage are the number of bytes in use,
-    // and the storage follows, see `X64_TEMPORARY_USED_SIZE_BYTES` in x64.c.
+    /**
+     * The first 8 bytes of the section for the temporary storage are the number of bytes in use,
+     * and the storage follows, see `X64_TEMPORARY_USED_SIZE_BYTES` in x64.c.
+     */
     X64_TEXT_TEMPORARY_USED_SIZE_BYTES = 8,
-    // A number is written in decimal if it is smaller than this, and otherwise in hexadecimal,
-    // because a number that is large is mostly a pattern of bits, such as the bytes of a string.
+    /**
+     * A number is written in decimal if it is smaller than this, and otherwise in hexadecimal,
+     * because a number that is large is mostly a pattern of bits, such as the bytes of a string.
+     */
     X64_TEXT_DECIMAL_LIMIT = 65536,
-    // The byte that starts the instructions of two bytes of opcode.
+    /**
+     * The byte that starts the instructions of two bytes of opcode.
+     */
     X64_TEXT_OPCODE_TWO_BYTE = 0x0F,
-    // The prefixes of the instructions of floats, and the opcode of the one that has none.
+    /**
+     * The prefixes of the instructions of floats, and the opcode of the one that has none.
+     */
     X64_TEXT_PREFIX_OPERAND_SIZE = 0x66,
     X64_TEXT_PREFIX_SCALAR_DOUBLE = 0xF2,
     X64_TEXT_PREFIX_SCALAR_SINGLE = 0xF3,
     X64_TEXT_OPCODE_SSE_COMPARE = 0x2E,
-    // A condition that the processor does not have, which stands for the jump that is always
-    // taken.
+    /**
+     * A condition that the processor does not have, which stands for the jump that is always taken.
+     */
     X64_TEXT_CONDITION_ALWAYS = 16,
 };
 

@@ -6,11 +6,16 @@
 #include <mialu/ast.h>
 
 enum {
-    // The deepest tree that can be printed. The printer keeps the path from the root in a fixed
-    // array instead of recursing. The parser produces trees much shallower than this: blocks nest
-    // up to `AST_BLOCK_DEPTH_MAX` deep, and each level is an if statement and a block.
+    /**
+     * The deepest tree that can be printed.
+     * The printer keeps the path from the root in a fixed array instead of recursing.
+     * The parser produces trees much shallower than this:
+     * blocks nest up to `AST_BLOCK_DEPTH_MAX` deep, and each level is an if statement and a block.
+     */
     AST_PRINT_DEPTH_MAX = 256,
-    // Spaces printed per level of depth.
+    /**
+     * Spaces printed per level of depth.
+     */
     AST_PRINT_INDENT_SPACES = 2,
 };
 

@@ -10,201 +10,353 @@
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
-    // The operand of `%` has no address: a parameter, the iterator of a for statement, a value that
-    // is computed, or a variable of an array or array slice type. The subject is its first name or
-    // string, or the name of the definition that it is in.
+    /**
+     * The operand of `%` has no address:
+     * a parameter, the iterator of a for statement, a value that is computed, or a variable of an
+     * array or array slice type.
+     * The subject is its first name or string, or the name of the definition that it is in.
+     */
     X64_BUILD_STATUS_ADDRESS_INVALID,
-    // An operand of `+`, `-`, `*` or `/`, or the variable or the value of an assignment such as
-    // `x += 1`, is not an `Int`, or not a float of the type of the operation when it is one of
-    // floats, or the two operands are of different types. The subject is the first name or string
-    // of the operand, or the name of the definition that it is in.
+    /**
+     * An operand of `+`, `-`, `*` or `/`, or the variable or the value of an assignment such as
+     * `x += 1`, is not an `Int`, or not a float of the type of the operation when it is one of
+     * floats, or the two operands are of different types.
+     * The subject is the first name or string of the operand, or the name of the definition that it
+     * is in.
+     */
     X64_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
-    // The first argument of `append` is not the address of a variable that is a dynamic array.
-    // The subject is `append`.
+    /**
+     * The first argument of `append` is not the address of a variable that is a dynamic array.
+     * The subject is `append`.
+     */
     X64_BUILD_STATUS_APPEND_TARGET_INVALID,
-    // An array, a dynamic array or an array slice is compared with one of another of the three
-    // kinds. The subject is the first operand.
+    /**
+     * An array, a dynamic array or an array slice is compared with one of another of the three
+     * kinds.
+     * The subject is the first operand.
+     */
     X64_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH,
-    // Two arrays whose lengths are known when the program is compiled are compared, and have
-    // different lengths. The subject is the first operand, `length_first` and `length_second` are
-    // the two lengths, and `value_offset` is where the second operand is.
+    /**
+     * Two arrays whose lengths are known when the program is compiled are compared, and have
+     * different lengths.
+     * The subject is the first operand, `length_first` and `length_second` are the two lengths, and
+     * `value_offset` is where the second operand is.
+     */
     X64_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH,
-    // An element of an array literal, or the value that is assigned to an element or to a range of
-    // elements, is not of the type of the elements. The subject is its first name or string.
+    /**
+     * An element of an array literal, or the value that is assigned to an element or to a range of
+     * elements, is not of the type of the elements.
+     * The subject is its first name or string.
+     */
     X64_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
-    // What is subscripted, sliced, gone through by a for statement or assigned to as a range is not
-    // an array or an array slice. The subject is its first name or string.
+    /**
+     * What is subscripted, sliced, gone through by a for statement or assigned to as a range is not
+     * an array or an array slice.
+     * The subject is its first name or string.
+     */
     X64_BUILD_STATUS_ARRAY_EXPECTED,
-    // A variable of an array type is not defined with an array literal, or is assigned to as a
-    // whole. The subject is the name of the variable.
+    /**
+     * A variable of an array type is not defined with an array literal, or is assigned to as a
+     * whole.
+     * The subject is the name of the variable.
+     */
     X64_BUILD_STATUS_ARRAY_INITIALIZER_INVALID,
-    // An array literal has another number of elements than the length of its type. The subject is
-    // the name of the type of the elements.
+    /**
+     * An array literal has another number of elements than the length of its type.
+     * The subject is the name of the type of the elements.
+     */
     X64_BUILD_STATUS_ARRAY_LENGTH_MISMATCH,
-    // A parameter of an array type, which has to be an array slice. The subject is the name of the
-    // parameter.
+    /**
+     * A parameter of an array type, which has to be an array slice.
+     * The subject is the name of the parameter.
+     */
     X64_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
-    // The number of arguments of a call is not the number of parameters of the procedure. The
-    // subject is the name of the procedure.
+    /**
+     * The number of arguments of a call is not the number of parameters of the procedure.
+     * The subject is the name of the procedure.
+     */
     X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH,
-    // An argument of another type than its parameter has. The subject is the name of the
-    // procedure.
+    /**
+     * An argument of another type than its parameter has.
+     * The subject is the name of the procedure.
+     */
     X64_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH,
-    // The value of a call of a procedure that returns nothing. The subject is its name.
+    /**
+     * The value of a call of a procedure that returns nothing.
+     * The subject is its name.
+     */
     X64_BUILD_STATUS_CALL_RESULT_MISSING,
-    // The call of a variable, a parameter or a global variable that does not hold a pointer to a
-    // procedure. The subject is its name.
+    /**
+     * The call of a variable, a parameter or a global variable that does not hold a pointer to a
+     * procedure.
+     * The subject is its name.
+     */
     X64_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE,
-    // The operands of a comparison are not two `Int` values, two `Rune` values or two floats of one
-    // type, or not two `Bool` values for `==` and `not=`. The subject is the first name or string of the comparison.
+    /**
+     * The operands of a comparison are not two `Int` values, two `Rune` values or two floats of one
+     * type, or not two `Bool` values for `==` and `not=`.
+     * The subject is the first name or string of the comparison.
+     */
     X64_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
-    // The condition of an if statement is not a `Bool`. The subject is the first name or string of
-    // the condition, or the name of the definition that it is in.
+    /**
+     * The condition of an if statement is not a `Bool`.
+     * The subject is the first name or string of the condition, or the name of the definition that
+     * it is in.
+     */
     X64_BUILD_STATUS_CONDITION_TYPE_INVALID,
-    // More constants than the build has room to keep, see `X64_CONSTANT_COUNT_MAX`. The subject
-    // is the name of the first one that does not fit.
+    /**
+     * More constants than the build has room to keep, see `X64_CONSTANT_COUNT_MAX`.
+     * The subject is the name of the first one that does not fit.
+     */
     X64_BUILD_STATUS_CONSTANT_COUNT_EXCEEDED,
-    // A member of an enum that the enum does not have. The subject is the name of the member.
+    /**
+     * A member of an enum that the enum does not have.
+     * The subject is the name of the member.
+     */
     X64_BUILD_STATUS_ENUM_MEMBER_UNKNOWN,
-    // A member such as `.RED` where no enum is wanted, which does not say what enum it is of. The
-    // subject is the name of the member, or of the variable that it is given to.
+    /**
+     * A member such as `.RED` where no enum is wanted, which does not say what enum it is of.
+     * The subject is the name of the member, or of the variable that it is given to.
+     */
     X64_BUILD_STATUS_ENUM_TYPE_UNKNOWN,
-    // An expression that is nested deeper than `X64_EXPRESSION_DEPTH_MAX`. The subject is the name
-    // of the definition that has it.
+    /**
+     * An expression that is nested deeper than `X64_EXPRESSION_DEPTH_MAX`.
+     * The subject is the name of the definition that has it.
+     */
     X64_BUILD_STATUS_EXPRESSION_TOO_DEEP,
-    // A procedure declared in a `foreign js ->` block. A program for the processor has no
-    // JavaScript to import from, only the C library. The subject is the name of the procedure.
-    // A field is accessed on a value that is not a struct or a pointer of one caret to one. The
-    // subject is the name of the field.
+    /**
+     * A procedure declared in a `foreign js ->` block.
+     * A program for the processor has no JavaScript to import from, only the C library.
+     * The subject is the name of the procedure.
+     * A field is accessed on a value that is not a struct or a pointer of one caret to one.
+     * The subject is the name of the field.
+     */
     X64_BUILD_STATUS_FIELD_BASE_INVALID,
-    // A field is assigned through a parameter or an iterator, which cannot be assigned to. The
-    // subject is the first name of the place.
+    /**
+     * A field is assigned through a parameter or an iterator, which cannot be assigned to.
+     * The subject is the first name of the place.
+     */
     X64_BUILD_STATUS_FIELD_TARGET_READ_ONLY,
     X64_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED,
-    // A foreign procedure whose library is not given as `system:Name.lib`, or that makes more
-    // libraries than the build has room for. The subject is the name of the procedure.
+    /**
+     * A foreign procedure whose library is not given as `system:Name.lib`, or that makes more
+     * libraries than the build has room for.
+     * The subject is the name of the procedure.
+     */
     X64_BUILD_STATUS_LIBRARY_INVALID,
-    // A name of a struct or an enum where a value is wanted, which is a type and not a value. The
-    // subject is the name.
+    /**
+     * A name of a struct or an enum where a value is wanted, which is a type and not a value.
+     * The subject is the name.
+     */
     X64_BUILD_STATUS_IDENTIFIER_NOT_VALUE,
-    // An index of a subscript or a bound of a slice is not an `Int`. The subject is its first name
-    // or string.
+    /**
+     * An index of a subscript or a bound of a slice is not an `Int`.
+     * The subject is its first name or string.
+     */
     X64_BUILD_STATUS_INDEX_TYPE_INVALID,
-    // An operand of `and`, `or` or `not` is not a `Bool`. The subject is the first name or string
-    // of the operand, or the name of the definition that it is in.
+    /**
+     * An operand of `and`, `or` or `not` is not a `Bool`.
+     * The subject is the first name or string of the operand, or the name of the definition that it
+     * is in.
+     */
     X64_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
-    // `cast(Type)` of a value that is not converted to that type: the type must be `Int` and the
-    // value a `Byte`, a `Bool`, an `Int`, a `Rune` or a float, or the type must be a float and the
-    // value a `Byte`, an `Int` or a float, or the type must be `Rune` and the value a `Byte` or a
-    // `Rune`, or the type must be `[4]Byte` and the value a `Rune`. The subject is the name of the
-    // type.
+    /**
+     * `cast(Type)` of a value that is not converted to that type:
+     * the type must be `Int` and the value a `Byte`, a `Bool`, an `Int`, a `Rune` or a float, or
+     * the type must be a float and the value a `Byte`, an `Int` or a float, or the type must be
+     * `Rune` and the value a `Byte` or a `Rune`, or the type must be `[4]Byte` and the value a
+     * `Rune`.
+     * The subject is the name of the type.
+     */
     X64_BUILD_STATUS_CAST_INVALID,
-    // There is no procedure called `main`, or it is not `main :: proc() Int ->`. The subject is
-    // `main` in the source in the second case, and has `bytes` NULL in the first, which is about
-    // no place in the source.
+    /**
+     * There is no procedure called `main`, or it is not `main :: proc() Int ->`.
+     * The subject is `main` in the source in the second case, and has `bytes` NULL in the first,
+     * which is about no place in the source.
+     */
     X64_BUILD_STATUS_MAIN_INVALID,
-    // The first argument of `make` is not the type of an array slice, which is what `make` makes.
-    // The subject is the text of the type.
+    /**
+     * The first argument of `make` is not the type of an array slice, which is what `make` makes.
+     * The subject is the text of the type.
+     */
     X64_BUILD_STATUS_MAKE_TYPE_INVALID,
-    // Two cases of a match statement match a value in common. The subject is the word `case` of
-    // the second.
+    /**
+     * Two cases of a match statement match a value in common.
+     * The subject is the word `case` of the second.
+     */
     X64_BUILD_STATUS_MATCH_CASE_DUPLICATE,
-    // A match of an enum, without a default case and without `partial`, that has no case for a
-    // member of the enum. The subject is the word `match`.
+    /**
+     * A match of an enum, without a default case and without `partial`, that has no case for a
+     * member of the enum.
+     * The subject is the word `match`.
+     */
     X64_BUILD_STATUS_MATCH_NOT_EXHAUSTIVE,
-    // The attribute `partial` of a match statement whose subject is not an enum. The subject is the
-    // attribute.
+    /**
+     * The attribute `partial` of a match statement whose subject is not an enum.
+     * The subject is the attribute.
+     */
     X64_BUILD_STATUS_MATCH_PARTIAL_INVALID,
-    // The pattern of a case is not known when the program is compiled. The subject is the word
-    // `case`.
+    /**
+     * The pattern of a case is not known when the program is compiled.
+     * The subject is the word `case`.
+     */
     X64_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT,
-    // The pattern of a case is not of the type of the subject. The subject is the word `case`.
+    /**
+     * The pattern of a case is not of the type of the subject.
+     * The subject is the word `case`.
+     */
     X64_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH,
-    // A range of a case that has no number in it. The subject is the word `case`.
+    /**
+     * A range of a case that has no number in it.
+     * The subject is the word `case`.
+     */
     X64_BUILD_STATUS_MATCH_RANGE_EMPTY,
-    // The subject of a match statement is not of a type that can be matched. The subject is its
-    // first name or string.
+    /**
+     * The subject of a match statement is not of a type that can be matched.
+     * The subject is its first name or string.
+     */
     X64_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID,
-    // A variable that is defined with `nil` and no type, which does not say what it points to. The
-    // subject is the name of the variable.
+    /**
+     * A variable that is defined with `nil` and no type, which does not say what it points to.
+     * The subject is the name of the variable.
+     */
     X64_BUILD_STATUS_NIL_TYPE_UNKNOWN,
     X64_BUILD_STATUS_OK,
     X64_BUILD_STATUS_OUTPUT_TOO_LARGE,
-    // `^` follows a value that is not a pointer. The subject is its first name or string.
+    /**
+     * `^` follows a value that is not a pointer.
+     * The subject is its first name or string.
+     */
     X64_BUILD_STATUS_POINTER_EXPECTED,
-    // The value that is assigned through a pointer is not of the type that it points to. The
-    // subject is the first name or string of the place.
+    /**
+     * The value that is assigned through a pointer is not of the type that it points to.
+     * The subject is the first name or string of the place.
+     */
     X64_BUILD_STATUS_POINTER_TARGET_TYPE_MISMATCH,
-    // The first number or the end of the range of a for statement is not an `Int`. The subject is
-    // its first name or string, or the name of the definition that it is in.
+    /**
+     * The first number or the end of the range of a for statement is not an `Int`.
+     * The subject is its first name or string, or the name of the definition that it is in.
+     */
     X64_BUILD_STATUS_RANGE_TYPE_INVALID,
-    // A `return` in a procedure that returns nothing. The subject is the name of the procedure.
+    /**
+     * A `return` in a procedure that returns nothing.
+     * The subject is the name of the procedure.
+     */
     X64_BUILD_STATUS_RETURN_TYPE_MISSING,
-    // A `return` that gives more values or fewer than the procedure has return types, and a call
-    // that returns several values where one is wanted, or a definition of several names whose call
-    // returns another number of values. The subject is the name of the procedure, or of the first
-    // of the names.
+    /**
+     * A `return` that gives more values or fewer than the procedure has return types, and a call
+     * that returns several values where one is wanted, or a definition of several names whose call
+     * returns another number of values.
+     * The subject is the name of the procedure, or of the first of the names.
+     */
     X64_BUILD_STATUS_RETURN_COUNT_MISMATCH,
     X64_BUILD_STATUS_RESULT_COUNT_MISMATCH,
-    // A returned value of another type than the procedure returns. The subject is the name of
-    // the procedure.
+    /**
+     * A returned value of another type than the procedure returns.
+     * The subject is the name of the procedure.
+     */
     X64_BUILD_STATUS_RETURN_TYPE_MISMATCH,
-    // A struct literal whose name is not a struct, or one without a name where no struct is
-    // wanted. The subject is its name, or the name of the definition that it is in.
+    /**
+     * A struct literal whose name is not a struct, or one without a name where no struct is wanted.
+     * The subject is its name, or the name of the definition that it is in.
+     */
     X64_BUILD_STATUS_STRUCT_EXPECTED,
-    // A field of a struct literal is given twice. The subject is the second one.
+    /**
+     * A field of a struct literal is given twice.
+     * The subject is the second one.
+     */
     X64_BUILD_STATUS_STRUCT_FIELD_DUPLICATE,
-    // A struct literal gives some fields and not all of them. The subject is its name.
+    /**
+     * A struct literal gives some fields and not all of them.
+     * The subject is its name.
+     */
     X64_BUILD_STATUS_STRUCT_FIELD_MISSING,
-    // A field is given or assigned a value of another type than it has. The subject is the name
-    // of the field.
+    /**
+     * A field is given or assigned a value of another type than it has.
+     * The subject is the name of the field.
+     */
     X64_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
-    // A field that the struct does not have. The subject is its name.
+    /**
+     * A field that the struct does not have.
+     * The subject is its name.
+     */
     X64_BUILD_STATUS_STRUCT_FIELD_UNKNOWN,
-    // A struct that contains itself, through its fields and the fields of its fields. The subject
-    // is its first field.
+    /**
+     * A struct that contains itself, through its fields and the fields of its fields.
+     * The subject is its first field.
+     */
     X64_BUILD_STATUS_STRUCT_RECURSIVE,
-    // `type_info_of` that is not followed by a field right away. The subject is the type that it
-    // is asked about.
+    /**
+     * `type_info_of` that is not followed by a field right away.
+     * The subject is the type that it is asked about.
+     */
     X64_BUILD_STATUS_TYPE_INFO_MISPLACED,
-    // `type_info_of` of a type that is not an enum. The subject is the type, or the name of the
-    // global variable that it is the value of.
+    /**
+     * `type_info_of` of a type that is not an enum.
+     * The subject is the type, or the name of the global variable that it is the value of.
+     */
     X64_BUILD_STATUS_TYPE_INFO_UNSUPPORTED,
-    // A type that the target does not have, of a parameter, a result or a variable. The subject is
-    // the text of the type, or the name of the parameter or the variable if the type is not a
-    // name.
+    /**
+     * A type that the target does not have, of a parameter, a result or a variable.
+     * The subject is the text of the type, or the name of the parameter or the variable if the type
+     * is not a name.
+     */
     X64_BUILD_STATUS_TYPE_UNSUPPORTED,
-    // The case of a union match is not a member of the enum of the field that it is matched
-    // against. The subject is the member.
+    /**
+     * The case of a union match is not a member of the enum of the field that it is matched
+     * against.
+     * The subject is the member.
+     */
     X64_BUILD_STATUS_UNION_CASE_UNKNOWN,
-    // The field that a union match is matched against is not a field of the struct of an enum
-    // type, outside of a case. The subject is its name.
+    /**
+     * The field that a union match is matched against is not a field of the struct of an enum type,
+     * outside of a case.
+     * The subject is its name.
+     */
     X64_BUILD_STATUS_UNION_DISCRIMINANT_INVALID,
-    // A struct literal gives a field of a case that is not the case of the member that it gives
-    // the matched field. The subject is the field.
+    /**
+     * A struct literal gives a field of a case that is not the case of the member that it gives the
+     * matched field.
+     * The subject is the field.
+     */
     X64_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH,
-    // A field of a case of a union match is read or assigned where the program does not show that
-    // its object is in the case. The subject is the field.
+    /**
+     * A field of a case of a union match is read or assigned where the program does not show that
+     * its object is in the case.
+     * The subject is the field.
+     */
     X64_BUILD_STATUS_UNION_FIELD_UNMATCHED,
-    // A struct literal gives a field of a case, but does not give the matched field a member that
-    // is written out. The subject is the field.
+    /**
+     * A struct literal gives a field of a case, but does not give the matched field a member that
+     * is written out.
+     * The subject is the field.
+     */
     X64_BUILD_STATUS_UNION_KIND_NOT_CONSTANT,
-    // Something that the target does not build yet. The subject is the name of the definition
-    // that has it.
+    /**
+     * Something that the target does not build yet.
+     * The subject is the name of the definition that has it.
+     */
     X64_BUILD_STATUS_UNSUPPORTED,
-    // The value that a variable is defined with or assigned is not of the type of the variable.
-    // The subject is the name of the variable.
+    /**
+     * The value that a variable is defined with or assigned is not of the type of the variable.
+     * The subject is the name of the variable.
+     */
     X64_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
 } X64_Build_Status;
 
 enum {
-    // The number of constants, the procedures, foreign ones too, and the strings, that a program
-    // can have. The build keeps one record for each in a fixed array, so that it needs no
-    // allocation.
+    /**
+     * The number of constants, the procedures, foreign ones too, and the strings, that a program
+     * can have.
+     * The build keeps one record for each in a fixed array, so that it needs no allocation.
+     */
     X64_CONSTANT_COUNT_MAX = 1024,
-    // The deepest expression that is built. The build walks an expression with the path from its
-    // root in a fixed array instead of recursing, and it is the bound of the analysis of constants
-    // and of the WebAssembly target as well, so that the targets accept the same expressions.
+    /**
+     * The deepest expression that is built.
+     * The build walks an expression with the path from its root in a fixed array instead of
+     * recursing, and it is the bound of the analysis of constants and of the WebAssembly target as
+     * well, so that the targets accept the same expressions.
+     */
     X64_EXPRESSION_DEPTH_MAX = 1024,
 };
 
@@ -312,13 +464,21 @@ typedef struct {
 // What a row of the debug information says about a place in the code. Alphabetical, because nothing
 // depends on the order.
 typedef enum {
-    // A copy of a deferred statement ends at the place, which is a block of its own for a debugger.
+    /**
+     * A copy of a deferred statement ends at the place, which is a block of its own for a debugger.
+     */
     X64_DEBUG_ROW_KIND_BLOCK_END,
-    // A copy of a deferred statement starts at the place.
+    /**
+     * A copy of a deferred statement starts at the place.
+     */
     X64_DEBUG_ROW_KIND_BLOCK_START,
-    // The `leave` of a procedure is at the place, after which the frame is the one of its caller.
+    /**
+     * The `leave` of a procedure is at the place, after which the frame is the one of its caller.
+     */
     X64_DEBUG_ROW_KIND_LEAVE,
-    // A procedure or a statement starts at the place, which is where a debugger stops for its line.
+    /**
+     * A procedure or a statement starts at the place, which is where a debugger stops for its line.
+     */
     X64_DEBUG_ROW_KIND_LINE,
 } X64_Debug_Row_Kind;
 
@@ -334,11 +494,15 @@ typedef struct {
 } X64_Debug_Row;
 
 enum {
-    // The number of `X64_Debug_Row` elements that a build has room for for every node of the
-    // syntax tree: a statement or a procedure has the row of its line, and a `return` or the end of
-    // a procedure has the row of its `leave`, and a copy of a deferred statement has the rows of
-    // where it starts and ends. A deferred statement is written again at each place where its block
-    // is left, so the rows are bounded by the room, and the ones that do not fit are left out.
+    /**
+     * The number of `X64_Debug_Row` elements that a build has room for for every node of the syntax
+     * tree:
+     * a statement or a procedure has the row of its line, and a `return` or the end of a procedure
+     * has the row of its `leave`, and a copy of a deferred statement has the rows of where it
+     * starts and ends.
+     * A deferred statement is written again at each place where its block is left, so the rows are
+     * bounded by the room, and the ones that do not fit are left out.
+     */
     X64_DEBUG_ROWS_PER_NODE = 4,
 };
 

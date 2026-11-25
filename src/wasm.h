@@ -11,38 +11,61 @@
 // disagree. They are an `enum` rather than `static const`, because a file that uses only some of
 // them would get warnings about the rest.
 enum {
-    // The flag of a data segment that is copied into memory 0 when the module is instantiated, at
-    // the address that a constant expression gives.
+    /**
+     * The flag of a data segment that is copied into memory 0 when the module is instantiated, at
+     * the address that a constant expression gives.
+     */
     WASM_DATA_SEGMENT_ACTIVE = 0x00,
 
-    // The kinds of thing that an export makes visible.
+    /**
+     * The kinds of thing that an export makes visible.
+     */
     WASM_EXPORT_KIND_FUNCTION = 0x00,
     WASM_EXPORT_KIND_MEMORY = 0x02,
 
-    // The flag of an element segment that is copied into table 0 when the module is instantiated,
-    // at the index that a constant expression gives, and has function indexes as its elements.
+    /**
+     * The flag of an element segment that is copied into table 0 when the module is instantiated,
+     * at the index that a constant expression gives, and has function indexes as its elements.
+     */
     WASM_ELEMENT_SEGMENT_ACTIVE = 0x00,
 
-    // The kind of thing that an import brings in. Only functions are imported.
+    /**
+     * The kind of thing that an import brings in.
+     * Only functions are imported.
+     */
     WASM_IMPORT_KIND_FUNCTION = 0x00,
 
-    // The flag of a global that its instructions can change, as opposed to 0x00 for one that is
-    // fixed.
+    /**
+     * The flag of a global that its instructions can change, as opposed to 0x00 for one that is
+     * fixed.
+     */
     WASM_GLOBAL_MUTABLE = 0x01,
 
-    // A 32-bit value takes 7 bits per byte, so at most 5 bytes in LEB128.
+    /**
+     * A 32-bit value takes 7 bits per byte, so at most 5 bytes in LEB128.
+     */
     WASM_LEB128_32_BYTES_MAX = 5,
-    // A 64-bit value takes at most 10 bytes in LEB128.
+    /**
+     * A 64-bit value takes at most 10 bytes in LEB128.
+     */
     WASM_LEB128_64_BYTES_MAX = 10,
 
-    // The flag of a memory that has a minimum size but no maximum.
+    /**
+     * The flag of a memory that has a minimum size but no maximum.
+     */
     WASM_MEMORY_LIMITS_MIN_ONLY = 0x00,
-    // A page of memory is 64 KiB.
+    /**
+     * A page of memory is 64 KiB.
+     */
     WASM_MEMORY_PAGE_SIZE_BYTES = 65536,
 
-    // The block type of a structured instruction that takes and leaves no values.
+    /**
+     * The block type of a structured instruction that takes and leaves no values.
+     */
     WASM_BLOCK_TYPE_EMPTY = 0x40,
-    // Instructions.
+    /**
+     * Instructions.
+     */
     WASM_OPCODE_BLOCK = 0x02,
     WASM_OPCODE_BR = 0x0C,
     WASM_OPCODE_BR_IF = 0x0D,
@@ -140,21 +163,30 @@ enum {
     WASM_OPCODE_LOCAL_SET = 0x21,
     WASM_OPCODE_LOCAL_TEE = 0x22,
     WASM_OPCODE_LOOP = 0x03,
-    // The size of the memory in pages, and the growing of it by a number of pages, which gives the
-    // size before, or -1 when it cannot grow. Each is followed by the memory, which is memory 0.
+    /**
+     * The size of the memory in pages, and the growing of it by a number of pages, which gives the
+     * size before, or -1 when it cannot grow.
+     * Each is followed by the memory, which is memory 0.
+     */
     WASM_OPCODE_MEMORY_GROW = 0x40,
     WASM_OPCODE_MEMORY_SIZE = 0x3F,
-    // The prefix of the instructions that came after the first version of the format, and the
-    // second bytes of `memory.copy` and `memory.fill`, the only ones of them that the compiler
-    // writes. The memory operands that follow them are memory 0: two of them for `memory.copy`, and
-    // one for `memory.fill`.
+    /**
+     * The prefix of the instructions that came after the first version of the format, and the
+     * second bytes of `memory.copy` and `memory.fill`, the only ones of them that the compiler
+     * writes.
+     * The memory operands that follow them are memory 0:
+     * two of them for `memory.copy`, and one for `memory.fill`.
+     */
     WASM_OPCODE_PREFIX_MISC = 0xFC,
     WASM_OPCODE_MISC_MEMORY_COPY = 0x0A,
     WASM_OPCODE_MISC_MEMORY_FILL = 0x0B,
     WASM_OPCODE_RETURN = 0x0F,
     WASM_OPCODE_UNREACHABLE = 0x00,
 
-    // The ids of the kinds of section. Custom sections are never written, but may be read.
+    /**
+     * The ids of the kinds of section.
+     * Custom sections are never written, but may be read.
+     */
     WASM_SECTION_ID_CODE = 10,
     WASM_SECTION_ID_CUSTOM = 0,
     WASM_SECTION_ID_DATA = 11,
@@ -167,13 +199,19 @@ enum {
     WASM_SECTION_ID_TABLE = 4,
     WASM_SECTION_ID_TYPE = 1,
 
-    // The flag of a table that has a minimum size but no maximum, like a memory has.
+    /**
+     * The flag of a table that has a minimum size but no maximum, like a memory has.
+     */
     WASM_TABLE_LIMITS_MIN_ONLY = 0x00,
 
-    // The type of the elements of a table, which are references to functions.
+    /**
+     * The type of the elements of a table, which are references to functions.
+     */
     WASM_TYPE_FUNCREF = 0x70,
-    // The marker of a function type, and the types of a 32-bit and a 64-bit integer, and of a
-    // 32-bit and a 64-bit float.
+    /**
+     * The marker of a function type, and the types of a 32-bit and a 64-bit integer, and of a
+     * 32-bit and a 64-bit float.
+     */
     WASM_TYPE_F32 = 0x7D,
     WASM_TYPE_F64 = 0x7C,
     WASM_TYPE_FUNCTION = 0x60,
@@ -188,157 +226,267 @@ extern byte const WASM_MODULE_HEADER[8];
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
-    // The operand of `%` has no address that can be taken: a value such as a number or a call, a
-    // parameter, the iterator of a for statement, a global variable, or an array or an array
-    // slice, which cannot be pointed to. A variable of such a type whose address is taken is this
-    // too. The subject is the name in the operand.
+    /**
+     * The operand of `%` has no address that can be taken:
+     * a value such as a number or a call, a parameter, the iterator of a for statement, a global
+     * variable, or an array or an array slice, which cannot be pointed to.
+     * A variable of such a type whose address is taken is this too.
+     * The subject is the name in the operand.
+     */
     WASM_BUILD_STATUS_ADDRESS_INVALID,
     WASM_BUILD_STATUS_ARITHMETIC_OPERAND_TYPE_INVALID,
-    // The first argument of `append` is not the address of a variable that is a dynamic array.
+    /**
+     * The first argument of `append` is not the address of a variable that is a dynamic array.
+     */
     WASM_BUILD_STATUS_APPEND_TARGET_INVALID,
-    // An array, a dynamic array or an array slice is compared with one of another of the three
-    // kinds.
+    /**
+     * An array, a dynamic array or an array slice is compared with one of another of the three
+     * kinds.
+     */
     WASM_BUILD_STATUS_COMPARISON_ARRAY_KIND_MISMATCH,
-    // Two arrays are compared and have different lengths, which are `length_first` and
-    // `length_second`, and `value_offset` is where the second operand is.
+    /**
+     * Two arrays are compared and have different lengths, which are `length_first` and
+     * `length_second`, and `value_offset` is where the second operand is.
+     */
     WASM_BUILD_STATUS_COMPARISON_ARRAY_LENGTH_MISMATCH,
-    // An element of an array, or a value that is assigned to one, that is not an `Int`.
+    /**
+     * An element of an array, or a value that is assigned to one, that is not an `Int`.
+     */
     WASM_BUILD_STATUS_ARRAY_ELEMENT_TYPE_MISMATCH,
-    // A value that has to be an array or an array slice, and is not: what is indexed, sliced, gone
-    // through by a for statement, or copied to a range of elements.
+    /**
+     * A value that has to be an array or an array slice, and is not:
+     * what is indexed, sliced, gone through by a for statement, or copied to a range of elements.
+     */
     WASM_BUILD_STATUS_ARRAY_EXPECTED,
-    // A variable of an array type that is not given an array literal.
+    /**
+     * A variable of an array type that is not given an array literal.
+     */
     WASM_BUILD_STATUS_ARRAY_INITIALIZER_INVALID,
-    // An array literal with another number of elements than the length of its type.
+    /**
+     * An array literal with another number of elements than the length of its type.
+     */
     WASM_BUILD_STATUS_ARRAY_LENGTH_MISMATCH,
-    // An array as the type of a parameter, or an array or an array slice as the type of a global
-    // variable. The subject is the type of the elements.
+    /**
+     * An array as the type of a parameter, or an array or an array slice as the type of a global
+     * variable.
+     * The subject is the type of the elements.
+     */
     WASM_BUILD_STATUS_ARRAY_TYPE_MISPLACED,
-    // A call of `str_to_c_str` whose argument is not a string literal: the temporary storage that
-    // a copy needs is not built for WebAssembly. The subject is its name.
+    /**
+     * A call of `str_to_c_str` whose argument is not a string literal:
+     * the temporary storage that a copy needs is not built for WebAssembly.
+     * The subject is its name.
+     */
     WASM_BUILD_STATUS_BUILT_IN_UNSUPPORTED,
     WASM_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH,
     WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH,
     WASM_BUILD_STATUS_CALL_RESULT_MISSING,
-    // A call of a variable, a parameter or a global variable that does not hold a pointer to a
-    // procedure. The subject is the name.
+    /**
+     * A call of a variable, a parameter or a global variable that does not hold a pointer to a
+     * procedure.
+     * The subject is the name.
+     */
     WASM_BUILD_STATUS_CALL_TARGET_NOT_PROCEDURE,
-    // `cast(Type)` of a value that is not converted to that type: the type must be `Int` and the
-    // value a `Byte`, a `Bool`, an `Int`, a `Rune` or a float, or the type must be a float and the
-    // value a `Byte`, an `Int` or a float, or the type must be `Rune` and the value a `Byte` or a
-    // `Rune`, or the type must be `[4]Byte` and the value a `Rune`. The subject is the name of the
-    // type.
+    /**
+     * `cast(Type)` of a value that is not converted to that type:
+     * the type must be `Int` and the value a `Byte`, a `Bool`, an `Int`, a `Rune` or a float, or
+     * the type must be a float and the value a `Byte`, an `Int` or a float, or the type must be
+     * `Rune` and the value a `Byte` or a `Rune`, or the type must be `[4]Byte` and the value a
+     * `Rune`.
+     * The subject is the name of the type.
+     */
     WASM_BUILD_STATUS_CAST_INVALID,
     WASM_BUILD_STATUS_COMPARISON_OPERAND_TYPE_INVALID,
     WASM_BUILD_STATUS_CONDITION_TYPE_INVALID,
     WASM_BUILD_STATUS_DEFINITION_NAME_RESERVED,
-    // `.RED` where no enum is known to give it one: the value of a variable that has no written
-    // type, an operand that is compared with another member without an enum, an argument of a
-    // procedure that is not one, and so on. The subject is the name of the member.
+    /**
+     * `.RED` where no enum is known to give it one:
+     * the value of a variable that has no written type, an operand that is compared with another
+     * member without an enum, an argument of a procedure that is not one, and so on.
+     * The subject is the name of the member.
+     */
     WASM_BUILD_STATUS_ENUM_TYPE_UNKNOWN,
-    // A member that the enum does not have, as in `Color.PURPLE` and in `.PURPLE` where the enum is
-    // `Color`. The subject is the name of the member.
+    /**
+     * A member that the enum does not have, as in `Color.PURPLE` and in `.PURPLE` where the enum is
+     * `Color`.
+     * The subject is the name of the member.
+     */
     WASM_BUILD_STATUS_ENUM_MEMBER_UNKNOWN,
     WASM_BUILD_STATUS_EXPRESSION_TOO_DEEP,
-    // A field is read or assigned through something that is not a variable, a parameter or an
-    // element of an array, such as the result of a call. The subject is the name of the field.
+    /**
+     * A field is read or assigned through something that is not a variable, a parameter or an
+     * element of an array, such as the result of a call.
+     * The subject is the name of the field.
+     */
     WASM_BUILD_STATUS_FIELD_BASE_INVALID,
-    // A field is assigned through a parameter or the iterator of a for statement, which cannot be
-    // assigned to. Through a pointer it can be, as the pointer is not changed. The subject is the
-    // name.
+    /**
+     * A field is assigned through a parameter or the iterator of a for statement, which cannot be
+     * assigned to.
+     * Through a pointer it can be, as the pointer is not changed.
+     * The subject is the name.
+     */
     WASM_BUILD_STATUS_FIELD_TARGET_READ_ONLY,
-    // A procedure declared in a `foreign libc ->` block. WebAssembly has no C library to import
-    // it from, only JavaScript to import from. The subject is the name of the procedure.
+    /**
+     * A procedure declared in a `foreign libc ->` block.
+     * WebAssembly has no C library to import it from, only JavaScript to import from.
+     * The subject is the name of the procedure.
+     */
     WASM_BUILD_STATUS_FOREIGN_TARGET_UNSUPPORTED,
     WASM_BUILD_STATUS_IDENTIFIER_NOT_VALUE,
-    // An index, or the end of a slice, that is not an `Int`.
+    /**
+     * An index, or the end of a slice, that is not an `Int`.
+     */
     WASM_BUILD_STATUS_INDEX_TYPE_INVALID,
     WASM_BUILD_STATUS_LOGICAL_OPERAND_TYPE_INVALID,
-    // The first argument of `make` is not the type of an array slice, which is what `make` makes.
-    // The subject is the text of the type.
+    /**
+     * The first argument of `make` is not the type of an array slice, which is what `make` makes.
+     * The subject is the text of the type.
+     */
     WASM_BUILD_STATUS_MAKE_TYPE_INVALID,
-    // Two cases of one match statement whose patterns match a value in common: the same value,
-    // ranges that overlap or a value inside a range. The second could never run. The subject is
-    // its word `case`.
+    /**
+     * Two cases of one match statement whose patterns match a value in common:
+     * the same value, ranges that overlap or a value inside a range.
+     * The second could never run.
+     * The subject is its word `case`.
+     */
     WASM_BUILD_STATUS_MATCH_CASE_DUPLICATE,
-    // A match statement of an enum that has no case for a member, no default case and no
-    // `#(partial)`. The subject is the word `match`, and the detail is the first member that is
-    // left out.
+    /**
+     * A match statement of an enum that has no case for a member, no default case and no
+     * `#(partial)`.
+     * The subject is the word `match`, and the detail is the first member that is left out.
+     */
     WASM_BUILD_STATUS_MATCH_NOT_EXHAUSTIVE,
-    // `#(partial)` on a match statement whose subject is not an enum, or which has a default case,
-    // where it would mean nothing. The subject is the attribute.
+    /**
+     * `#(partial)` on a match statement whose subject is not an enum, or which has a default case,
+     * where it would mean nothing.
+     * The subject is the attribute.
+     */
     WASM_BUILD_STATUS_MATCH_PARTIAL_INVALID,
-    // A pattern that is not known when the program is compiled, such as a variable or a call. The
-    // subject is the word `case`.
+    /**
+     * A pattern that is not known when the program is compiled, such as a variable or a call.
+     * The subject is the word `case`.
+     */
     WASM_BUILD_STATUS_MATCH_PATTERN_NOT_CONSTANT,
-    // A pattern that is not of the type of the subject: a number for a `Str`, the member of
-    // another enum, a range for a `Str` or an enum, or a number that does not fit in a `Byte`.
-    // The subject is the word `case`.
+    /**
+     * A pattern that is not of the type of the subject:
+     * a number for a `Str`, the member of another enum, a range for a `Str` or an enum, or a number
+     * that does not fit in a `Byte`.
+     * The subject is the word `case`.
+     */
     WASM_BUILD_STATUS_MATCH_PATTERN_TYPE_MISMATCH,
-    // A range pattern that has no numbers, such as `5..<5`, which would never match. The subject
-    // is the word `case`.
+    /**
+     * A range pattern that has no numbers, such as `5..<5`, which would never match.
+     * The subject is the word `case`.
+     */
     WASM_BUILD_STATUS_MATCH_RANGE_EMPTY,
-    // The subject of a match statement is not an `Int`, a `Byte`, a `Str` or an enum. The subject
-    // is the expression.
+    /**
+     * The subject of a match statement is not an `Int`, a `Byte`, a `Str` or an enum.
+     * The subject is the expression.
+     */
     WASM_BUILD_STATUS_MATCH_SUBJECT_TYPE_INVALID,
-    // `nil` where no pointer type is known to give it one: the value of a variable that has no
-    // written type, as in `p := nil`. The subject is the name of the variable.
+    /**
+     * `nil` where no pointer type is known to give it one:
+     * the value of a variable that has no written type, as in `p := nil`.
+     * The subject is the name of the variable.
+     */
     WASM_BUILD_STATUS_NIL_TYPE_UNKNOWN,
     WASM_BUILD_STATUS_OK,
     WASM_BUILD_STATUS_OUTPUT_TOO_LARGE,
-    // A value that is followed with `^`, or assigned through, and is not a pointer.
+    /**
+     * A value that is followed with `^`, or assigned through, and is not a pointer.
+     */
     WASM_BUILD_STATUS_POINTER_EXPECTED,
-    // A value that is assigned through a pointer, as in `p^ = x`, and is not of the type that the
-    // pointer points to. The subject is the name of the pointer.
+    /**
+     * A value that is assigned through a pointer, as in `p^ = x`, and is not of the type that the
+     * pointer points to.
+     * The subject is the name of the pointer.
+     */
     WASM_BUILD_STATUS_POINTER_TARGET_TYPE_MISMATCH,
     WASM_BUILD_STATUS_RANGE_TYPE_INVALID,
-    // A `return` that gives more values or fewer than the procedure has return types, or a definition
-    // of several names whose call returns another number of values. The subject is the name of the
-    // procedure, or of the first of the names.
+    /**
+     * A `return` that gives more values or fewer than the procedure has return types, or a
+     * definition of several names whose call returns another number of values.
+     * The subject is the name of the procedure, or of the first of the names.
+     */
     WASM_BUILD_STATUS_RETURN_COUNT_MISMATCH,
     WASM_BUILD_STATUS_RESULT_COUNT_MISMATCH,
     WASM_BUILD_STATUS_RETURN_TYPE_MISMATCH,
     WASM_BUILD_STATUS_RETURN_TYPE_MISSING,
-    // A field is accessed on a value that is not a struct. The subject is the name before the dot.
+    /**
+     * A field is accessed on a value that is not a struct.
+     * The subject is the name before the dot.
+     */
     WASM_BUILD_STATUS_STRUCT_EXPECTED,
-    // A field that is given a value twice in one struct literal. The subject is the second one.
+    /**
+     * A field that is given a value twice in one struct literal.
+     * The subject is the second one.
+     */
     WASM_BUILD_STATUS_STRUCT_FIELD_DUPLICATE,
-    // A field that a struct literal does not give a value, while it gives one to another field. A
-    // literal with no fields, `Person {}`, gives every field its default value. The subject is the
-    // name of the field.
+    /**
+     * A field that a struct literal does not give a value, while it gives one to another field.
+     * A literal with no fields, `Person {}`, gives every field its default value.
+     * The subject is the name of the field.
+     */
     WASM_BUILD_STATUS_STRUCT_FIELD_MISSING,
-    // A value that is not of the type of the field that it is given to or assigned to.
+    /**
+     * A value that is not of the type of the field that it is given to or assigned to.
+     */
     WASM_BUILD_STATUS_STRUCT_FIELD_TYPE_MISMATCH,
-    // A field that the struct does not have, in a struct literal or an access.
+    /**
+     * A field that the struct does not have, in a struct literal or an access.
+     */
     WASM_BUILD_STATUS_STRUCT_FIELD_UNKNOWN,
-    // A struct that has itself as a field, directly or through other structs, so it would be
-    // infinitely large. The subject is the name of the first field of the struct.
+    /**
+     * A struct that has itself as a field, directly or through other structs, so it would be
+     * infinitely large.
+     * The subject is the name of the first field of the struct.
+     */
     WASM_BUILD_STATUS_STRUCT_RECURSIVE,
-    // `type_info_of(Type)` that is not directly followed by a field, as in `info := type_info_of(
-    // Color)`, or that is the value of a global variable with more than one field after it. The
-    // information only exists at compile time, so only its fields can be used. The subject is the
-    // name of the type, or of the global variable.
+    /**
+     * `type_info_of(Type)` that is not directly followed by a field, as in
+     * `info := type_info_of( Color)`, or that is the value of a global variable with more than one
+     * field after it.
+     * The information only exists at compile time, so only its fields can be used.
+     * The subject is the name of the type, or of the global variable.
+     */
     WASM_BUILD_STATUS_TYPE_INFO_MISPLACED,
-    // `type_info_of(Type)` of a type that the target has no information about, which is every type
-    // that is not an enum. The subject is the name of the type.
+    /**
+     * `type_info_of(Type)` of a type that the target has no information about, which is every type
+     * that is not an enum.
+     * The subject is the name of the type.
+     */
     WASM_BUILD_STATUS_TYPE_INFO_UNSUPPORTED,
     WASM_BUILD_STATUS_TYPE_UNSUPPORTED,
-    // A case of a union match that is not a member of the enum of the field that is matched. The
-    // subject is the member.
+    /**
+     * A case of a union match that is not a member of the enum of the field that is matched.
+     * The subject is the member.
+     */
     WASM_BUILD_STATUS_UNION_CASE_UNKNOWN,
-    // The field that a union match matches is not a field of the struct that the union match is
-    // in, is not of an enum type, or is itself in a case. The subject is its name.
+    /**
+     * The field that a union match matches is not a field of the struct that the union match is in,
+     * is not of an enum type, or is itself in a case.
+     * The subject is its name.
+     */
     WASM_BUILD_STATUS_UNION_DISCRIMINANT_INVALID,
-    // A struct object that gives a field of a case of a union match, and a value for the matched
-    // field that is not the member of the case. The subject is the name of the field of the case.
+    /**
+     * A struct object that gives a field of a case of a union match, and a value for the matched
+     * field that is not the member of the case.
+     * The subject is the name of the field of the case.
+     */
     WASM_BUILD_STATUS_UNION_FIELD_KIND_MISMATCH,
-    // A field of a case of a union match that is used where the compiler cannot tell that the
-    // matched field is the member of the case: not inside an if statement that compares them, or
-    // in one where the matched field is changed. The subject is the name of the field.
+    /**
+     * A field of a case of a union match that is used where the compiler cannot tell that the
+     * matched field is the member of the case:
+     * not inside an if statement that compares them, or in one where the matched field is changed.
+     * The subject is the name of the field.
+     */
     WASM_BUILD_STATUS_UNION_FIELD_UNMATCHED,
-    // A struct object that gives a field of a case of a union match, and a value for the matched
-    // field that is not a member of the enum written out, such as `.IDENTIFIER`, so the case is
-    // not known when the program is compiled. The subject is the name of the field of the case.
+    /**
+     * A struct object that gives a field of a case of a union match, and a value for the matched
+     * field that is not a member of the enum written out, such as `.IDENTIFIER`, so the case is not
+     * known when the program is compiled.
+     * The subject is the name of the field of the case.
+     */
     WASM_BUILD_STATUS_UNION_KIND_NOT_CONSTANT,
     WASM_BUILD_STATUS_VARIABLE_TYPE_MISMATCH,
 } Wasm_Build_Status;

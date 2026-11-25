@@ -20,36 +20,56 @@
 #endif
 
 enum {
-    // The sections and the headers start at multiples of this in the file. It is the smallest value
-    // that the format allows, which keeps the file small.
+    /**
+     * The sections and the headers start at multiples of this in the file.
+     * It is the smallest value that the format allows, which keeps the file small.
+     */
     X64_FILE_ALIGNMENT_BYTES = 0x200,
-    // The sections start at multiples of this in memory, the size of a page.
+    /**
+     * The sections start at multiples of this in memory, the size of a page.
+     */
     X64_SECTION_ALIGNMENT_BYTES = 0x1000,
-    // The sections that every file has: `.rdata`, `.data` and `.text`, and the sections that a file
-    // has when it is built with debug information, see `X64_DEBUG_SECTION_NAMES`.
+    /**
+     * The sections that every file has:
+     * `.rdata`, `.data` and `.text`, and the sections that a file has when it is built with debug
+     * information, see `X64_DEBUG_SECTION_NAMES`.
+     */
     X64_SECTION_COUNT = 3,
     X64_DEBUG_SECTION_COUNT = 5,
-    // The address in memory, relative to the image, of the first section.
+    /**
+     * The address in memory, relative to the image, of the first section.
+     */
     X64_RDATA_RVA = 0x1000,
 
     X64_DOS_HEADER_SIZE_BYTES = 0x40,
-    // The signature "PE" with two zeros, and the header of the file.
+    /**
+     * The signature "PE" with two zeros, and the header of the file.
+     */
     X64_FILE_HEADER_SIZE_BYTES = 24,
     X64_OPTIONAL_HEADER_SIZE_BYTES = 240,
     X64_SECTION_HEADER_SIZE_BYTES = 40,
     X64_IMPORT_DESCRIPTOR_SIZE_BYTES = 20,
-    // An entry of the table of imports is the 64-bit address of the name of an import, and the
-    // table ends with a zero entry.
+    /**
+     * An entry of the table of imports is the 64-bit address of the name of an import, and the
+     * table ends with a zero entry.
+     */
     X64_IMPORT_ENTRY_SIZE_BYTES = 8,
-    // The most libraries that a program imports from: the C library, and the libraries of the
-    // system that it names, which the parser limits to fewer.
+    /**
+     * The most libraries that a program imports from:
+     * the C library, and the libraries of the system that it names, which the parser limits to
+     * fewer.
+     */
     X64_LIBRARY_COUNT_MAX = 32,
 
-    // The registers are numbered like the processor does, and `r8` to `r15` need the extra bit of
-    // an instruction prefix. The code uses only the registers that the calling convention of
-    // Windows on x64 lets a procedure change without saving them, so that a procedure never has to
-    // keep a register of its caller: `rax`, `rcx`, `rdx` and `r8` to `r11`. `rsp` and `rbp` are
-    // the stack and the frame.
+    /**
+     * The registers are numbered like the processor does, and `r8` to `r15` need the extra bit of
+     * an instruction prefix.
+     * The code uses only the registers that the calling convention of Windows on x64 lets a
+     * procedure change without saving them, so that a procedure never has to keep a register of its
+     * caller:
+     * `rax`, `rcx`, `rdx` and `r8` to `r11`.
+     * `rsp` and `rbp` are the stack and the frame.
+     */
     X64_REGISTER_RAX = 0,
     X64_REGISTER_RCX = 1,
     X64_REGISTER_RDX = 2,
@@ -60,12 +80,17 @@ enum {
     X64_REGISTER_R10 = 10,
     X64_REGISTER_R11 = 11,
 
-    // The opcodes of the instructions that have a register and an operand, which is a register or
-    // memory. `X64_OPCODE_LOAD` reads the operand into the register, `X64_OPCODE_LEA` puts the
-    // address of the operand in the register, and the others write the operand: `mov` stores the
-    // register in it, and the arithmetic sets it to itself and the register.
+    /**
+     * The opcodes of the instructions that have a register and an operand, which is a register or
+     * memory.
+     * `X64_OPCODE_LOAD` reads the operand into the register, `X64_OPCODE_LEA` puts the address of
+     * the operand in the register, and the others write the operand:
+     * `mov` stores the register in it, and the arithmetic sets it to itself and the register.
+     */
     X64_OPCODE_ADD = 0x01,
-    // `mov` of the lowest byte of the register to memory.
+    /**
+     * `mov` of the lowest byte of the register to memory.
+     */
     X64_OPCODE_STORE_BYTE = 0x88,
     X64_OPCODE_OR = 0x09,
     X64_OPCODE_AND = 0x21,
@@ -75,55 +100,80 @@ enum {
     X64_OPCODE_TEST = 0x85,
     X64_OPCODE_STORE = 0x89,
     X64_OPCODE_LOAD = 0x8B,
-    // `movsxd`, which fills a 64-bit register with a 32-bit number and its sign.
+    /**
+     * `movsxd`, which fills a 64-bit register with a 32-bit number and its sign.
+     */
     X64_OPCODE_MOVSXD = 0x63,
     X64_OPCODE_LEA = 0x8D,
-    // The prefix that says that the operands are 64 bits wide. The bits of the extension of the
-    // registers are added to it.
+    /**
+     * The prefix that says that the operands are 64 bits wide.
+     * The bits of the extension of the registers are added to it.
+     */
     X64_REX_WIDE = 0x48,
-    // The prefix of the instructions of two bytes of opcode.
+    /**
+     * The prefix of the instructions of two bytes of opcode.
+     */
     X64_OPCODE_TWO_BYTE = 0x0F,
     X64_OPCODE_TWO_BYTE_IMUL = 0xAF,
     X64_OPCODE_TWO_BYTE_MOVZX_BYTE = 0xB6,
     X64_OPCODE_TWO_BYTE_SET = 0x90,
-    // The prefixes that say which instruction of the SSE extension an opcode is, which comes before
-    // the prefix of the registers: of a scalar of 32 bits, of a scalar of 64 bits and of a move
-    // between a register and a register of floats.
+    /**
+     * The prefixes that say which instruction of the SSE extension an opcode is, which comes before
+     * the prefix of the registers:
+     * of a scalar of 32 bits, of a scalar of 64 bits and of a move between a register and a
+     * register of floats.
+     */
     X64_PREFIX_SCALAR_SINGLE = 0xF3,
     X64_PREFIX_SCALAR_DOUBLE = 0xF2,
     X64_PREFIX_OPERAND_SIZE = 0x66,
-    // The opcodes, after `0x0F`, of the instructions of floats. `cvtsi2ss` makes a float of an
-    // integer, `cvttss2si` makes an integer of a float by dropping its fraction, `ucomiss` compares
-    // two floats and sets the flags of an unsigned comparison, with the parity flag set when one is
-    // not a number, and `movd` moves 32 bits between a register and a register of floats, and
-    // `movq` 64 bits. Each has a form for 64-bit floats, which has another prefix.
+    /**
+     * The opcodes, after `0x0F`, of the instructions of floats.
+     * `cvtsi2ss` makes a float of an integer, `cvttss2si` makes an integer of a float by dropping
+     * its fraction, `ucomiss` compares two floats and sets the flags of an unsigned comparison,
+     * with the parity flag set when one is not a number, and `movd` moves 32 bits between a
+     * register and a register of floats, and `movq` 64 bits.
+     * Each has a form for 64-bit floats, which has another prefix.
+     */
     X64_OPCODE_SSE_CONVERT_FROM_INTEGER = 0x2A,
     X64_OPCODE_SSE_CONVERT_TO_INTEGER = 0x2C,
     X64_OPCODE_SSE_COMPARE = 0x2E,
     X64_OPCODE_SSE_ADD = 0x58,
-    // `cvtss2sd` makes a float of 64 bits of one of 32 bits, and `cvtsd2ss` the other way round.
+    /**
+     * `cvtss2sd` makes a float of 64 bits of one of 32 bits, and `cvtsd2ss` the other way round.
+     */
     X64_OPCODE_SSE_CONVERT_FLOAT = 0x5A,
     X64_OPCODE_SSE_MULTIPLY = 0x59,
     X64_OPCODE_SSE_SUBTRACT = 0x5C,
     X64_OPCODE_SSE_DIVIDE = 0x5E,
     X64_OPCODE_SSE_MOVE_TO_FLOAT = 0x6E,
     X64_OPCODE_SSE_MOVE_FROM_FLOAT = 0x7E,
-    // The registers of floats, numbered like the processor does. The code uses the first four: the
-    // arguments and the result are in them, and so are the two operands of an operation.
+    /**
+     * The registers of floats, numbered like the processor does.
+     * The code uses the first four:
+     * the arguments and the result are in them, and so are the two operands of an operation.
+     */
     X64_REGISTER_XMM0 = 0,
     X64_REGISTER_XMM1 = 1,
-    // The numbers of the conditions of `set` and of the conditional jumps, which are added to their
-    // opcodes. The signed ones are used for an `Int`, whose order is signed.
+    /**
+     * The numbers of the conditions of `set` and of the conditional jumps, which are added to their
+     * opcodes.
+     * The signed ones are used for an `Int`, whose order is signed.
+     */
     X64_CONDITION_PARITY = 0xA,
     X64_CONDITION_NOT_PARITY = 0xB,
     X64_CONDITION_BELOW = 0x2,
     X64_CONDITION_ABOVE_EQUAL = 0x3,
     X64_CONDITION_EQUAL = 0x4,
-    // Not a condition of the processor: the jump that is always taken, see `x64_jump_write`.
+    /**
+     * Not a condition of the processor:
+     * the jump that is always taken, see `x64_jump_write`.
+     */
     X64_CONDITION_ALWAYS = 0x10,
     X64_CONDITION_NOT_EQUAL = 0x5,
-    // The unsigned conditions, which an index and an address are compared with, so that a negative
-    // index is above every length.
+    /**
+     * The unsigned conditions, which an index and an address are compared with, so that a negative
+     * index is above every length.
+     */
     X64_CONDITION_BELOW_EQUAL = 0x6,
     X64_CONDITION_ABOVE = 0x7,
     X64_CONDITION_LESS = 0xC,
@@ -131,55 +181,90 @@ enum {
     X64_CONDITION_LESS_EQUAL = 0xE,
     X64_CONDITION_GREATER = 0xF,
 
-    // The space that the caller of a procedure makes below the arguments for the callee to keep the
-    // four registers of arguments in, whether it has that many or not.
+    /**
+     * The space that the caller of a procedure makes below the arguments for the callee to keep the
+     * four registers of arguments in, whether it has that many or not.
+     */
     X64_SHADOW_SPACE_BYTES = 32,
-    // The number of words of the arguments that are passed in registers, see
-    // `X64_ARGUMENT_REGISTERS`. The others are passed on the stack, above the shadow space.
+    /**
+     * The number of words of the arguments that are passed in registers, see
+     * `X64_ARGUMENT_REGISTERS`.
+     * The others are passed on the stack, above the shadow space.
+     */
     X64_ARGUMENT_REGISTER_COUNT = 4,
-    // The size of a word of a value, which every value is made of, see `x64_type_word_count`. It is
-    // also the size of a slot of the stack.
+    /**
+     * The size of a word of a value, which every value is made of, see `x64_type_word_count`.
+     * It is also the size of a slot of the stack.
+     */
     X64_WORD_SIZE_BYTES = 8,
-    // The largest number that a `Byte` holds.
+    /**
+     * The largest number that a `Byte` holds.
+     */
     X64_BYTE_MAX = 255,
-    // An `Enum_Member_Type_Info` of the table of an enum, which is the `Str` of the name of the
-    // member and its number, see `x64_data_layout`.
+    /**
+     * An `Enum_Member_Type_Info` of the table of an enum, which is the `Str` of the name of the
+     * member and its number, see `x64_data_layout`.
+     */
     X64_TYPE_INFO_MEMBER_SIZE_BYTES = 3 * X64_WORD_SIZE_BYTES,
-    // The processor pushes the address to return to, and the procedure pushes `rbp`, so the first
-    // word of the arguments, which the procedure keeps there, is this far above `rbp`.
+    /**
+     * The processor pushes the address to return to, and the procedure pushes `rbp`, so the first
+     * word of the arguments, which the procedure keeps there, is this far above `rbp`.
+     */
     X64_ARGUMENT_HOME_OFFSET_BYTES = 16,
 
-    // The temporary storage that `str_to_c_str` makes its strings in. It is a section of its own
-    // that the system gives to the program zeroed and that is not in the file, so it costs no space
-    // there. 64 KiB hold a great many strings of a procedure that has them, which are all given
-    // back when it returns. A string that does not fit stops the program.
+    /**
+     * The temporary storage that `str_to_c_str` makes its strings in.
+     * It is a section of its own that the system gives to the program zeroed and that is not in the
+     * file, so it costs no space there.
+     * 64 KiB hold a great many strings of a procedure that has them, which are all given back when
+     * it returns.
+     * A string that does not fit stops the program.
+     */
     X64_TEMPORARY_STORAGE_SIZE_BYTES = 64 * 1024,
-    // The first 8 bytes of the section are the number of bytes of the storage that are in use, and
-    // the storage follows. Strings are made at multiples of 8 so that they are aligned.
+    /**
+     * The first 8 bytes of the section are the number of bytes of the storage that are in use, and
+     * the storage follows.
+     * Strings are made at multiples of 8 so that they are aligned.
+     */
     X64_TEMPORARY_USED_SIZE_BYTES = 8,
     X64_TEMPORARY_ALIGNMENT_BYTES = 8,
-    // The most values that one `append` takes, which its code counts with an 8-bit immediate.
+    /**
+     * The most values that one `append` takes, which its code counts with an 8-bit immediate.
+     */
     X64_APPEND_VALUE_COUNT_MAX = 100,
-    // A section of the debug information is not needed to run the program, so the system may drop
-    // it: it is data that is initialized, read and discardable. The table of unwinding is read by
-    // the system when it unwinds the stack, so it stays.
+    /**
+     * A section of the debug information is not needed to run the program, so the system may drop
+     * it:
+     * it is data that is initialized, read and discardable.
+     * The table of unwinding is read by the system when it unwinds the stack, so it stays.
+     */
     X64_DEBUG_SECTION_CHARACTERISTICS = 0x42000040,
     X64_UNWIND_SECTION_CHARACTERISTICS = 0x40000040,
-    // An entry of the table of unwinding: where a procedure starts and ends, and where its unwind
-    // information is. The information of every procedure takes 8 bytes: 4 of header and two codes
-    // of 2 bytes, see `x64_debug_unwind_write`.
+    /**
+     * An entry of the table of unwinding:
+     * where a procedure starts and ends, and where its unwind information is.
+     * The information of every procedure takes 8 bytes:
+     * 4 of header and two codes of 2 bytes, see `x64_debug_unwind_write`.
+     */
     X64_UNWIND_ENTRY_SIZE_BYTES = 12,
     X64_UNWIND_INFO_SIZE_BYTES = 8,
-    // The entry of the data directories that is the table of unwinding, which Windows calls the
-    // exception table.
+    /**
+     * The entry of the data directories that is the table of unwinding, which Windows calls the
+     * exception table.
+     */
     X64_DIRECTORY_EXCEPTION = 3,
-    // The address of the image when it is loaded, which the debug information has its addresses
-    // relative to, see `X64_IMAGE_BASE`.
+    /**
+     * The address of the image when it is loaded, which the debug information has its addresses
+     * relative to, see `X64_IMAGE_BASE`.
+     */
     X64_DEBUG_ADDRESS_SIZE_BYTES = 8,
 
-    // The numbers of the DWARF format that the debug information uses, see
-    // https://dwarfstd.org/doc/DWARF4.pdf. The registers are numbered as the System V ABI for x64
-    // numbers them for DWARF, which gdb uses for Windows on x64 too.
+    /**
+     * The numbers of the DWARF format that the debug information uses, see
+     * https://dwarfstd.org/doc/DWARF4.pdf.
+     * The registers are numbered as the System V ABI for x64 numbers them for DWARF, which gdb uses
+     * for Windows on x64 too.
+     */
     X64_DWARF_VERSION = 4,
     X64_DWARF_FRAME_VERSION = 1,
     X64_DWARF_LANGUAGE_C99 = 0x0C,
@@ -208,8 +293,10 @@ enum {
     X64_DWARF_CFA_OFFSET = 0x80,
     X64_DWARF_CFA_RESTORE = 0xC0,
     X64_DWARF_CFA_NOP = 0x00,
-    // The abbreviations of `X64_DEBUG_ABBREVIATIONS`, which say what each entry of `.debug_info`
-    // is.
+    /**
+     * The abbreviations of `X64_DEBUG_ABBREVIATIONS`, which say what each entry of `.debug_info`
+     * is.
+     */
     X64_DWARF_ABBREVIATION_COMPILE_UNIT = 1,
     X64_DWARF_ABBREVIATION_BASE_TYPE = 2,
     X64_DWARF_ABBREVIATION_POINTER_TYPE = 3,
@@ -230,45 +317,71 @@ enum {
     X64_DWARF_ABBREVIATION_SUBROUTINE_TYPE_VOID = 18,
     X64_DWARF_ABBREVIATION_LEXICAL_BLOCK = 19,
     X64_DWARF_ABBREVIATION_LABEL = 20,
-    // The frame of a procedure, see `x64_procedure_write`: on entry the address to return to is at
-    // `rsp`, so the frame of the caller, the CFA, starts 8 bytes above it. `push rbp` makes that
-    // 16, and keeps `rbp` 16 bytes below the CFA, and from `mov rbp, rsp` on the CFA is `rbp + 16`.
-    // So the arguments that the procedure keeps are at the CFA and above, and the variables are
-    // below the 16 bytes of the address and of `rbp`.
+    /**
+     * The frame of a procedure, see `x64_procedure_write`:
+     * on entry the address to return to is at `rsp`, so the frame of the caller, the CFA, starts 8
+     * bytes above it.
+     * `push rbp` makes that 16, and keeps `rbp` 16 bytes below the CFA, and from `mov rbp, rsp` on
+     * the CFA is `rbp + 16`.
+     * So the arguments that the procedure keeps are at the CFA and above, and the variables are
+     * below the 16 bytes of the address and of `rbp`.
+     */
     X64_DEBUG_CFA_ENTRY_OFFSET_BYTES = 8,
     X64_DEBUG_CFA_FRAME_OFFSET_BYTES = 16,
-    // The start of the program makes 40 bytes of the stack, see `x64_code_write`.
+    /**
+     * The start of the program makes 40 bytes of the stack, see `x64_code_write`.
+     */
     X64_DEBUG_START_FRAME_BYTES = 40,
 
-    // The stack must stay a multiple of this, so that every call is made with it, see
-    // `x64_procedure_write`. The frame of a procedure is rounded up to it.
+    /**
+     * The stack must stay a multiple of this, so that every call is made with it, see
+     * `x64_procedure_write`.
+     * The frame of a procedure is rounded up to it.
+     */
     X64_STACK_ALIGNMENT_BYTES = 16,
-    // The stack of the program, which the system makes for it when it starts. All of it is
-    // committed at once, see `x64_headers_write`, so that a frame of any size up to it can be made
-    // with one `sub rsp` and used at once, without touching every page on the way down as a
-    // program has to when only the first page of the stack is there. 1 MiB is what a program for
-    // Windows gets by default, and what the WebAssembly target has for its arrays as well.
+    /**
+     * The stack of the program, which the system makes for it when it starts.
+     * All of it is committed at once, see `x64_headers_write`, so that a frame of any size up to it
+     * can be made with one `sub rsp` and used at once, without touching every page on the way down
+     * as a program has to when only the first page of the stack is there.
+     * 1 MiB is what a program for Windows gets by default, and what the WebAssembly target has for
+     * its arrays as well.
+     */
     X64_STACK_SIZE_BYTES = 1024 * 1024,
-    // The largest frame that a procedure can have, which fits the stack with room left for the
-    // frames of its callers.
+    /**
+     * The largest frame that a procedure can have, which fits the stack with room left for the
+     * frames of its callers.
+     */
     X64_FRAME_SIZE_BYTES_MAX = X64_STACK_SIZE_BYTES / 2,
-    // The bytes at the top of the frame of every procedure, below `rbp`, that come before the
-    // places of its variables: the slot that keeps how much of the temporary storage was in use
-    // when the procedure started, see `x64_procedure_write`.
+    /**
+     * The bytes at the top of the frame of every procedure, below `rbp`, that come before the
+     * places of its variables:
+     * the slot that keeps how much of the temporary storage was in use when the procedure started,
+     * see `x64_procedure_write`.
+     */
     X64_FRAME_FIXED_SIZE_BYTES = 8,
-    // The place of that slot, at `rbp - 8`.
+    /**
+     * The place of that slot, at `rbp - 8`.
+     */
     X64_FRAME_TEMPORARY_OFFSET_BYTES = 8,
-    // The most structs that are open at once while the fields of a struct are walked, which is how
-    // far structs can be inside each other, see `x64_struct_word_count`. A struct that has itself
-    // as a field is infinitely large, and is found by going deeper than this.
+    /**
+     * The most structs that are open at once while the fields of a struct are walked, which is how
+     * far structs can be inside each other, see `x64_struct_word_count`.
+     * A struct that has itself as a field is infinitely large, and is found by going deeper than
+     * this.
+     */
     X64_STRUCT_DEPTH_MAX = 64,
-    // The most fields that a walk over a struct visits. Structs whose fields are structs with
-    // several fields of a struct each have more words than any program can use, and the walk must
-    // end.
+    /**
+     * The most fields that a walk over a struct visits.
+     * Structs whose fields are structs with several fields of a struct each have more words than
+     * any program can use, and the walk must end.
+     */
     X64_STRUCT_STEP_MAX = 1 << 20,
-    // The most frames that the statements of a procedure need at once: the body, and for each of
-    // the blocks that the parser accepts inside each other the statement and the block, see
-    // `AST_BLOCK_DEPTH_MAX`, with room for more that later statements need.
+    /**
+     * The most frames that the statements of a procedure need at once:
+     * the body, and for each of the blocks that the parser accepts inside each other the statement
+     * and the block, see `AST_BLOCK_DEPTH_MAX`, with room for more that later statements need.
+     */
     X64_STATEMENT_DEPTH_MAX = 4 * AST_BLOCK_DEPTH_MAX + 4,
 };
 
@@ -281,33 +394,53 @@ static size_t const X64_WORD_COUNT_INVALID = SIZE_MAX;
 // What a constant of the module is, which decides what the build makes of it. Alphabetical, because
 // nothing depends on the order.
 typedef enum {
-    // A procedure of a `foreign libc ->` block, which is imported and has no code.
+    /**
+     * A procedure of a `foreign libc ->` block, which is imported and has no code.
+     */
     X64_CONSTANT_KIND_FOREIGN,
-    // The member of an enum, such as `DEFAULT :: Color.RED`, which has no code: a use of it is the
-    // number of the member.
+    /**
+     * The member of an enum, such as `DEFAULT :: Color.RED`, which has no code:
+     * a use of it is the number of the member.
+     */
     X64_CONSTANT_KIND_MEMBER,
-    // A procedure with a body, which has code.
+    /**
+     * A procedure with a body, which has code.
+     */
     X64_CONSTANT_KIND_PROCEDURE,
-    // A string, such as `greeting :: "Hello"`, whose bytes are in `.rdata` with the other string
-    // literals. It has no code, and it is used where a `C_Str` is wanted, or as the argument of
-    // `str_to_c_str`, like a string literal.
+    /**
+     * A string, such as `greeting :: "Hello"`, whose bytes are in `.rdata` with the other string
+     * literals.
+     * It has no code, and it is used where a `C_Str` is wanted, or as the argument of
+     * `str_to_c_str`, like a string literal.
+     */
     X64_CONSTANT_KIND_STRING,
-    // A number or a truth value, such as `LIMIT :: 100`. It has no code either: a use of it is its
-    // value, like a literal.
+    /**
+     * A number or a truth value, such as `LIMIT :: 100`.
+     * It has no code either:
+     * a use of it is its value, like a literal.
+     */
     X64_CONSTANT_KIND_VALUE,
 } X64_Constant_Kind;
 
 // How an expression is wanted by what it is part of. Alphabetical, because nothing depends on the
 // order.
 typedef enum {
-    // The address of the place that the expression is, which is what `%` takes.
+    /**
+     * The address of the place that the expression is, which is what `%` takes.
+     */
     X64_MODE_ADDRESS,
-    // The address of a place that is only read, which can also be a parameter or an iterator: the
-    // struct whose field is read.
+    /**
+     * The address of a place that is only read, which can also be a parameter or an iterator:
+     * the struct whose field is read.
+     */
     X64_MODE_PLACE,
-    // The address of the place that an assignment writes to, which can also be a global variable.
+    /**
+     * The address of the place that an assignment writes to, which can also be a global variable.
+     */
     X64_MODE_TARGET,
-    // The value of the expression.
+    /**
+     * The value of the expression.
+     */
     X64_MODE_VALUE,
 } X64_Mode;
 
@@ -1007,7 +1140,9 @@ enum {
     X64_DEBUG_SECTION_INFO = 2,
     X64_DEBUG_SECTION_LINE = 3,
     X64_DEBUG_SECTION_FRAME = 4,
-    // The longest name that a header has room for.
+    /**
+     * The longest name that a header has room for.
+     */
     X64_SECTION_NAME_SIZE_BYTES = 8,
 };
 

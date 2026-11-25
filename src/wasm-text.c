@@ -15,15 +15,26 @@
 // globals, exports, elements and data, with the index of each in a `(;index;)` comment.
 
 enum {
-    // The longest decimal number that is written: `UINT64_MAX` has 20 digits.
+    /**
+     * The longest decimal number that is written:
+     * `UINT64_MAX` has 20 digits.
+     */
     WASM_TEXT_DECIMAL_DIGITS_MAX = 20,
-    // The most digits that tell two `float` values apart, and two `double` values, which is how
-    // many `wasm_text_write_float` needs to write a number so that it reads back the same.
+    /**
+     * The most digits that tell two `float` values apart, and two `double` values, which is how
+     * many `wasm_text_write_float` needs to write a number so that it reads back the same.
+     */
     WASM_TEXT_DIGITS_F32 = 9,
     WASM_TEXT_DIGITS_F64 = 17,
-    // The natural alignment of a 64-bit load or store, as a power of two: 8 bytes.
+    /**
+     * The natural alignment of a 64-bit load or store, as a power of two:
+     * 8 bytes.
+     */
     WASM_TEXT_ALIGNMENT_I64 = 3,
-    // The same for a 32-bit load or store: 4 bytes.
+    /**
+     * The same for a 32-bit load or store:
+     * 4 bytes.
+     */
     WASM_TEXT_ALIGNMENT_I32 = 2,
 };
 

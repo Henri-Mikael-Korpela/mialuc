@@ -32,40 +32,68 @@
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
-    // The call of a polymorphic procedure has neither as many arguments as the procedure has
-    // parameters, nor as many as it has parameters that are not types. The subject is the name of
-    // the call.
+    /**
+     * The call of a polymorphic procedure has neither as many arguments as the procedure has
+     * parameters, nor as many as it has parameters that are not types.
+     * The subject is the name of the call.
+     */
     SPECIALIZE_STATUS_ARGUMENT_COUNT_MISMATCH,
-    // An argument whose type is not of the form of the type of its parameter, such as an `Int`
-    // for `[]$T`. The subject is the name of the call.
+    /**
+     * An argument whose type is not of the form of the type of its parameter, such as an `Int` for
+     * `[]$T`.
+     * The subject is the name of the call.
+     */
     SPECIALIZE_STATUS_ARGUMENT_TYPE_MISMATCH,
-    // The program needs more copies, or a larger tree, than the compiler makes, which a procedure
-    // that calls itself with ever larger types does. The subject is the name of the definition
-    // whose copy did not fit, and `number` the limit.
+    /**
+     * The program needs more copies, or a larger tree, than the compiler makes, which a procedure
+     * that calls itself with ever larger types does.
+     * The subject is the name of the definition whose copy did not fit, and `number` the limit.
+     */
     SPECIALIZE_STATUS_LIMIT,
     SPECIALIZE_STATUS_OK,
-    // The analysis of the program with its copies found an error, which `semantic` has.
+    /**
+     * The analysis of the program with its copies found an error, which `semantic` has.
+     */
     SPECIALIZE_STATUS_SEMANTIC,
-    // A polymorphic procedure is used as a value, which has no type, because it is many
-    // procedures. The subject is its name.
+    /**
+     * A polymorphic procedure is used as a value, which has no type, because it is many procedures.
+     * The subject is its name.
+     */
     SPECIALIZE_STATUS_PROCEDURE_NOT_CALLED,
-    // A struct that has no type parameters is given type arguments. The subject is the type.
+    /**
+     * A struct that has no type parameters is given type arguments.
+     * The subject is the type.
+     */
     SPECIALIZE_STATUS_STRUCT_NOT_POLYMORPHIC,
-    // A polymorphic struct is given another number of type arguments than it has type parameters,
-    // which can be none. The subject is the type, and `number` the number of type parameters.
+    /**
+     * A polymorphic struct is given another number of type arguments than it has type parameters,
+     * which can be none.
+     * The subject is the type, and `number` the number of type parameters.
+     */
     SPECIALIZE_STATUS_STRUCT_TYPE_ARGUMENT_COUNT_MISMATCH,
-    // The type that a type parameter is given is deduced as one type from one argument and as
-    // another from another. The subject is the name of the call, `detail` the type parameter, and
-    // `other` and `target` the two types.
+    /**
+     * The type that a type parameter is given is deduced as one type from one argument and as
+     * another from another.
+     * The subject is the name of the call, `detail` the type parameter, and `other` and `target`
+     * the two types.
+     */
     SPECIALIZE_STATUS_TYPE_PARAMETER_CONFLICT,
-    // A type parameter is declared twice by one procedure or struct. The subject is the second.
+    /**
+     * A type parameter is declared twice by one procedure or struct.
+     * The subject is the second.
+     */
     SPECIALIZE_STATUS_TYPE_PARAMETER_DUPLICATE,
-    // A name with `$` before it outside of the type of a parameter of a procedure, which is where
-    // a type parameter is declared. The subject is the name.
+    /**
+     * A name with `$` before it outside of the type of a parameter of a procedure, which is where a
+     * type parameter is declared.
+     * The subject is the name.
+     */
     SPECIALIZE_STATUS_TYPE_PARAMETER_MISPLACED,
-    // The type of a type parameter cannot be deduced from the arguments of a call, because no
-    // argument says it, or an argument has no type that is known. The subject is the name of the
-    // call, and `detail` the type parameter.
+    /**
+     * The type of a type parameter cannot be deduced from the arguments of a call, because no
+     * argument says it, or an argument has no type that is known.
+     * The subject is the name of the call, and `detail` the type parameter.
+     */
     SPECIALIZE_STATUS_TYPE_PARAMETER_UNDEDUCED,
 } Specialize_Status;
 

@@ -10,9 +10,11 @@
 typedef enum {
     PARSE_STATUS_OK,
     PARSE_STATUS_NODE_LIMIT,
-    // A `return` without a value in a procedure that has a return type. `expected` is the return
-    // type, as the source writes it, which is a view of the source, and `error_token_index` is the
-    // token after the `return`.
+    /**
+     * A `return` without a value in a procedure that has a return type.
+     * `expected` is the return type, as the source writes it, which is a view of the source, and
+     * `error_token_index` is the token after the `return`.
+     */
     PARSE_STATUS_RETURN_VALUE_MISSING,
     PARSE_STATUS_UNEXPECTED_TOKEN,
 } Parse_Status;

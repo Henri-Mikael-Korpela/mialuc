@@ -8,10 +8,14 @@
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
-    // The file breaks the format, for example a header or the code ends in the middle of an
-    // instruction.
+    /**
+     * The file breaks the format, for example a header or the code ends in the middle of an
+     * instruction.
+     */
     X64_TEXT_STATUS_EXECUTABLE_MALFORMED,
-    // The file may be valid, but has an instruction that the formatter does not know.
+    /**
+     * The file may be valid, but has an instruction that the formatter does not know.
+     */
     X64_TEXT_STATUS_EXECUTABLE_UNSUPPORTED,
     X64_TEXT_STATUS_OK,
     X64_TEXT_STATUS_OUTPUT_TOO_LARGE,

@@ -8,9 +8,13 @@
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
-    // The module breaks the binary format, for example it ends in the middle of a section.
+    /**
+     * The module breaks the binary format, for example it ends in the middle of a section.
+     */
     WASM_TEXT_STATUS_MODULE_MALFORMED,
-    // The module may be valid, but uses something that the formatter does not know.
+    /**
+     * The module may be valid, but uses something that the formatter does not know.
+     */
     WASM_TEXT_STATUS_MODULE_UNSUPPORTED,
     WASM_TEXT_STATUS_OK,
     WASM_TEXT_STATUS_OUTPUT_TOO_LARGE,

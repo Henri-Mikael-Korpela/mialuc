@@ -8,22 +8,36 @@
 #include <mialu/specialize.h>
 
 enum {
-    // The most rounds, see `specialize`. A program needs as many as its polymorphic procedures call
-    // each other deep, plus one, so this is far more than one needs, and a procedure that calls
-    // itself with a larger type each time, which would need rounds without end, stops at it. Such a
-    // type grows by three tokens in a round, so it stays within `SPECIALIZE_TYPE_TOKEN_MAX`.
+    /**
+     * The most rounds, see `specialize`.
+     * A program needs as many as its polymorphic procedures call each other deep, plus one, so this
+     * is far more than one needs, and a procedure that calls itself with a larger type each time,
+     * which would need rounds without end, stops at it.
+     * Such a type grows by three tokens in a round, so it stays within `SPECIALIZE_TYPE_TOKEN_MAX`.
+     */
     SPECIALIZE_ROUND_MAX = 32,
-    // The most copies of polymorphic definitions, which is as many procedures as a target builds,
-    // see `X64_CONSTANT_COUNT_MAX`.
+    /**
+     * The most copies of polymorphic definitions, which is as many procedures as a target builds,
+     * see `X64_CONSTANT_COUNT_MAX`.
+     */
     SPECIALIZE_REQUEST_MAX = 1024,
-    // The most type parameters of one procedure or struct, see `AST_STRUCT_TYPE_PARAMETER_COUNT_MAX`.
+    /**
+     * The most type parameters of one procedure or struct, see
+     * `AST_STRUCT_TYPE_PARAMETER_COUNT_MAX`.
+     */
     SPECIALIZE_TYPE_PARAMETER_MAX = AST_STRUCT_TYPE_PARAMETER_COUNT_MAX,
-    // The longest text of a type that is worked out, which is far longer than a type is written.
+    /**
+     * The longest text of a type that is worked out, which is far longer than a type is written.
+     */
     SPECIALIZE_TYPE_TEXT_SIZE_BYTES = 512,
-    // The most tokens of the text of a type, see `Specialize_Type_Tokens`.
+    /**
+     * The most tokens of the text of a type, see `Specialize_Type_Tokens`.
+     */
     SPECIALIZE_TYPE_TOKEN_MAX = 128,
-    // How deep the type of an expression is followed through the names and the expressions that it
-    // is made of, which is the depth that a constant expression is allowed to have.
+    /**
+     * How deep the type of an expression is followed through the names and the expressions that it
+     * is made of, which is the depth that a constant expression is allowed to have.
+     */
     SPECIALIZE_TYPE_DEPTH_MAX = 64,
 };
 
@@ -90,8 +104,10 @@ typedef struct {
 typedef enum {
     SPECIALIZE_DEDUCTION_DONE,
     SPECIALIZE_DEDUCTION_FAILED,
-    // The type of an argument is not known yet, because it is the result of a call that is not
-    // specialized yet, so the call is looked at again in the next round.
+    /**
+     * The type of an argument is not known yet, because it is the result of a call that is not
+     * specialized yet, so the call is looked at again in the next round.
+     */
     SPECIALIZE_DEDUCTION_PENDING,
 } Specialize_Deduction;
 

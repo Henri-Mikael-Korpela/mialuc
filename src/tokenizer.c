@@ -54,11 +54,15 @@ typedef struct {
 } Tokenize_Rune_Literal;
 
 enum {
-    // Indentation must be a whole number of levels, and one level is always this many spaces.
+    /**
+     * Indentation must be a whole number of levels, and one level is always this many spaces.
+     */
     INDENTATION_SPACES_PER_LEVEL = 4,
-    // The most characters that a float literal can have, digit separators included, which is far
-    // more than the 17 digits that tell two `double` values apart. The digits are copied to a
-    // buffer of this size, without the separators, for `strtod`.
+    /**
+     * The most characters that a float literal can have, digit separators included, which is far
+     * more than the 17 digits that tell two `double` values apart.
+     * The digits are copied to a buffer of this size, without the separators, for `strtod`.
+     */
     TOKENIZER_FLOAT_LITERAL_LENGTH_MAX = 128,
 };
 

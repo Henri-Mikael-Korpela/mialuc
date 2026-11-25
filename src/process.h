@@ -9,16 +9,24 @@
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
-    // The file for the program could not be made or written in the directory for temporary files.
+    /**
+     * The file for the program could not be made or written in the directory for temporary files.
+     */
     PROCESS_STATUS_FILE_FAILED,
     PROCESS_STATUS_OK,
-    // The program could not be started: the system refused the file, for example because it is not
-    // a program for this machine.
+    /**
+     * The program could not be started:
+     * the system refused the file, for example because it is not a program for this machine.
+     */
     PROCESS_STATUS_START_FAILED,
-    // The command line of the program, which is the path of the file and the arguments, is longer
-    // than the system takes, which is 32767 characters.
+    /**
+     * The command line of the program, which is the path of the file and the arguments, is longer
+     * than the system takes, which is 32767 characters.
+     */
     PROCESS_STATUS_ARGUMENTS_TOO_LONG,
-    // Running a program built by the compiler is only done on Windows for now.
+    /**
+     * Running a program built by the compiler is only done on Windows for now.
+     */
     PROCESS_STATUS_UNSUPPORTED,
 } Process_Status;
 

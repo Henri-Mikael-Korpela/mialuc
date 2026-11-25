@@ -24,20 +24,30 @@ static char const DIAGNOSTIC_STYLE_HELP[] = "\x1b[1;36m";
 static char const DIAGNOSTIC_STYLE_RESET[] = "\x1b[0m";
 
 enum {
-    // The notes and helps are broken into lines of at most this many characters, so that they can
-    // be read in a terminal of the usual width without the terminal breaking them in the middle of
-    // a word. A word that is longer than the line stays on a line of its own.
+    /**
+     * The notes and helps are broken into lines of at most this many characters, so that they can
+     * be read in a terminal of the usual width without the terminal breaking them in the middle of
+     * a word.
+     * A word that is longer than the line stays on a line of its own.
+     */
     DIAGNOSTIC_LINE_WIDTH = 100,
-    // The width of the gutter, which is the width of the line number, when there is no line
-    // number, as in an error about a file as a whole: it has room for the `=` of a note.
+    /**
+     * The width of the gutter, which is the width of the line number, when there is no line number,
+     * as in an error about a file as a whole:
+     * it has room for the `=` of a note.
+     */
     DIAGNOSTIC_GUTTER_WIDTH_MIN = 1,
-    // The most characters of a line of the source that are shown. A longer line shows this many
-    // around the span, and the span is `DIAGNOSTIC_SOURCE_LEAD` characters from the start of them
-    // when there is text before it.
+    /**
+     * The most characters of a line of the source that are shown.
+     * A longer line shows this many around the span, and the span is `DIAGNOSTIC_SOURCE_LEAD`
+     * characters from the start of them when there is text before it.
+     */
     DIAGNOSTIC_SOURCE_WIDTH_MAX = 100,
     DIAGNOSTIC_SOURCE_LEAD = 30,
-    // The lines of the source that are shown before and after a line that the error is about, when
-    // there are that many, for the context of it.
+    /**
+     * The lines of the source that are shown before and after a line that the error is about, when
+     * there are that many, for the context of it.
+     */
     DIAGNOSTIC_CONTEXT_LINES = 2,
 };
 

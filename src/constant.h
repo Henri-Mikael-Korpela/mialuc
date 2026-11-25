@@ -9,11 +9,14 @@
 #include <mialu/semantic.h>
 
 enum {
-    // The deepest that the evaluation goes: operators inside each other, and the constants that a
-    // name leads to, which take two places each, the name and the definition. The evaluation keeps
-    // this path in a fixed array instead of calling itself. It is the bound of the WebAssembly
-    // target for an expression as well, so that a constant is never too deep for a target that
-    // could write the same expression.
+    /**
+     * The deepest that the evaluation goes:
+     * operators inside each other, and the constants that a name leads to, which take two places
+     * each, the name and the definition.
+     * The evaluation keeps this path in a fixed array instead of calling itself.
+     * It is the bound of the WebAssembly target for an expression as well, so that a constant is
+     * never too deep for a target that could write the same expression.
+     */
     CONSTANT_EXPRESSION_DEPTH_MAX = 1024,
 };
 
@@ -40,82 +43,140 @@ typedef struct {
 typedef enum {
     CONSTANT_TYPE_BOOL,
     CONSTANT_TYPE_BYTE,
-    // A constant that is defined with the type `F32`, or arithmetic of one with an untyped float.
-    // Its value is a number that an `F32` can hold.
+    /**
+     * A constant that is defined with the type `F32`, or arithmetic of one with an untyped float.
+     * Its value is a number that an `F32` can hold.
+     */
     CONSTANT_TYPE_F32,
-    // A constant that is defined with the type `F64`, or arithmetic of one with an untyped float.
+    /**
+     * A constant that is defined with the type `F64`, or arithmetic of one with an untyped float.
+     */
     CONSTANT_TYPE_F64,
-    // A constant that is defined with the type `I32`, or arithmetic of one with an untyped integer.
-    // Its value is a number from -2147483648 to 2147483647.
+    /**
+     * A constant that is defined with the type `I32`, or arithmetic of one with an untyped integer.
+     * Its value is a number from -2147483648 to 2147483647.
+     */
     CONSTANT_TYPE_I32,
-    // A constant that is defined with the type `I64`, or arithmetic of one with an untyped integer.
-    // Its value is any number that an `Int` holds.
+    /**
+     * A constant that is defined with the type `I64`, or arithmetic of one with an untyped integer.
+     * Its value is any number that an `Int` holds.
+     */
     CONSTANT_TYPE_I64,
     CONSTANT_TYPE_INT,
-    // A rune literal, such as `'A'`, whose code point is in `integer`, and a constant that is
-    // defined with the type `Rune`. A rune has no arithmetic, and no untyped integer is one.
+    /**
+     * A rune literal, such as `'A'`, whose code point is in `integer`, and a constant that is
+     * defined with the type `Rune`.
+     * A rune has no arithmetic, and no untyped integer is one.
+     */
     CONSTANT_TYPE_RUNE,
     CONSTANT_TYPE_STR,
-    // A constant that is defined with the type `U32`, or arithmetic of one with an untyped integer.
-    // Its value is a number from 0 to 4294967295.
+    /**
+     * A constant that is defined with the type `U32`, or arithmetic of one with an untyped integer.
+     * Its value is a number from 0 to 4294967295.
+     */
     CONSTANT_TYPE_U32,
-    // A constant that is defined with the type `U64`, or arithmetic of one with an untyped integer.
-    // Its value is a number from 0 to 9223372036854775807, which is as far as the 64 bits of
-    // `integer` go, so a constant is not larger than an `Int` is.
+    /**
+     * A constant that is defined with the type `U64`, or arithmetic of one with an untyped integer.
+     * Its value is a number from 0 to 9223372036854775807, which is as far as the 64 bits of
+     * `integer` go, so a constant is not larger than an `Int` is.
+     */
     CONSTANT_TYPE_U64,
-    // `true`, `false`, a comparison of constants, and `and`, `or` and `not` of untyped truth
-    // values.
+    /**
+     * `true`, `false`, a comparison of constants, and `and`, `or` and `not` of untyped truth
+     * values.
+     */
     CONSTANT_TYPE_UNTYPED_BOOL,
-    // A float literal, and arithmetic of untyped floats. Its value is a `double`.
+    /**
+     * A float literal, and arithmetic of untyped floats.
+     * Its value is a `double`.
+     */
     CONSTANT_TYPE_UNTYPED_FLOAT,
-    // An integer literal, and arithmetic of untyped integers.
+    /**
+     * An integer literal, and arithmetic of untyped integers.
+     */
     CONSTANT_TYPE_UNTYPED_INTEGER,
-    // A string literal.
+    /**
+     * A string literal.
+     */
     CONSTANT_TYPE_UNTYPED_STRING,
 } Constant_Type;
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
-    // A constant that is defined in terms of itself, through any number of others. `error` is the
-    // name where the circle closes.
+    /**
+     * A constant that is defined in terms of itself, through any number of others.
+     * `error` is the name where the circle closes.
+     */
     CONSTANT_STATUS_CYCLE,
-    // The expression, with the constants that it goes through, is deeper than
-    // `CONSTANT_EXPRESSION_DEPTH_MAX`. `error` is the node where the limit was reached.
+    /**
+     * The expression, with the constants that it goes through, is deeper than
+     * `CONSTANT_EXPRESSION_DEPTH_MAX`.
+     * `error` is the node where the limit was reached.
+     */
     CONSTANT_STATUS_DEPTH_EXCEEDED,
-    // A division by zero, which has no value, also of floats, which have an infinity for it in a
-    // running program but not in a constant. `error` is the division.
+    /**
+     * A division by zero, which has no value, also of floats, which have an infinity for it in a
+     * running program but not in a constant.
+     * `error` is the division.
+     */
     CONSTANT_STATUS_DIVISION_BY_ZERO,
-    // The definition of a constant whose value is being worked out. Meeting it again means that
-    // its value depends on itself. No entry has it once the evaluation that set it is done.
+    /**
+     * The definition of a constant whose value is being worked out.
+     * Meeting it again means that its value depends on itself.
+     * No entry has it once the evaluation that set it is done.
+     */
     CONSTANT_STATUS_EVALUATING,
-    // Not every part of the expression is known when the program is compiled, such as a variable
-    // or a call, so it is not a constant. That is not an error in a procedure, where the value is
-    // computed when the program runs, but it is one for the value of a constant.
+    /**
+     * Not every part of the expression is known when the program is compiled, such as a variable or
+     * a call, so it is not a constant.
+     * That is not an error in a procedure, where the value is computed when the program runs, but
+     * it is one for the value of a constant.
+     */
     CONSTANT_STATUS_NOT_CONSTANT,
     CONSTANT_STATUS_OK,
-    // An operator is given operands that it does not take, such as `true + 1`, a typed `Byte` in
-    // arithmetic, an `Int` and a `Byte` together, two strings in a comparison, or a number for
-    // `++`. `error` is the operator.
+    /**
+     * An operator is given operands that it does not take, such as `true + 1`, a typed `Byte` in
+     * arithmetic, an `Int` and a `Byte` together, two strings in a comparison, or a number for
+     * `++`.
+     * `error` is the operator.
+     */
     CONSTANT_STATUS_OPERAND_TYPE_INVALID,
-    // A result that does not fit in a 64-bit `Int`, or a float result that is infinite. Constant
-    // arithmetic does not wrap around as the arithmetic of a running program does, because the
-    // number is wrong as soon as it would. `error` is the operator.
+    /**
+     * A result that does not fit in a 64-bit `Int`, or a float result that is infinite.
+     * Constant arithmetic does not wrap around as the arithmetic of a running program does, because
+     * the number is wrong as soon as it would.
+     * `error` is the operator.
+     */
     CONSTANT_STATUS_OVERFLOW,
-    // The text of the strings that `++` joins does not fit in the `Constant_Text` any more.
-    // `error` is the operator.
+    /**
+     * The text of the strings that `++` joins does not fit in the `Constant_Text` any more.
+     * `error` is the operator.
+     */
     CONSTANT_STATUS_TEXT_TOO_LONG,
-    // A typed constant whose type is not `Int`, `I32`, `I64`, `U32`, `U64`, `Byte`, `Rune`, `F32`, `F64`, `Bool` or `Str`,
-    // which are the types that a constant can have. `error` is the definition.
+    /**
+     * A typed constant whose type is not `Int`, `I32`, `I64`, `U32`, `U64`, `Byte`, `Rune`, `F32`,
+     * `F64`, `Bool` or `Str`, which are the types that a constant can have.
+     * `error` is the definition.
+     */
     CONSTANT_STATUS_TYPE_INVALID,
-    // A value that is not of the type that it is given, such as a string for a constant of type
-    // `Int`, or a typed `Int` for one of type `Byte`. `error` is the definition.
+    /**
+     * A value that is not of the type that it is given, such as a string for a constant of type
+     * `Int`, or a typed `Int` for one of type `Byte`.
+     * `error` is the definition.
+     */
     CONSTANT_STATUS_TYPE_MISMATCH,
-    // A node that was not evaluated. Every entry of the table starts with it.
+    /**
+     * A node that was not evaluated.
+     * Every entry of the table starts with it.
+     */
     CONSTANT_STATUS_UNKNOWN,
-    // An untyped integer that does not fit in the `Byte` that it becomes, such as 300, in the
-    // value of a constant of type `Byte` or compared with a typed `Byte` constant, and an untyped
-    // float that is above the largest `F32` in a constant of type `F32` or compared with a typed
-    // `F32` constant. `error` is the definition or the comparison.
+    /**
+     * An untyped integer that does not fit in the `Byte` that it becomes, such as 300, in the value
+     * of a constant of type `Byte` or compared with a typed `Byte` constant, and an untyped float
+     * that is above the largest `F32` in a constant of type `F32` or compared with a typed `F32`
+     * constant.
+     * `error` is the definition or the comparison.
+     */
     CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE,
 } Constant_Status;
 

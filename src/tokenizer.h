@@ -8,50 +8,75 @@
 #include <mialu/str.h>
 
 typedef enum {
-    // Tokens consisting of a single character are represented by their ASCII value:
+    /**
+     * Tokens consisting of a single character are represented by their ASCII value:
+     */
     TOKEN_KIND_ASTERISK = '*',
-    // The braces around the elements of an array literal, and the brackets around the length of an
-    // array type and around the index of a subscript.
+    /**
+     * The braces around the elements of an array literal, and the brackets around the length of an
+     * array type and around the index of a subscript.
+     */
     TOKEN_KIND_BRACE_LEFT = '{',
     TOKEN_KIND_BRACE_RIGHT = '}',
     TOKEN_KIND_BRACKET_LEFT = '[',
     TOKEN_KIND_BRACKET_RIGHT = ']',
-    // Written after a type to make it a pointer type, as in `^Int`, and after an expression to
-    // follow the pointer that it is, as in `p^`.
+    /**
+     * Written after a type to make it a pointer type, as in `^Int`, and after an expression to
+     * follow the pointer that it is, as in `p^`.
+     */
     TOKEN_KIND_CARET = '^',
     TOKEN_KIND_COMMA = ',',
-    // The dot of a field access, as in `p.age`. `..<` and `..<=` are the tokens of a range.
+    /**
+     * The dot of a field access, as in `p.age`.
+     * `..<` and `..<=` are the tokens of a range.
+     */
     TOKEN_KIND_DOT = '.',
     TOKEN_KIND_EQUALS = '=',
     TOKEN_KIND_GREATER = '>',
-    // Starts the attribute list of a definition, such as `#(static)`.
+    /**
+     * Starts the attribute list of a definition, such as `#(static)`.
+     */
     TOKEN_KIND_HASH = '#',
     TOKEN_KIND_LESS = '<',
     TOKEN_KIND_MINUS = '-',
     TOKEN_KIND_PARENTHESIS_LEFT = '(',
     TOKEN_KIND_PARENTHESIS_RIGHT = ')',
-    // Written before an expression to take its address, as in `%x`.
+    /**
+     * Written before an expression to take its address, as in `%x`.
+     */
     TOKEN_KIND_PERCENT = '%',
     TOKEN_KIND_PLUS = '+',
     TOKEN_KIND_SLASH = '/',
     TOKEN_KIND_TYPE_SEPARATOR = ':',
 
-    // Tokens consisting of multiple characters are represented by a unique value, which starts
-    // above the ASCII range so that it cannot be the value of a single-character token:
+    /**
+     * Tokens consisting of multiple characters are represented by a unique value, which starts
+     * above the ASCII range so that it cannot be the value of a single-character token:
+     */
     TOKEN_KIND_ARROW = 256,
     TOKEN_KIND_ASTERISK_EQUALS,
-    // `//` and the rest of the line, which can follow code on the same line or stand alone. The
-    // parser never sees it, see `tokens_without_comments`.
+    /**
+     * `//` and the rest of the line, which can follow code on the same line or stand alone.
+     * The parser never sees it, see `tokens_without_comments`.
+     */
     TOKEN_KIND_COMMENT,
-    // One or more lines in a row that each start with `///`, as a single token. A line without it,
-    // a blank line and a comment of the other kind all end it, and it is always alone on its
-    // lines. The parser never sees it either.
+    /**
+     * One or more lines in a row that each start with `///`, as a single token.
+     * A line without it, a blank line and a comment of the other kind all end it, and it is always
+     * alone on its lines.
+     * The parser never sees it either.
+     */
     TOKEN_KIND_DOCUMENTATION_COMMENT,
-    // `...`, which stands where the body of a procedure would be, for a procedure that is defined
-    // elsewhere.
+    /**
+     * `...`, which stands where the body of a procedure would be, for a procedure that is defined
+     * elsewhere.
+     */
     TOKEN_KIND_ELLIPSIS,
     TOKEN_KIND_EQUALS_EQUALS,
-    // A decimal number with a fractional part, such as `1.5`. See `AST_NODE_TYPE_FLOAT_LITERAL`.
+    /**
+     * A decimal number with a fractional part, such as `1.5`.
+     * See `AST_NODE_TYPE_FLOAT_LITERAL`.
+     */
     TOKEN_KIND_FLOAT_LITERAL,
     TOKEN_KIND_GREATER_EQUALS,
     TOKEN_KIND_IDENTIFIER,
@@ -59,16 +84,24 @@ typedef enum {
     TOKEN_KIND_INTEGER_LITERAL,
     TOKEN_KIND_KEYWORD_AND,
     TOKEN_KIND_KEYWORD_BREAK,
-    // Starts a case of a match statement, see `AST_NODE_TYPE_MATCH_CASE`, or of a union match.
+    /**
+     * Starts a case of a match statement, see `AST_NODE_TYPE_MATCH_CASE`, or of a union match.
+     */
     TOKEN_KIND_KEYWORD_CASE,
-    // Starts a cast, `cast(Int)x`, see `AST_NODE_TYPE_CAST`.
+    /**
+     * Starts a cast, `cast(Int)x`, see `AST_NODE_TYPE_CAST`.
+     */
     TOKEN_KIND_KEYWORD_CAST,
     TOKEN_KIND_KEYWORD_CONST,
     TOKEN_KIND_KEYWORD_CONTINUE,
-    // Runs the statement after it when the block that it is in is left, see
-    // `AST_NODE_TYPE_DEFER_STATEMENT`.
+    /**
+     * Runs the statement after it when the block that it is in is left, see
+     * `AST_NODE_TYPE_DEFER_STATEMENT`.
+     */
     TOKEN_KIND_KEYWORD_DEFER,
-    // The length of a dynamic array type, `[dynamic]Int`, see `AST_ARRAY_LENGTH_DYNAMIC`.
+    /**
+     * The length of a dynamic array type, `[dynamic]Int`, see `AST_ARRAY_LENGTH_DYNAMIC`.
+     */
     TOKEN_KIND_KEYWORD_DYNAMIC,
     TOKEN_KIND_KEYWORD_ELSE,
     TOKEN_KIND_KEYWORD_ENUM,
@@ -78,45 +111,64 @@ typedef enum {
     TOKEN_KIND_KEYWORD_IF,
     TOKEN_KIND_KEYWORD_IMPORT,
     TOKEN_KIND_KEYWORD_IN,
-    // Starts a match statement, see `AST_NODE_TYPE_MATCH_STATEMENT`, and follows `union` in a
-    // union match.
+    /**
+     * Starts a match statement, see `AST_NODE_TYPE_MATCH_STATEMENT`, and follows `union` in a union
+     * match.
+     */
     TOKEN_KIND_KEYWORD_MATCH,
     TOKEN_KIND_KEYWORD_NIL,
     TOKEN_KIND_KEYWORD_NOT,
     TOKEN_KIND_KEYWORD_OR,
-    // Starts the package definition that every source file begins with, `package name`.
+    /**
+     * Starts the package definition that every source file begins with, `package name`.
+     */
     TOKEN_KIND_KEYWORD_PACKAGE,
     TOKEN_KIND_KEYWORD_PROC,
     TOKEN_KIND_KEYWORD_RETURN,
     TOKEN_KIND_KEYWORD_STRUCT,
     TOKEN_KIND_KEYWORD_TRUE,
-    // The type of a type parameter, as in `$T: type_id`: the parameter is a type, which a call
-    // gives, and not a value.
+    /**
+     * The type of a type parameter, as in `$T: type_id`:
+     * the parameter is a type, which a call gives, and not a value.
+     */
     TOKEN_KIND_KEYWORD_TYPE_ID,
     TOKEN_KIND_KEYWORD_TYPE_INFO_OF,
     TOKEN_KIND_KEYWORD_UNION,
-    // `:` and a name with nothing in between, such as `:outer`. The name without the `:` is in the
-    // `identifier` payload.
+    /**
+     * `:` and a name with nothing in between, such as `:outer`.
+     * The name without the `:` is in the `identifier` payload.
+     */
     TOKEN_KIND_LABEL,
     TOKEN_KIND_LESS_EQUALS,
     TOKEN_KIND_MINUS_EQUALS,
     TOKEN_KIND_NOT_EQUALS,
     TOKEN_KIND_PLUS_EQUALS,
-    // `++`, which joins the text of two constants, see `AST_NODE_TYPE_CONCATENATION`.
+    /**
+     * `++`, which joins the text of two constants, see `AST_NODE_TYPE_CONCATENATION`.
+     */
     TOKEN_KIND_PLUS_PLUS,
-    // `..`, which stands for every element of an array literal, `[3]Int { .. = 0 }`.
+    /**
+     * `..`, which stands for every element of an array literal, `[3]Int { .. = 0 }`.
+     */
     TOKEN_KIND_DOT_DOT,
-    // `..<` and `..<=`, which are the ends of an exclusive and of an inclusive range.
+    /**
+     * `..<` and `..<=`, which are the ends of an exclusive and of an inclusive range.
+     */
     TOKEN_KIND_RANGE_EXCLUSIVE,
     TOKEN_KIND_RANGE_INCLUSIVE,
-    // One character between single quotes, such as `'A'`, `'芋'` or `'🚀'`. See
-    // `AST_NODE_TYPE_RUNE_LITERAL`.
+    /**
+     * One character between single quotes, such as `'A'`, `'芋'` or `'🚀'`.
+     * See `AST_NODE_TYPE_RUNE_LITERAL`.
+     */
     TOKEN_KIND_RUNE_LITERAL,
     TOKEN_KIND_SLASH_EQUALS,
     TOKEN_KIND_STRING_LITERAL,
-    // `$` and a name with nothing in between, such as `$T`, which declares the name as a type
-    // parameter of a procedure, see `AST_NODE_TYPE_TYPE_NAME`. The `identifier` payload is the
-    // whole text, with the `$`, so that the type that it is part of is one view of the source.
+    /**
+     * `$` and a name with nothing in between, such as `$T`, which declares the name as a type
+     * parameter of a procedure, see `AST_NODE_TYPE_TYPE_NAME`.
+     * The `identifier` payload is the whole text, with the `$`, so that the type that it is part of
+     * is one view of the source.
+     */
     TOKEN_KIND_TYPE_PARAMETER,
 
     TOKEN_KIND_END,
@@ -175,69 +227,114 @@ STATIC_ASSERT(sizeof(Token) == 24, token_size_is_24_bytes);
 
 typedef enum {
     TOKENIZE_STATUS_OK,
-    // A comment has bytes that are not valid UTF-8. `error_offset` is where the first bad
-    // character starts.
+    /**
+     * A comment has bytes that are not valid UTF-8.
+     * `error_offset` is where the first bad character starts.
+     */
     TOKENIZE_STATUS_COMMENT_ENCODING_INVALID,
-    // A `///` that has code before it on its line. It documents the code after it, so it has to be
-    // on lines of its own, and a note about the code on the same line is a `//` comment.
-    // `error_offset` is where the `///` starts.
+    /**
+     * A `///` that has code before it on its line.
+     * It documents the code after it, so it has to be on lines of its own, and a note about the
+     * code on the same line is a `//` comment.
+     * `error_offset` is where the `///` starts.
+     */
     TOKENIZE_STATUS_DOCUMENTATION_COMMENT_TRAILING,
-    // A character of a float literal after its dot that is not a digit, such as the `f` of `1.5f`
-    // or the `e` of `1.5e3`, which the language does not have. `error_offset` is where the
-    // character is.
+    /**
+     * A character of a float literal after its dot that is not a digit, such as the `f` of `1.5f`
+     * or the `e` of `1.5e3`, which the language does not have.
+     * `error_offset` is where the character is.
+     */
     TOKENIZE_STATUS_FLOAT_LITERAL_DIGIT_INVALID,
-    // A float literal that has more characters than `TOKENIZER_FLOAT_LITERAL_LENGTH_MAX`.
-    // `error_offset` is where the literal starts.
+    /**
+     * A float literal that has more characters than `TOKENIZER_FLOAT_LITERAL_LENGTH_MAX`.
+     * `error_offset` is where the literal starts.
+     */
     TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LONG,
-    // The value of a float literal is above the largest `double`, which is about 1.8e308.
-    // `error_offset` is where the literal starts.
+    /**
+     * The value of a float literal is above the largest `double`, which is about 1.8e308.
+     * `error_offset` is where the literal starts.
+     */
     TOKENIZE_STATUS_FLOAT_LITERAL_TOO_LARGE,
-    // A digit separator `_` that is not between two digits in a float literal, such as `1.5_`.
-    // `error_offset` is where the separator is.
+    /**
+     * A digit separator `_` that is not between two digits in a float literal, such as `1.5_`.
+     * `error_offset` is where the separator is.
+     */
     TOKENIZE_STATUS_FLOAT_LITERAL_SEPARATOR_INVALID,
     TOKENIZE_STATUS_INDENTATION_TAB,
     TOKENIZE_STATUS_INDENTATION_WIDTH_INVALID,
-    // A character of an integer literal that is not a digit of its base, such as the `2` of
-    // `0b102`, the `g` of `0xfg` or the `a` of `12a`. `error_offset` is where the character is.
+    /**
+     * A character of an integer literal that is not a digit of its base, such as the `2` of
+     * `0b102`, the `g` of `0xfg` or the `a` of `12a`.
+     * `error_offset` is where the character is.
+     */
     TOKENIZE_STATUS_INTEGER_LITERAL_DIGIT_INVALID,
-    // A `0b` or `0x` that has no digits after it. `error_offset` is where the literal starts.
+    /**
+     * A `0b` or `0x` that has no digits after it.
+     * `error_offset` is where the literal starts.
+     */
     TOKENIZE_STATUS_INTEGER_LITERAL_DIGITS_MISSING,
-    // A digit separator `_` that is not between two digits, such as in `1__000`, `1_` or `0x_FF`.
-    // `error_offset` is where the separator is.
+    /**
+     * A digit separator `_` that is not between two digits, such as in `1__000`, `1_` or `0x_FF`.
+     * `error_offset` is where the separator is.
+     */
     TOKENIZE_STATUS_INTEGER_LITERAL_SEPARATOR_INVALID,
-    // The value of an integer literal is above the largest `Int`. `error_offset` is where the
-    // literal starts.
+    /**
+     * The value of an integer literal is above the largest `Int`.
+     * `error_offset` is where the literal starts.
+     */
     TOKENIZE_STATUS_INTEGER_LITERAL_TOO_LARGE,
-    // A label, a `:` and a name at the start of a statement, whose name is a reserved word.
+    /**
+     * A label, a `:` and a name at the start of a statement, whose name is a reserved word.
+     */
     TOKENIZE_STATUS_LABEL_INVALID,
-    // An escape sequence of a string that is not one of the language, which are those of a rune
-    // literal, see `TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID`. `error_offset` is where the
-    // backslash is.
+    /**
+     * An escape sequence of a string that is not one of the language, which are those of a rune
+     * literal, see `TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID`.
+     * `error_offset` is where the backslash is.
+     */
     TOKENIZE_STATUS_STRING_LITERAL_ESCAPE_INVALID,
-    // The string has bytes that are not valid UTF-8. `error_offset` is where the first bad
-    // character starts.
+    /**
+     * The string has bytes that are not valid UTF-8.
+     * `error_offset` is where the first bad character starts.
+     */
     TOKENIZE_STATUS_STRING_LITERAL_ENCODING_INVALID,
-    // The string has no closing quote before the end of its line.
+    /**
+     * The string has no closing quote before the end of its line.
+     */
     TOKENIZE_STATUS_STRING_LITERAL_UNTERMINATED,
-    // `''`, a rune literal without a character. `error_offset` is where the literal starts.
+    /**
+     * `''`, a rune literal without a character.
+     * `error_offset` is where the literal starts.
+     */
     TOKENIZE_STATUS_RUNE_LITERAL_EMPTY,
-    // The character of a rune literal is not valid UTF-8. `error_offset` is where the first bad
-    // byte is.
+    /**
+     * The character of a rune literal is not valid UTF-8.
+     * `error_offset` is where the first bad byte is.
+     */
     TOKENIZE_STATUS_RUNE_LITERAL_ENCODING_INVALID,
-    // An escape sequence of a rune literal that is not one of the language: a backslash followed by
-    // a character that does not make one, such as `\q`, too few digits, as in `\x4`, or a number
-    // that is not a Unicode character, such as the surrogate of `\ud800`, a number above 0x10FFFF
-    // or an octal one above 255. `error_offset` is where the backslash is.
+    /**
+     * An escape sequence of a rune literal that is not one of the language:
+     * a backslash followed by a character that does not make one, such as `\q`, too few digits, as
+     * in `\x4`, or a number that is not a Unicode character, such as the surrogate of `\ud800`, a
+     * number above 0x10FFFF or an octal one above 255.
+     * `error_offset` is where the backslash is.
+     */
     TOKENIZE_STATUS_RUNE_LITERAL_ESCAPE_INVALID,
-    // A rune literal that has more than one character, such as `'ab'`. `error_offset` is where the
-    // literal starts.
+    /**
+     * A rune literal that has more than one character, such as `'ab'`.
+     * `error_offset` is where the literal starts.
+     */
     TOKENIZE_STATUS_RUNE_LITERAL_TOO_LONG,
-    // A rune literal that has no closing quote before the end of its line. `error_offset` is where
-    // the literal starts.
+    /**
+     * A rune literal that has no closing quote before the end of its line.
+     * `error_offset` is where the literal starts.
+     */
     TOKENIZE_STATUS_RUNE_LITERAL_UNTERMINATED,
     TOKENIZE_STATUS_TOKEN_LIMIT,
-    // A type parameter, a `$` and a name, whose name is a reserved word. `error_offset` is where
-    // the `$` is.
+    /**
+     * A type parameter, a `$` and a name, whose name is a reserved word.
+     * `error_offset` is where the `$` is.
+     */
     TOKENIZE_STATUS_TYPE_PARAMETER_INVALID,
     TOKENIZE_STATUS_UNEXPECTED_CHARACTER,
 } Tokenize_Status;

@@ -93,45 +93,72 @@ typedef enum {
 // The language that the code of a foreign procedure is in, and so who provides it. Alphabetical,
 // because nothing depends on the order.
 typedef enum {
-    // JavaScript, for the WebAssembly target: `foreign js ->`.
+    /**
+     * JavaScript, for the WebAssembly target:
+     * `foreign js ->`.
+     */
     AST_FOREIGN_TARGET_JS,
-    // The C library of the platform, for the native targets: `foreign libc ->`.
+    /**
+     * The C library of the platform, for the native targets:
+     * `foreign libc ->`.
+     */
     AST_FOREIGN_TARGET_LIBC,
-    // A library of the system, which a program names itself, for the native targets:
-    // `import foreign kernel32 "system:Kernel32.lib"` and `foreign kernel32 ->`.
+    /**
+     * A library of the system, which a program names itself, for the native targets:
+     * `import foreign kernel32 "system:Kernel32.lib"` and `foreign kernel32 ->`.
+     */
     AST_FOREIGN_TARGET_SYSTEM,
 } Ast_Foreign_Target;
 
 // How the length of an array type is given. Alphabetical, because nothing depends on the order.
 typedef enum {
-    // A constant expression between the brackets that is not just an integer literal, such as a
-    // name, as in `[SIZE]Int` and `[SIZE * 2]Int`. The expression is the second child of the array
-    // type, after the type of the elements. The analysis works the length out, and gives the type
-    // the kind `AST_ARRAY_LENGTH_FIXED` with the length in the payload, so a target only meets
-    // this kind in a program that the analysis did not accept.
+    /**
+     * A constant expression between the brackets that is not just an integer literal, such as a
+     * name, as in `[SIZE]Int` and `[SIZE * 2]Int`.
+     * The expression is the second child of the array type, after the type of the elements.
+     * The analysis works the length out, and gives the type the kind `AST_ARRAY_LENGTH_FIXED` with
+     * the length in the payload, so a target only meets this kind in a program that the analysis
+     * did not accept.
+     */
     AST_ARRAY_LENGTH_CONSTANT,
-    // The keyword `dynamic` between the brackets, as in `[dynamic]Int`: an array that grows when
-    // elements are appended to it, whose length is known only when the program runs. As a literal,
-    // `[dynamic]Int` is an empty one, and has no elements and no braces.
+    /**
+     * The keyword `dynamic` between the brackets, as in `[dynamic]Int`:
+     * an array that grows when elements are appended to it, whose length is known only when the
+     * program runs.
+     * As a literal, `[dynamic]Int` is an empty one, and has no elements and no braces.
+     */
     AST_ARRAY_LENGTH_DYNAMIC,
-    // An integer literal between the brackets, as in `[5]Int`. It is in the payload.
+    /**
+     * An integer literal between the brackets, as in `[5]Int`.
+     * It is in the payload.
+     */
     AST_ARRAY_LENGTH_FIXED,
-    // The keyword `const` between the brackets, as in `[const]Int`: the length is the number of
-    // elements of the array literal that the type is the start of.
+    /**
+     * The keyword `const` between the brackets, as in `[const]Int`:
+     * the length is the number of elements of the array literal that the type is the start of.
+     */
     AST_ARRAY_LENGTH_INFERRED,
-    // Nothing between the brackets, as in `[]Int`. That is not an array but an array slice, which
-    // views the elements of an array and knows its length only when the program runs.
+    /**
+     * Nothing between the brackets, as in `[]Int`.
+     * That is not an array but an array slice, which views the elements of an array and knows its
+     * length only when the program runs.
+     */
     AST_ARRAY_LENGTH_OMITTED,
 } Ast_Array_Length_Kind;
 
 enum {
-    // The most blocks that can be inside each other in a procedure, not counting the body of the
-    // procedure. The parser and the analysis keep the blocks that are open in a fixed array
-    // instead of recursing, and a deeper nesting is rejected by the parser.
+    /**
+     * The most blocks that can be inside each other in a procedure, not counting the body of the
+     * procedure.
+     * The parser and the analysis keep the blocks that are open in a fixed array instead of
+     * recursing, and a deeper nesting is rejected by the parser.
+     */
     AST_BLOCK_DEPTH_MAX = 32,
-    // The most type parameters that a struct has, `struct($K: type_id, $V: type_id)`. The parser
-    // keeps them aside while it makes the struct, which comes after them, see
-    // `AST_NODE_TYPE_CONSTANT_DEFINITION`.
+    /**
+     * The most type parameters that a struct has, `struct($K: type_id, $V: type_id)`.
+     * The parser keeps them aside while it makes the struct, which comes after them, see
+     * `AST_NODE_TYPE_CONSTANT_DEFINITION`.
+     */
     AST_STRUCT_TYPE_PARAMETER_COUNT_MAX = 8,
 };
 

@@ -21,12 +21,18 @@ typedef struct {
 
 // Alphabetical, because nothing depends on the order.
 typedef enum {
-    // The fields below a `case` of a union match. They become fields of the struct that the union
-    // match is in.
+    /**
+     * The fields below a `case` of a union match.
+     * They become fields of the struct that the union match is in.
+     */
     PARSE_STRUCT_FRAME_KIND_CASE,
-    // The fields of a struct, and its union matches.
+    /**
+     * The fields of a struct, and its union matches.
+     */
     PARSE_STRUCT_FRAME_KIND_STRUCT,
-    // The cases below `union match kind ->`.
+    /**
+     * The cases below `union match kind ->`.
+     */
     PARSE_STRUCT_FRAME_KIND_UNION,
 } Parse_Struct_Frame_Kind;
 
@@ -49,13 +55,17 @@ typedef struct {
 } Parse_Struct_Frame;
 
 enum {
-    // The most values that a call can return and that one definition can name, see
-    // `parse_results_definition`.
+    /**
+     * The most values that a call can return and that one definition can name, see
+     * `parse_results_definition`.
+     */
     PARSE_RESULT_COUNT_MAX = 8,
 };
 
 enum {
-    // The most libraries of the system that a program can import, each with its own name.
+    /**
+     * The most libraries of the system that a program can import, each with its own name.
+     */
     PARSE_SYSTEM_LIBRARY_MAX = 16,
 };
 
