@@ -1,5 +1,5 @@
-#ifndef MIALU_PACKAGE_H
-#define MIALU_PACKAGE_H
+#ifndef MIALU_H_PACKAGE
+#define MIALU_H_PACKAGE
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -170,4 +170,4 @@ bool packages_locate(Packages const *packages, Str subject, char const **path, S
  */
 bool packages_node_source(Packages const *packages, size_t node, Str *source);
 
-#endif
+#endif // MIALU_H_PACKAGE

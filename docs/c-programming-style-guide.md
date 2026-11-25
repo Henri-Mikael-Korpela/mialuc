@@ -150,6 +150,11 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 
 - Avoid complex macros. If a macro has side effects or evaluates its argument more than once, it must be named in capitals and commented.
 
+## Header files
+
+- Guard every header file with an include guard named `MIALU_H_<HEADER_FILE_NAME>`, where the name is the file name without the extension, in capitals, with hyphens replaced by underscores. For example, `package.h` uses `MIALU_H_PACKAGE` and `wasm-text.h` uses `MIALU_H_WASM_TEXT`.
+- Repeat the guard name in a single line comment after the closing `#endif`, like this: `#endif // MIALU_H_PACKAGE`.
+
 ## Undefined behavior
 
 - Do not rely on undefined behavior. Be careful with signed overflow, shifts, strict aliasing, uninitialized reads and pointer arithmetic. Use unsigned types for wraparound arithmetic.

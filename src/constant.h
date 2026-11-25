@@ -1,5 +1,5 @@
-#ifndef MIALU_CONSTANT_H
-#define MIALU_CONSTANT_H
+#ifndef MIALU_H_CONSTANT
+#define MIALU_H_CONSTANT
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -216,4 +216,4 @@ bool constant_is_f32(Constant_Value value);
  */
 Constant_Type constant_type_default(Constant_Type type);
 
-#endif
+#endif // MIALU_H_CONSTANT

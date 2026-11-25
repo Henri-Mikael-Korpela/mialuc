@@ -1,5 +1,5 @@
-#ifndef MIALU_LIMITS_H
-#define MIALU_LIMITS_H
+#ifndef MIALU_H_LIMITS
+#define MIALU_H_LIMITS
 
 /**
  * The limits of the compiler that an error tells. The compiler allocates what it needs once, when
@@ -34,4 +34,4 @@ enum {
     SPECIALIZE_TEXT_COUNT_MAX = TOKEN_COUNT_MAX,
 };
 
-#endif
+#endif // MIALU_H_LIMITS

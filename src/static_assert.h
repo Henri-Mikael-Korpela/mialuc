@@ -1,5 +1,5 @@
-#ifndef MIALU_STATIC_ASSERT_H
-#define MIALU_STATIC_ASSERT_H
+#ifndef MIALU_H_STATIC_ASSERT
+#define MIALU_H_STATIC_ASSERT
 
 #include <iso646.h>
 
@@ -11,4 +11,4 @@
  */
 #define STATIC_ASSERT(condition, name) typedef char name[1 - 2 * not (condition)]
 
-#endif
+#endif // MIALU_H_STATIC_ASSERT

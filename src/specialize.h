@@ -1,5 +1,5 @@
-#ifndef MIALU_SPECIALIZE_H
-#define MIALU_SPECIALIZE_H
+#ifndef MIALU_H_SPECIALIZE
+#define MIALU_H_SPECIALIZE
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -164,4 +164,4 @@ Specialize_Result specialize(Array_Slice nodes, Ast_Node_Index root, size_t impo
  */
 Str specialize_source_of(Specialize_Texts const *texts, Str subject);
 
-#endif
+#endif // MIALU_H_SPECIALIZE

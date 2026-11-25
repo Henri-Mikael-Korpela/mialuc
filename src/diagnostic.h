@@ -1,5 +1,5 @@
-#ifndef MIALU_DIAGNOSTIC_H
-#define MIALU_DIAGNOSTIC_H
+#ifndef MIALU_H_DIAGNOSTIC
+#define MIALU_H_DIAGNOSTIC
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -66,4 +66,4 @@ typedef struct {
  */
 void diagnostic_print(FILE *output, Diagnostic const *diagnostic, bool is_color);
 
-#endif
+#endif // MIALU_H_DIAGNOSTIC

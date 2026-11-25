@@ -1,5 +1,5 @@
-#ifndef MIALU_SEMANTIC_H
-#define MIALU_SEMANTIC_H
+#ifndef MIALU_H_SEMANTIC
+#define MIALU_H_SEMANTIC
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -305,4 +305,4 @@ Semantic_Result semantic_analyze(Array_Slice nodes, Ast_Node_Index root, size_t 
  */
 bool semantic_is_built_in_procedure(Str name);
 
-#endif
+#endif // MIALU_H_SEMANTIC

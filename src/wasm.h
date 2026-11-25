@@ -1,5 +1,5 @@
-#ifndef MIALU_WASM_H
-#define MIALU_WASM_H
+#ifndef MIALU_H_WASM
+#define MIALU_H_WASM
 
 #include <mialu/array_slice.h>
 #include <mialu/ast.h>
@@ -478,4 +478,4 @@ typedef struct {
 Wasm_Build_Result wasm_build(Array_Slice nodes, Array_Slice bindings, Array_Slice constants,
                              Ast_Node_Index root, Array_Slice output_buffer);
 
-#endif
+#endif // MIALU_H_WASM

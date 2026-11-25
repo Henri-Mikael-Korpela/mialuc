@@ -1,5 +1,5 @@
-#ifndef MIALU_ARRAY_SLICE_H
-#define MIALU_ARRAY_SLICE_H
+#ifndef MIALU_H_ARRAY_SLICE
+#define MIALU_H_ARRAY_SLICE
 
 #include <stddef.h>
 
@@ -25,4 +25,4 @@ STATIC_ASSERT(sizeof(Array_Slice) == 16, array_slice_size_is_16_bytes);
  */
 Array_Slice array_slice_make(void *elements, size_t length);
 
-#endif
+#endif // MIALU_H_ARRAY_SLICE

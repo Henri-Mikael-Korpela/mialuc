@@ -1,5 +1,5 @@
-#ifndef MIALU_REPORT_H
-#define MIALU_REPORT_H
+#ifndef MIALU_H_REPORT
+#define MIALU_H_REPORT
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -313,4 +313,4 @@ void report_wasm_text_error(Reporter const *reporter, char const *path, Wasm_Tex
  */
 void report_x64_text_error(Reporter const *reporter, char const *path, X64_Text_Result result);
 
-#endif
+#endif // MIALU_H_REPORT

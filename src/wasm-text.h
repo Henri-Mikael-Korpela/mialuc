@@ -1,5 +1,5 @@
-#ifndef MIALU_WASM_TEXT_H
-#define MIALU_WASM_TEXT_H
+#ifndef MIALU_H_WASM_TEXT
+#define MIALU_H_WASM_TEXT
 
 #include <stddef.h>
 
@@ -39,4 +39,4 @@ typedef struct {
  */
 Wasm_Text_Result wasm_text_format(Array_Slice module, Array_Slice output_buffer);
 
-#endif
+#endif // MIALU_H_WASM_TEXT

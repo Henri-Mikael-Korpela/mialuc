@@ -1,5 +1,5 @@
-#ifndef MIALU_PROCESS_H
-#define MIALU_PROCESS_H
+#ifndef MIALU_H_PROCESS
+#define MIALU_H_PROCESS
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -72,4 +72,4 @@ Str process_executable_directory(Array_Slice buffer);
  */
 bool process_standard_error_has_color(void);
 
-#endif
+#endif // MIALU_H_PROCESS

@@ -1,5 +1,5 @@
-#ifndef MIALU_STR_H
-#define MIALU_STR_H
+#ifndef MIALU_H_STR
+#define MIALU_H_STR
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -56,4 +56,4 @@ typedef struct {
  */
 Str_Position str_position_at(Str source, size_t offset);
 
-#endif
+#endif // MIALU_H_STR

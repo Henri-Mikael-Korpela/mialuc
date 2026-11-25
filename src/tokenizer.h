@@ -1,5 +1,5 @@
-#ifndef MIALU_TOKENIZER_H
-#define MIALU_TOKENIZER_H
+#ifndef MIALU_H_TOKENIZER
+#define MIALU_H_TOKENIZER
 
 #include <stdint.h>
 
@@ -281,4 +281,4 @@ Tokenize_Result tokenize(Str source, Array_Slice token_buffer, Array_Slice text_
  */
 Array_Slice tokens_without_comments(Array_Slice tokens, Array_Slice code_buffer);
 
-#endif
+#endif // MIALU_H_TOKENIZER

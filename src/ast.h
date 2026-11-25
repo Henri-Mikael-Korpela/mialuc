@@ -1,5 +1,5 @@
-#ifndef MIALU_AST_H
-#define MIALU_AST_H
+#ifndef MIALU_H_AST
+#define MIALU_H_AST
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -828,4 +828,4 @@ void ast_print(Array_Slice nodes, Ast_Node_Index root);
  */
 bool ast_cast_type_is_byte_array(Str type_name);
 
-#endif
+#endif // MIALU_H_AST

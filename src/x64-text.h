@@ -1,5 +1,5 @@
-#ifndef MIALU_X64_TEXT_H
-#define MIALU_X64_TEXT_H
+#ifndef MIALU_H_X64_TEXT
+#define MIALU_H_X64_TEXT
 
 #include <stddef.h>
 
@@ -45,4 +45,4 @@ typedef struct {
 X64_Text_Result x64_text_format(Array_Slice executable, Array_Slice symbols,
                                 Array_Slice label_buffer, Array_Slice output_buffer);
 
-#endif
+#endif // MIALU_H_X64_TEXT

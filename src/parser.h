@@ -1,5 +1,5 @@
-#ifndef MIALU_PARSER_H
-#define MIALU_PARSER_H
+#ifndef MIALU_H_PARSER
+#define MIALU_H_PARSER
 
 #include <stddef.h>
 
@@ -48,4 +48,4 @@ Parse_Result parse(Array_Slice tokens, Array_Slice node_buffer);
  */
 Parse_Result parse_at(Array_Slice tokens, Array_Slice node_buffer, size_t node_start);
 
-#endif
+#endif // MIALU_H_PARSER
