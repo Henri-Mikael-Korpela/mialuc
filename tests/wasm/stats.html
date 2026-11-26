@@ -240,6 +240,7 @@
                         <th scope="col">Comment lines</th>
                         <th scope="col">Blank lines</th>
                         <th scope="col">Functions</th>
+                        <th scope="col">Structs</th>
                     </tr>
                 </thead>
                 <tbody id="table-body"></tbody>
@@ -280,10 +281,10 @@
             for (const group of groups) {
                 let part = merged.find((candidate) => candidate.name === group.name);
                 if (part === undefined) {
-                    part = { name: group.name, language: group.language, files: 0, lines: 0, code: 0, comments: 0, blanks: 0, functions: 0 };
+                    part = { name: group.name, language: group.language, files: 0, lines: 0, code: 0, comments: 0, blanks: 0, functions: 0, structs: 0 };
                     merged.push(part);
                 }
-                for (const field of ["files", "lines", "code", "comments", "blanks", "functions"]) part[field] += group[field];
+                for (const field of ["files", "lines", "code", "comments", "blanks", "functions", "structs"]) part[field] += group[field];
             }
             return merged;
         }
@@ -406,7 +407,7 @@
             if (colorIndex !== undefined) first.append(swatch(colorIndex));
             first.append(name);
             row.append(first);
-            for (const field of ["files", "lines", "code", "comments", "blanks", "functions"]) {
+            for (const field of ["files", "lines", "code", "comments", "blanks", "functions", "structs"]) {
                 row.append(element("td", {}, number.format(part[field])));
             }
             return row;
@@ -415,7 +416,7 @@
         function renderTable() {
             const body = document.getElementById("table-body");
             body.replaceChildren();
-            const sum = (items) => Object.fromEntries(["files", "lines", "code", "comments", "blanks", "functions"].map((field) => [field, total(items, field)]));
+            const sum = (items) => Object.fromEntries(["files", "lines", "code", "comments", "blanks", "functions", "structs"].map((field) => [field, total(items, field)]));
             LANGUAGES.forEach((language, languageIndex) => {
                 const own = parts.filter((part) => part.language === language);
                 body.append(tableRow(LANGUAGE_NAMES[language], sum(own), "subtotal", languageIndex));

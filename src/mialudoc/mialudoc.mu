@@ -1972,7 +1972,8 @@ send_internals :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byt
 // asks for them, one part of the project at a time, and the answer is JSON:
 //
 //     {"groups": [{"name": "Compiler sources", "language": "C", "files": 18, "lines": 40000,
-//                  "code": 33000, "comments": 4000, "blanks": 3000, "functions": 900}, ...]}
+//                  "code": 33000, "comments": 4000, "blanks": 3000, "functions": 900,
+//                  "structs": 300}, ...]}
 //
 // A line is blank when it has nothing but spaces, a line of a comment is one that has nothing else, and
 // the others are source lines, also when a comment follows the code. In C a comment is `//` and
@@ -1981,7 +1982,8 @@ send_internals :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byt
 //
 // A function in C is a `{` that follows a `)` outside of every other `{`, as the definition of a
 // function does, so a prototype is not one. In Mialu it is a line that has `:: proc(`, except the
-// declaration of a foreign procedure, which ends with `...`.
+// declaration of a foreign procedure, which ends with `...`. A struct in C is a line that has the word
+// `struct` and ends with `{`, as `typedef struct {` does, and in Mialu it is a line that has `:: struct`.
 // ---------------------------------------------------------------------------------------------
 
 LINE_BLANK :: 0
@@ -1989,7 +1991,7 @@ LINE_COMMENT :: 1
 LINE_CODE :: 2
 
 /// How many files and lines a part of the project has, and how the lines are divided: every line is
-/// blank, a line of a comment or a source line. `functions` is how many functions are defined.
+/// blank, a line of a comment or a source line. `functions` and `structs` are how many of them are defined.
 Line_Count :: struct ->
     files: Int
     lines: Int
@@ -1997,6 +1999,7 @@ Line_Count :: struct ->
     comments: Int
     blanks: Int
     functions: Int
+    structs: Int
 
 /// Where the first byte is that is not a space, a tab or a control character, which is the length
 /// of the bytes when there is none.
@@ -2080,6 +2083,14 @@ bytes_have :: proc(text: []Byte, part: Str) Bool ->
             return true
     return false
 
+/// Whether the line of code `text` of a C file defines a struct: it has the word `struct`, and its
+/// last byte that is not a space is the `{` that opens the members.
+c_line_defines_struct :: proc(text: []Byte) Bool ->
+    end := length_of(text)
+    for end > 0 and text[end - 1] <= 32 ->
+        end -= 1
+    return end > 0 and text[end - 1] == '{' and bytes_have(text[0:end], "struct ")
+
 /// Whether the line of code `text` of a Mialu file defines a procedure, which a foreign one that
 /// ends with `...` does not.
 line_defines_procedure :: proc(text: []Byte) Bool ->
@@ -2117,8 +2128,13 @@ count_file :: proc(arena: ^mu.Arena_Allocator, path: []Byte, is_c: Bool, count: 
                 if is_c ->
                     if c_line_starts_function(code, %depth) ->
                         count.functions += 1
-                else if line_defines_procedure(code) ->
-                    count.functions += 1
+                    if c_line_defines_struct(code) ->
+                        count.structs += 1
+                else ->
+                    if line_defines_procedure(code) ->
+                        count.functions += 1
+                    if bytes_have(code, ":: struct") ->
+                        count.structs += 1
 
 /// Puts a number that is not negative in the page.
 emit_number :: proc(out: ^Output, number: Int) ->
@@ -2138,7 +2154,7 @@ emit_count_field :: proc(out: ^Output, name: Str, number: Int) ->
 /// puts the part of the project that they are in the page, as an object of the answer. Parts of
 /// the same name are one part for the page. `is_first` is false after the first part.
 emit_stats_group :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte, name: Str, language: Str, folder: Str, extension: Str, is_first: ^Bool) ->
-    count := Line_Count { files = 0, lines = 0, code = 0, comments = 0, blanks = 0, functions = 0 }
+    count := Line_Count { files = 0, lines = 0, code = 0, comments = 0, blanks = 0, functions = 0, structs = 0 }
     is_c := language == "C"
 
     pattern_bytes := [PATH_BYTES]Byte { .. = 0 }
@@ -2185,6 +2201,7 @@ emit_stats_group :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []
     emit_count_field(out, "comments", count.comments)
     emit_count_field(out, "blanks", count.blanks)
     emit_count_field(out, "functions", count.functions)
+    emit_count_field(out, "structs", count.structs)
     emit_text(out, "}")
 
 /// Sends the answer of /api/stats.
