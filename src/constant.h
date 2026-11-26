@@ -212,7 +212,9 @@ typedef struct {
  *
  * An expression is a constant when it is a literal, the name of a constant whose value is one, or
  * an operator whose operands are constants: arithmetic of integers or of floats, a comparison, and
- * `and`, `or` and `not` of truth values, and `++` of strings and runes. Anything else, such as a variable, a call or `nil`, is
+ * `and`, `or` and `not` of truth values, and `++` of strings and runes, and the cast of a rune
+ * to an integer type, `cast(Int)' '`, which has the type that it names, and for a `Byte` is an
+ * error when the character is above 255. Anything else, such as a variable, a call or `nil`, is
  * `CONSTANT_STATUS_NOT_CONSTANT`. The definition of a constant, an
  * `AST_NODE_TYPE_CONSTANT_DEFINITION`, can be evaluated too, and its entry is the value that a use
  * of its name has, which is its value converted to its type when it has one.

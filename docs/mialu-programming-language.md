@@ -859,7 +859,17 @@ encode :: proc(character: Rune) Int ->
 
 The other direction, to a type that holds fewer values, is not a cast, because a value may not fit: [`int_to_byte`](#int_to_byte) makes a `Byte` of an `Int` and stops the program when the number is not from 0 to 255, see [Bytes](#bytes). A `Bool` is never made out of an `Int`, which is written as a comparison, `n not= 0`, see [Booleans](#booleans).
 
-A cast binds like `%`: it is written before an operand, which can have subscripts, fields and carets after it, and it binds tighter than every operator, so `cast(Int)a + b` is `(cast(Int)a) + b` and `cast(Int)a[2]` is the cast of the element. A cast cannot follow a cast, which would do nothing, and a cast is not a constant, so `LIMIT :: cast(Int)SMALL` is an error. The type is a name, and the word `cast` is a [keyword](#reserved-words).
+A cast binds like `%`: it is written before an operand, which can have subscripts, fields and carets after it, and it binds tighter than every operator, so `cast(Int)a + b` is `(cast(Int)a) + b` and `cast(Int)a[2]` is the cast of the element. A cast cannot follow a cast, which would do nothing, and a cast is not a constant, so `LIMIT :: cast(Int)SMALL` is an error, with one exception: the cast of a rune that is known when the program is compiled to an integer type is a [constant](#constants). The type is a name, and the word `cast` is a [keyword](#reserved-words).
+
+A rune that is known when the program is compiled, which is a rune literal or a constant that has one, can be cast to `Int`, `I32`, `I64`, `U32`, `U64` or `Byte` in the value of a constant, in the length of an array and in the initial value of a global variable, and the result is the code point of the character, with the type that the cast names. So the number of a character is written once, with a name, instead of as a number that has to be looked up:
+
+```mialu
+SPACE :: cast(Int)' '
+LETTER : Byte : cast(Byte)'a'
+NEXT :: SPACE + 1
+```
+
+`SPACE` is the `Int` 32 and `LETTER` the `Byte` 97, and they are typed constants like any that is written `SPACE : Int : 32`, so `SPACE` is not given to a `Byte`, and `NEXT` is the `Int` 33. Every integer type but a `Byte` holds the code point of every character, but a `Byte` holds the characters up to 255, so `cast(Byte)'é'` is the `Byte` 233 and `cast(Byte)'芋'` is an error, [E0460](error-codes.md). The cast of anything else, such as an `Int`, a `Byte` or a variable, is not a constant, and the cast of a rune to an `Int` in a procedure, `cast(Int)c`, is worked out when the program runs, as before; a `cast(Byte)` of a rune that is not a constant stays an error there.
 
 > **Lessons learnt from C** In C, a cast is written `(int)x` whatever it does, so one spelling converts a number, throws away the high bits of another, and reinterprets a pointer as an integer, and it is easy to confuse with a parenthesized expression. In Mialu a cast is a keyword that is found by searching for it, and it is allowed only where nothing is lost.
 
@@ -886,7 +896,7 @@ GREETING :: "Hello, world"
 DEBUG :: true
 ```
 
-The value of such a constant is a constant expression: a literal, the name of another constant, or the arithmetic, comparison and logical operators applied to them, such as `DOUBLE_LIMIT :: LIMIT * 2` or `VERBOSE :: DEBUG and LIMIT > 50`, and `++` applied to strings and runes, such as `HELLO :: "Hello" ++ ' ' ++ NAME`, see [Strings](#strings). The compiler works the value out, so a constant costs nothing when the program runs: a use of its name is its value, as if the literal were written there. A constant can be used above the line where it is defined, like any constant, and it can be defined in terms of constants below it, but not in terms of itself, so `A :: B` together with `B :: A + 1` is an error. A call, a variable, a parameter and a global variable have a value only when the program runs, so `START :: clock()` is an error.
+The value of such a constant is a constant expression: a literal, the name of another constant, or the arithmetic, comparison and logical operators applied to them, such as `DOUBLE_LIMIT :: LIMIT * 2` or `VERBOSE :: DEBUG and LIMIT > 50`, and `++` applied to strings and runes, such as `HELLO :: "Hello" ++ ' ' ++ NAME`, see [Strings](#strings), and the cast of a rune to an integer type, such as `SPACE :: cast(Int)' '`, see [Casts](#casts). The compiler works the value out, so a constant costs nothing when the program runs: a use of its name is its value, as if the literal were written there. A constant can be used above the line where it is defined, like any constant, and it can be defined in terms of constants below it, but not in terms of itself, so `A :: B` together with `B :: A + 1` is an error. A call, a variable, a parameter and a global variable have a value only when the program runs, so `START :: clock()` is an error.
 
 Arithmetic in a constant expression is exact. A step whose result does not fit in an `Int`, such as `0x7FFF_FFFF_FFFF_FFFF + 1`, is an error, and so is a division by zero, such as `1 / 0`, where the same operation on variables would wrap around or trap when the program runs. That goes for the parts of any expression that are constants, so `x + 1 / 0` is an error as well.
 

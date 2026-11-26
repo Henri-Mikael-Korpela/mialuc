@@ -147,7 +147,7 @@ These are found when the values of [constants](mialu-programming-language.md#con
 | E0457 | the constant expression at 'name' has more than 1024 nested operators and constants | |
 | E0458 | the constant 'name' has a type that a constant cannot have | A constant is an Int, an I32, an I64, a U32, a U64, a Byte, a Rune, an F32, an F64, a Bool or a Str. |
 | E0459 | the value of the constant 'name' is not of the type of the constant | |
-| E0460 | the number at 'name' does not fit in a Byte | A Byte is a number from 0 to 255. |
+| E0460 | the number at 'name' does not fit in a Byte | A Byte is a number from 0 to 255, also the code point of a character that is cast to one in a constant, such as `cast(Byte)'é'`. |
 | E0461 | the operands of '++' at 'name' are not known when the program is compiled | `++` joins strings and runes when the program is compiled. |
 | E0462 | the length of an array at 'name' is not known when the program is compiled | |
 | E0463 | the length of an array at 'name' must be an integer that is not below zero | |

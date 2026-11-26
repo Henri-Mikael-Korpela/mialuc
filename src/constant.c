@@ -255,6 +255,31 @@ Constant_Type constant_type_default(Constant_Type type) {
 }
 
 /**
+ * Sets `target` to the constant type of the integer type that is named `type_name`, as in
+ * `cast(Int)`, and returns true, or returns false when it names any other type.
+ */
+static bool constant_cast_target(Str type_name, Constant_Type *target) {
+    assert(target != NULL);
+
+    if (str_equals(type_name, STR("Int"))) {
+        *target = CONSTANT_TYPE_INT;
+    } else if (str_equals(type_name, STR("Byte"))) {
+        *target = CONSTANT_TYPE_BYTE;
+    } else if (str_equals(type_name, STR("I32"))) {
+        *target = CONSTANT_TYPE_I32;
+    } else if (str_equals(type_name, STR("I64"))) {
+        *target = CONSTANT_TYPE_I64;
+    } else if (str_equals(type_name, STR("U32"))) {
+        *target = CONSTANT_TYPE_U32;
+    } else if (str_equals(type_name, STR("U64"))) {
+        *target = CONSTANT_TYPE_U64;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+/**
  * Works on `node` once: either asks for the entry of a child that is not known yet, or finishes the
  * node from the entries of its children, which are known by then. It only reads the table, so the
  * order in which the nodes are finished is up to `constant_evaluate`. It writes nothing but the text
@@ -371,6 +396,27 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
         }
         return constant_step_done(constant_arithmetic(nodes, node, values[left], values[right]));
     }
+    case AST_NODE_TYPE_CAST: {
+        // Only the cast of a `Rune` that is known when the program is compiled, such as `' '`, to
+        // an integer type is a constant. Any other cast needs the program to run.
+        Ast_Node_Index operand = current->first_child;
+        if (values[operand].status == CONSTANT_STATUS_UNKNOWN) {
+            return constant_step_down(operand);
+        }
+        Constant_Value value = values[operand];
+        Constant_Type target = CONSTANT_TYPE_INT;
+        if (value.status != CONSTANT_STATUS_OK || value.type != CONSTANT_TYPE_RUNE ||
+            not constant_cast_target(current->payload.cast.type_name, &target)) {
+            return constant_step_done(constant_fail(CONSTANT_STATUS_NOT_CONSTANT,
+                                                    AST_NODE_INDEX_NONE));
+        }
+        // Every other integer type holds the code point of every character, but a `Byte` holds the
+        // ones up to 255, and the others are an error here, as an untyped 300 is for a `Byte`.
+        if (target == CONSTANT_TYPE_BYTE && (value.integer < 0 || value.integer > UINT8_MAX)) {
+            return constant_step_done(constant_fail(CONSTANT_STATUS_VALUE_NOT_REPRESENTABLE, node));
+        }
+        return constant_step_done(constant_make(target, value.integer));
+    }
     case AST_NODE_TYPE_CALL: {
         // Only the built-in `int_to_str` is a constant, when its argument is. Any other call
         // needs the program to run.
@@ -394,7 +440,6 @@ static Constant_Step constant_step(Constant_Evaluation const *evaluation, Ast_No
     }
     case AST_NODE_TYPE_ADDRESS_OF:
     case AST_NODE_TYPE_ARRAY_LITERAL:
-    case AST_NODE_TYPE_CAST:
     case AST_NODE_TYPE_DEREFERENCE:
     case AST_NODE_TYPE_ENUM_LITERAL:
     case AST_NODE_TYPE_FIELD_ACCESS:
