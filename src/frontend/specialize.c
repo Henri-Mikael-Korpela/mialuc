@@ -684,7 +684,9 @@ static bool specialize_parameters_collect(Specializer *specializer, Ast_Node_Ind
  * `*is_explicit` set, and those types are its arguments. The types of the other arguments are
  * matched with the types of their parameters, first the ones whose type is known, and then the
  * untyped constants, which only say the type of a type parameter that nothing else said, because
- * they can become several. Returns what came of it: an error is recorded when it failed.
+ * they can become several, and a rune that is known when the program is compiled is one of them,
+ * because a `Byte` parameter is given it as the byte that it is. Returns what came of it: an error
+ * is recorded when it failed.
  */
 static Specialize_Deduction specialize_call_deduce(Specializer *specializer, Ast_Node_Index call,
                                                    Ast_Node_Index definition,
@@ -740,7 +742,8 @@ static Specialize_Deduction specialize_call_deduce(Specializer *specializer, Ast
                               (constant.type == CONSTANT_TYPE_UNTYPED_BOOL ||
                                constant.type == CONSTANT_TYPE_UNTYPED_FLOAT ||
                                constant.type == CONSTANT_TYPE_UNTYPED_INTEGER ||
-                               constant.type == CONSTANT_TYPE_UNTYPED_STRING);
+                               constant.type == CONSTANT_TYPE_UNTYPED_STRING ||
+                               constant.type == CONSTANT_TYPE_RUNE);
             if (is_type && not is_untyped_pass) {
                 // The type that is given is the argument itself.
                 Specialize_Type_Text given = {.length = 0, .is_overflowed = false};

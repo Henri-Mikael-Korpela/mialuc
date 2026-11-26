@@ -6,3 +6,6 @@ console.log("The line ends of Hi, a carriage return, a line feed, !, a line feed
     count_line_ends());
 console.log("127 is the delete, and 0 is the null:", Boolean(is_delete(127)), Boolean(is_null(0)),
     Boolean(is_null(1)));
+console.log("A rune is a Byte parameter, 46 is the dot and 47 is not:", Boolean(is_dot(46)),
+    Boolean(is_dot(47)));
+console.log("The first dot of a, the dot, b and the dot is at 1:", first_dot());

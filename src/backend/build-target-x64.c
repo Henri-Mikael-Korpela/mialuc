@@ -6337,7 +6337,11 @@ static bool x64_call_write(X64_Builder *builder, X64_Expression_Frame const *fra
             return x64_fail(builder, X64_BUILD_STATUS_CALL_ARGUMENT_COUNT_MISMATCH, name);
         }
         X64_Type parameter_type = x64_parameter_type(builder, procedure, i);
-        if (not x64_type_accepts(builder, parameter_type, argument)) {
+        // A rune that is known when the program is compiled and is in the ASCII range is the byte
+        // that is its UTF-8 encoding, which a `Byte` parameter is given, as in a comparison.
+        bool is_byte_rune = parameter_type.kind == X64_TYPE_KIND_BYTE &&
+                            x64_is_ascii_rune_constant(builder, argument);
+        if (not is_byte_rune and not x64_type_accepts(builder, parameter_type, argument)) {
             // An expression that the target does not build has no type.
             if (x64_expression_type_for(builder, argument, parameter_type).kind ==
                     X64_TYPE_KIND_NONE &&

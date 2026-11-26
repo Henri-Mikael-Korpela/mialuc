@@ -1150,15 +1150,15 @@ is_file_name :: proc(bytes: []Byte) Bool ->
 
 /// What a file with the name is for a browser, by the end of its name.
 content_type_of :: proc(name: []Byte) Str ->
-    dot := -1
-    for index in 0..<length_of(name) ->
-        if name[index] == '.' ->
-            dot = index
-    if dot < 0 ->
+    dot_index := mu.find_first_index_of(name, '.')
+    if dot_index < 0 ->
         return "application/octet-stream"
-    extension, is_ascii := mu.try_bytes_to_str_ascii(name[dot + 1:])
-    if not is_ascii ->
-        return "application/octet-stream"
+
+    // The second return value ignored, because if the conversion fails,
+    // the result would be an empty string for the first return value
+    // and therefore would not match anything. Therefore the resulting
+    // control path is the default case.
+    extension, _ := mu.try_bytes_to_str_ascii(name[dot_index + 1:])
     match extension ->
         case "html" ->
             return "text/html; charset=utf-8"

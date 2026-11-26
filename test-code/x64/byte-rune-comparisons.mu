@@ -32,6 +32,17 @@ flag :: proc(is_true: Bool) Int ->
 is_new_line :: proc(b: Byte) Bool ->
     return b == '\n'
 
+/// A rune is given to a `Byte` parameter as the byte that it is.
+is_byte :: proc(b: Byte, wanted: Byte) Bool ->
+    return b == wanted
+
+/// A polymorphic procedure whose type parameter is a `Byte` by the other argument.
+find_first :: proc(elements: []$T, target: T) Int ->
+    for index in 0..<length_of(elements) ->
+        if elements[index] == target ->
+            return index
+    return -1
+
 main :: proc() Int ->
     wrong := 0
 
@@ -75,6 +86,16 @@ main :: proc() Int ->
         wrong += check("condition is %lld", 1, 1)
     else ->
         wrong += check("condition is %lld", 0, 1)
+
+    // A rune is given to a Byte parameter, which is the byte that it is, also as a constant and an
+    // escape sequence.
+    wrong += check("a rune is a Byte parameter %lld", flag(is_byte(bytes[0], 'A')), 1)
+    wrong += check("a rune that is not it %lld", flag(is_byte(bytes[0], 'B')), 0)
+    wrong += check("an escape sequence is a Byte parameter %lld", flag(is_byte(bytes[1], '\n')), 1)
+    wrong += check("a constant rune is a Byte parameter %lld", flag(is_byte(bytes[8], LETTER)), 1)
+    wrong += check("the last of the range is a Byte parameter %lld", flag(is_byte(bytes[7], '')), 1)
+    wrong += check("the first of a polymorphic search is at %lld", find_first(bytes[:], '\n'), 1)
+    wrong += check("a rune that is not there is at %lld", find_first(bytes[:], 'z'), -1)
 
     // Two constants, which the compiler compares.
     wrong += check("constants are %lld", flag(LINE_FEED == '\n'), 1)

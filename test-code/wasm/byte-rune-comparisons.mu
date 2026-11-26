@@ -28,3 +28,21 @@ is_delete :: proc(b: Byte) Bool ->
 
 is_null :: proc(b: Byte) Bool ->
     return b == '\000'
+
+/// A rune is given to a `Byte` parameter as the byte that it is.
+is_byte :: proc(b: Byte, wanted: Byte) Bool ->
+    return b == wanted
+
+is_dot :: proc(b: Byte) Bool ->
+    return is_byte(b, '.')
+
+/// A polymorphic procedure whose type parameter is a `Byte` by the other argument.
+find_first :: proc(elements: []$T, target: T) Int ->
+    for index in 0..<length_of(elements) ->
+        if elements[index] == target ->
+            return index
+    return -1
+
+first_dot :: proc() Int ->
+    bytes := [const]Byte { 97, 46, 98, 46 }
+    return find_first(bytes[:], '.')

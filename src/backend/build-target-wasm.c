@@ -3793,7 +3793,12 @@ static bool wasm_build_code_section_body_call(Wasm_Builder *builder, Ast_Node_In
         Ast_Node_Index type = wasm_signature_parameter_type(builder, callee, i);
         Wasm_Type parameter_type = wasm_type_of_node(builder, type);
         // An array is passed as an array slice, see `wasm_array_decay`.
-        if (not wasm_expression_is_accepted(builder, parameter_type, argument)) {
+        // A rune that is known when the program is compiled and is in the ASCII range is the byte
+        // that is its UTF-8 encoding, which a `Byte` parameter is given, as in a comparison.
+        bool is_byte_rune = parameter_type.kind == WASM_VALUE_TYPE_BYTE &&
+                            wasm_is_ascii_rune_constant(builder, argument);
+        if (not is_byte_rune &&
+            not wasm_expression_is_accepted(builder, parameter_type, argument)) {
             return wasm_fail(builder, WASM_BUILD_STATUS_CALL_ARGUMENT_TYPE_MISMATCH, name);
         }
         argument = builder->nodes[argument].next_sibling;

@@ -1,0 +1,8 @@
+error[E0507]: an argument of the call of 'is_byte' is not of the type of its parameter
+ --> test-code/errors/wasm/E0507-call-argument-rune-not-ascii.mu:7:14
+  |
+5 |
+6 | main :: proc() Int ->
+7 |     found := is_byte(65, 'é')
+  |              ^^^^^^^
+8 |     return 0

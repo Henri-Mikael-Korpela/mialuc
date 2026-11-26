@@ -470,6 +470,12 @@ is_line_end :: proc(b: Byte) Bool ->
     return b == '\n' or b == '\r'
 ```
 
+A rune of the same kind is also given to a procedure where the parameter is a `Byte`, as the byte that it is, so a character does not have to be written as a number or a cast: with `is_byte :: proc(b: Byte, wanted: Byte) Bool`, `is_byte(b, '.')` is the same as `is_byte(b, 46)`. It must be known when the program is compiled and be in the ASCII range, from 0 to 127, for the reason that a comparison has, so `is_byte(b, 'é')` is an error, and so is a `Rune` that is a variable. This is the only place where a rune is converted to a `Byte` without a [cast](#casts): an assignment, `b : Byte = '.'`, a return value, a field and an element of an array still need `cast(Byte)'.'`. In a call of a [polymorphic procedure](#polymorphic-procedures) the rune does not give a type parameter its type when another argument does, so `find_first_index_of(bytes, '.')` with `bytes` of `[]Byte` makes `T` a `Byte`, and the rune is the byte of the dot. When nothing else gives the type parameter its type, the rune gives it `Rune`:
+
+```mialu
+dot_index := mu.find_first_index_of(name, '.')
+```
+
 A `Byte` has no arithmetic: `a + b` for two bytes is an error, and the arithmetic is done on `Int` values, as in `cast(Int)a + cast(Int)b`.
 
 ### Floating-point numbers
