@@ -96,6 +96,7 @@ import "mu:filesystem"
 import "mu:net"
 import "mu:process"
 import "mu:slices"
+import "mu:strings"
 import foreign libc
 import foreign kernel32 "system:Kernel32.lib"
 
@@ -1155,18 +1156,24 @@ content_type_of :: proc(name: []Byte) Str ->
             dot = index
     if dot < 0 ->
         return "application/octet-stream"
-    extension := name[dot + 1:]
-    if bytes_are(extension, "html") ->
-        return "text/html; charset=utf-8"
-    if bytes_are(extension, "js") ->
-        return "text/javascript; charset=utf-8"
-    if bytes_are(extension, "json") ->
-        return "application/json"
-    if bytes_are(extension, "wasm") ->
-        return "application/wasm"
-    if bytes_are(extension, "mu") or bytes_are(extension, "txt") ->
-        return "text/plain; charset=utf-8"
-    return "application/octet-stream"
+    extension, is_ascii := mu.try_bytes_to_str_ascii(name[dot + 1:])
+    if not is_ascii ->
+        return "application/octet-stream"
+    match extension ->
+        case "html" ->
+            return "text/html; charset=utf-8"
+        case "js" ->
+            return "text/javascript; charset=utf-8"
+        case "json" ->
+            return "application/json"
+        case "wasm" ->
+            return "application/wasm"
+        case "mu" ->
+            return "text/plain; charset=utf-8"
+        case "txt" ->
+            return "text/plain; charset=utf-8"
+        case ->
+            return "application/octet-stream"
 
 /// Sends the file `name` of the directory `folder` of the project, which has a path that starts and
 /// ends with a slash, such as `/tests/wasm/`, and gives the code of the answer.

@@ -8,6 +8,7 @@ package imports
 
 import "mu:math"
 import "mu:slices"
+import "mu:strings"
 
 /// The program's own, which has the name of one of the library. It is not the library's.
 min :: proc(a: Int, b: Int) Int ->
@@ -34,3 +35,19 @@ first_three :: proc() Int ->
 first_five :: proc() Int ->
     numbers := [4]Int { 7, 3, 9, 3 }
     return mu.find_first_index_of(numbers[:], 5)
+
+/// The number of characters of the bytes 119, 97, 115 and 109, which are ASCII text, `wasm`, and
+/// of the bytes 99, 97 and 195, which are not, so that there is no text, -1.
+ascii_length :: proc() Int ->
+    word := [4]Byte { 119, 97, 115, 109 }
+    text, is_ascii := mu.try_bytes_to_str_ascii(word[:])
+    if not is_ascii ->
+        return -1
+    return length_of(text)
+
+not_ascii_length :: proc() Int ->
+    accent := [3]Byte { 99, 97, 195 }
+    text, is_ascii := mu.try_bytes_to_str_ascii(accent[:])
+    if not is_ascii ->
+        return -1
+    return length_of(text)
