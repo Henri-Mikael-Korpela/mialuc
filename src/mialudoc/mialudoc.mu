@@ -273,16 +273,16 @@ byte_is :: proc(bytes: []Byte, index: Int, value: Byte) Bool ->
 is_digit_at :: proc(bytes: []Byte, index: Int) Bool ->
     return index >= 0 and index < length_of(bytes) and cast(Int)bytes[index] >= ZERO and cast(Int)bytes[index] <= NINE
 
-/// Where the first byte that is `target` is, from `from` on, or -1.
-find_byte :: proc(bytes: []Byte, from: Int, target: Byte) Int ->
-    for index in from..<length_of(bytes) ->
+/// Where the first byte that is `target` is in `bytes`, or -1.
+find_byte :: proc(bytes: []Byte, target: Byte) Int ->
+    for index in 0..<length_of(bytes) ->
         if bytes[index] == target ->
             return index
     return -1
 
-/// Where the first two bytes in a row that are `target` are, from `from` on, or -1.
-find_pair :: proc(bytes: []Byte, from: Int, target: Byte) Int ->
-    for index in from..<length_of(bytes) - 1 ->
+/// Where the first two bytes in a row that are `target` are in `bytes`, or -1.
+find_pair :: proc(bytes: []Byte, target: Byte) Int ->
+    for index in 0..<length_of(bytes) - 1 ->
         if bytes[index] == target and bytes[index + 1] == target ->
             return index
     return -1
@@ -603,43 +603,48 @@ render_inline :: proc(out: ^Output, text: []Byte) ->
         rest := length_of(text) - index
 
         if value == BACKTICK ->
-            end := find_byte(text, index + 1, BACKTICK)
-            if end >= 0 ->
+            code := text[index + 1:]
+            code_length := find_byte(code, BACKTICK)
+            if code_length >= 0 ->
                 emit_text(out, "<code>")
-                emit_escaped(out, text[index + 1:end])
+                emit_escaped(out, code[0:code_length])
                 emit_text(out, "</code>")
-                index = end + 1
+                index += code_length + 2
                 continue
 
         if value == STAR and byte_is(text, index + 1, STAR) ->
-            end := find_pair(text, index + 2, STAR)
-            if end > index + 2 ->
+            strong := text[index + 2:]
+            strong_length := find_pair(strong, STAR)
+            if strong_length > 0 ->
                 emit_text(out, "<strong>")
-                render_inline(out, text[index + 2:end])
+                render_inline(out, strong[0:strong_length])
                 emit_text(out, "</strong>")
-                index = end + 2
+                index += strong_length + 4
                 continue
 
         if value == STAR and rest > 1 and not byte_is(text, index + 1, SPACE) ->
-            end := find_byte(text, index + 1, STAR)
-            if end > index + 1 ->
+            emphasized := text[index + 1:]
+            emphasized_length := find_byte(emphasized, STAR)
+            if emphasized_length > 0 ->
                 emit_text(out, "<em>")
-                render_inline(out, text[index + 1:end])
+                render_inline(out, emphasized[0:emphasized_length])
                 emit_text(out, "</em>")
-                index = end + 1
+                index += emphasized_length + 2
                 continue
 
         if value == LEFT_BRACKET ->
-            middle := find_byte(text, index + 1, RIGHT_BRACKET)
-            if middle >= 0 and byte_is(text, middle + 1, LEFT_PARENTHESIS) ->
-                end := find_byte(text, middle + 2, RIGHT_PARENTHESIS)
-                if end >= 0 ->
+            label := text[index + 1:]
+            label_length := find_byte(label, RIGHT_BRACKET)
+            if label_length >= 0 and byte_is(label, label_length + 1, LEFT_PARENTHESIS) ->
+                address := label[label_length + 2:]
+                address_length := find_byte(address, RIGHT_PARENTHESIS)
+                if address_length >= 0 ->
                     emit_text(out, "<a href=\"")
-                    emit_href(out, text[middle + 2:end])
+                    emit_href(out, address[0:address_length])
                     emit_text(out, "\">")
-                    render_inline(out, text[index + 1:middle])
+                    render_inline(out, label[0:label_length])
                     emit_text(out, "</a>")
-                    index = end + 1
+                    index += label_length + address_length + 4
                     continue
 
         if value == '\\' and rest > 1 ->
@@ -1205,12 +1210,14 @@ emit_json_bytes :: proc(out: ^Output, bytes: []Byte, strip_links: Bool) Int ->
     for index < length_of(bytes) ->
         value := bytes[index]
         if strip_links and value == '[' ->
-            middle := find_byte(bytes, index + 1, RIGHT_BRACKET)
-            if middle >= 0 and byte_is(bytes, middle + 1, LEFT_PARENTHESIS) ->
-                end := find_byte(bytes, middle + 2, RIGHT_PARENTHESIS)
-                if end >= 0 ->
-                    emit_json_bytes(out, bytes[index + 1:middle], false)
-                    index = end + 1
+            label := bytes[index + 1:]
+            label_length := find_byte(label, RIGHT_BRACKET)
+            if label_length >= 0 and byte_is(label, label_length + 1, LEFT_PARENTHESIS) ->
+                address := label[label_length + 2:]
+                address_length := find_byte(address, RIGHT_PARENTHESIS)
+                if address_length >= 0 ->
+                    emit_json_bytes(out, label[0:label_length], false)
+                    index += label_length + address_length + 4
                     continue
 
         // The carriage return before a line feed is how Windows ends a line, and is not text. One
@@ -1597,10 +1604,11 @@ find_ast_description :: proc(arena: ^mu.Arena_Allocator, directory: []Byte, name
             if is_found ->
                 break
             start := length_of(AST_ENTRY)
-            end := find_byte(text, start, BACKTICK)
-            if end >= 0 and bytes_equal(text[start:end], name) ->
+            entry := text[start:]
+            name_length := find_byte(entry, BACKTICK)
+            if name_length >= 0 and bytes_equal(entry[0:name_length], name) ->
                 is_found = true
-                rest := text[end + 1:]
+                rest := entry[name_length + 1:]
                 // The name is followed by a colon, and a space that is not part of the description.
                 if byte_is(rest, 0, COLON) ->
                     rest = rest[1:]
@@ -2436,9 +2444,10 @@ walk_tree :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte, i
 content_length_of :: proc(head: []Byte) Int ->
     start := 0
     for start < length_of(head) ->
-        end := find_byte(head, start, LINE_FEED)
-        if end < 0 ->
-            end = length_of(head)
+        end := length_of(head)
+        line_length := find_byte(head[start:], LINE_FEED)
+        if line_length >= 0 ->
+            end = start + line_length
         // A line ends with a carriage return and a line feed, and the carriage return is not part of it.
         field := head[start:start + trim_lines(head[start:end])]
         if length_of(field) > 15 ->
@@ -2744,9 +2753,10 @@ next_word :: proc(text: []Byte, from: Int) (Int, Int) ->
 read_host :: proc(text: []Byte, host: []Byte) Bool ->
     start := 0
     for index in 0..<4 ->
-        end := find_byte(text, start, DOT)
-        if end < 0 or index == 3 ->
-            end = length_of(text)
+        end := length_of(text)
+        part_length := find_byte(text[start:], DOT)
+        if part_length >= 0 and index < 3 ->
+            end = start + part_length
         if index < 3 and end == length_of(text) ->
             return false
         number, is_number := try_str_to_int(utf8_decode_or_empty(text[start:end]))
