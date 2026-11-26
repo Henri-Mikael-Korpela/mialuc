@@ -1468,7 +1468,7 @@ base64_digit :: proc(value: Int) Byte ->
 // The internals of the compiler: /api/internals
 //
 // The page of the internals shows the tokens, the nodes of the syntax tree, the reserved words and
-// the operators. They are read from the sources of the compiler, `src/tokenizer.h` and `src/ast.h`,
+// the operators. They are read from the sources of the compiler, `src/frontend/tokenizer.h` and `src/frontend/ast.h`,
 // and from the specification of the language, so the page cannot go out of date. The answer is
 //
 //     {"tokens": [{"name", "value", "spelling", "category", "description"}],
@@ -1492,7 +1492,7 @@ open_project_file :: proc(directory: []Byte, below: Str, wide_path: []Byte) (mu.
 /// description. A comment about a group of members is not about the next one.
 emit_tokens :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
-    file, open_error := open_project_file(directory, "/src/tokenizer.h", wide_path[:])
+    file, open_error := open_project_file(directory, "/src/frontend/tokenizer.h", wide_path[:])
     if open_error not= .NONE ->
         return 0
     defer mu.file_close(file)
@@ -1617,7 +1617,7 @@ AST_CONTINUATION :: " *   "
 /// ` * - `AST_NODE_TYPE_NAME`: text` and the lines that go on with it, and gives how long it is.
 find_ast_description :: proc(arena: ^mu.Arena_Allocator, directory: []Byte, name: []Byte, description: []Byte) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
-    file, open_error := open_project_file(directory, "/src/ast.h", wide_path[:])
+    file, open_error := open_project_file(directory, "/src/frontend/ast.h", wide_path[:])
     if open_error not= .NONE ->
         return 0
     defer mu.file_close(file)
@@ -1661,7 +1661,7 @@ find_ast_description :: proc(arena: ^mu.Arena_Allocator, directory: []Byte, name
 /// with its group and its entry of the big comment.
 emit_ast_nodes :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
-    file, open_error := open_project_file(directory, "/src/ast.h", wide_path[:])
+    file, open_error := open_project_file(directory, "/src/frontend/ast.h", wide_path[:])
     if open_error not= .NONE ->
         return 0
     defer mu.file_close(file)
@@ -2195,7 +2195,11 @@ send_stats :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, w
     is_first := true
     emit_text(%out, "{\"groups\":[")
     emit_stats_group(%out, arena, directory, "Compiler sources", "C", "/src", ".c", %is_first)
+    emit_stats_group(%out, arena, directory, "Compiler sources", "C", "/src/frontend", ".c", %is_first)
+    emit_stats_group(%out, arena, directory, "Compiler sources", "C", "/src/backend", ".c", %is_first)
     emit_stats_group(%out, arena, directory, "Compiler headers", "C", "/src", ".h", %is_first)
+    emit_stats_group(%out, arena, directory, "Compiler headers", "C", "/src/frontend", ".h", %is_first)
+    emit_stats_group(%out, arena, directory, "Compiler headers", "C", "/src/backend", ".h", %is_first)
     emit_stats_group(%out, arena, directory, "Standard library", "Mialu", "/src/mialu-std", ".mu", %is_first)
     emit_stats_group(%out, arena, directory, "mialudoc", "Mialu", "/src/mialudoc", ".mu", %is_first)
     emit_stats_group(%out, arena, directory, "Scripts and examples", "Mialu", "/scripts", ".mu", %is_first)

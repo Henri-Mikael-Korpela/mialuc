@@ -6,9 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <mialu/build-target-wasm.h>
 #include <mialu/common_types.h>
 #include <mialu/wasm-text.h>
-#include <mialu/wasm.h>
 
 // The text follows the layout of `wasm2wat` from the WebAssembly Binary Toolkit, which is what
 // people who read WebAssembly text are used to: types first, then functions, tables, memories,

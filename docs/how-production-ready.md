@@ -161,7 +161,7 @@ Each milestone has an exit criterion that can be checked, and its steps are in t
 *Exit criterion:* the standard library has containers that are written once and used for any type.
 
 1. Specify parametric polymorphism: syntax, how a type is inferred, and the errors. (Done.)
-2. Implement it by specializing a procedure per set of types before the targets, so that both targets need no change. (Done, see `src/specialize.c`.)
+2. Implement it by specializing a procedure per set of types before the targets, so that both targets need no change. (Done, see `src/frontend/specialize.c`.)
 3. Allow generic structs, so that a container is one definition. (Done.)
 4. Write `mu:array`, `mu:map` and `mu:string` as generic code.
 5. Add a short form for returning an error early.

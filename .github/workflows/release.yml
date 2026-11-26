@@ -88,7 +88,8 @@ jobs:
           cp media/mialu-logo.png "$package/media/"
           cp -r tests/wasm "$package/tests/wasm"
           cp -r test-code/wasm "$package/test-code/wasm"
-          cp src/tokenizer.h src/ast.h "$package/src/"
+          mkdir -p "$package/src/frontend"
+          cp src/frontend/tokenizer.h src/frontend/ast.h "$package/src/frontend/"
           7z a "mialuc-$GITHUB_REF_NAME-win-x64.zip" "mialuc-$GITHUB_REF_NAME"
 
       - name: The package finds its standard library

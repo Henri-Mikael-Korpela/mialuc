@@ -233,7 +233,7 @@
                 ],
             },
             {
-                id: "wasm", name: "WebAssembly", file: "wasm.c", kind: "back", x: 260, y: 170,
+                id: "wasm", name: "WebAssembly", file: "build-target-wasm.c", kind: "back", x: 260, y: 170,
                 gives: "A module of WebAssembly, in the binary format.",
                 points: [
                     "Runs in a browser: the playground compiles with this target.",
@@ -241,7 +241,7 @@
                 ],
             },
             {
-                id: "x64", name: "x64 Windows", file: "x64.c", kind: "back", x: 260, y: 250,
+                id: "x64", name: "x64 Windows", file: "build-target-x64.c", kind: "back", x: 260, y: 250,
                 gives: "The machine code of a Windows executable, with debug information.",
                 points: [
                     "Calls the foreign procedures that a program declares, such as those of Kernel32 and libc.",
@@ -251,12 +251,12 @@
             {
                 id: "wasm-text", name: "Wasm text", file: "wasm-text.c", kind: "back", x: 20, y: 170,
                 gives: "The text format, wat, which is read from the bytes of the module.",
-                points: ["Reads the binary that wasm.c wrote, so the two cannot disagree.", "The playground shows it next to the program."],
+                points: ["Reads the binary that build-target-wasm.c wrote, so the two cannot disagree.", "The playground shows it next to the program."],
             },
             {
                 id: "x64-text", name: "x64 text", file: "x64-text.c", kind: "back", x: 20, y: 250,
                 gives: "The assembly of the machine code, for dump-asm.",
-                points: ["Reads the bytes of x64.c, with its symbols."],
+                points: ["Reads the bytes of build-target-x64.c, with its symbols."],
             },
             {
                 id: "driver", name: "Driver", file: "main.c, process.c", kind: "support", x: 20, y: 330,

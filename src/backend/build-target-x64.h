@@ -1,5 +1,5 @@
-#ifndef MIALU_H_X64
-#define MIALU_H_X64
+#ifndef MIALU_H_BUILD_TARGET_X64
+#define MIALU_H_BUILD_TARGET_X64
 
 #include <stdint.h>
 
@@ -613,4 +613,4 @@ enum {
  */
 size_t x64_struct_size_bytes(Array_Slice nodes, Ast_Node_Index root, Ast_Node_Index struct_node);
 
-#endif // MIALU_H_X64
+#endif // MIALU_H_BUILD_TARGET_X64

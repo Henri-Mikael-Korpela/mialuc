@@ -20,13 +20,19 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-set(MIALUC_SOURCES src/main.c src/array_slice.c src/ast.c src/constant.c src/diagnostic.c src/package.c src/parser.c src/report.c src/semantic.c src/specialize.c src/str.c src/tokenizer.c src/wasm.c src/wasm-text.c src/x64.c src/x64-text.c src/process.c)
+set(MIALUC_SOURCES
+    src/main.c src/array_slice.c src/constant.c src/diagnostic.c src/process.c src/report.c src/str.c
+    src/frontend/ast.c src/frontend/package.c src/frontend/parser.c src/frontend/semantic.c
+    src/frontend/specialize.c src/frontend/tokenizer.c
+    src/backend/build-target-wasm.c src/backend/build-target-x64.c src/backend/wasm-text.c
+    src/backend/x64-text.c)
 add_executable(mialuc ${MIALUC_SOURCES})
 
-# Headers live directly in src/ but are included as <mialu/...>, so they are copied into a
+# Headers live in src/ and in its directories frontend/ and backend/, but are included as <mialu/...>, so they are copied into a
 # generated include directory under that name. configure_file reruns CMake when a header changes.
 set(MIALU_INCLUDE_DIRECTORY ${CMAKE_BINARY_DIR}/include)
-file(GLOB MIALU_HEADERS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/*.h)
+file(GLOB MIALU_HEADERS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/*.h ${CMAKE_SOURCE_DIR}/src/frontend/*.h
+     ${CMAKE_SOURCE_DIR}/src/backend/*.h)
 foreach(header_path ${MIALU_HEADERS})
     get_filename_component(header_name ${header_path} NAME)
     configure_file(${header_path} ${MIALU_INCLUDE_DIRECTORY}/mialu/${header_name} COPYONLY)

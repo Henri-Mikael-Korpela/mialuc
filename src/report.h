@@ -5,15 +5,15 @@
 #include <stdint.h>
 
 #include <mialu/array_slice.h>
+#include <mialu/build-target-wasm.h>
+#include <mialu/build-target-x64.h>
 #include <mialu/package.h>
 #include <mialu/parser.h>
 #include <mialu/semantic.h>
 #include <mialu/specialize.h>
-#include <mialu/x64.h>
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
 #include <mialu/wasm-text.h>
-#include <mialu/wasm.h>
 #include <mialu/x64-text.h>
 
 /**

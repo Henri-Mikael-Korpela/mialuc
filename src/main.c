@@ -10,6 +10,8 @@
 
 #include <mialu/array_slice.h>
 #include <mialu/ast.h>
+#include <mialu/build-target-wasm.h>
+#include <mialu/build-target-x64.h>
 #include <mialu/common_types.h>
 #include <mialu/constant.h>
 #include <mialu/limits.h>
@@ -21,9 +23,7 @@
 #include <mialu/str.h>
 #include <mialu/tokenizer.h>
 #include <mialu/wasm-text.h>
-#include <mialu/wasm.h>
 #include <mialu/x64-text.h>
-#include <mialu/x64.h>
 
 // The version of the compiler is given by the build, from the file VERSION, see CMakeLists.txt.
 #ifndef MIALU_VERSION_STRING

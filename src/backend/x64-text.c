@@ -6,10 +6,10 @@
 #include <string.h>
 
 #include <mialu/array_slice.h>
+#include <mialu/build-target-x64.h>
 #include <mialu/common_types.h>
 #include <mialu/str.h>
 #include <mialu/x64-text.h>
-#include <mialu/x64.h>
 
 // The format of the text: the operand that is written to comes first, a register is written with
 // a `%` in front of it, a memory operand is `[base + displacement]`, a label is `.name:` and is

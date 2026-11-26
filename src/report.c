@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <mialu/build-target-x64.h>
 #include <mialu/common_types.h>
 #include <mialu/constant.h>
 #include <mialu/diagnostic.h>
@@ -16,7 +17,6 @@
 #include <mialu/tokenizer.h>
 #include <mialu/wasm-text.h>
 #include <mialu/x64-text.h>
-#include <mialu/x64.h>
 
 enum {
     /**

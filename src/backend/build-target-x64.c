@@ -5,9 +5,9 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <mialu/semantic.h>
+#include <mialu/build-target-x64.h>
 #include <mialu/constant.h>
-#include <mialu/x64.h>
+#include <mialu/semantic.h>
 
 // The layout of the file follows the PE format, see
 // https://learn.microsoft.com/en-us/windows/win32/debug/pe-format. A file has the headers, and then

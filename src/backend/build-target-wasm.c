@@ -4,10 +4,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <mialu/build-target-wasm.h>
 #include <mialu/common_types.h>
-#include <mialu/semantic.h>
 #include <mialu/constant.h>
-#include <mialu/wasm.h>
+#include <mialu/semantic.h>
 
 // The constants of the binary format are in wasm.h, because wasm-text.c reads what this writes.
 
