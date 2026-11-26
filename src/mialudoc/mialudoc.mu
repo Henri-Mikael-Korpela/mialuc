@@ -263,12 +263,6 @@ bytes_end_with :: proc(bytes: []Byte, text: Str) Bool ->
         return false
     return bytes_are(bytes[length_of(bytes) - length_of(text):], text)
 
-/// Whether the byte at `index` is `value`, which is false when there is no byte there. The index is
-/// checked first, and the byte is only read when it is there, as `and` does not evaluate its right
-/// operand otherwise.
-byte_is :: proc(bytes: []Byte, index: Int, value: Byte) Bool ->
-    return index >= 0 and index < length_of(bytes) and bytes[index] == value
-
 /// Whether the byte at `index` is a digit, which is false when there is no byte there.
 is_digit_at :: proc(bytes: []Byte, index: Int) Bool ->
     return index >= 0 and index < length_of(bytes) and cast(Int)bytes[index] >= ZERO and cast(Int)bytes[index] <= NINE
@@ -290,14 +284,14 @@ find_pair :: proc(bytes: []Byte, target: Byte) Int ->
 /// Where the bytes start after the spaces at their start.
 trim_start :: proc(bytes: []Byte) Int ->
     index := 0
-    for byte_is(bytes, index, SPACE) ->
+    for index < length_of(bytes) and bytes[index] == SPACE ->
         index += 1
     return index
 
 /// Where the bytes end before the spaces at their end.
 trim_end :: proc(bytes: []Byte) Int ->
     end := length_of(bytes)
-    for byte_is(bytes, end - 1, SPACE) ->
+    for end > 0 and bytes[end - 1] == SPACE ->
         end -= 1
     // Bytes that are all spaces end where they start, so a range from one to the other is empty.
     start := trim_start(bytes)
@@ -464,7 +458,7 @@ emit_href :: proc(out: ^Output, url: []Byte) ->
     for index < length_of(url) ->
         if bytes_start_with(url[index:], ".md") ->
             after := index + 3
-            if after == length_of(url) or byte_is(url, after, HASH) ->
+            if after == length_of(url) or url[after] == HASH ->
                 index = after
                 continue
         emit_escaped_byte(out, url[index])
@@ -612,7 +606,7 @@ render_inline :: proc(out: ^Output, text: []Byte) ->
                 index += code_length + 2
                 continue
 
-        if value == STAR and byte_is(text, index + 1, STAR) ->
+        if value == STAR and rest > 1 and text[index + 1] == STAR ->
             strong := text[index + 2:]
             strong_length := find_pair(strong, STAR)
             if strong_length > 0 ->
@@ -622,7 +616,7 @@ render_inline :: proc(out: ^Output, text: []Byte) ->
                 index += strong_length + 4
                 continue
 
-        if value == STAR and rest > 1 and not byte_is(text, index + 1, SPACE) ->
+        if value == STAR and rest > 1 and text[index + 1] not= SPACE ->
             emphasized := text[index + 1:]
             emphasized_length := find_byte_first(emphasized, STAR)
             if emphasized_length > 0 ->
@@ -635,7 +629,7 @@ render_inline :: proc(out: ^Output, text: []Byte) ->
         if value == LEFT_BRACKET ->
             label := text[index + 1:]
             label_length := find_byte_first(label, RIGHT_BRACKET)
-            if label_length >= 0 and byte_is(label, label_length + 1, LEFT_PARENTHESIS) ->
+            if label_length >= 0 and label_length + 1 < length_of(label) and label[label_length + 1] == LEFT_PARENTHESIS ->
                 address := label[label_length + 2:]
                 address_length := find_byte_first(address, RIGHT_PARENTHESIS)
                 if address_length >= 0 ->
@@ -733,14 +727,13 @@ close_everything :: proc(out: ^Output, state: ^Render) ->
 /// number. It is 0 when the text does not start with one.
 list_marker :: proc(text: []Byte) (Int, Bool) ->
     // MISSING: parentheses to group a condition, so the two bullets are two conditions.
-    if byte_is(text, 1, SPACE) and byte_is(text, 0, DASH) ->
-        return 2, false
-    if byte_is(text, 1, SPACE) and byte_is(text, 0, STAR) ->
-        return 2, false
+    if length_of(text) > 1 and text[1] == SPACE ->
+        if text[0] == DASH or text[0] == STAR ->
+            return 2, false
     digits := 0
     for is_digit_at(text, digits) ->
         digits += 1
-    if digits > 0 and byte_is(text, digits, DOT) and byte_is(text, digits + 1, SPACE) ->
+    if digits > 0 and digits + 1 < length_of(text) and text[digits] == DOT and text[digits + 1] == SPACE ->
         return digits + 2, true
     return 0, false
 
@@ -831,9 +824,9 @@ render_line :: proc(out: ^Output, state: ^Render, line: []Byte) Int ->
 
     if indent == 0 and text[0] == '#' ->
         level := 0
-        for byte_is(text, level, HASH) ->
+        for level < length_of(text) and text[level] == HASH ->
             level += 1
-        if level <= 6 and byte_is(text, level, SPACE) ->
+        if level <= 6 and level < length_of(text) and text[level] == SPACE ->
             close_everything(out, state)
             heading := text[level + 1:]
             emit_text(out, "<h")
@@ -857,7 +850,7 @@ render_line :: proc(out: ^Output, state: ^Render, line: []Byte) Int ->
         close_table(out, state)
         close_lists(out, state)
         content := text[1:]
-        if byte_is(content, 0, SPACE) ->
+        if length_of(content) > 0 and content[0] == SPACE ->
             content = content[1:]
         if not state.in_quote ->
             emit_text(out, "<blockquote><p>")
@@ -965,7 +958,7 @@ read_line :: proc(reader: ^Line_Reader, line: []Byte) (Int, Bool) ->
             length += 1
     if not has_line ->
         return 0, false
-    if byte_is(line, length - 1, CARRIAGE_RETURN) ->
+    if length > 0 and line[length - 1] == CARRIAGE_RETURN ->
         length -= 1
     return length, true
 
@@ -1142,14 +1135,17 @@ list_has :: proc(list: Str, word: []Byte) Bool ->
 /// Where the bytes end before the line ends that are at their end.
 trim_lines :: proc(bytes: []Byte) Int ->
     end := length_of(bytes)
-    for byte_is(bytes, end - 1, LINE_FEED) or byte_is(bytes, end - 1, CARRIAGE_RETURN) or byte_is(bytes, end - 1, SPACE) ->
+    for end > 0 ->
+        last := bytes[end - 1]
+        if last not= LINE_FEED and last not= CARRIAGE_RETURN and last not= SPACE ->
+            break
         end -= 1
     return end
 
 /// Whether a name is that of a file of one of the directories that are served as they are: it has
 /// letters, digits, `-`, `_` and dots, and does not start with a dot, so it cannot be `..`.
 is_file_name :: proc(bytes: []Byte) Bool ->
-    if length_of(bytes) == 0 or byte_is(bytes, 0, DOT) ->
+    if length_of(bytes) == 0 or bytes[0] == DOT ->
         return false
     for value in bytes ->
         if not is_name_byte(value) and value not= '.' ->
@@ -1212,7 +1208,7 @@ emit_json_bytes :: proc(out: ^Output, bytes: []Byte, strip_links: Bool) Int ->
         if strip_links and value == '[' ->
             label := bytes[index + 1:]
             label_length := find_byte_first(label, RIGHT_BRACKET)
-            if label_length >= 0 and byte_is(label, label_length + 1, LEFT_PARENTHESIS) ->
+            if label_length >= 0 and label_length + 1 < length_of(label) and label[label_length + 1] == LEFT_PARENTHESIS ->
                 address := label[label_length + 2:]
                 address_length := find_byte_first(address, RIGHT_PARENTHESIS)
                 if address_length >= 0 ->
@@ -1222,7 +1218,7 @@ emit_json_bytes :: proc(out: ^Output, bytes: []Byte, strip_links: Bool) Int ->
 
         // The carriage return before a line feed is how Windows ends a line, and is not text. One
         // that is not is, such as the one that a string of the program has.
-        if value == '\r' and byte_is(bytes, index + 1, LINE_FEED) ->
+        if value == '\r' and index + 1 < length_of(bytes) and bytes[index + 1] == LINE_FEED ->
             index += 1
             continue
         emit_json_byte(out, value)
@@ -1503,11 +1499,11 @@ emit_tokens :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte)
         value_end := 0
         if is_member ->
             is_member = false
-            if byte_is(stripped, name_end, COMMA) ->
+            if name_end < length_of(stripped) and stripped[name_end] == COMMA ->
                 is_member = true
             else if bytes_start_with(stripped[name_end:], " = ") ->
                 start := name_end + 3
-                if byte_is(stripped, start, QUOTE) and byte_is(stripped, start + 2, QUOTE) and byte_is(stripped, start + 3, COMMA) ->
+                if start + 3 < length_of(stripped) and stripped[start] == QUOTE and stripped[start + 2] == QUOTE and stripped[start + 3] == COMMA ->
                     is_member = true
                     value_start = start
                     value_end = start + 3
@@ -1515,7 +1511,7 @@ emit_tokens :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte)
                     digits := start
                     for is_digit_at(stripped, digits) ->
                         digits += 1
-                    if digits > start and byte_is(stripped, digits, COMMA) ->
+                    if digits > start and digits < length_of(stripped) and stripped[digits] == COMMA ->
                         is_member = true
                         value_start = start
                         value_end = digits
@@ -1530,7 +1526,7 @@ emit_tokens :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte)
         comment_length = 0
 
         has_value := value_end > value_start
-        is_character := has_value and byte_is(stripped, value_start, QUOTE)
+        is_character := has_value and stripped[value_start] == QUOTE
         is_keyword := bytes_start_with(name, "KEYWORD_")
 
         if is_first ->
@@ -1610,7 +1606,7 @@ find_ast_description :: proc(arena: ^mu.Arena_Allocator, directory: []Byte, name
                 is_found = true
                 rest := entry[name_length + 1:]
                 // The name is followed by a colon, and a space that is not part of the description.
-                if byte_is(rest, 0, COLON) ->
+                if length_of(rest) > 0 and rest[0] == COLON ->
                     rest = rest[1:]
                 rest = trim(rest)
                 length = put_bytes(description, 0, rest)
@@ -1658,7 +1654,7 @@ emit_ast_nodes :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []By
             name_end = length_of(stripped)
         for is_word_at(stripped, name_end) ->
             name_end += 1
-        if bytes_start_with(stripped, "AST_NODE_TYPE_") and name_end > 14 and byte_is(stripped, name_end, COMMA) ->
+        if bytes_start_with(stripped, "AST_NODE_TYPE_") and name_end > 14 and name_end < length_of(stripped) and stripped[name_end] == COMMA ->
             name := stripped[14:name_end]
             category := "Other"
             if list_has("ARRAY_TYPE ENUM_TYPE POINTER_TYPE PROCEDURE_TYPE STRUCT_TYPE TYPE_NAME", name) ->
@@ -1769,7 +1765,7 @@ emit_reserved_words :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory:
                 start += 1
                 continue
             end := start
-            for end < length and not byte_is(text, end, SPACE) ->
+            for end < length and text[end] not= SPACE ->
                 end += 1
             word := text[start:end]
             if is_first ->
@@ -1840,7 +1836,7 @@ emit_operators_of :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: [
         if bytes_start_with(text, "## ") ->
             break
         text = text[0:trim_end(text)]
-        if not byte_is(text, 0, PIPE) or not byte_is(text, length_of(text) - 1, PIPE) ->
+        if length_of(text) == 0 or text[0] not= PIPE or text[length_of(text) - 1] not= PIPE ->
             continue
 
         // The cells are between the five bars of the row. A row with other bars is not one.
@@ -1875,10 +1871,10 @@ emit_operators_of :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: [
 
         // The backticks around an operator are not part of it.
         operator_start := 0
-        for byte_is(operator_text, operator_start, BACKTICK) ->
+        for operator_start < length_of(operator_text) and operator_text[operator_start] == BACKTICK ->
             operator_start += 1
         operator_end := length_of(operator_text)
-        for operator_end > operator_start and byte_is(operator_text, operator_end - 1, BACKTICK) ->
+        for operator_end > operator_start and operator_text[operator_end - 1] == BACKTICK ->
             operator_end -= 1
 
         if is_first^ ->
@@ -2663,7 +2659,7 @@ answer :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, request: []Byte, d
 
     // What follows a `?` or a `#` is not part of the page.
     end := 0
-    for end < length_of(target) and not byte_is(target, end, QUESTION) and not byte_is(target, end, HASH) ->
+    for end < length_of(target) and target[end] not= QUESTION and target[end] not= HASH ->
         end += 1
     target = target[0:end]
     with_body := not is_head
@@ -2742,10 +2738,10 @@ log_request :: proc(request: []Byte, code: Int) ->
 /// when there is none. The words are separated by spaces.
 next_word :: proc(text: []Byte, from: Int) (Int, Int) ->
     start := from
-    for byte_is(text, start, SPACE) ->
+    for start < length_of(text) and text[start] == SPACE ->
         start += 1
     end := start
-    for end < length_of(text) and not byte_is(text, end, SPACE) ->
+    for end < length_of(text) and text[end] not= SPACE ->
         end += 1
     return start, end
 
