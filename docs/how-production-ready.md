@@ -2,12 +2,14 @@
 
 ## Goals
 
-- A procedural Turing-complete language with similar low-level control as in C with convenient yet powerful structures built in to allow for large scale application development.
+- A procedural Turing-complete language.
+- Explicit control over memory with little to no hidden control flow.
+- Fast compilation times, fast iteration time.
 - A language that makes web development more pleasant, see [Problems Mialu addresses](problems.md).
 
 ## Verdict
 
-Mialu is **not production ready**. It is version 0.5.0, and the first commit is from 2026-10-31. It is a well-specified, carefully built language with a compiler that is good for learning, experiments, small tools and its own programs: the release scripts and `mialudoc`, the server of the documentation and the playground, are written in it. It cannot yet be used for the "large scale application development" that the goals name, and it cannot yet write a web service, which is the use that matters most.
+Mialu is **not production ready**. It is version 0.5.0, and the first commit is from 2026-10-31. It is a well-specified, carefully built language with a compiler that is good for learning, experiments, small tools and its own programs: the release scripts and `mialudoc`, the server of the documentation and the playground, are written in it. It meets the goals of explicit memory and fast compilation only in part, and it cannot yet write a web service, which is the use that matters most.
 
 What exists is not listed again here, see the [specification](mialu-programming-language.md), the [command line](mialu-cli.md) and the documents of the [targets](build-target-x64-win32.md). In short: a front end and two back ends written in about 42,000 lines of C (`x64-win32` and WebAssembly), a verified grammar, a debugger and a language server for VS Code, a playground, and a standard library of four files. What follows is what is missing.
 
@@ -29,13 +31,14 @@ The impact says how much the gap matters for production readiness: **Critical** 
 - **Standard library too small.** No collections, time, random numbers, sockets, process start, directory listing or file size. What exists works on Windows only.
 - **No package manager and no project file.** Packages exist, but there are no versioned dependencies, no visibility rules and no build description. Every build compiles the program and everything it imports.
 - **Integers.** `I8`, `I16` and `U16` are reserved, an `I32` takes 8 bytes in a struct, and there is no remainder operator. Protocols and file formats need exact sizes and byte order.
-- **No optimizer.** Code is a direct translation that keeps values on a stack in memory.
+- **No optimizer.** Code is a direct translation that keeps values on a stack in memory. This is the price of the goal of fast compilation, which is why it is no Critical gap: the generated code is slow (see [M6](#m6-real-programs-011)), but the compiler is simple and quick. An optimization is worth adding only when it is cheap, such as register allocation and the removal of redundant moves, and not at the cost of the speed of the compiler.
+- **Fast compilation is a goal that nobody measures.** There are no benchmarks of the compile time, no limit that CI checks, and no way to rebuild only what changed. Every build compiles the program and everything it imports. Fast iteration also needs a watch mode, or a run command that starts the program as soon as it is built.
 - **Fixed compiler limits.** 1 MiB of source, 65,536 tokens and nodes, 1,024 procedures.
 - **No stability promise.** Version 0.x, and a specification that changes with the code.
 
 ### Medium
 
-- **Error handling is by hand.** Values are returned as `(Int, File_Error)`, and there is nothing that shortens the chain of fallible calls, so code with many of them is long.
+- **Error handling is by hand.** Values are returned as `(Int, File_Error)`, and there is nothing that shortens the chain of fallible calls, so code with many of them is long. This fits the goal of no hidden control flow, so a short form has to stay visible at the call, see [feature 6](#6-state-data-and-errors-that-can-be-reasoned-about).
 - **Arithmetic wraps silently.** There is no checked or saturating form.
 - **No sanitizers, profiler or coverage.** Debugging needs gdb on Windows.
 - **No security review** of a compiler in C that reads untrusted source.
@@ -53,7 +56,7 @@ A language that only catches up with C, a better C, competes with Zig and Rust, 
 
 **Problem:** memory bugs (use after free, leaks, dangling pointers) are the largest class of security holes, and the long-running processes of a web service suffer from them and from the pauses of garbage collection.
 
-**Idea:** the allocator is a value that is passed, as in Zig, but the language makes it hard to misuse: an arena per request that is freed as a whole, a pointer that cannot outlive its arena (checked at compile time, by a region that is part of the type), and a trap, not a corruption, on use after free in a debug build. `defer` already exists as the tool for release.
+**Idea:** this is the goal of explicit control over memory: nothing allocates unless the code says so. The allocator is a value that is passed, as in Zig, but the language makes it hard to misuse: an arena per request that is freed as a whole, a pointer that cannot outlive its arena (checked at compile time, by a region that is part of the type), and a trap, not a corruption, on use after free in a debug build. `defer` already exists as the tool for release.
 
 **Compared:** C and C++ leave it to the programmer and tools. Java, C#, Kotlin and Python use a garbage collector, safe but with pauses and a memory use that is hard to predict. Rust is safe at compile time at the price of lifetimes in every signature. Zig has explicit allocators but no checks of lifetimes. A region check without the full burden of Rust would be a middle path that no language of the seven takes.
 
@@ -69,7 +72,7 @@ A language that only catches up with C, a better C, competes with Zig and Rust, 
 
 **Problem:** distributed systems, real-time communication, background jobs and many clients at once are the daily work of a server, and data races are the hardest bugs to find.
 
-**Idea:** lightweight tasks with their own small stacks, and channels, with a rule that a pointer sent over a channel is moved and the sender cannot use it again (a compile-time check that is simpler than a borrow checker, because the check only concerns a send). `defer` and cancellation tied together, so that a task that is cancelled releases what it holds. Structured concurrency: a task cannot outlive the block that started it.
+**Idea:** lightweight tasks with their own small stacks (switched only at a call that is marked, such as a send, a receive or a wait, so that no switch is hidden), and channels, with a rule that a pointer sent over a channel is moved and the sender cannot use it again (a compile-time check that is simpler than a borrow checker, because the check only concerns a send). `defer` and cancellation tied together, so that a task that is cancelled releases what it holds. Structured concurrency: a task cannot outlive the block that started it.
 
 **Compared:** C and C++ give threads and a manual discipline. Java has threads and, lately, virtual threads. Kotlin has coroutines with structured concurrency, the model to follow. C# has `async`/`await`. Python has the GIL and `asyncio`. Rust has `Send` and `Sync` that prove no data race, with the colored functions of async. Zig has no stable async at all. A language with structured tasks and moved sends, small enough to learn in a day, would be rare.
 
@@ -93,7 +96,7 @@ A language that only catches up with C, a better C, competes with Zig and Rust, 
 
 **Problem:** **managing complex application state**, and failures that are lost or hidden.
 
-**Idea:** a short form for a fallible call that returns early with the error (the `?` of Rust, or `try` of Zig) and works with the multiple results that Mialu has, so no exceptions are needed. Immutable by default values, and matches over unions that the compiler proves complete, which Mialu has, to model a state machine so that an impossible state cannot be written. Structured logging and errors with a trace, from the types.
+**Idea:** a short form for a fallible call that returns early with the error and works with the multiple results that Mialu has, so no exceptions are needed. The goal of no hidden control flow says that the return must be seen where it happens: a keyword in front of the call, as `try` of Zig, and not a symbol that is easy to miss at the end of it, as the `?` of Rust. Immutable by default values, and matches over unions that the compiler proves complete, which Mialu has, to model a state machine so that an impossible state cannot be written. Structured logging and errors with a trace, from the types.
 
 **Compared:** C has error codes by hand. C++, Java, C# and Python use exceptions, which are invisible in a signature. Kotlin has both. Rust (`Result` and `?`) and Zig (error unions and `try`) show the target. Mialu is already close, because it has multiple results and exhaustive matches, and only the short form is missing.
 
@@ -107,9 +110,9 @@ A language that only catches up with C, a better C, competes with Zig and Rust, 
 
 ### 8. Tools that run from one file
 
-**Problem:** the setup of a project (a package manager, a bundler, a linter, a formatter, a test runner) is a large part of the cost of web development.
+**Problem:** the setup of a project (a package manager, a bundler, a linter, a formatter, a test runner) is a large part of the cost of web development, and it slows the loop of change and result that the goal of fast iteration is about.
 
-**Idea:** the compiler is also the formatter, the test runner (`mialuc test`, with the tests in the same file), the documentation generator (from `///`) and the package fetcher, and it needs no other program. This is already the way of the toolchain, which has no linker or assembler to install. Reproducible builds, since the compiler is deterministic and has no dependencies.
+**Idea:** the compiler is also the formatter, the test runner (`mialuc test`, with the tests in the same file), the documentation generator (from `///`) and the package fetcher, and it needs no other program. This is already the way of the toolchain, which has no linker or assembler to install. Reproducible builds, since the compiler is deterministic and has no dependencies, and a watch mode that builds again when a file changes, so that the time from a change to its result is the compile time and nothing else.
 
 **Compared:** Rust (`cargo`) and Zig (`zig build`, `zig test`, `zig fmt`) are the standard. Go set it. C and C++ have no standard at all. Java, Kotlin and C# need Maven, Gradle or MSBuild. Python has too many tools. For Mialu this is cheap, and it removes a reason not to try it.
 
@@ -127,6 +130,8 @@ A language that only catches up with C, a better C, competes with Zig and Rust, 
 | Native platforms | Many | Many | Many | Many | Many | Many | Many | **One** |
 | Toolchain to install | Large | Large | Large | Large | Medium | Medium | One file | One file |
 | Compiler is tested in CI | Yes | Yes | Yes | Yes | Yes | Yes | Yes | **No** |
+| Compilation speed | Slow | Medium | Medium | Slow | None needed | Slow | Medium | Fast by design, **not measured** |
+| Speed of the generated code | Fast | Fast | Fast | Fast | Slow | Fast | Fast | **Slow**, no optimizer |
 
 Mialu leads in the size and simplicity of its toolchain and in the quality of its specification and its error messages. It trails in everything that a program of real size needs. The way to be worth using is not to match the standard library of a language that is thirty years old, but to be the language where the features above (regions, plain generics, structured tasks, one source for both sides of the web) are small and fit together.
 
@@ -142,8 +147,9 @@ Each milestone has an exit criterion that can be checked, and its steps are in t
 2. Run each `test-code/wasm` program with Node and its `.client.js`, with no browser.
 3. Add a test for each rule that the specification states: every error code has one (`scripts/verify_errors.py`, `test-code/errors`), but a code may cover more than one rule.
 4. Run the grammar check, both runners and the error tests on every push and pull request, not only on a release tag.
-5. Add the tests that today's examples lack: integer wrap-around, deep expressions at the limit, empty inputs, and the cases of the limits in the CLI document.
-6. Run the compiler under an address sanitizer and a fuzzer on the tokenizer and parser, and fix what they find.
+5. Measure the compile time of every program of `test-code` and of the compiler's own Mialu programs, keep the numbers, and fail CI when a change makes the compiler clearly slower, so that fast compilation is checked as a goal and not assumed.
+6. Add the tests that today's examples lack: integer wrap-around, deep expressions at the limit, empty inputs, and the cases of the limits in the CLI document.
+7. Run the compiler under an address sanitizer and a fuzzer on the tokenizer and parser, and fix what they find.
 
 ### M2: Memory and data (0.7)
 
@@ -164,7 +170,7 @@ Each milestone has an exit criterion that can be checked, and its steps are in t
 2. Implement it by specializing a procedure per set of types before the targets, so that both targets need no change. (Done, see `src/frontend/specialize.c`.)
 3. Allow generic structs, so that a container is one definition. (Done.)
 4. Write `mu:array`, `mu:map` and `mu:string` as generic code.
-5. Add a short form for returning an error early.
+5. Add a short form for returning an error early, with a keyword that marks the return at the call.
 6. Raise the compiler limits that tests or the library reach, and keep the limits documented.
 
 ### M4: Beyond Windows (0.9)
@@ -194,7 +200,7 @@ Each milestone has an exit criterion that can be checked, and its steps are in t
 1. Write one real application in Mialu. The best candidate is a part of the compiler itself, starting with the tokenizer.
 2. Keep a list of every workaround that it needed, and turn each into a language, library or compiler change.
 3. Add a project build file and a way to name and fetch dependencies, with versions.
-4. Improve the speed of the generated code with register allocation and the removal of redundant moves, measured against C on a set of benchmarks, now that tests keep it correct.
+4. Improve the speed of the generated code with register allocation and the removal of redundant moves, measured against C on a set of benchmarks, now that tests keep it correct, and keep the compile time within the budget of M1.
 5. Add a source formatter, a test command and a linter, so that a project has one style.
 
 ### M7: Mialu 1.0
@@ -214,6 +220,8 @@ Each milestone has an exit criterion that can be checked, and its steps are in t
 | Language design and specification | Strong, for the size of the language |
 | Evidence that the compiler is correct | Weak: examples compile, nothing runs them in CI |
 | Targets | One native platform and WebAssembly |
+| Explicit memory, no hidden control flow | Good in the language (`defer`, explicit returns of errors), the heap is by hand and incomplete |
+| Fast compilation and iteration | Fast by design (no optimizer, no linker), not measured, no watch mode |
 | Memory, generics, concurrency | Memory by hand and generics without constraints, no concurrency |
 | Standard library | Minimal |
 | Web development | A Wasm target and a playground, no networking library |
