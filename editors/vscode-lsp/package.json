@@ -36,6 +36,11 @@
                     "default": true,
                     "description": "Show the value that the compiler worked out for a constant inline, after the :: of its definition, when it is not written as the value."
                 },
+                "mialu.lsp.implicitCasts": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show the cast(Byte) that is not in the code, inline before a rune of the ASCII range that is given to a parameter of the type Byte."
+                },
                 "mialu.lsp.typeHover": {
                     "type": "boolean",
                     "default": true,

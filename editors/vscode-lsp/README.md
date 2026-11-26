@@ -2,7 +2,7 @@
 
 A language server for Mialu, and the extension that connects VS Code to it. It is an extension of its own next to the [language extension](../vscode/README.md), which it needs for the language `mialu`.
 
-It has three features. The first is the size of a struct: above the definition of each struct there is a line that says how much memory a value of it takes and how it is aligned.
+It has several features. The first is the size of a struct: above the definition of each struct there is a line that says how much memory a value of it takes and how it is aligned.
 
 ```
 Size: 24 bytes | Alignment: 8 bytes
@@ -19,6 +19,8 @@ The third is the outline of a file, which VS Code shows in the Outline view, in 
 The fourth is diagnostics: a moment after a document is opened or changed, the server checks it with the compiler, and the error is marked in the code with a red squiggle, under the part that its carets point at, and listed in the Problems tab with its code, such as `E0402`, and its note and help, and it goes away when the text is fixed. The compiler stops at the first error, so there is one at a time. The errors of the types of a call of a polymorphic procedure, such as a type parameter that cannot be deduced, are among them. It is checked on the text in the editor, not the saved file.
 
 The fifth is the value of a constant, shown inline after the `::` of its definition, or the second `:` of a typed one, as a hint of the editor: `VERSION_STRING :: ⇒ "0.3.0" int_to_str(VERSION_MAJOR) ++ '.' ++ ...` for a constant that the compiler worked out from others, and `SIZE :: ⇒ 4096 (0x1000) 64 * 64` for a number, which is also written in hexadecimal from 256 up. A constant that is written as its value, such as `LIMIT :: 100`, has no hint, since it would say the same. The server answers `textDocument/inlayHint` from the same `mialuc dump-types` as the hover, and the setting `mialu.lsp.constantValues` turns the hints off.
+
+The sixth is the cast that the compiler makes and the code does not say: a rune of the ASCII range that is given to a parameter of the type `Byte` is the byte that it is, see [Bytes](../../docs/mialu-programming-language.md#bytes), so in `dot_index := mu.find_first_index_of(name, '.')` the editor shows `cast(Byte)` inline before the `'.'`, as if `cast(Byte)'.'` were written, and the file is not changed. It is shown for a rune literal and for the name of a constant that is a rune, also when the procedure is polymorphic and the type is deduced, such as the `T` of `find_first_index_of` for `name` of `[]Byte`. The hint comes from a line of `mialuc dump-types` with the note `implicit cast`, which is not a name, so the hover ignores it, and the setting `mialu.lsp.implicitCasts` turns the hints off.
 
 The server is `server.js`. It speaks the [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) over the standard input and output, so another editor with a client for it can use it too: it answers `textDocument/codeLens`, `textDocument/hover` and `textDocument/documentSymbol`, publishes `textDocument/publishDiagnostics`, and keeps the text of the open documents from `textDocument/didOpen`, `didChange` (the whole text) and `didClose`.
 
@@ -42,5 +44,7 @@ Then run "Developer: Reload Window" in VS Code.
 ## Settings
 
 - `mialu.lsp.structSizes`: show the sizes above the structs. On by default.
+- `mialu.lsp.implicitCasts`: show the `cast(Byte)` of a rune that is given to a `Byte` parameter inline. On by default.
+- `mialu.lsp.constantValues`: show the value of a constant inline after its `::`. On by default.
 - `mialu.lsp.typeHover`: show the type of a name when the pointer rests on it. On by default.
 - `mialu.lsp.compilerPath`: the path of mialuc, see above.

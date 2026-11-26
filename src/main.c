@@ -163,6 +163,15 @@ static bool        main_constant_value_write              (Ast_Node const *nodes
                                                             size_t node_count,
                                                             Ast_Node_Index target, char *text,
                                                             size_t text_size_bytes);
+static void         main_rune_arguments_print              (Str source, Ast_Node const *nodes,
+                                                            Semantic_Binding const *bindings,
+                                                            Constant_Value const *constants,
+                                                            size_t node_count,
+                                                            Ast_Node_Index call,
+                                                            Ast_Node const *callee_nodes,
+                                                            Semantic_Binding const *callee_bindings,
+                                                            size_t callee_node_count,
+                                                            Ast_Node_Index callee_call);
 static void         main_type_row_print                    (Str source, Str name,
                                                             char const *text, char const *note,
                                                             Str value, char const *plain_value,
@@ -1731,6 +1740,133 @@ static void main_value_print(Str value, size_t bytes_max) {
 }
 
 /**
+ * Prints a line of `dump-types` for each argument of `call` that is a rune known when the program
+ * is compiled and in the ASCII range, and is given to a parameter of the type `Byte`, which makes
+ * it the byte that it is without a cast: the line is for the argument, whose type is `Byte`, with
+ * the note `implicit cast`, so that an editor can show the `cast(Byte)` that is not in the code.
+ * `callee_call` is the call in `callee_nodes`, the program that the targets build, whose binding
+ * has the procedure that is called, which for a polymorphic procedure is the specialization whose
+ * parameters have the types that were deduced, or `AST_NODE_INDEX_NONE` for a call that has no copy
+ * there, which `nodes` then holds.
+ */
+static void main_rune_arguments_print(Str source, Ast_Node const *nodes,
+                                      Semantic_Binding const *bindings,
+                                      Constant_Value const *constants, size_t node_count,
+                                      Ast_Node_Index call, Ast_Node const *callee_nodes,
+                                      Semantic_Binding const *callee_bindings,
+                                      size_t callee_node_count, Ast_Node_Index callee_call) {
+    // The procedure as it is written says which parameter each argument is for, and the one that
+    // the call calls, which for a polymorphic procedure is its specialization without the type
+    // parameters, says the types that the values are given.
+    Semantic_Binding binding = bindings[call];
+    if (binding.kind != SEMANTIC_BINDING_KIND_CONSTANT || binding.target >= node_count ||
+        nodes[binding.target].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
+        nodes[nodes[binding.target].first_child].node_type != AST_NODE_TYPE_PROCEDURE) {
+        return;
+    }
+    Ast_Node_Index written = nodes[binding.target].first_child;
+    Ast_Node const *definition_nodes = nodes;
+    Ast_Node_Index procedure = written;
+    if (callee_call != AST_NODE_INDEX_NONE) {
+        Semantic_Binding callee = callee_bindings[callee_call];
+        if (callee.kind != SEMANTIC_BINDING_KIND_CONSTANT ||
+            callee.target >= callee_node_count ||
+            callee_nodes[callee.target].node_type != AST_NODE_TYPE_CONSTANT_DEFINITION ||
+            callee_nodes[callee_nodes[callee.target].first_child].node_type !=
+                AST_NODE_TYPE_PROCEDURE) {
+            return;
+        }
+        definition_nodes = callee_nodes;
+        procedure = callee_nodes[callee.target].first_child;
+    }
+
+    // A type parameter that the call does not give, because it is deduced, is no argument.
+    size_t parameter_count = 0;
+    size_t value_count = 0;
+    for (Ast_Node_Index parameter = nodes[written].first_child;
+         parameter != AST_NODE_INDEX_NONE && nodes[parameter].node_type == AST_NODE_TYPE_PARAMETER;
+         parameter = nodes[parameter].next_sibling) {
+        parameter_count += 1;
+        if (not ast_parameter_is_type(nodes, parameter)) {
+            value_count += 1;
+        }
+    }
+    size_t argument_count = 0;
+    for (Ast_Node_Index argument = nodes[call].first_child; argument != AST_NODE_INDEX_NONE;
+         argument = nodes[argument].next_sibling) {
+        argument_count += 1;
+    }
+    bool is_skipping_types = argument_count == value_count && value_count != parameter_count;
+
+    Ast_Node_Index parameter = nodes[written].first_child;
+    size_t value_index = 0;
+    for (Ast_Node_Index argument = nodes[call].first_child; argument != AST_NODE_INDEX_NONE;
+         argument = nodes[argument].next_sibling) {
+        while (is_skipping_types && parameter != AST_NODE_INDEX_NONE &&
+               ast_parameter_is_type(nodes, parameter)) {
+            parameter = nodes[parameter].next_sibling;
+        }
+        if (parameter == AST_NODE_INDEX_NONE ||
+            nodes[parameter].node_type != AST_NODE_TYPE_PARAMETER) {
+            return;
+        }
+        bool is_type = ast_parameter_is_type(nodes, parameter);
+        Ast_Node_Index written_parameter = parameter;
+        parameter = nodes[parameter].next_sibling;
+        if (is_type) {
+            continue;
+        }
+        // The parameter of the same place among the values, in the procedure that is called.
+        Ast_Node_Index parameter_here = definition_nodes[procedure].first_child;
+        for (size_t i = 0; i < value_index && parameter_here != AST_NODE_INDEX_NONE; i += 1) {
+            parameter_here = definition_nodes[parameter_here].next_sibling;
+        }
+        value_index += 1;
+        if (callee_call == AST_NODE_INDEX_NONE) {
+            parameter_here = written_parameter;
+        }
+        if (parameter_here == AST_NODE_INDEX_NONE ||
+            definition_nodes[parameter_here].node_type != AST_NODE_TYPE_PARAMETER) {
+            return;
+        }
+
+        Constant_Value constant = constants[argument];
+        if (constant.status != CONSTANT_STATUS_OK || constant.type != CONSTANT_TYPE_RUNE ||
+            constant.integer < 0 || constant.integer > 0x7F) {
+            continue;
+        }
+        char type[32] = "";
+        if (not main_type_text_write(definition_nodes, definition_nodes[parameter_here].first_child,
+                                     type, sizeof(type)) ||
+            strcmp(type, "Byte") != 0) {
+            continue;
+        }
+
+        // The text of the argument, which is a view of the source.
+        Str text = STR_EMPTY;
+        if (nodes[argument].node_type == AST_NODE_TYPE_IDENTIFIER) {
+            text = nodes[argument].payload.identifier.name;
+        } else if (nodes[argument].node_type == AST_NODE_TYPE_RUNE_LITERAL &&
+                   nodes[argument].source_offset < source.length &&
+                   source.bytes[nodes[argument].source_offset] == '\'') {
+            size_t start = nodes[argument].source_offset;
+            size_t end = start + 1;
+            while (end < source.length && source.bytes[end] != '\'' &&
+                   source.bytes[end] != '\n') {
+                end += source.bytes[end] == '\\' ? 2 : 1;
+            }
+            if (end < source.length && source.bytes[end] == '\'') {
+                text = str_make(source.bytes + start, end + 1 - start);
+            }
+        }
+        if (text.bytes != NULL) {
+            main_type_row_print(source, text, "Byte", "implicit cast", STR_EMPTY, "", STR_EMPTY,
+                                "");
+        }
+    }
+}
+
+/**
  * Prints the line of `dump-types` for the name `name`, a view of the source, with `text` as the
  * type, see `main_run_command_print_types`. A `note` that is not empty is a sixth field, and a
  * `value` that is not empty is a seventh, after a sixth that is then empty when there is no note,
@@ -1936,6 +2072,11 @@ static void main_run_command_print_types(Str source, Parse_Result parse_result,
     for (Ast_Node_Index index = (Ast_Node_Index)first_node; index < parse_result.nodes.length;
          index += 1) {
         Ast_Node const *node = &nodes[index];
+        if (node->node_type == AST_NODE_TYPE_CALL) {
+            main_rune_arguments_print(source, nodes, bindings, constants, parse_result.nodes.length,
+                                      index, copy_nodes, copy_bindings, copy_count,
+                                      copy_of[index]);
+        }
         Str name = STR_EMPTY;
         Ast_Node_Index target = AST_NODE_INDEX_NONE;
         // The enum that a member belongs to, for the names whose type is that.

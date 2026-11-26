@@ -628,3 +628,64 @@ test("the value of a constant is shown inline after its operator", async () => {
         assert.strictEqual((await request("shutdown", null)).result, null);
     });
 });
+
+test("the cast of a rune that is given to a Byte parameter is shown inline", async () => {
+    await withServer(async (request, notify) => {
+        const initialized = await request("initialize", {
+            processId: null, rootUri: null, capabilities: {},
+            initializationOptions: { compilerPath: COMPILER },
+        });
+        assert.strictEqual(initialized.result.capabilities.inlayHintProvider, true);
+        notify("initialized", {});
+
+        const source = [
+            "package casts",
+            "",
+            "LETTER :: 'k'",
+            "",
+            "is_byte :: proc(b: Byte, wanted: Byte) Bool ->",
+            "    return b == wanted",
+            "",
+            "find_first :: proc(elements: []$T, target: T) Int ->",
+            "    for index in 0..<length_of(elements) ->",
+            "        if elements[index] == target ->",
+            "            return index",
+            "    return -1",
+            "",
+            "main :: proc() Int ->",
+            "    bytes := [const]Byte { 97, 46, 98 }",
+            "    a := is_byte(97, '.')",
+            "    b := is_byte(98, LETTER)",
+            "    c := find_first(bytes[:], '.')",
+            "    d := is_byte(98, 98)",
+            "    return find_first(bytes[:], 46)",
+            "",
+        ].join("\n");
+        const uri = "file:///casts.mu";
+        notify("textDocument/didOpen", {
+            textDocument: { uri, languageId: "mialu", version: 1, text: source },
+        });
+        const hints = (await request("textDocument/inlayHint", {
+            textDocument: { uri },
+            range: { start: { line: 0, character: 0 }, end: { line: 30, character: 0 } },
+        })).result.filter((hint) => hint.data === "implicitCast");
+        const lines = source.split("\n");
+        // Each hint is right before the argument, and only a rune has one.
+        const shown = hints.map((hint) => [
+            lines[hint.position.line].slice(hint.position.character), hint.label, hint.data]);
+        assert.deepStrictEqual(shown, [
+            ["'.')", "cast(Byte)", "implicitCast"],
+            ["LETTER)", "cast(Byte)", "implicitCast"],
+            ["'.')", "cast(Byte)", "implicitCast"],
+        ]);
+        assert.strictEqual(hints[0].paddingRight, false);
+
+        // The hint is not a name, so the pointer on the rune shows no type.
+        const column = lines[15].indexOf("'.'") + 1;
+        const hover = (await request("textDocument/hover", {
+            textDocument: { uri }, position: { line: 15, character: column },
+        })).result;
+        assert.strictEqual(hover, null);
+        assert.strictEqual((await request("shutdown", null)).result, null);
+    });
+});

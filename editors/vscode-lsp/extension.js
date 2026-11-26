@@ -190,7 +190,8 @@ async function activate(context) {
             if (event.affectsConfiguration("mialu.lsp.structSizes")) {
                 lensesChanged.fire();
             }
-            if (event.affectsConfiguration("mialu.lsp.constantValues")) {
+            if (event.affectsConfiguration("mialu.lsp.constantValues") ||
+                event.affectsConfiguration("mialu.lsp.implicitCasts")) {
                 hintsChanged.fire();
             }
         }),
@@ -238,11 +239,15 @@ async function activate(context) {
                 }
             },
         }),
-        // The value of a constant is shown after its `::`, as an inline hint.
+        // The value of a constant is shown after its `::`, and the cast of a rune that is given to a
+        // `Byte` parameter before it, as inline hints.
         vscode.languages.registerInlayHintsProvider({ language: LANGUAGE_ID }, {
             onDidChangeInlayHints: hintsChanged.event,
             async provideInlayHints(document, range) {
-                if (!vscode.workspace.getConfiguration("mialu.lsp").get("constantValues", true)) {
+                const settings = vscode.workspace.getConfiguration("mialu.lsp");
+                const isConstantShown = settings.get("constantValues", true);
+                const isCastShown = settings.get("implicitCasts", true);
+                if (!isConstantShown && !isCastShown) {
                     return [];
                 }
                 try {
@@ -253,7 +258,9 @@ async function activate(context) {
                             end: { line: range.end.line, character: range.end.character },
                         },
                     });
-                    return hints.map((hint) => {
+                    return hints.filter((hint) =>
+                        hint.data === "implicitCast" ? isCastShown : isConstantShown
+                    ).map((hint) => {
                         const result = new vscode.InlayHint(
                             new vscode.Position(hint.position.line, hint.position.character),
                             hint.label);

@@ -124,6 +124,13 @@ function unquote(quoted) {
 }
 
 /**
+ * The note of a line of `mialuc dump-types` for a rune that is given to a parameter of the type
+ * `Byte`, which is the byte that it is without a cast. The line is for the inline hint that shows
+ * the `cast(Byte)` that is not in the code, and it is not a name to hover.
+ */
+const IMPLICIT_CAST_NOTE = "implicit cast";
+
+/**
  * Turns the output of `mialuc dump-types` into the names with their types. A line of the output is
  * the line and the column of a name, both counted from 1 in bytes, the length of the name in bytes,
  * the name and the type, a note that some lines have, and after it the value of a constant that is
@@ -455,7 +462,7 @@ async function hover(uri, position) {
     const bytes = Buffer.from(lineText, "utf8");
     for (const entry of document.names) {
         if (entry.line !== position.line || offset < entry.column ||
-            offset >= entry.column + entry.length) {
+            offset >= entry.column + entry.length || entry.note === IMPLICIT_CAST_NOTE) {
             continue;
         }
         if (bytes.toString("utf8", entry.column, entry.column + entry.length) !== entry.name) {
@@ -544,8 +551,10 @@ const INLAY_VALUE_CHARACTERS_MAX = 80;
  * Answers a request for the inline hints of the lines of `range`: after the `::` of a constant, or
  * the second `:` of a typed one, the value that the compiler worked out for it, such as the text
  * that `VERSION_STRING :: int_to_str(MAJOR) ++ '.' ++ int_to_str(MINOR)` makes. A constant that is
- * written as its value, such as `LIMIT :: 100`, has no hint, since it would say the same. The
- * names are the ones of the last text that compiled while the text does not.
+ * written as its value, such as `LIMIT :: 100`, has no hint, since it would say the same. Before a
+ * rune that is given to a `Byte` parameter, as in `find(name, '.')`, there is the `cast(Byte)` that
+ * the compiler makes, with `data` set to `implicitCast`. The names are the ones of the last text
+ * that compiled while the text does not.
  */
 async function inlayHints(uri, range) {
     const document = documents.get(uri);
@@ -561,6 +570,31 @@ async function inlayHints(uri, range) {
     const lines = document.text.split("\n").map((line) => line.replace(/\r$/, ""));
     const hints = [];
     for (const entry of document.names) {
+        if (entry.note === IMPLICIT_CAST_NOTE) {
+            // A rune that is given to a `Byte` parameter is the byte that it is, and the hint shows
+            // the cast that the compiler makes, in front of the argument.
+            if (entry.line < range.start.line || entry.line > range.end.line ||
+                entry.line >= lines.length) {
+                continue;
+            }
+            const bytes = Buffer.from(lines[entry.line], "utf8");
+            if (bytes.toString("utf8", entry.column, entry.column + entry.length) !== entry.name) {
+                continue;
+            }
+            hints.push({
+                position: {
+                    line: entry.line,
+                    character: bytes.toString("utf8", 0, entry.column).length,
+                },
+                label: `cast(${entry.type})`,
+                tooltip: `${entry.name} is converted to a ${entry.type} where it is given to a ` +
+                    "parameter of that type, as if cast(" + entry.type + ") were written",
+                paddingLeft: false,
+                paddingRight: false,
+                data: "implicitCast",
+            });
+            continue;
+        }
         if (entry.value === "" || entry.line < range.start.line || entry.line > range.end.line ||
             entry.line >= lines.length) {
             continue;
