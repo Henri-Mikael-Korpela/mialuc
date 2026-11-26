@@ -35,6 +35,8 @@ foreign libc ->
 
 /// The path of the file of the version, relative to the root of the project.
 VERSION_PATH :: "VERSION"
+SPACE : Byte : cast(Byte)' '
+QUOTE : Byte : cast(Byte)'"'
 
 /// The file that the output of a command of git is written to, and read from.
 OUTPUT_PATH :: "deploy-release.tmp"
@@ -62,7 +64,7 @@ trimmed_length :: proc(bytes: []Byte) Int ->
     end := length_of(bytes)
     for end > 0 ->
         last := bytes[end - 1]
-        if last not= 10 and last not= 13 and last not= ' ' ->
+        if last not= '\n' and last not= '\r' and last not= SPACE ->
             break
         end -= 1
     return end
@@ -133,7 +135,7 @@ git_with :: proc(arguments: Str, value: Str, suffix: Str) ([]Byte, Bool) ->
     command := [COMMAND_BYTES]Byte { .. = 0 }
     length := text_append(command[:], 0, "git ")
     length = text_append(command[:], length, arguments)
-    length = byte_append(command[:], length, 32)
+    length = byte_append(command[:], length, SPACE)
     length = text_append(command[:], length, value)
     length = text_append(command[:], length, suffix)
     output, is_ok := git(command[:], length)
@@ -149,10 +151,10 @@ tag_make :: proc(tag: Str, version: Str, is_replacing: Bool) Bool ->
     length = text_append(command[:], length, "-a ")
     length = text_append(command[:], length, tag)
     length = text_append(command[:], length, " -m ")
-    length = byte_append(command[:], length, 34)
+    length = byte_append(command[:], length, QUOTE)
     length = text_append(command[:], length, "Release ")
     length = text_append(command[:], length, version)
-    length = byte_append(command[:], length, 34)
+    length = byte_append(command[:], length, QUOTE)
     output, is_ok := git(command[:], length)
     destroy(output)
     return is_ok

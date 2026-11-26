@@ -150,19 +150,30 @@ STATUS_METHOD_NOT_ALLOWED :: 405
 STATUS_PAYLOAD_TOO_LARGE :: 413
 STATUS_INTERNAL_ERROR :: 500
 
-/// The numbers of the characters that the Markdown looks for. See MISSING: a `Rune` as a `Byte`.
-BACKTICK :: 96
-STAR :: 42
-LEFT_BRACKET :: 91
-RIGHT_BRACKET :: 93
-LEFT_PARENTHESIS :: 40
-RIGHT_PARENTHESIS :: 41
-SPACE :: 32
-HASH :: 35
-DASH :: 45
-DOT :: 46
-QUESTION :: 63
-CARRIAGE_RETURN :: 13
+/// The numbers of the characters that the code looks for, which a cast of a rune that is known when
+/// the program is compiled makes. See MISSING: a `Rune` as a `Byte`.
+BACKTICK :: cast(Int)'`'
+STAR :: cast(Int)'*'
+LEFT_BRACKET :: cast(Int)'['
+RIGHT_BRACKET :: cast(Int)']'
+LEFT_PARENTHESIS :: cast(Int)'('
+RIGHT_PARENTHESIS :: cast(Int)')'
+SPACE :: cast(Int)' '
+HASH :: cast(Int)'#'
+DASH :: cast(Int)'-'
+DOT :: cast(Int)'.'
+QUESTION :: cast(Int)'?'
+CARRIAGE_RETURN :: cast(Int)'\r'
+LINE_FEED :: cast(Int)'\n'
+ZERO :: cast(Int)'0'
+NINE :: cast(Int)'9'
+UPPER_A :: cast(Int)'A'
+UPPER_Z :: cast(Int)'Z'
+LOWER_A :: cast(Int)'a'
+LOWER_Z :: cast(Int)'z'
+
+/// What a letter has more than the capital of it, in its number.
+LETTER_CASE_OFFSET :: LOWER_A - UPPER_A
 
 // ---------------------------------------------------------------------------------------------
 // Bytes and text. The head of an answer is put in a buffer, and the pages go out through an Output.
@@ -253,7 +264,7 @@ byte_is :: proc(bytes: []Byte, index: Int, value: Int) Bool ->
 
 /// Whether the byte at `index` is a digit, which is false when there is no byte there.
 is_digit_at :: proc(bytes: []Byte, index: Int) Bool ->
-    return index >= 0 and index < length_of(bytes) and bytes[index] >= 48 and bytes[index] <= 57
+    return index >= 0 and index < length_of(bytes) and cast(Int)bytes[index] >= ZERO and cast(Int)bytes[index] <= NINE
 
 /// Where the first byte that is `target` is, from `from` on, or -1.
 find_byte :: proc(bytes: []Byte, from: Int, target: Int) Int ->
@@ -1119,7 +1130,7 @@ list_has :: proc(list: Str, word: []Byte) Bool ->
 /// Where the bytes end before the line ends that are at their end.
 trim_lines :: proc(bytes: []Byte) Int ->
     end := length_of(bytes)
-    for byte_is(bytes, end - 1, 10) or byte_is(bytes, end - 1, CARRIAGE_RETURN) or byte_is(bytes, end - 1, SPACE) ->
+    for byte_is(bytes, end - 1, LINE_FEED) or byte_is(bytes, end - 1, CARRIAGE_RETURN) or byte_is(bytes, end - 1, SPACE) ->
         end -= 1
     return end
 
@@ -1176,8 +1187,8 @@ send_page :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []By
 /// The hexadecimal digit of a number from 0 to 15.
 hex_digit :: proc(value: Int) Byte ->
     if value < 10 ->
-        return int_to_byte(48 + value)
-    return int_to_byte(87 + value)
+        return int_to_byte(ZERO + value)
+    return int_to_byte(LOWER_A - 10 + value)
 
 /// Puts the bytes in the page as the inside of a JSON string. A carriage return is left out, as the
 /// text of a line on Windows has one before its line feed. With `strip_links` a link of Markdown,
@@ -1363,8 +1374,8 @@ emit_json_string :: proc(out: ^Output, bytes: []Byte) Int ->
 emit_json_lower :: proc(out: ^Output, bytes: []Byte) Int ->
     emit_text(out, "\"")
     for value in bytes ->
-        if value >= 65 and value <= 90 ->
-            emit_byte(out, int_to_byte(cast(Int)value + 32))
+        if cast(Int)value >= UPPER_A and cast(Int)value <= UPPER_Z ->
+            emit_byte(out, int_to_byte(cast(Int)value + LETTER_CASE_OFFSET))
         else ->
             emit_byte(out, value)
     emit_text(out, "\"")
@@ -1399,14 +1410,14 @@ emit_base64 :: proc(out: ^Output, bytes: []Byte) Int ->
 /// The character of a number from 0 to 63 in base64: `A` to `Z`, `a` to `z`, `0` to `9`, `+` and `/`.
 base64_digit :: proc(value: Int) Byte ->
     if value < 26 ->
-        return int_to_byte(65 + value)
+        return int_to_byte(UPPER_A + value)
     if value < 52 ->
-        return int_to_byte(97 + value - 26)
+        return int_to_byte(LOWER_A + value - 26)
     if value < 62 ->
-        return int_to_byte(48 + value - 52)
+        return int_to_byte(ZERO + value - 52)
     if value == 62 ->
-        return int_to_byte(43)
-    return int_to_byte(47)
+        return int_to_byte(cast(Int)'+')
+    return int_to_byte(cast(Int)'/')
 
 // ---------------------------------------------------------------------------------------------
 // The internals of the compiler: /api/internals
@@ -1765,8 +1776,8 @@ emit_reserved_words :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory:
             else ->
                 emit_text(out, "\"TOKEN_KIND_KEYWORD_")
                 for value in word ->
-                    if value >= 97 and value <= 122 ->
-                        emit_byte(out, int_to_byte(cast(Int)value - 32))
+                    if cast(Int)value >= LOWER_A and cast(Int)value <= LOWER_Z ->
+                        emit_byte(out, int_to_byte(cast(Int)value - LETTER_CASE_OFFSET))
                     else ->
                         emit_byte(out, value)
                 emit_text(out, "\"")
@@ -1840,7 +1851,7 @@ emit_operators_of :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: [
         example := trim(cell)
         is_number := length_of(precedence_text) > 0
         for value in precedence_text ->
-            if value < 48 or value > 57 ->
+            if cast(Int)value < ZERO or cast(Int)value > NINE ->
                 is_number = false
         if not is_number ->
             continue
@@ -2432,8 +2443,8 @@ content_length_of :: proc(head: []Byte) Int ->
             index := 0
             for character in "content-length:" ->
                 lower := cast(Int)name[index]
-                if lower >= 65 and lower <= 90 ->
-                    lower += 32
+                if lower >= UPPER_A and lower <= UPPER_Z ->
+                    lower += LETTER_CASE_OFFSET
                 if lower not= cast(Int)character ->
                     matches = false
                 index += 1

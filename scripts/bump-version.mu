@@ -30,6 +30,7 @@ foreign libc ->
 
 /// The path of the file of the version, relative to the root of the project.
 VERSION_PATH :: "VERSION"
+NEWLINE : Byte : cast(Byte)'\n'
 
 /// Writes `bytes` and then a line feed to the file at `path`, which is made when it is not there and
 /// emptied when it is. Gives whether all of it was written.
@@ -43,7 +44,7 @@ write_line :: proc(path: Str, bytes: []Byte) Bool ->
     count, error := mu.file_write(file, bytes)
     if error not= .NONE or count not= length_of(bytes) ->
         return false
-    return mu.file_write_byte(file, 10) == .NONE
+    return mu.file_write_byte(file, NEWLINE) == .NONE
 
 main :: proc() Int ->
     // The version is what follows the name of the program in its command line, the arguments as they
