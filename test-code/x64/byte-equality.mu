@@ -32,7 +32,7 @@ differ :: proc(first: Byte, second: Byte) Bool ->
     return first not= second
 
 /// Where the first byte that is `target` is, or -1.
-find_byte :: proc(bytes: []Byte, target: Byte) Int ->
+find_byte_first :: proc(bytes: []Byte, target: Byte) Int ->
     for index in 0..<length_of(bytes) ->
         if bytes[index] == target ->
             return index
@@ -49,8 +49,8 @@ main :: proc() Int ->
     wrong += check("same parameters: %lld", flag(same(bytes[0], bytes[1])), 1)
     wrong += check("different parameters: %lld", flag(differ(bytes[0], bytes[2])), 1)
     line := [5]Byte { 72, 105, 32, 10, 33 }
-    wrong += check("the first space is at %lld", find_byte(line[:], SPACE), 2)
-    wrong += check("the first new line is at %lld", find_byte(line[:], NEWLINE), 3)
-    wrong += check("a byte that is not there is at %lld", find_byte(line[:], 0), -1)
+    wrong += check("the first space is at %lld", find_byte_first(line[:], SPACE), 2)
+    wrong += check("the first new line is at %lld", find_byte_first(line[:], NEWLINE), 3)
+    wrong += check("a byte that is not there is at %lld", find_byte_first(line[:], 0), -1)
     wrong += check("a constant is a byte: %lld", flag(line[3] == NEWLINE), 1)
     return wrong
