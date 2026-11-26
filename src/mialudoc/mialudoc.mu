@@ -51,10 +51,6 @@
 ///   - MISSING: the program and its package knowing where they are, so the compiler is found at
 ///     `<directory>/mialuc.exe` or `<directory>/build/mialuc.exe`, with the directory that is given, and
 ///     not next to the program.
-///   - MISSING: a standard library of sockets, `mu:network` or the like. The procedures of Winsock are
-///     declared here, and the structures that they take, `WSADATA` and `sockaddr_in`, are arrays of
-///     bytes that are filled by hand, as there is no way to say the size and the layout of a struct
-///     that is not made of words, or to take the size of one.
 ///   - MISSING: the files of a directory in `mu:filesystem` that a pattern with `*` finds, so
 ///     `FindFirstFileA` and the procedures with it are declared here, and the name of a file is read
 ///     from the bytes of `WIN32_FIND_DATAA`. `mu.find_entry_first` finds one entry by its name, and
@@ -76,10 +72,10 @@
 ///     order with one, and it is not an argument for a parameter of a `Byte`, so the numbers of the
 ///     characters are written, such as 48 for `'0'`, or the compared byte is made an `Int`.
 ///   - MISSING: the sizes of the integers in memory. An `I32` takes 8 bytes in a struct or an array,
-///     so a pointer to one is not a pointer to an `int`. The `int` that `setsockopt` takes is a
-///     `DWORD` in an array of 4 bytes, which is made by hand.
-///   - MISSING: unsigned and small integers, `U16` and the byte order of the network, so the port
-///     is split in two bytes by hand.
+///     so a pointer to one is not a pointer to an `int`. `mu:net` makes the structures that Winsock
+///     takes, `WSADATA` and `sockaddr_in`, and the `DWORD` that `setsockopt` takes, as bytes by hand.
+///   - MISSING: unsigned and small integers, `U16` and the byte order of the network, so `mu:net`
+///     splits the port in two bytes by hand.
 ///   - MISSING: threads and a way to wait on many sockets, so the server answers one connection at
 ///     a time. A client that is slow is cut off by a timeout of the socket.
 ///   - MISSING: a log with the values of different types in a line. `printf` of the C library is
@@ -97,10 +93,10 @@ package mialudoc
 
 import "mu:allocator"
 import "mu:filesystem"
+import "mu:net"
 import "mu:process"
 import foreign libc
 import foreign kernel32 "system:Kernel32.lib"
-import foreign ws2_32 "system:Ws2_32.lib"
 
 foreign libc ->
     fflush :: proc(stream: ^Byte) I32 -> ...
@@ -114,36 +110,9 @@ foreign kernel32 #(default_calling_convention("system")) ->
     FindNextFileA  :: proc(handle: Int, data: ^Byte) I32 -> ...
     GetFileSizeEx  :: proc(file: Int, size: ^I64) I32 -> ...
 
-/// Winsock, `Ws2_32.dll`. A `SOCKET` is the size of an `Int`, and an `int` is an `I32`. The addresses
-/// and the buffers are `^Byte`, as the structures are bytes, see the MISSING notes above.
-foreign ws2_32 #(default_calling_convention("system")) ->
-    WSAStartup  :: proc(version: U32, data: ^Byte) I32 -> ...
-    socket      :: proc(family: I32, kind: I32, protocol: I32) Int -> ...
-    setsockopt  :: proc(handle: Int, level: I32, name: I32, value: ^Byte, length: I32) I32 -> ...
-    bind        :: proc(handle: Int, address: ^Byte, length: I32) I32 -> ...
-    listen      :: proc(handle: Int, backlog: I32) I32 -> ...
-    accept      :: proc(handle: Int, address: ^Byte, length: ^Byte) Int -> ...
-    recv        :: proc(handle: Int, buffer: ^Byte, length: I32, flags: I32) I32 -> ...
-    send        :: proc(handle: Int, buffer: ^Byte, length: I32, flags: I32) I32 -> ...
-    shutdown    :: proc(handle: Int, how: I32) I32 -> ...
-    closesocket :: proc(handle: Int) I32 -> ...
-
 DEFAULT_PORT :: 8080
 DEFAULT_DIRECTORY :: "."
 
-/// The version of Winsock that is asked for, 2.2, as the `WORD` that `MAKEWORD(2, 2)` makes.
-WINSOCK_VERSION : U32 : 0x0202
-
-/// `WSADATA` is 408 bytes on x64. 512 is enough, and the system writes it.
-WSADATA_BYTES :: 512
-
-AF_INET : I32 : 2
-SOCK_STREAM : I32 : 1
-IPPROTO_TCP : I32 : 6
-SOL_SOCKET : I32 : 0xFFFF
-SO_RCVTIMEO : I32 : 0x1006
-SD_SEND : I32 : 1
-INVALID_SOCKET :: -1
 INVALID_HANDLE :: -1
 
 /// `WIN32_FIND_DATAA` is 320 bytes, and the name of the file is a string of at most 260 bytes, a
@@ -156,7 +125,7 @@ FIND_NAME_BYTES :: 260
 RECEIVE_TIMEOUT_MILLISECONDS :: 5000
 
 /// The most connections that wait to be accepted.
-BACKLOG : I32 : 16
+BACKLOG :: 16
 
 REQUEST_BYTES :: 8192
 HEAD_BYTES :: 1024
@@ -358,54 +327,27 @@ is_punctuation :: proc(value: Byte) Bool ->
 // ---------------------------------------------------------------------------------------------
 
 /// Sends all of `bytes` to the client, and says whether the system took them all.
-send_all :: proc(client: Int, bytes: []Byte) Bool ->
-    sent := 0
-    for sent < length_of(bytes) ->
-        count := cast(Int)send(client, %bytes[sent], int_to_i32(length_of(bytes) - sent), 0)
-        if count <= 0 ->
-            return false
-        sent += count
-    return true
+send_all :: proc(client: mu.Socket, bytes: []Byte) Bool ->
+    return mu.net_send_all(client, bytes) == .NONE
 
-/// Makes the socket that listens on `port` of the address `host`, which is its 4 bytes, and gives it, or
-/// INVALID_SOCKET. The server is for the machine that it runs on, so it listens on 127.0.0.1 unless
+/// Makes the socket that listens on `port` of the address `host`, which is its 4 bytes, and says
+/// whether it did. The server is for the machine that it runs on, so it listens on 127.0.0.1 unless
 /// it is told to be reachable from elsewhere, as it is in a container.
-listen_on :: proc(port: Int, host: []Byte) Int ->
-    data := [WSADATA_BYTES]Byte { .. = 0 }
-    if WSAStartup(WINSOCK_VERSION, %data[0]) not= 0 ->
-        puts("mialudoc: Winsock did not start")
-        return INVALID_SOCKET
-
-    listener := socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
-    if listener == INVALID_SOCKET ->
-        puts("mialudoc: no socket")
-        return INVALID_SOCKET
-
-    // A `sockaddr_in`: the family in 2 bytes, the port in 2 bytes with the high one first, the
-    // address in 4 bytes, and 8 bytes that are not used. MISSING: a struct of this layout and `htons`.
-    address := [16]Byte { .. = 0 }
-    address[0] = int_to_byte(cast(Int)AF_INET)
-    address[2] = int_to_byte(port / 256)
-    address[3] = int_to_byte(port - port / 256 * 256)
-    for index in 0..<4 ->
-        address[4 + index] = host[index]
-    if bind(listener, %address[0], 16) not= 0 ->
+listen_on :: proc(port: Int, host: []Byte) (mu.Socket, Bool) ->
+    listener, error := mu.net_listen(host, port, BACKLOG)
+    if error == .ADDRESS_IN_USE ->
         puts("mialudoc: the port is not free")
-        closesocket(listener)
-        return INVALID_SOCKET
-    if listen(listener, BACKLOG) not= 0 ->
+    else if error not= .NONE ->
         puts("mialudoc: it does not listen")
-        closesocket(listener)
-        return INVALID_SOCKET
-    return listener
+    return listener, error == .NONE
 
 /// Reads the request of a client into `buffer` until its head, which ends with an empty line, is
 /// there, or the buffer is full, or the client is gone, and gives how many bytes it read.
-receive_head :: proc(client: Int, buffer: []Byte) Int ->
+receive_head :: proc(client: mu.Socket, buffer: []Byte) Int ->
     total := 0
     for total < length_of(buffer) ->
-        count := cast(Int)recv(client, %buffer[total], int_to_i32(length_of(buffer) - total), 0)
-        if count <= 0 ->
+        count, error := mu.net_receive(client, buffer[total:])
+        if error not= .NONE or count == 0 ->
             break
         total += count
         if find_head_end(buffer[0:total]) >= 0 ->
@@ -427,7 +369,7 @@ find_head_end :: proc(bytes: []Byte) Int ->
 /// Where the bytes of a page go. `is_open` is false after the client did not take some, and what is
 /// put after that is dropped.
 Output :: struct ->
-    client: Int
+    client: mu.Socket
     /// The bytes that are not sent yet are at the start of it.
     buffer: []Byte
     used: Int
@@ -435,7 +377,7 @@ Output :: struct ->
 
 /// Makes the Output of a page for the client, whose buffer is taken from the arena of the request.
 /// An Output that got no buffer, as the arena had no room, drops what is put in it.
-output_make :: proc(client: Int, arena: ^mu.Arena_Allocator, size: Int) Output ->
+output_make :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, size: Int) Output ->
     buffer, _ := mu.arena_allocate(arena, size)
     return Output { client = client, buffer = buffer, used = 0, is_open = true }
 
@@ -517,7 +459,7 @@ emit_href :: proc(out: ^Output, url: []Byte) ->
 /// Sends the head of an answer with the status, the type and the length of the body, which is all the
 /// headers that a browser needs. A length below zero is not known, and then the body goes on until
 /// the connection is closed, which the head says it will be.
-send_head :: proc(client: Int, code: Int, reason: Str, content_type: Str, length: Int) Bool ->
+send_head :: proc(client: mu.Socket, code: Int, reason: Str, content_type: Str, length: Int) Bool ->
     head := [HEAD_BYTES]Byte { .. = 0 }
     at := put_text(head[:], 0, "HTTP/1.1 ")
     at = put_int(head[:], at, code)
@@ -535,7 +477,7 @@ send_head :: proc(client: Int, code: Int, reason: Str, content_type: Str, length
 
 /// Sends an answer that is a line of text, such as `404 Not Found`, and gives the code. The body is
 /// left out for a `HEAD` request, which gets the head that a `GET` would.
-send_error :: proc(client: Int, code: Int, reason: Str, with_body: Bool) Int ->
+send_error :: proc(client: mu.Socket, code: Int, reason: Str, with_body: Bool) Int ->
     body := [BODY_BYTES]Byte { .. = 0 }
     at := put_int(body[:], 0, code)
     at = put_text(body[:], at, " ")
@@ -555,7 +497,7 @@ open_path :: proc(path: []Byte, wide_path: []Byte) (mu.File, mu.File_Error) ->
     return file, error
 
 /// Sends the file at `path` as it is, in chunks, and gives the code of the answer.
-send_file :: proc(client: Int, arena: ^mu.Arena_Allocator, path: []Byte, content_type: Str, with_body: Bool) Int ->
+send_file :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, path: []Byte, content_type: Str, with_body: Bool) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
     file, open_error := open_path(path, wide_path[:])
     if open_error not= .NONE ->
@@ -1090,7 +1032,7 @@ emit_document_cards :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory:
     return 0
 
 /// Sends the index page: the logo, and the list of the documents.
-send_index :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, with_body: Bool) Int ->
+send_index :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []Byte, with_body: Bool) Int ->
     if not send_head(client, STATUS_OK, "OK", "text/html; charset=utf-8", -1) or not with_body ->
         return STATUS_OK
     out := output_make(client, arena, OUTPUT_BYTES)
@@ -1105,7 +1047,7 @@ send_index :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, w
     return STATUS_OK
 
 /// Sends the document `docs/<name>.md` as a page of HTML.
-send_document :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, name: []Byte, with_body: Bool) Int ->
+send_document :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []Byte, name: []Byte, with_body: Bool) Int ->
     path := [PATH_BYTES]Byte { .. = 0 }
     path_length := make_path(path[:], directory, "/docs/", name, ".md")
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
@@ -1214,7 +1156,7 @@ content_type_of :: proc(name: []Byte) Str ->
 
 /// Sends the file `name` of the directory `folder` of the project, which has a path that starts and
 /// ends with a slash, such as `/tests/wasm/`, and gives the code of the answer.
-send_static :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, folder: Str, name: []Byte, with_body: Bool) Int ->
+send_static :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []Byte, folder: Str, name: []Byte, with_body: Bool) Int ->
     if not is_file_name(name) ->
         return send_error(client, STATUS_NOT_FOUND, "Not Found", with_body)
     path := [PATH_BYTES]Byte { .. = 0 }
@@ -1222,7 +1164,7 @@ send_static :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, 
     return send_file(client, arena, path[0:path_length], content_type_of(name), with_body)
 
 /// Sends a page of the project that is a file, such as `/tests/wasm/playground.html`.
-send_page :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, folder: Str, file_name: Str, with_body: Bool) Int ->
+send_page :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []Byte, folder: Str, file_name: Str, with_body: Bool) Int ->
     path := [PATH_BYTES]Byte { .. = 0 }
     path_length := make_path(path[:], directory, folder, path[0:0], file_name)
     return send_file(client, arena, path[0:path_length], "text/html; charset=utf-8", with_body)
@@ -1943,7 +1885,7 @@ emit_operators :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []By
     return 0
 
 /// Sends the answer of /api/internals.
-send_internals :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, with_body: Bool) Int ->
+send_internals :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []Byte, with_body: Bool) Int ->
     wide_path := [PATH_BYTES * 2 + 2]Byte { .. = 0 }
     file, open_error := open_project_file(directory, "/docs/mialu-programming-language.md", wide_path[:])
     if open_error not= .NONE ->
@@ -2215,7 +2157,7 @@ emit_stats_group :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []
     emit_text(out, "}")
 
 /// Sends the answer of /api/stats.
-send_stats :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, with_body: Bool) Int ->
+send_stats :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []Byte, with_body: Bool) Int ->
     if not send_head(client, STATUS_OK, "OK", "application/json", -1) or not with_body ->
         return STATUS_OK
     out := output_make(client, arena, OUTPUT_BYTES)
@@ -2522,7 +2464,7 @@ write_all :: proc(file: mu.File, bytes: []Byte) Bool ->
 
 /// Writes the source of a request to `playground.mu`: first what came with the head, and then what the client
 /// still sends, until it has sent `length` bytes. It says whether all of it was written.
-receive_source :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, first: []Byte, length: Int) Bool ->
+receive_source :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []Byte, first: []Byte, length: Int) Bool ->
     path := [PATH_BYTES]Byte { .. = 0 }
     path_length := work_path(path[:], directory, "playground.mu")
     text, is_text := utf8_decode(path[0:path_length])
@@ -2547,8 +2489,8 @@ receive_source :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byt
             wanted = length_of(chunk)
         if wanted == 0 ->
             return false
-        count := cast(Int)recv(client, %chunk[0], int_to_i32(wanted), 0)
-        if count <= 0 ->
+        count, error := mu.net_receive(client, chunk[0:wanted])
+        if error not= .NONE or count == 0 ->
             return false
         if not write_all(file, chunk[0:count]) ->
             return false
@@ -2556,7 +2498,7 @@ receive_source :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byt
     return true
 
 /// Sends an answer of /compile that has an error and nothing else.
-send_compile_failure :: proc(client: Int, arena: ^mu.Arena_Allocator, message: []Byte) Int ->
+send_compile_failure :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, message: []Byte) Int ->
     if not send_head(client, STATUS_OK, "OK", "application/json", -1) ->
         return STATUS_OK
     out := output_make(client, arena, BODY_BYTES * 8)
@@ -2570,7 +2512,7 @@ send_compile_failure :: proc(client: Int, arena: ^mu.Arena_Allocator, message: [
 /// built for both targets of WebAssembly, and for the one of x64, to show its assembly.
 /// The syntax tree, the text of the module and the assembly are sent from their files, so they can be
 /// of any size. The module in base64 is read into memory that is made for its size, so it can be too.
-send_compile :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte, request: []Byte, head_end: Int) Int ->
+send_compile :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []Byte, request: []Byte, head_end: Int) Int ->
     length := content_length_of(request[0:head_end])
     if length < 0 ->
         return send_error(client, STATUS_BAD_REQUEST, "Bad Request", true)
@@ -2676,7 +2618,7 @@ split_request_line :: proc(line: []Byte) ([]Byte, []Byte, []Byte, Bool) ->
     return line[0:first], line[first + 1:second], line[second + 1:], true
 
 /// Answers the request that is in `request`, and gives the code of the answer.
-answer :: proc(client: Int, arena: ^mu.Arena_Allocator, request: []Byte, directory: []Byte) Int ->
+answer :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, request: []Byte, directory: []Byte) Int ->
     line_end := 0
     for line_end < length_of(request) ->
         if request[line_end] == '\r' or request[line_end] == '\n' ->
@@ -2739,14 +2681,10 @@ answer :: proc(client: Int, arena: ^mu.Arena_Allocator, request: []Byte, directo
 
 /// Reads the request of a client, answers it, and closes the connection. Everything that the answer
 /// takes from the arena is given back after it.
-serve_client :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte) ->
+serve_client :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []Byte) ->
     defer mu.arena_reset(arena)
-    // A client that does not send its request is cut off, so it does not hold the server. The
-    // timeout is a `DWORD` of 4 bytes, the lowest first. MISSING: the sizes of integers in memory.
-    timeout := [4]Byte { .. = 0 }
-    timeout[0] = int_to_byte(RECEIVE_TIMEOUT_MILLISECONDS - RECEIVE_TIMEOUT_MILLISECONDS / 256 * 256)
-    timeout[1] = int_to_byte(RECEIVE_TIMEOUT_MILLISECONDS / 256)
-    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, %timeout[0], 4)
+    // A client that does not send its request is cut off, so it does not hold the server.
+    mu.net_set_receive_timeout(client, RECEIVE_TIMEOUT_MILLISECONDS)
 
     request, _ := mu.arena_allocate(arena, REQUEST_BYTES)
     count := receive_head(client, request)
@@ -2754,8 +2692,7 @@ serve_client :: proc(client: Int, arena: ^mu.Arena_Allocator, directory: []Byte)
         code := answer(client, arena, request[0:count], directory)
         log_request(request[0:count], code)
 
-    shutdown(client, SD_SEND)
-    closesocket(client)
+    mu.net_close(client)
 
 /// Prints the code and the request line, such as `200 GET /mialu-cli HTTP/1.1`.
 log_request :: proc(request: []Byte, code: Int) ->
@@ -2847,8 +2784,8 @@ main :: proc() Int ->
         puts("usage: mialudoc [port [directory [address]]]")
         return 2
 
-    listener := listen_on(port, host[:])
-    if listener == INVALID_SOCKET ->
+    listener, is_listening := listen_on(port, host[:])
+    if not is_listening ->
         return 1
 
     printf("mialudoc: http://localhost:%lld/ shows the project at ", port)
@@ -2864,8 +2801,8 @@ main :: proc() Int ->
     arena := mu.Arena_Allocator { memory = memory, used = 0 }
 
     for ->
-        client := accept(listener, nil, nil)
-        if client == INVALID_SOCKET ->
+        client, accept_error := mu.net_accept(listener)
+        if accept_error not= .NONE ->
             continue
         serve_client(client, %arena, directory[0:directory_length])
     return 0

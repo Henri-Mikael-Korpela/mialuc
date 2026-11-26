@@ -173,7 +173,7 @@ Each milestone has an exit criterion that can be checked, and its steps are in t
 
 1. Separate what the target needs from the system into one small layer: process exit, standard streams, files, memory, sockets, the command line.
 2. Add an `x64-linux` target: ELF output, the System V calling convention, system calls or the C library.
-3. Make `mu:filesystem` and `mu:process` work on both systems, add `mu:network`, and WebAssembly where it can.
+3. Make `mu:filesystem` and `mu:process` work on both systems, add `mu:net`, and WebAssembly where it can.
 4. Build the compiler itself on Linux and macOS, and run the CI of M1 on all of them.
 5. Package a release for each platform.
 

@@ -8,6 +8,7 @@ package imports
 
 import "mu:filesystem"
 import "mu:math"
+import "mu:net"
 
 import foreign libc
 
@@ -90,6 +91,21 @@ main :: proc() Int ->
     wrong += check("a ? is PATH_INVALID: %lld", flag(question_error == mu.File_Error.PATH_INVALID), 1)
     wildcard_entry, wildcard_error := mu.find_entry_first("C:/Win*", "explorer.exe")
     wrong += check("a * in the directory is PATH_INVALID: %lld", flag(wildcard_error == mu.File_Error.PATH_INVALID), 1)
+
+    // Sockets: an address that is not 4 bytes and a port that is not one are ADDRESS_INVALID, a port
+    // that is listened on is closed after, and a port that is taken cannot be listened on again.
+    local := [4]Byte { 127, 0, 0, 1 }
+    short := [3]Byte { 127, 0, 1 }
+    bad_socket, bad_address_error := mu.net_listen(short[:], 52731, 4)
+    wrong += check("an address of 3 bytes is ADDRESS_INVALID: %lld", flag(bad_address_error == mu.Net_Error.ADDRESS_INVALID), 1)
+    zero_socket, zero_error := mu.net_listen(local[:], 0, 4)
+    wrong += check("port 0 is ADDRESS_INVALID: %lld", flag(zero_error == mu.Net_Error.ADDRESS_INVALID), 1)
+    listener, listen_error := mu.net_listen(local[:], 52731, 4)
+    wrong += check("a port is listened on: %lld", flag(listen_error == mu.Net_Error.NONE), 1)
+    taken, taken_error := mu.net_listen(local[:], 52731, 4)
+    wrong += check("a port that is taken is ADDRESS_IN_USE: %lld", flag(taken_error == mu.Net_Error.ADDRESS_IN_USE), 1)
+    wrong += check("the listener is closed: %lld", flag(mu.net_close(listener) == mu.Net_Error.NONE), 1)
+    wrong += check("a socket that is not open is SOCKET_INVALID: %lld", flag(mu.net_close(taken) == mu.Net_Error.SOCKET_INVALID), 1)
 
     // The program's own File is not the library's, and neither is its CP_UTF8 or its clamp.
     mine := File { name_length = 3, is_open = true }

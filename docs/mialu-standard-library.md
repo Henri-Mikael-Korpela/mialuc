@@ -30,6 +30,7 @@ The files are in the directory [src/mialu-std](../src/mialu-std) of the project,
 | [math.mu](../src/mialu-std/math.mu) | `import "mu:math"` | all | The smaller and the larger of two numbers, and a number held between two others. |
 | [version.mu](../src/mialu-std/version.mu) | `import "mu:version"` | all | Whether a text is a version of the form `MAJOR.MINOR.PATCH`. |
 | [filesystem.mu](../src/mialu-std/filesystem.mu) | `import "mu:filesystem"` | `x64-win32` | Files: opening, reading, writing and closing them, the standard input, and finding an entry of a directory by its name. |
+| [net.mu](../src/mialu-std/net.mu) | `import "mu:net"` | `x64-win32` | TCP sockets over IPv4: listening on a port, accepting connections, and receiving and sending bytes. |
 | [process.mu](../src/mialu-std/process.mu) | `import "mu:process"` | `x64-win32` | The command line that the program was started with. |
 
 ## allocator
@@ -135,6 +136,45 @@ read_first_line :: proc(path: Str, line: []Byte) Int ->
 
 The file has other definitions that are for its own procedures, such as the constants of the system and `file_error_from`, which gives the `File_Error` of the code that the system gives. They are public as everything is, but a program does not need them.
 
+## net
+
+TCP sockets over IPv4, for Windows only for now. A `Socket` is the handle that the system gives, with no buffer of its own and no lock, and nothing allocates. The structures that Winsock takes are made here, as bytes, so a program does not have to.
+
+### Types
+
+| Type | What it is |
+|---|---|
+| `Socket` | An open socket: the handle of the system, in its field `handle`. A socket that is not open has the handle `INVALID_SOCKET_VALUE`, -1. A copy of it is the same socket, so a socket is closed once. |
+| `Net_Error` | Why a procedure did not do what it was asked: `NONE` when it did, and `ADDRESS_INVALID`, `ADDRESS_IN_USE`, `ACCESS_DENIED`, `START_FAILED`, `TIMED_OUT`, `CONNECTION_RESET`, `SOCKET_INVALID` and `OTHER`. |
+
+### Procedures
+
+| Procedure | What it does |
+|---|---|
+| `net_listen(host: []Byte, port: Int, backlog: Int) (Socket, Net_Error)` | Makes the socket that listens on the port of the address, which is its 4 bytes, such as 127.0.0.1. At most `backlog` connections wait to be accepted. The address must be 4 bytes and the port from 1 to 65535, or it is `ADDRESS_INVALID`. Winsock is started by the first call. |
+| `net_accept(listener: Socket) (Socket, Net_Error)` | Waits for a client to connect, and gives the socket that is connected to it. |
+| `net_set_receive_timeout(connection: Socket, milliseconds: Int) Net_Error` | Sets how long a receive waits for the other end to send. After that long without a byte it is `TIMED_OUT`. Zero waits without end. |
+| `net_receive(connection: Socket, buffer: []Byte) (Int, Net_Error)` | Receives as many bytes as the system gives at once, at most as many as the buffer has, and gives how many. Zero bytes is that the other end closed the connection. |
+| `net_send(connection: Socket, buffer: []Byte) (Int, Net_Error)` | Sends as many bytes as the system takes at once, and gives how many. |
+| `net_send_all(connection: Socket, buffer: []Byte) Net_Error` | Sends the whole of the buffer, in as many parts as the system takes it in. |
+| `net_close(connection: Socket) Net_Error` | Tells the other end that nothing more is sent, and closes the socket. `SOCKET_INVALID` is the answer for a socket that is not open. |
+
+```
+import "mu:net"
+
+serve_once :: proc() ->
+    local := [4]Byte { 127, 0, 0, 1 }
+    listener, listen_error := mu.net_listen(local[:], 8080, 16)
+    if listen_error == .NONE ->
+        defer mu.net_close(listener)
+        client, accept_error := mu.net_accept(listener)
+        if accept_error == .NONE ->
+            request := [1024]Byte { .. = 0 }
+            count, receive_error := mu.net_receive(client, request[:])
+            mu.net_send_all(client, request[0:count])
+            mu.net_close(client)
+```
+
 ## process
 
 The program that is running, for Windows only for now.
@@ -158,7 +198,8 @@ main :: proc() Int ->
 
 The library has what the programs of the project needed, and no more. The programs that are written in Mialu, the [scripts](releasing.md) and `mialudoc`, show what is missing, and where it was needed they note it with `MISSING:` in a comment. The most needed are:
 
-- Sockets and the starting of a process, which `mialudoc` declares itself from the system.
+- The starting of a process, which `mialudoc` declares itself from the system.
+- Sockets other than a TCP server over IPv4: connecting to a server, UDP, IPv6 and waiting on many sockets at once.
 - Listing the files of a directory and the size of a file.
 - Text: joining strings when the program runs and the text of a number.
 - Programs that run on something other than Windows.
