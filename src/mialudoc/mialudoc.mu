@@ -143,37 +143,44 @@ TITLE_BYTES :: 256
 REQUEST_ARENA_BYTES :: 1048576
 LIST_LEVELS :: 6
 
-STATUS_OK :: 200
-STATUS_BAD_REQUEST :: 400
-STATUS_NOT_FOUND :: 404
+STATUS_OK                 :: 200
+STATUS_BAD_REQUEST        :: 400
+STATUS_NOT_FOUND          :: 404
 STATUS_METHOD_NOT_ALLOWED :: 405
-STATUS_PAYLOAD_TOO_LARGE :: 413
-STATUS_INTERNAL_ERROR :: 500
+STATUS_PAYLOAD_TOO_LARGE  :: 413
+STATUS_INTERNAL_ERROR     :: 500
 
-/// The numbers of the characters that the code looks for, which a cast of a rune that is known when
-/// the program is compiled makes. See MISSING: a `Rune` as a `Byte`.
-BACKTICK :: cast(Int)'`'
-STAR :: cast(Int)'*'
-LEFT_BRACKET :: cast(Int)'['
-RIGHT_BRACKET :: cast(Int)']'
-LEFT_PARENTHESIS :: cast(Int)'('
-RIGHT_PARENTHESIS :: cast(Int)')'
-SPACE :: cast(Int)' '
-HASH :: cast(Int)'#'
-DASH :: cast(Int)'-'
-DOT :: cast(Int)'.'
-QUESTION :: cast(Int)'?'
-CARRIAGE_RETURN :: cast(Int)'\r'
-LINE_FEED :: cast(Int)'\n'
-ZERO :: cast(Int)'0'
-NINE :: cast(Int)'9'
-UPPER_A :: cast(Int)'A'
-UPPER_Z :: cast(Int)'Z'
-LOWER_A :: cast(Int)'a'
-LOWER_Z :: cast(Int)'z'
+/// The characters that the code looks for as bytes, which a cast of a rune that is known when the
+/// program is compiled makes, and the numbers of the letters and the digits, which are `Int` values,
+/// as they are added to. See MISSING: a `Rune` as a `Byte`.
+BACKTICK          : Byte : cast(Byte)'`'
+STAR              : Byte : cast(Byte)'*'
+LEFT_BRACKET      : Byte : cast(Byte)'['
+RIGHT_BRACKET     : Byte : cast(Byte)']'
+LEFT_PARENTHESIS  : Byte : cast(Byte)'('
+RIGHT_PARENTHESIS : Byte : cast(Byte)')'
+SPACE             : Byte : cast(Byte)' '
+HASH              : Byte : cast(Byte)'#'
+DASH              : Byte : cast(Byte)'-'
+DOT               : Byte : cast(Byte)'.'
+QUESTION          : Byte : cast(Byte)'?'
+CARRIAGE_RETURN   : Byte : cast(Byte)'\r'
+LINE_FEED         : Byte : cast(Byte)'\n'
+ZERO              :: cast(Int)'0'
+NINE              :: cast(Int)'9'
+UPPER_A           :: cast(Int)'A'
+UPPER_Z           :: cast(Int)'Z'
+LOWER_A           :: cast(Int)'a'
+LOWER_Z           :: cast(Int)'z'
 
 /// What a letter has more than the capital of it, in its number.
 LETTER_CASE_OFFSET :: LOWER_A - UPPER_A
+
+/// The other bytes that the parts of the code that read the source of the compiler look for.
+COMMA             : Byte : cast(Byte)','
+QUOTE             : Byte : cast(Byte)'\''
+COLON             : Byte : cast(Byte)':'
+PIPE              : Byte : cast(Byte)'|'
 
 // ---------------------------------------------------------------------------------------------
 // Bytes and text. The head of an answer is put in a buffer, and the pages go out through an Output.
@@ -259,24 +266,24 @@ bytes_end_with :: proc(bytes: []Byte, text: Str) Bool ->
 /// Whether the byte at `index` is `value`, which is false when there is no byte there. The index is
 /// checked first, and the byte is only read when it is there, as `and` does not evaluate its right
 /// operand otherwise.
-byte_is :: proc(bytes: []Byte, index: Int, value: Int) Bool ->
-    return index >= 0 and index < length_of(bytes) and cast(Int)bytes[index] == value
+byte_is :: proc(bytes: []Byte, index: Int, value: Byte) Bool ->
+    return index >= 0 and index < length_of(bytes) and bytes[index] == value
 
 /// Whether the byte at `index` is a digit, which is false when there is no byte there.
 is_digit_at :: proc(bytes: []Byte, index: Int) Bool ->
     return index >= 0 and index < length_of(bytes) and cast(Int)bytes[index] >= ZERO and cast(Int)bytes[index] <= NINE
 
 /// Where the first byte that is `target` is, from `from` on, or -1.
-find_byte :: proc(bytes: []Byte, from: Int, target: Int) Int ->
+find_byte :: proc(bytes: []Byte, from: Int, target: Byte) Int ->
     for index in from..<length_of(bytes) ->
-        if cast(Int)bytes[index] == target ->
+        if bytes[index] == target ->
             return index
     return -1
 
 /// Where the first two bytes in a row that are `target` are, from `from` on, or -1.
-find_pair :: proc(bytes: []Byte, from: Int, target: Int) Int ->
+find_pair :: proc(bytes: []Byte, from: Int, target: Byte) Int ->
     for index in from..<length_of(bytes) - 1 ->
-        if cast(Int)bytes[index] == target and cast(Int)bytes[index + 1] == target ->
+        if bytes[index] == target and bytes[index + 1] == target ->
             return index
     return -1
 
@@ -432,7 +439,7 @@ emit_escaped :: proc(out: ^Output, bytes: []Byte) ->
 /// styles, such as the title of a tab.
 emit_plain :: proc(out: ^Output, bytes: []Byte) ->
     for value in bytes ->
-        if cast(Int)value not= BACKTICK and cast(Int)value not= STAR ->
+        if value not= BACKTICK and value not= STAR ->
             emit_escaped_byte(out, value)
 
 /// Puts the name that a heading has as a link target: the letters in lower case, the digits, `-` and
@@ -441,7 +448,7 @@ emit_slug :: proc(out: ^Output, bytes: []Byte) ->
     for value in bytes ->
         match value ->
             case 'A'..<='Z' ->
-                emit_byte(out, int_to_byte(cast(Int)value + 32))
+                emit_byte(out, int_to_byte(cast(Int)value + LETTER_CASE_OFFSET))
             case ' ' ->
                 emit_byte(out, int_to_byte(45))
             case '0'..<='9' ->
@@ -595,7 +602,7 @@ render_inline :: proc(out: ^Output, text: []Byte) ->
         value := text[index]
         rest := length_of(text) - index
 
-        if cast(Int)value == BACKTICK ->
+        if value == BACKTICK ->
             end := find_byte(text, index + 1, BACKTICK)
             if end >= 0 ->
                 emit_text(out, "<code>")
@@ -604,7 +611,7 @@ render_inline :: proc(out: ^Output, text: []Byte) ->
                 index = end + 1
                 continue
 
-        if cast(Int)value == STAR and byte_is(text, index + 1, STAR) ->
+        if value == STAR and byte_is(text, index + 1, STAR) ->
             end := find_pair(text, index + 2, STAR)
             if end > index + 2 ->
                 emit_text(out, "<strong>")
@@ -613,7 +620,7 @@ render_inline :: proc(out: ^Output, text: []Byte) ->
                 index = end + 2
                 continue
 
-        if cast(Int)value == STAR and rest > 1 and not byte_is(text, index + 1, SPACE) ->
+        if value == STAR and rest > 1 and not byte_is(text, index + 1, SPACE) ->
             end := find_byte(text, index + 1, STAR)
             if end > index + 1 ->
                 emit_text(out, "<em>")
@@ -622,7 +629,7 @@ render_inline :: proc(out: ^Output, text: []Byte) ->
                 index = end + 1
                 continue
 
-        if cast(Int)value == LEFT_BRACKET ->
+        if value == LEFT_BRACKET ->
             middle := find_byte(text, index + 1, RIGHT_BRACKET)
             if middle >= 0 and byte_is(text, middle + 1, LEFT_PARENTHESIS) ->
                 end := find_byte(text, middle + 2, RIGHT_PARENTHESIS)
@@ -753,7 +760,7 @@ render_table_row :: proc(out: ^Output, text: []Byte, is_head: Bool) ->
             continue
         if value == '\\' ->
             is_escaped = true
-        if cast(Int)value == BACKTICK ->
+        if value == BACKTICK ->
             is_code = not is_code
         if value == '|' and not is_code ->
             render_table_cell(out, text[cell_start:position], is_head)
@@ -1208,7 +1215,7 @@ emit_json_bytes :: proc(out: ^Output, bytes: []Byte, strip_links: Bool) Int ->
 
         // The carriage return before a line feed is how Windows ends a line, and is not text. One
         // that is not is, such as the one that a string of the program has.
-        if value == '\r' and byte_is(bytes, index + 1, 10) ->
+        if value == '\r' and byte_is(bytes, index + 1, LINE_FEED) ->
             index += 1
             continue
         emit_json_byte(out, value)
@@ -1432,9 +1439,6 @@ base64_digit :: proc(value: Int) Byte ->
 //      "operators": [{"operator", "description", "precedence", "example", "category"}]}
 // ---------------------------------------------------------------------------------------------
 
-COMMA :: 44
-QUOTE :: 39
-GRAVE :: 96
 
 /// Opens a file of the project, whose path is below the directory, for reading, and gives it.
 open_project_file :: proc(directory: []Byte, below: Str, wide_path: []Byte) (mu.File, mu.File_Error) ->
@@ -1593,12 +1597,12 @@ find_ast_description :: proc(arena: ^mu.Arena_Allocator, directory: []Byte, name
             if is_found ->
                 break
             start := length_of(AST_ENTRY)
-            end := find_byte(text, start, GRAVE)
+            end := find_byte(text, start, BACKTICK)
             if end >= 0 and bytes_equal(text[start:end], name) ->
                 is_found = true
                 rest := text[end + 1:]
                 // The name is followed by a colon, and a space that is not part of the description.
-                if byte_is(rest, 0, 58) ->
+                if byte_is(rest, 0, COLON) ->
                     rest = rest[1:]
                 rest = trim(rest)
                 length = put_bytes(description, 0, rest)
@@ -1828,7 +1832,7 @@ emit_operators_of :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: [
         if bytes_start_with(text, "## ") ->
             break
         text = text[0:trim_end(text)]
-        if not byte_is(text, 0, 124) or not byte_is(text, length_of(text) - 1, 124) ->
+        if not byte_is(text, 0, PIPE) or not byte_is(text, length_of(text) - 1, PIPE) ->
             continue
 
         // The cells are between the five bars of the row. A row with other bars is not one.
@@ -1857,16 +1861,16 @@ emit_operators_of :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: [
             continue
         precedence := 0
         for value in precedence_text ->
-            precedence = precedence * 10 + cast(Int)value - 48
+            precedence = precedence * 10 + cast(Int)value - ZERO
         if precedence not= wanted ->
             continue
 
         // The backticks around an operator are not part of it.
         operator_start := 0
-        for byte_is(operator_text, operator_start, GRAVE) ->
+        for byte_is(operator_text, operator_start, BACKTICK) ->
             operator_start += 1
         operator_end := length_of(operator_text)
-        for operator_end > operator_start and byte_is(operator_text, operator_end - 1, GRAVE) ->
+        for operator_end > operator_start and byte_is(operator_text, operator_end - 1, BACKTICK) ->
             operator_end -= 1
 
         if is_first^ ->
@@ -2432,7 +2436,7 @@ walk_tree :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte, i
 content_length_of :: proc(head: []Byte) Int ->
     start := 0
     for start < length_of(head) ->
-        end := find_byte(head, start, 10)
+        end := find_byte(head, start, LINE_FEED)
         if end < 0 ->
             end = length_of(head)
         // A line ends with a carriage return and a line feed, and the carriage return is not part of it.
