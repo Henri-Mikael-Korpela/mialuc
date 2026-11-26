@@ -7,6 +7,7 @@
 package imports
 
 import "mu:math"
+import "mu:slices"
 
 /// The program's own, which has the name of one of the library. It is not the library's.
 min :: proc(a: Int, b: Int) Int ->
@@ -23,3 +24,13 @@ smallest :: proc(a: Int, b: Int) Int ->
 
 own_smallest :: proc(a: Int, b: Int) Int ->
     return min(a, b)
+
+/// Where the first 3 is in the numbers 7, 3, 9 and 3, which is one specialization of the library's
+/// polymorphic `find_first_index_of`, and where the first 5 is, which is not there.
+first_three :: proc() Int ->
+    numbers := [4]Int { 7, 3, 9, 3 }
+    return mu.find_first_index_of(numbers[:], 3)
+
+first_five :: proc() Int ->
+    numbers := [4]Int { 7, 3, 9, 3 }
+    return mu.find_first_index_of(numbers[:], 5)

@@ -5,3 +5,5 @@ console.log("largest(3, 9) is 9, and the library's smallest(3, 9) is 3:", larges
     smallest(3, 9));
 console.log("The program's own min(3, 9) is 309:", own_smallest(3, 9));
 console.log("The exports are the program's, and not the library's:", typeof min, typeof clamp);
+console.log("The library's find_first_index_of finds the first 3 at 1, and no 5 at -1:", first_three(),
+    first_five());

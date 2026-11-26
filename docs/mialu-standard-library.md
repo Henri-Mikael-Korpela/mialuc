@@ -20,7 +20,7 @@ main :: proc() Int ->
     return count
 ```
 
-The definitions of an imported file are all part of the program, whether it calls them or not, so a file that uses the system, such as `filesystem` and `process`, which are for Windows, does not build for the WebAssembly targets. `allocator`, `math` and `version` only use the language itself, and so they work on every target.
+The definitions of an imported file are all part of the program, whether it calls them or not, so a file that uses the system, such as `filesystem` and `process`, which are for Windows, does not build for the WebAssembly targets. `allocator`, `math`, `slices` and `version` only use the language itself, and so they work on every target.
 
 The files are in the directory [src/mialu-std](../src/mialu-std) of the project, which a compiler that is built from the project reads, and in the directory `lib` next to `mialuc.exe` in a [release](releasing.md), which is looked in first. A file that is in neither is an error that says where it looked. See [Standard library](mialu-programming-language.md#standard-library) in the specification.
 
@@ -28,6 +28,7 @@ The files are in the directory [src/mialu-std](../src/mialu-std) of the project,
 |---|---|---|---|
 | [allocator.mu](../src/mialu-std/allocator.mu) | `import "mu:allocator"` | all | An arena, which gives out pieces of memory that the program gives it, and gives them back all at once. |
 | [math.mu](../src/mialu-std/math.mu) | `import "mu:math"` | all | The smaller and the larger of two numbers, and a number held between two others. |
+| [slices.mu](../src/mialu-std/slices.mu) | `import "mu:slices"` | all | Searching the elements of an array slice of any type, such as the bytes of a text. |
 | [version.mu](../src/mialu-std/version.mu) | `import "mu:version"` | all | Whether a text is a version of the form `MAJOR.MINOR.PATCH`. |
 | [filesystem.mu](../src/mialu-std/filesystem.mu) | `import "mu:filesystem"` | `x64-win32` | Files: opening, reading, writing and closing them, the standard input, and finding an entry of a directory by its name. |
 | [net.mu](../src/mialu-std/net.mu) | `import "mu:net"` | `x64-win32` | TCP sockets over IPv4: listening on a port, accepting connections, and receiving and sending bytes. |
@@ -79,6 +80,22 @@ Numbers are `Int` values, and the procedures work on every target.
 import "mu:math"
 
 index := mu.clamp(position, 0, length_of(items) - 1)
+```
+
+## slices
+
+Searching the elements of an array slice. The procedures are [polymorphic](mialu-programming-language.md#parametric-polymorphism): the type of the elements is deduced from the arguments, and each type that a program uses gets a copy of the procedure, as fast as one written for that type, so they work on every target. The elements are compared with `==`, so the type must have it.
+
+| Procedure | What it does |
+|---|---|
+| `find_first_index_of(elements: []$T, target: T) Int` | Gives where the first element of `elements` that is `target` is, or -1 when there is none. |
+
+```
+import "mu:slices"
+
+comma := mu.find_first_index_of(line, ',')
+if comma >= 0 ->
+    name := line[0:comma]
 ```
 
 ## version

@@ -95,6 +95,7 @@ import "mu:allocator"
 import "mu:filesystem"
 import "mu:net"
 import "mu:process"
+import "mu:slices"
 import foreign libc
 import foreign kernel32 "system:Kernel32.lib"
 
@@ -267,13 +268,6 @@ bytes_end_with :: proc(bytes: []Byte, text: Str) Bool ->
 /// Whether the byte at `index` is a digit, which is false when there is no byte there.
 is_digit_at :: proc(bytes: []Byte, index: Int) Bool ->
     return index >= 0 and index < length_of(bytes) and cast(Int)bytes[index] >= ZERO and cast(Int)bytes[index] <= NINE
-
-/// Where the first byte that is `target` is in `bytes`, or -1.
-find_byte_first :: proc(bytes: []Byte, target: Byte) Int ->
-    for index in 0..<length_of(bytes) ->
-        if bytes[index] == target ->
-            return index
-    return -1
 
 /// Where the first two bytes in a row that are `target` are in `bytes`, or -1.
 find_pair :: proc(bytes: []Byte, target: Byte) Int ->
@@ -599,7 +593,7 @@ render_inline :: proc(out: ^Output, text: []Byte) ->
 
         if value == BACKTICK ->
             code := text[index + 1:]
-            code_length := find_byte_first(code, BACKTICK)
+            code_length := mu.find_first_index_of(code, BACKTICK)
             if code_length >= 0 ->
                 emit_text(out, "<code>")
                 emit_escaped(out, code[0:code_length])
@@ -619,7 +613,7 @@ render_inline :: proc(out: ^Output, text: []Byte) ->
 
         if value == STAR and rest > 1 and text[index + 1] not= SPACE ->
             emphasized := text[index + 1:]
-            emphasized_length := find_byte_first(emphasized, STAR)
+            emphasized_length := mu.find_first_index_of(emphasized, STAR)
             if emphasized_length > 0 ->
                 emit_text(out, "<em>")
                 render_inline(out, emphasized[0:emphasized_length])
@@ -629,10 +623,10 @@ render_inline :: proc(out: ^Output, text: []Byte) ->
 
         if value == LEFT_BRACKET ->
             label := text[index + 1:]
-            label_length := find_byte_first(label, RIGHT_BRACKET)
+            label_length := mu.find_first_index_of(label, RIGHT_BRACKET)
             if label_length >= 0 and label_length + 1 < length_of(label) and label[label_length + 1] == LEFT_PARENTHESIS ->
                 address := label[label_length + 2:]
-                address_length := find_byte_first(address, RIGHT_PARENTHESIS)
+                address_length := mu.find_first_index_of(address, RIGHT_PARENTHESIS)
                 if address_length >= 0 ->
                     emit_text(out, "<a href=\"")
                     emit_href(out, address[0:address_length])
@@ -1208,10 +1202,10 @@ emit_json_bytes :: proc(out: ^Output, bytes: []Byte, strip_links: Bool) Int ->
         value := bytes[index]
         if strip_links and value == '[' ->
             label := bytes[index + 1:]
-            label_length := find_byte_first(label, RIGHT_BRACKET)
+            label_length := mu.find_first_index_of(label, RIGHT_BRACKET)
             if label_length >= 0 and label_length + 1 < length_of(label) and label[label_length + 1] == LEFT_PARENTHESIS ->
                 address := label[label_length + 2:]
-                address_length := find_byte_first(address, RIGHT_PARENTHESIS)
+                address_length := mu.find_first_index_of(address, RIGHT_PARENTHESIS)
                 if address_length >= 0 ->
                     emit_json_bytes(out, label[0:label_length], false)
                     index += label_length + address_length + 4
@@ -1602,7 +1596,7 @@ find_ast_description :: proc(arena: ^mu.Arena_Allocator, directory: []Byte, name
                 break
             start := length_of(AST_ENTRY)
             entry := text[start:]
-            name_length := find_byte_first(entry, BACKTICK)
+            name_length := mu.find_first_index_of(entry, BACKTICK)
             if name_length >= 0 and bytes_equal(entry[0:name_length], name) ->
                 is_found = true
                 rest := entry[name_length + 1:]
@@ -2484,7 +2478,7 @@ content_length_of :: proc(head: []Byte) Int ->
     start := 0
     for start < length_of(head) ->
         end := length_of(head)
-        line_length := find_byte_first(head[start:], LINE_FEED)
+        line_length := mu.find_first_index_of(head[start:], LINE_FEED)
         if line_length >= 0 ->
             end = start + line_length
         // A line ends with a carriage return and a line feed, and the carriage return is not part of it.
@@ -2668,16 +2662,14 @@ send_compile :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: [
 /// Splits the line of a request, `GET /target HTTP/1.1`, at its two spaces, in the method, the target
 /// and the version, and says whether the line has them.
 split_request_line :: proc(line: []Byte) ([]Byte, []Byte, []Byte, Bool) ->
-    first := -1
-    second := -1
-    for index in 0..<length_of(line) ->
-        if line[index] == ' ' ->
-            if first < 0 ->
-                first = index
-            else if second < 0 ->
-                second = index
-    if first <= 0 or second <= first + 1 ->
+    first := mu.find_first_index_of(line, SPACE)
+    if first <= 0 ->
         return line[0:0], line[0:0], line[0:0], false
+    rest := line[first + 1:]
+    second_length := mu.find_first_index_of(rest, SPACE)
+    if second_length <= 0 ->
+        return line[0:0], line[0:0], line[0:0], false
+    second := first + 1 + second_length
     return line[0:first], line[first + 1:second], line[second + 1:], true
 
 /// Answers the request that is in `request`, and gives the code of the answer.
@@ -2793,7 +2785,7 @@ read_host :: proc(text: []Byte, host: []Byte) Bool ->
     start := 0
     for index in 0..<4 ->
         end := length_of(text)
-        part_length := find_byte_first(text[start:], DOT)
+        part_length := mu.find_first_index_of(text[start:], DOT)
         if part_length >= 0 and index < 3 ->
             end = start + part_length
         if index < 3 and end == length_of(text) ->
