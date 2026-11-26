@@ -136,6 +136,7 @@ LINE_BYTES :: 16384
 PATH_BYTES :: 1024
 DIRECTORY_BYTES :: 256
 TITLE_BYTES :: 256
+UNITS_BYTES :: 256
 
 /// The memory of the answer to one request, which the buffers of the answer are taken from, and
 /// which is given back all at once when the answer is sent. An answer takes at most a few of the
@@ -1934,7 +1935,7 @@ send_internals :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory:
 // blank lines and the lines of comments are not counted. The files are counted here, when the page
 // asks for them, one part of the project at a time, and the answer is JSON:
 //
-//     {"groups": [{"name": "Compiler sources", "language": "C", "files": 18, "lines": 40000,
+//     {"groups": [{"name": "Parser", "language": "C", "files": 18, "lines": 40000,
 //                  "code": 33000, "comments": 4000, "blanks": 3000, "functions": 900,
 //                  "structs": 300, "enums": 100}, ...]}
 //
@@ -2156,6 +2157,11 @@ emit_stats_group :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []
             FindClose(handle)
             break
 
+    emit_stats_part(out, name, language, %count, is_first)
+
+/// Puts the part of the project that is named `name`, which has the `count`, in the page, as an
+/// object of the answer. `is_first` is false after the first part.
+emit_stats_part :: proc(out: ^Output, name: Str, language: Str, count: ^Line_Count, is_first: ^Bool) ->
     if is_first^ ->
         is_first^ = false
     else ->
@@ -2165,15 +2171,43 @@ emit_stats_group :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []
     emit_text(out, "\",\"language\":\"")
     emit_text(out, language)
     emit_text(out, "\"")
-    emit_count_field(out, "files", count.files)
-    emit_count_field(out, "lines", count.lines)
-    emit_count_field(out, "code", count.code)
-    emit_count_field(out, "comments", count.comments)
-    emit_count_field(out, "blanks", count.blanks)
-    emit_count_field(out, "functions", count.functions)
-    emit_count_field(out, "structs", count.structs)
-    emit_count_field(out, "enums", count.enums)
+    emit_count_field(out, "files", count^.files)
+    emit_count_field(out, "lines", count^.lines)
+    emit_count_field(out, "code", count^.code)
+    emit_count_field(out, "comments", count^.comments)
+    emit_count_field(out, "blanks", count^.blanks)
+    emit_count_field(out, "functions", count^.functions)
+    emit_count_field(out, "structs", count^.structs)
+    emit_count_field(out, "enums", count^.enums)
     emit_text(out, "}")
+
+/// Counts the file `name` with the extension `extension` of the directory `folder` of the project in
+/// `count`. A file that is not there is not counted.
+count_c_file :: proc(arena: ^mu.Arena_Allocator, directory: []Byte, folder: Str, name: []Byte, extension: Str, count: ^Line_Count) ->
+    path := [PATH_BYTES]Byte { .. = 0 }
+    at := put_bytes(path[:], 0, directory)
+    at = put_text(path[:], at, folder)
+    at = put_text(path[:], at, "/")
+    at = put_bytes(path[:], at, name)
+    at = put_text(path[:], at, extension)
+    count_file(arena, path[0:at], true, count)
+
+/// Puts a part of the C code of the compiler in the page, as the architecture view has it: the
+/// files of the `units`, which are names separated by spaces, of the directory `folder`. Each unit is
+/// a `.c` file and the `.h` file that goes with it, and a unit that has no header, such as `main`,
+/// has the one file.
+emit_c_part :: proc(out: ^Output, arena: ^mu.Arena_Allocator, directory: []Byte, name: Str, folder: Str, units: Str, is_first: ^Bool) ->
+    count := Line_Count { files = 0, lines = 0, code = 0, comments = 0, blanks = 0, functions = 0, structs = 0, enums = 0 }
+    list := [UNITS_BYTES]Byte { .. = 0 }
+    list_length := put_text(list[:], 0, units)
+    start, end := next_word(list[0:list_length], 0)
+    for end > start ->
+        count_c_file(arena, directory, folder, list[start:end], ".c", %count)
+        count_c_file(arena, directory, folder, list[start:end], ".h", %count)
+        next_start, next_end := next_word(list[0:list_length], end)
+        start = next_start
+        end = next_end
+    emit_stats_part(out, name, "C", %count, is_first)
 
 /// Sends the answer of /api/stats.
 send_stats :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []Byte, with_body: Bool) Int ->
@@ -2182,12 +2216,21 @@ send_stats :: proc(client: mu.Socket, arena: ^mu.Arena_Allocator, directory: []B
     out := output_make(client, arena, OUTPUT_BYTES)
     is_first := true
     emit_text(%out, "{\"groups\":[")
-    emit_stats_group(%out, arena, directory, "Compiler sources", "C", "/src", ".c", %is_first)
-    emit_stats_group(%out, arena, directory, "Compiler sources", "C", "/src/frontend", ".c", %is_first)
-    emit_stats_group(%out, arena, directory, "Compiler sources", "C", "/src/backend", ".c", %is_first)
-    emit_stats_group(%out, arena, directory, "Compiler headers", "C", "/src", ".h", %is_first)
-    emit_stats_group(%out, arena, directory, "Compiler headers", "C", "/src/frontend", ".h", %is_first)
-    emit_stats_group(%out, arena, directory, "Compiler headers", "C", "/src/backend", ".h", %is_first)
+    // The parts of the C code are the ones of tests/wasm/architecture.html, in its order.
+    emit_c_part(%out, arena, directory, "Tokenizer", "/src/frontend", "tokenizer", %is_first)
+    emit_c_part(%out, arena, directory, "Packages", "/src/frontend", "package", %is_first)
+    emit_c_part(%out, arena, directory, "Parser", "/src/frontend", "parser ast", %is_first)
+    emit_c_part(%out, arena, directory, "Semantic analysis", "/src/frontend", "semantic", %is_first)
+    emit_c_part(%out, arena, directory, "Constants", "/src", "constant", %is_first)
+    emit_c_part(%out, arena, directory, "Specializer", "/src/frontend", "specialize", %is_first)
+    emit_c_part(%out, arena, directory, "WebAssembly", "/src/backend", "build-target-wasm", %is_first)
+    emit_c_part(%out, arena, directory, "x64 Windows", "/src/backend", "build-target-x64", %is_first)
+    emit_c_part(%out, arena, directory, "Wasm text", "/src/backend", "wasm-text", %is_first)
+    emit_c_part(%out, arena, directory, "x64 text", "/src/backend", "x64-text", %is_first)
+    emit_c_part(%out, arena, directory, "Driver", "/src", "main process", %is_first)
+    emit_c_part(%out, arena, directory, "Errors", "/src", "report diagnostic", %is_first)
+    // What the stages share, which the architecture view does not draw.
+    emit_c_part(%out, arena, directory, "Shared code", "/src", "array_slice common_types limits static_assert str", %is_first)
     emit_stats_group(%out, arena, directory, "Standard library", "Mialu", "/src/mialu-std", ".mu", %is_first)
     emit_stats_group(%out, arena, directory, "mialudoc", "Mialu", "/src/mialudoc", ".mu", %is_first)
     emit_stats_group(%out, arena, directory, "Scripts and examples", "Mialu", "/scripts", ".mu", %is_first)
