@@ -55,8 +55,10 @@
 ///     declared here, and the structures that they take, `WSADATA` and `sockaddr_in`, are arrays of
 ///     bytes that are filled by hand, as there is no way to say the size and the layout of a struct
 ///     that is not made of words, or to take the size of one.
-///   - MISSING: the files of a directory in `mu:filesystem`, so `FindFirstFileA` and the procedures
-///     with it are declared here, and the name of a file is read from the bytes of `WIN32_FIND_DATAA`.
+///   - MISSING: the files of a directory in `mu:filesystem` that a pattern with `*` finds, so
+///     `FindFirstFileA` and the procedures with it are declared here, and the name of a file is read
+///     from the bytes of `WIN32_FIND_DATAA`. `mu.find_entry_first` finds one entry by its name, and
+///     does not take a pattern.
 ///   - MISSING: the size of a file in `mu:filesystem`, so `GetFileSizeEx` is declared here.
 ///   - MISSING: a way to see the bytes of a `Str`, see "Converting a string to bytes" in the
 ///     specification. Text is put in a buffer one character at a time with `put_text` and `emit_text`,
@@ -2264,7 +2266,6 @@ foreign kernel32 #(default_calling_convention("system")) ->
     CreateDirectoryA     :: proc(path: ^Byte, security: ^Byte) I32 -> ...
     CreateFileA          :: proc(file_name: ^Byte, desired_access: U32, share_mode: U32, security: ^Byte, disposition: U32, attributes: U32, template: Int) Int -> ...
     CreateProcessA       :: proc(application: ^Byte, command_line: ^Byte, process_security: ^Byte, thread_security: ^Byte, inherit_handles: I32, flags: U32, environment: ^Byte, directory: ^Byte, startup: ^Byte, process: ^Byte) I32 -> ...
-    GetFileAttributesA   :: proc(path: ^Byte) U32 -> ...
     GetExitCodeProcess   :: proc(process: Int, code: ^U32) I32 -> ...
     TerminateProcess     :: proc(process: Int, code: U32) I32 -> ...
     WaitForSingleObject  :: proc(handle: Int, milliseconds: U32) U32 -> ...
@@ -2277,7 +2278,6 @@ CREATE_ALWAYS : U32 : 2
 OPEN_EXISTING : U32 : 3
 FILE_ATTRIBUTE_NORMAL : U32 : 0x80
 CREATE_NO_WINDOW : U32 : 0x08000000
-INVALID_FILE_ATTRIBUTES : U32 : 0xFFFFFFFF
 
 PLAYGROUND_DIRECTORY :: "/build/playground"
 SOURCE_BYTES_MAX :: 1048576
@@ -2315,9 +2315,8 @@ get_u64 :: proc(buffer: []Byte, at: Int) Int ->
 /// Where the compiler is below the directory of the project: next to mialudoc, as in a package of a release,
 /// or else in `build`, where the build of the project puts it.
 compiler_location :: proc(directory: []Byte) Str ->
-    path := [PATH_BYTES]Byte { .. = 0 }
-    put_text(path[:], put_bytes(path[:], 0, directory), "/mialuc.exe")
-    if GetFileAttributesA(%path[0]) not= INVALID_FILE_ATTRIBUTES ->
+    entry, error := mu.find_entry_first(utf8_decode_or_empty(directory), "mialuc.exe")
+    if error == .NONE and not entry.is_directory ->
         return "/mialuc.exe"
     return "/build/mialuc.exe"
 

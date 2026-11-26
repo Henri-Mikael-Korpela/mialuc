@@ -29,7 +29,7 @@ The files are in the directory [src/mialu-std](../src/mialu-std) of the project,
 | [allocator.mu](../src/mialu-std/allocator.mu) | `import "mu:allocator"` | all | An arena, which gives out pieces of memory that the program gives it, and gives them back all at once. |
 | [math.mu](../src/mialu-std/math.mu) | `import "mu:math"` | all | The smaller and the larger of two numbers, and a number held between two others. |
 | [version.mu](../src/mialu-std/version.mu) | `import "mu:version"` | all | Whether a text is a version of the form `MAJOR.MINOR.PATCH`. |
-| [filesystem.mu](../src/mialu-std/filesystem.mu) | `import "mu:filesystem"` | `x64-win32` | Files: opening, reading, writing and closing them, and the standard input. |
+| [filesystem.mu](../src/mialu-std/filesystem.mu) | `import "mu:filesystem"` | `x64-win32` | Files: opening, reading, writing and closing them, the standard input, and finding an entry of a directory by its name. |
 | [process.mu](../src/mialu-std/process.mu) | `import "mu:process"` | `x64-win32` | The command line that the program was started with. |
 
 ## allocator
@@ -99,6 +99,7 @@ Access to the filesystem of the system, for Windows only for now. A `File` is th
 |---|---|
 | `File` | An open file: the handle of the system, in its field `handle`. A file that is not open has the handle `INVALID_HANDLE_VALUE`, -1. A copy of it is the same file, so a file is closed once. |
 | `File_Open_Mode` | How a file is opened: `READ` for an existing file, `WRITE` from its start, made when it is not there and emptied when it is, and `APPEND` at its end, made when it is not there. |
+| `Directory_Entry` | What `find_entry_first` says of an entry of a directory: `is_directory`, and `size_bytes`, the size of a file. |
 | `File_Error` | Why a procedure did not do what it was asked: `NONE` when it did, and `NOT_FOUND`, `ACCESS_DENIED`, `IN_USE`, `PATH_INVALID`, `BUFFER_TOO_SMALL`, `FILE_INVALID`, `END_OF_FILE` and `OTHER`. |
 
 ### Procedures
@@ -111,6 +112,7 @@ Access to the filesystem of the system, for Windows only for now. A `File` is th
 | `file_read(file: File, buffer: []Byte) (Int, File_Error)` | Reads as many bytes as the system gives at once, at most as many as the buffer has, and gives how many. Zero bytes is the end of the file. A console gives a line at a time. |
 | `file_read_all(path: Str, wide_path: []Byte, buffer: []Byte) (Int, File_Error)` | Opens the file, reads it until its end or until the buffer is full, closes it, and gives how many bytes it has. What is left of a file that is larger than the buffer is not read. |
 | `file_read_line(file: File, buffer: []Byte) (Int, File_Error)` | Reads a line, without its end, and gives how long it is. A line feed ends it, and the carriage return before it is not part of it. A line that does not fit is cut where the buffer ends. At the end of the file it is `END_OF_FILE`. It reads a byte at a time, so it takes no byte of the next line, but it is slow for a large file. |
+| `find_entry_first(directory_path: Str, target_entry: Str) (Directory_Entry, File_Error)` | Finds the entry that has the name `target_entry` in the directory, and says whether it is a directory and how big it is. It is the name of one entry and not a pattern: a `*` or a `?` in either text is `PATH_INVALID`, and an entry that is not there is `NOT_FOUND`. An empty directory is the current one. The path is made on the stack, up to `FIND_PATH_BYTES_MAX`, 1024, bytes. |
 | `file_write(file: File, buffer: []Byte) (Int, File_Error)` | Writes as many bytes as the system takes at once, and gives how many. |
 | `file_write_byte(file: File, value: Byte) File_Error` | Writes one byte. |
 | `file_write_all(path: Str, wide_path: []Byte, buffer: []Byte) (Int, File_Error)` | Opens the file for writing, writes the whole buffer, and closes it. |

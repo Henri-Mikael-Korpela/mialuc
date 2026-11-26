@@ -73,6 +73,24 @@ main :: proc() Int ->
     nul_count, nul_error := mu.file_read_all("NUL", wide, data[:])
     wrong += check("the whole of NUL has %lld bytes", nul_count, 0)
 
+    // The entry of a directory by its name: a directory of Windows is a directory, a file in it is not
+    // one and has bytes, a name that is not there is NOT_FOUND, and a pattern is not a name.
+    directory_entry, directory_error := mu.find_entry_first("C:/Windows", "System32")
+    wrong += check("System32 is found: %lld", flag(directory_error == mu.File_Error.NONE), 1)
+    wrong += check("and it is a directory: %lld", flag(directory_entry.is_directory), 1)
+    file_entry, file_error := mu.find_entry_first("C:/Windows", "explorer.exe")
+    wrong += check("explorer.exe is found: %lld", flag(file_error == mu.File_Error.NONE), 1)
+    wrong += check("and it is not a directory: %lld", flag(file_entry.is_directory), 0)
+    wrong += check("and it has bytes: %lld", flag(file_entry.size_bytes > 0), 1)
+    missing_entry, missing_entry_error := mu.find_entry_first("C:/Windows", "no-such-entry.txt")
+    wrong += check("a missing entry is NOT_FOUND: %lld", flag(missing_entry_error == mu.File_Error.NOT_FOUND), 1)
+    star_entry, star_error := mu.find_entry_first("C:/Windows", "*.exe")
+    wrong += check("a * is PATH_INVALID: %lld", flag(star_error == mu.File_Error.PATH_INVALID), 1)
+    question_entry, question_error := mu.find_entry_first("C:/Windows", "explorer.ex?")
+    wrong += check("a ? is PATH_INVALID: %lld", flag(question_error == mu.File_Error.PATH_INVALID), 1)
+    wildcard_entry, wildcard_error := mu.find_entry_first("C:/Win*", "explorer.exe")
+    wrong += check("a * in the directory is PATH_INVALID: %lld", flag(wildcard_error == mu.File_Error.PATH_INVALID), 1)
+
     // The program's own File is not the library's, and neither is its CP_UTF8 or its clamp.
     mine := File { name_length = 3, is_open = true }
     theirs := mu.File { handle = 5 }

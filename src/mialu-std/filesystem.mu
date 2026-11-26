@@ -12,6 +12,8 @@ import foreign kernel32 "system:Kernel32.lib"
 /// `BOOL` is an `I32`, and `LPCWSTR` is the address of text in UTF-16.
 foreign kernel32 #(default_calling_convention("system")) ->
     CloseHandle         :: proc(handle: Int) I32 -> ...
+    FindClose           :: proc(handle: Int) I32 -> ...
+    FindFirstFileW      :: proc(file_name: ^Byte, data: ^Byte) Int -> ...
     CreateFileW         :: proc(file_name: ^Byte, desired_access: U32, share_mode: U32, security_attributes: ^Byte, creation_disposition: U32, flags_and_attributes: U32, template_file: Int) Int -> ...
     GetLastError        :: proc() U32 -> ...
     GetStdHandle        :: proc(standard_handle: I32) Int -> ...
@@ -56,6 +58,18 @@ INVALID_HANDLE_VALUE :: -1
 /// the UTF-16 of a path takes two bytes for each of its characters, at most one for each byte of
 /// its UTF-8, and two more for the zero that ends it.
 WIDE_PATH_BYTES_PER_BYTE :: 2
+
+/// `WIN32_FIND_DATAW` is 592 bytes. What `find_entry_first` reads of it is the attributes, the 4
+/// bytes at 0, and the size, the 4 bytes at 28 that are its upper half and the 4 at 32 that are its
+/// lower half.
+FIND_DATA_BYTES :: 592
+FIND_DATA_ATTRIBUTES :: 0
+FIND_DATA_SIZE_HIGH :: 28
+FIND_DATA_SIZE_LOW :: 32
+
+/// The most bytes that the path of `find_entry_first` has: the directory, a separator and the name.
+/// A path that is longer is `File_Error.BUFFER_TOO_SMALL`.
+FIND_PATH_BYTES_MAX :: 1024
 
 /// An open file: the handle of the system. A file that is not open has the handle -1. It is
 /// copied by copying the handle, so a copy is the same file, and the file is closed once.
@@ -110,6 +124,12 @@ file_error_from :: proc(code: U32) File_Error ->
             return .BUFFER_TOO_SMALL
         case ->
             return .OTHER
+
+/// What `find_entry_first` says of an entry of a directory: a file, or a directory when it is one.
+/// `size_bytes` is the size of a file, and is not meant for a directory.
+Directory_Entry :: struct ->
+    is_directory: Bool
+    size_bytes: Int
 
 /// What a program may do with a file that is opened in the mode: read it, write it, or add to it.
 file_mode_access :: proc(mode: File_Open_Mode) U32 ->
@@ -293,3 +313,83 @@ file_read_line :: proc(file: File, buffer: []Byte) (Int, File_Error) ->
         if buffer[length - 1] == '\r' ->
             length -= 1
     return length, .NONE
+
+/// The number of bytes that the UTF-8 of a character takes.
+utf8_length :: proc(character: Rune) Int ->
+    if character >= '𐀀' ->
+        return 4
+    if character >= 'ࠀ' ->
+        return 3
+    if character >= '' ->
+        return 2
+    return 1
+
+/// Puts the UTF-8 of `text` in `buffer` from `at`, and gives where the next byte goes, or -1 when
+/// it does not fit. MISSING: reading the bytes of a `Str`, which would make this a copy.
+put_utf8 :: proc(buffer: []Byte, at: Int, text: Str) Int ->
+    position := at
+    for character in text ->
+        encoded := cast([4]Byte)character
+        count := utf8_length(character)
+        if position + count > length_of(buffer) ->
+            return -1
+        for index in 0..<count ->
+            buffer[position] = encoded[index]
+            position += 1
+    return position
+
+/// Whether `text` has a character that stands for others in the name of a file, `*` or `?`.
+has_wildcard :: proc(text: Str) Bool ->
+    for character in text ->
+        if character == '*' or character == '?' ->
+            return true
+    return false
+
+/// Reads 4 bytes of `data` at `at`, the lowest first, as a number.
+find_data_u32 :: proc(data: []Byte, at: Int) Int ->
+    total := 0
+    for index in 0..<4 ->
+        total = total * 256 + cast(Int)data[at + 3 - index]
+    return total
+
+/// Finds the entry named `target_entry` in the directory at `directory_path`, both in UTF-8, and
+/// gives what it is with `File_Error.NONE`, or an entry of nothing with the error:
+/// `File_Error.NOT_FOUND` when the directory has no such entry. It is the name of one entry, in
+/// exactly the spelling that it has but for the case of its letters, and it is not a pattern: a
+/// `*` or a `?` in either text is `File_Error.PATH_INVALID`. An empty directory is the current
+/// one. The path is made on the stack, so the two texts and the separator that goes between them
+/// have at most `FIND_PATH_BYTES_MAX` bytes, or the answer is `File_Error.BUFFER_TOO_SMALL`.
+find_entry_first :: proc(directory_path: Str, target_entry: Str) (Directory_Entry, File_Error) ->
+    nothing := Directory_Entry { is_directory = false, size_bytes = 0 }
+    if has_wildcard(directory_path) or has_wildcard(target_entry) ->
+        return nothing, .PATH_INVALID
+
+    // The last byte is left as the zero that ends the path.
+    path := [FIND_PATH_BYTES_MAX]Byte { .. = 0 }
+    limit := path[0:FIND_PATH_BYTES_MAX - 1]
+    at := put_utf8(limit, 0, directory_path)
+    if at > 0 ->
+        at = put_utf8(limit, at, "\\")
+    if at >= 0 ->
+        at = put_utf8(limit, at, target_entry)
+    if at < 0 ->
+        return nothing, .BUFFER_TOO_SMALL
+    text, is_text := utf8_decode(path[0:at])
+
+    wide_path := [FIND_PATH_BYTES_MAX * WIDE_PATH_BYTES_PER_BYTE]Byte { .. = 0 }
+    characters := int_to_i32(length_of(wide_path) / WIDE_PATH_BYTES_PER_BYTE)
+    if MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, str_to_c_str(text), -1, %wide_path[0], characters) == 0 ->
+        return nothing, .PATH_INVALID
+
+    data := [FIND_DATA_BYTES]Byte { .. = 0 }
+    handle := FindFirstFileW(%wide_path[0], %data[0])
+    if handle == INVALID_HANDLE_VALUE ->
+        return nothing, file_error_from(GetLastError())
+    FindClose(handle)
+
+    // The attribute of a directory is the bit 16 of the attributes, which is the lowest of what is
+    // left when the byte is divided by 16, and there is no operator for a bit yet.
+    sixteens := find_data_u32(data[:], FIND_DATA_ATTRIBUTES) / 16
+    is_directory := sixteens - sixteens / 2 * 2 == 1
+    size_bytes := find_data_u32(data[:], FIND_DATA_SIZE_HIGH) * 4294967296 + find_data_u32(data[:], FIND_DATA_SIZE_LOW)
+    return Directory_Entry { is_directory = is_directory, size_bytes = size_bytes }, .NONE
